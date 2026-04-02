@@ -69,7 +69,7 @@ TIMEOUTS: Each step has a 20-second stale-state timeout. If nothing changes for 
 
 CREDENTIALS: NEVER ask the user for passwords or credentials in the chat. Always use "credentials" action=store — it opens a secure prompt so the user types credentials directly into the terminal. You never see them. Then use a login step in "execute".
 
-BOT DETECTION / CAPTCHA RULE: If a captcha appears, try solve-captcha first. Only report failure if the captcha persists after multiple attempts.
+BOT DETECTION / CAPTCHA RULE: If a captcha appears, ALWAYS use the "solve-captcha" step — it auto-detects and solves reCAPTCHA/hCaptcha using vision AI. NEVER manually select tiles with recaptcha-select. Only report failure if solve-captcha fails after multiple attempts.
 
 REVERSE ENGINEERING: When the user asks to "reverse engineer", "map the API", "capture endpoints", or "save the endpoints" — use the "reverse-engineer" tool. It records every API call the page makes during execution, including auth tokens, cookies, and full request/response data.`
   : `iframer — browser access for AI agents when normal methods fail.
@@ -94,7 +94,7 @@ TIMEOUTS: Each step has a 20-second stale-state timeout. If nothing changes on t
 
 CREDENTIALS: NEVER ask the user for passwords or credentials in the chat. Always use "credentials" action=store — it opens a secure prompt so the user types credentials directly into the terminal. You never see them. Then use a login step in "execute".
 
-BOT DETECTION / CAPTCHA RULE: If a captcha appears, try solve-captcha first. Only report failure if it persists after multiple attempts.
+BOT DETECTION / CAPTCHA RULE: If a captcha appears, ALWAYS use the "solve-captcha" step — it auto-detects reCAPTCHA vs hCaptcha and solves it using vision AI. NEVER try to solve captchas manually by selecting tiles yourself with recaptcha-select. The solve-captcha step handles the full flow: clicking the checkbox, screenshotting tiles, classifying them with Claude vision in parallel, clicking matches, and verifying. Only report failure if solve-captcha fails after multiple attempts.
 
 REVERSE ENGINEERING: When the user asks to "reverse engineer", "map the API", "capture endpoints", "save the endpoints", or "figure out how this site works" — use the "reverse-engineer" tool. It runs the same pipeline steps as execute but records every API call the page makes, including auth tokens, cookies, and full request/response data. Save the results to a directory the user specifies.`;
 
