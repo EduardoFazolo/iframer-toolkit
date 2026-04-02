@@ -13,6 +13,7 @@ import { executeAction } from "./actions";
 import { StaleStateMonitor, StaleStateError } from "./stale-monitor";
 import { detectObstacles, resolveObstacle } from "./obstacles";
 import { saveScreenshot } from "./screenshot";
+import { ApiCapture } from "./api-capture";
 
 const DEFAULT_STALE_TIMEOUT_MS = 20_000;
 
@@ -78,7 +79,18 @@ export class PipelineRunner {
     const results: StepResult[] = [];
     const obstacles: ObstacleEncounter[] = [];
 
+    // API capture — hook network events when enabled
+    const capture = opts.captureApi ? new ApiCapture(page) : null;
+    if (capture) capture.start();
+
+    const finishCapture = () => {
+      if (!capture) return undefined;
+      capture.stop();
+      return capture.getResults();
+    };
+
     for (let i = 0; i < pipeline.steps.length; i++) {
+      if (capture) capture.setStep(i);
       const step = pipeline.steps[i];
       const monitor = new StaleStateMonitor(page, staleTimeoutMs);
 
@@ -122,6 +134,7 @@ export class PipelineRunner {
             retryable: isRetryable(errorType),
           },
           durationMs: Date.now() - startTime,
+          capturedApi: finishCapture(),
         };
       }
 
@@ -162,6 +175,7 @@ export class PipelineRunner {
             retryable: isRetryable(errorType),
           },
           durationMs: Date.now() - startTime,
+          capturedApi: finishCapture(),
         };
       }
 
@@ -200,6 +214,7 @@ export class PipelineRunner {
                 retryable: true,
               },
               durationMs: Date.now() - startTime,
+              capturedApi: finishCapture(),
             };
           }
         }
@@ -217,6 +232,7 @@ export class PipelineRunner {
       obstacles,
       finalState,
       durationMs: Date.now() - startTime,
+      capturedApi: finishCapture(),
     };
   }
 }

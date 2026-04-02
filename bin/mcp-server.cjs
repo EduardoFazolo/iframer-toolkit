@@ -28442,7 +28442,9 @@ TIMEOUTS: Each step has a 20-second stale-state timeout. If nothing changes for 
 
 CREDENTIALS: NEVER ask the user for passwords or credentials in the chat. Always use "credentials" action=store — it opens a secure prompt so the user types credentials directly into the terminal. You never see them. Then use a login step in "execute".
 
-BOT DETECTION / CAPTCHA RULE: If a captcha appears, try solve-captcha first. Only report failure if the captcha persists after multiple attempts.` : `iframer — browser access for AI agents when normal methods fail.
+BOT DETECTION / CAPTCHA RULE: If a captcha appears, try solve-captcha first. Only report failure if the captcha persists after multiple attempts.
+
+REVERSE ENGINEERING: When the user asks to "reverse engineer", "map the API", "capture endpoints", or "save the endpoints" — use the "reverse-engineer" tool. It records every API call the page makes during execution, including auth tokens, cookies, and full request/response data.` : `iframer — browser access for AI agents when normal methods fail.
 
 PHILOSOPHY: You are a capable agent. Do your work locally first. Only call iframer when you hit a wall: captcha, login-gated content, heavy bot detection, or content that requires a real browser to render. iframer is a swiss knife you pull out for hard problems, not your default browsing tool.
 
@@ -28464,7 +28466,9 @@ TIMEOUTS: Each step has a 20-second stale-state timeout. If nothing changes on t
 
 CREDENTIALS: NEVER ask the user for passwords or credentials in the chat. Always use "credentials" action=store — it opens a secure prompt so the user types credentials directly into the terminal. You never see them. Then use a login step in "execute".
 
-BOT DETECTION / CAPTCHA RULE: If a captcha appears, try solve-captcha first. Only report failure if it persists after multiple attempts.`;
+BOT DETECTION / CAPTCHA RULE: If a captcha appears, try solve-captcha first. Only report failure if it persists after multiple attempts.
+
+REVERSE ENGINEERING: When the user asks to "reverse engineer", "map the API", "capture endpoints", "save the endpoints", or "figure out how this site works" — use the "reverse-engineer" tool. It runs the same pipeline steps as execute but records every API call the page makes, including auth tokens, cookies, and full request/response data. Save the results to a directory the user specifies.`;
 var server = new McpServer({ name: "iframer", version: "2.1.5" }, { instructions: INSTRUCTIONS });
 server.tool("status", `Get the full state of iframer in one call. Call this first. Returns: API health, active session, stored credentials.`, {}, async () => {
   try {
@@ -28552,13 +28556,16 @@ Key step types:
 - login: fill login form with stored credentials (never exposes passwords)
 - screenshot: take a mid-pipeline screenshot
 
-Returns: ok, completedSteps, results (with extract values), obstacles (what was detected/resolved), and on failure: errorContext with screenshot, URL, errorType, suggestion, retryable.`, {
+API capture (options.captureApi): When enabled, records all XHR/fetch requests the page makes during execution. Use this when the user asks to "reverse engineer", "capture endpoints", "map the API", "remember how this works", or "save the endpoints". Returns structured endpoint data grouped by domain with parameterized paths, request/response bodies, and which pipeline step triggered each call. The agent can then save these to a directory for future direct API usage.
+
+Returns: ok, completedSteps, results (with extract values), obstacles (what was detected/resolved), capturedApi (when enabled), and on failure: errorContext with screenshot, URL, errorType, suggestion, retryable.`, {
   steps: exports_external.array(stepSchema).describe("Pipeline steps to execute sequentially"),
   options: exports_external.object({
     staleTimeoutMs: exports_external.number().optional().describe("Override the 20s stale-state timeout per step"),
     screenshotAfterEach: exports_external.boolean().optional().describe("Take a screenshot after every step (expensive)"),
     continueOnObstacle: exports_external.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
-    continueOnError: exports_external.boolean().optional().describe("Continue past failing steps (default: false)")
+    continueOnError: exports_external.boolean().optional().describe("Continue past failing steps (default: false)"),
+    captureApi: exports_external.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes. Use when the user wants to reverse-engineer, map, or save a site's API endpoints.")
   }).optional()
 }, async (params) => {
   try {
@@ -28587,6 +28594,32 @@ Obstacles handled:`);
       for (const o of data.obstacles) {
         lines.push(`  [step ${o.detectedAtStep}] ${o.type}: ${o.resolved ? o.resolution : "UNRESOLVED - " + (o.resolution || "unknown")}`);
       }
+    }
+    if (data.capturedApi && data.capturedApi.length > 0) {
+      lines.push(`
+--- Captured API ---`);
+      for (const api2 of data.capturedApi) {
+        lines.push(`
+${api2.domain} (${api2.baseUrl})`);
+        const authParts = [];
+        if (api2.auth?.authorization)
+          authParts.push("Authorization header");
+        if (api2.auth?.cookies && Object.keys(api2.auth.cookies).length > 0)
+          authParts.push(`${Object.keys(api2.auth.cookies).length} cookies`);
+        if (api2.auth?.tokens && Object.keys(api2.auth.tokens).length > 0)
+          authParts.push(`${Object.keys(api2.auth.tokens).length} token headers (${Object.keys(api2.auth.tokens).join(", ")})`);
+        if (authParts.length > 0)
+          lines.push(`  Auth: ${authParts.join(", ")}`);
+        lines.push("  Endpoints:");
+        for (const ep of api2.endpoints) {
+          lines.push(`    ${ep.method} ${ep.path}  [step ${ep.triggeredAtStep}, status ${ep.responseStatus}]`);
+          if (ep.rawPaths.length > 1) {
+            lines.push(`      examples: ${ep.rawPaths.slice(0, 3).join(", ")}`);
+          }
+        }
+      }
+      lines.push(`
+The capturedApi field contains full endpoint data including auth, headers, request/response bodies, and curl commands. Save it to a directory for the user — use auth.json for shared credentials and one file per endpoint.`);
     }
     let screenshotUrl = null;
     if (data.error) {
@@ -28708,6 +28741,167 @@ ${data.domains.map((d) => `  - ${d}`).join(`
 iframer credentials add ${domain2}`);
     }
     return err(`Error: ${e.message}`);
+  }
+});
+server.tool("reverse-engineer", `Reverse-engineer a website's API. Navigates to a URL, performs the steps you specify, and captures every XHR/fetch request the page makes — including auth tokens, cookies, headers, request/response bodies, and ready-to-use curl commands.
+
+Use this when the user asks to:
+- "reverse engineer" or "map" a site's API
+- "capture the endpoints" or "save the API"
+- "figure out how this site works under the hood"
+- "record the API calls" so they can be replayed later
+
+How it works:
+1. You provide steps (same as execute) — navigate, click, fill, extract, etc.
+2. iframer runs them while recording all API calls the page makes
+3. Returns structured data per domain: shared auth (cookies, tokens, Authorization header) + each endpoint with method, path, headers, body, response, and a curl command
+
+After getting results, save them as RUNNABLE CODE to a directory:
+  <outputDir>/
+    auth.js                — exports shared cookies, tokens, authorization as an object
+    getMessages.js         — one .js file per endpoint: exports an async function that calls the endpoint using fetch, with auth imported from auth.js
+    index.js               — re-exports all endpoint functions
+    README.md              — summary of all endpoints and their dependency chain
+
+If typed=true (user asks to "infer types", "add types", "save as typescript", etc.), save as .ts instead:
+    auth.ts                — typed auth config with interface
+    getMessages.ts         — async function with inferred request/response types based on captured data
+    types.ts               — all inferred interfaces (e.g. Message, Channel, User) derived from response bodies
+    index.ts               — re-exports all endpoint functions
+
+Naming: convert endpoint paths to camelCase function names (e.g. GET /api/v9/channels/{id}/messages → getChannelMessages). Group related endpoints logically.
+
+The outputDir defaults to the current working directory + the domain name (e.g. ./example_com/). Ask the user where to save if unclear.`, {
+  steps: exports_external.array(stepSchema).describe("Pipeline steps to execute while capturing API calls"),
+  outputDir: exports_external.string().optional().describe("Directory to save the captured API files. If not provided, ask the user or default to ./<domain>/"),
+  typed: exports_external.boolean().optional().describe("Save as .ts with inferred types instead of .js. Set to true when the user asks for types, typescript, or type inference."),
+  options: exports_external.object({
+    staleTimeoutMs: exports_external.number().optional().describe("Override the 20s stale-state timeout per step"),
+    continueOnObstacle: exports_external.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
+    continueOnError: exports_external.boolean().optional().describe("Continue past failing steps (default: false)")
+  }).optional()
+}, async (params) => {
+  try {
+    const execParams = {
+      steps: params.steps,
+      options: { ...params.options, captureApi: true }
+    };
+    const data = await apiPost("/execute", execParams);
+    const lines = [];
+    lines.push(`ok: ${data.ok}`);
+    lines.push(`steps: ${data.completedSteps}/${data.totalSteps}`);
+    if (data.durationMs)
+      lines.push(`duration: ${data.durationMs}ms`);
+    if (data.finalState) {
+      lines.push(`
+Final page: ${data.finalState.title}`);
+      lines.push(`URL: ${data.finalState.url}`);
+    }
+    if (data.capturedApi && data.capturedApi.length > 0) {
+      for (const api2 of data.capturedApi) {
+        lines.push(`
+━━━ ${api2.domain} (${api2.baseUrl}) ━━━`);
+        const authParts = [];
+        if (api2.auth?.authorization)
+          authParts.push(`Authorization: ${api2.auth.authorization.slice(0, 30)}...`);
+        if (api2.auth?.cookies && Object.keys(api2.auth.cookies).length > 0)
+          authParts.push(`${Object.keys(api2.auth.cookies).length} cookies`);
+        if (api2.auth?.tokens && Object.keys(api2.auth.tokens).length > 0) {
+          for (const [k, v] of Object.entries(api2.auth.tokens)) {
+            authParts.push(`${k}: ${String(v).slice(0, 30)}...`);
+          }
+        }
+        if (authParts.length > 0) {
+          lines.push(`
+Auth:`);
+          for (const part of authParts)
+            lines.push(`  ${part}`);
+        }
+        lines.push(`
+Endpoints (${api2.endpoints.length}):`);
+        for (const ep of api2.endpoints) {
+          lines.push(`
+  ${ep.method} ${ep.path}`);
+          lines.push(`    Status: ${ep.responseStatus}`);
+          lines.push(`    Triggered at step: ${ep.triggeredAtStep}`);
+          if (ep.rawPaths.length > 1) {
+            lines.push(`    Seen paths: ${ep.rawPaths.slice(0, 5).join(", ")}`);
+          }
+          if (ep.headers && Object.keys(ep.headers).length > 0) {
+            lines.push(`    Headers: ${Object.keys(ep.headers).join(", ")}`);
+          }
+          if (ep.requestBody) {
+            const bodyPreview = JSON.stringify(ep.requestBody).slice(0, 200);
+            lines.push(`    Request body: ${bodyPreview}${bodyPreview.length >= 200 ? "..." : ""}`);
+          }
+          if (ep.responseBody) {
+            const resPreview = JSON.stringify(ep.responseBody).slice(0, 200);
+            lines.push(`    Response: ${resPreview}${resPreview.length >= 200 ? "..." : ""}`);
+          }
+        }
+      }
+      const mainDomain = data.capturedApi[0]?.domain || "api";
+      const dir = params.outputDir || `./${mainDomain}`;
+      const ext = params.typed ? ".ts" : ".js";
+      lines.push(`
+━━━ Save instructions ━━━`);
+      lines.push(`Save to: ${dir}`);
+      lines.push(`Format: ${ext} files`);
+      lines.push(`
+Generate these files from the capturedApi data:`);
+      if (params.typed) {
+        lines.push(`  1. auth.ts — export the auth object with a typed interface (AuthConfig)`);
+        lines.push(`  2. types.ts — infer TypeScript interfaces from the response bodies (e.g. if response has {id: "123", content: "hi"} → interface Message { id: string; content: string; }). Name types based on the endpoint context.`);
+        lines.push(`  3. One .ts file per endpoint — export an async function that calls fetch with the right method, headers (from auth.ts), and body. Use the inferred types for params and return values.`);
+        lines.push(`  4. index.ts — re-export all endpoint functions`);
+        lines.push(`  5. README.md — endpoint summary and dependency chain`);
+      } else {
+        lines.push(`  1. auth.js — module.exports the auth object (cookies, tokens, authorization)`);
+        lines.push(`  2. One .js file per endpoint — module.exports an async function that calls fetch with the right method, headers (require from auth.js), and body.`);
+        lines.push(`  3. index.js — re-export all endpoint functions`);
+        lines.push(`  4. README.md — endpoint summary and dependency chain`);
+      }
+      lines.push(`
+Function naming: convert paths to camelCase (e.g. GET /api/v9/channels/{id}/messages → getChannelMessages, DELETE /api/v9/channels/{id}/messages/{id2} → deleteChannelMessage).`);
+      lines.push(`
+IMPORTANT: Auth data contains real tokens/cookies — they expire. Remind the user.`);
+    } else {
+      lines.push(`
+No API calls were captured. The page may not have made any XHR/fetch requests during the steps, or the steps may not have triggered the expected behavior.`);
+    }
+    if (data.error) {
+      lines.push(`
+--- Failure ---`);
+      if (typeof data.error === "string") {
+        lines.push(`Error: ${data.error}`);
+      } else {
+        lines.push(`Failed at step ${data.error.failedAtStep}: ${JSON.stringify(data.error.failedStep)}`);
+        lines.push(`Error type: ${data.error.errorType}`);
+        lines.push(`Message: ${data.error.message}`);
+        if (data.error.suggestion)
+          lines.push(`Suggestion: ${data.error.suggestion}`);
+      }
+    }
+    const content = [{ type: "text", text: lines.join(`
+`) }];
+    const screenshotUrl = data.error?.pageState?.screenshotUrl ?? data.finalState?.screenshotUrl;
+    if (screenshotUrl) {
+      const img = await fetchScreenshot(screenshotUrl);
+      if (img)
+        content.push(img);
+    }
+    if (data.capturedApi && data.capturedApi.length > 0) {
+      content.push({
+        type: "text",
+        text: `--- capturedApi JSON ---
+` + JSON.stringify(data.capturedApi, null, 2)
+      });
+    }
+    if (!data.ok)
+      return { content, isError: true };
+    return { content };
+  } catch (e) {
+    return err(`Connection error: ${e.message}. Is the API running at ${BASE_URL}?`);
   }
 });
 var transport = new StdioServerTransport;
