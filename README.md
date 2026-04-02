@@ -19,7 +19,7 @@ The browser runs inside Docker using your machine's real IP — no proxies, no r
 **1. Clone and configure**
 
 ```bash
-git clone https://github.com/yourusername/iframer.git
+git clone https://github.com/EduardoFazolo/iframer-toolkit.git
 cd iframer
 cp .env.example .env
 # Edit .env — set ANTHROPIC_IFRAMER_SECRET (required for captcha solving)
