@@ -209,7 +209,9 @@ Key step types:
 - login: fill login form with stored credentials (never exposes passwords)
 - screenshot: take a mid-pipeline screenshot
 
-Returns: ok, completedSteps, results (with extract values), obstacles (what was detected/resolved), and on failure: errorContext with screenshot, URL, errorType, suggestion, retryable.`,
+API capture (options.captureApi): When enabled, records all XHR/fetch requests the page makes during execution. Use this when the user asks to "reverse engineer", "capture endpoints", "map the API", "remember how this works", or "save the endpoints". Returns structured endpoint data grouped by domain with parameterized paths, request/response bodies, and which pipeline step triggered each call. The agent can then save these to a directory for future direct API usage.
+
+Returns: ok, completedSteps, results (with extract values), obstacles (what was detected/resolved), capturedApi (when enabled), and on failure: errorContext with screenshot, URL, errorType, suggestion, retryable.`,
   {
     steps: z.array(stepSchema).describe("Pipeline steps to execute sequentially"),
     options: z.object({
@@ -217,6 +219,7 @@ Returns: ok, completedSteps, results (with extract values), obstacles (what was 
       screenshotAfterEach: z.boolean().optional().describe("Take a screenshot after every step (expensive)"),
       continueOnObstacle: z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
       continueOnError: z.boolean().optional().describe("Continue past failing steps (default: false)"),
+      captureApi: z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes. Use when the user wants to reverse-engineer, map, or save a site's API endpoints."),
     }).optional(),
   },
   async (params) => {
@@ -248,6 +251,30 @@ Returns: ok, completedSteps, results (with extract values), obstacles (what was 
         for (const o of data.obstacles) {
           lines.push(`  [step ${o.detectedAtStep}] ${o.type}: ${o.resolved ? o.resolution : "UNRESOLVED - " + (o.resolution || "unknown")}`);
         }
+      }
+
+      // Captured API endpoints
+      if (data.capturedApi && data.capturedApi.length > 0) {
+        lines.push("\n--- Captured API ---");
+        for (const api of data.capturedApi) {
+          lines.push(`\n${api.domain} (${api.baseUrl})`);
+
+          // Show auth summary
+          const authParts: string[] = [];
+          if (api.auth?.authorization) authParts.push("Authorization header");
+          if (api.auth?.cookies && Object.keys(api.auth.cookies).length > 0) authParts.push(`${Object.keys(api.auth.cookies).length} cookies`);
+          if (api.auth?.tokens && Object.keys(api.auth.tokens).length > 0) authParts.push(`${Object.keys(api.auth.tokens).length} token headers (${Object.keys(api.auth.tokens).join(", ")})`);
+          if (authParts.length > 0) lines.push(`  Auth: ${authParts.join(", ")}`);
+
+          lines.push("  Endpoints:");
+          for (const ep of api.endpoints) {
+            lines.push(`    ${ep.method} ${ep.path}  [step ${ep.triggeredAtStep}, status ${ep.responseStatus}]`);
+            if (ep.rawPaths.length > 1) {
+              lines.push(`      examples: ${ep.rawPaths.slice(0, 3).join(", ")}`);
+            }
+          }
+        }
+        lines.push("\nThe capturedApi field contains full endpoint data including auth, headers, request/response bodies, and curl commands. Save it to a directory for the user — use auth.json for shared credentials and one file per endpoint.");
       }
 
       // Collect screenshot URL (failure takes priority, then final state)
