@@ -441,6 +441,34 @@ async function main() {
       break;
     }
 
+    // ─── Remove MCP ──────────────────────────────────────────────
+
+    case "remove-mcp": {
+      const claudeConfigPath2 = path.join(require("os").homedir(), ".claude.json");
+      let config2 = {};
+      try {
+        config2 = JSON.parse(fs.readFileSync(claudeConfigPath2, "utf8"));
+      } catch {
+        console.log("  No ~/.claude.json found — nothing to remove.");
+        break;
+      }
+
+      const isDev2 = args.includes("--dev");
+      const mcpName2 = isDev2 ? "iframer-dev" : "iframer";
+
+      if (!config2.mcpServers || !config2.mcpServers[mcpName2]) {
+        console.log(`  ${mcpName2} MCP is not installed.`);
+        break;
+      }
+
+      delete config2.mcpServers[mcpName2];
+      fs.writeFileSync(claudeConfigPath2, JSON.stringify(config2, null, 2));
+      console.log(`\n  ${mcpName2} MCP removed!`);
+      console.log(`  Config updated: ${claudeConfigPath2}`);
+      console.log("  Restart Claude Code for the change to take effect.\n");
+      break;
+    }
+
     // ─── Help ──────────────────────────────────────────────────────
 
     default:
@@ -450,6 +478,7 @@ async function main() {
   Commands:
     status                         Check API health
     install-mcp [--dev]             Install the iframer MCP into Claude Code
+    remove-mcp [--dev]              Remove the iframer MCP from Claude Code
 
   Credentials:
     credentials add <domain>       Store login credentials (encrypted, server-side)

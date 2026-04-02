@@ -11,7 +11,9 @@
     "logs:docker": "docker compose logs -f api",
     "test:smoke": "node tests/smoke.js",
     "test:login": "node tests/login-flows.js",
-    "test:crypto": "node tests/crypto.test.js"
+    "test:crypto": "node tests/crypto.test.js",
+    "mcp:install": "node bin/cli.js install-mcp",
+    "mcp:remove": "node bin/cli.js remove-mcp"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
