@@ -1,0 +1,19 @@
+node_modules/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Internal docs (pricing, strategy)
+docs/
+
+# OS
+.DS_Store
+Thumbs.db

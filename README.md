@@ -29,16 +29,29 @@ cp .env.example .env
 **2. Start**
 
 ```bash
-docker compose up -d
+bun run start:docker
+```
+
+Other Docker helpers:
+
+```bash
+bun run stop:docker   # stop containers
+bun run logs:docker   # tail container logs
 ```
 
 **3. Install the MCP into Claude Code**
 
 ```bash
-node bin/cli.js install-mcp
+bun run mcp:install
 ```
 
 This auto-reads `IFRAMER_SECRET` from your `.env` and writes the MCP config to `~/.claude.json`. Restart Claude Code and the `iframer` tools will appear automatically.
+
+To remove the MCP:
+
+```bash
+bun run mcp:remove
+```
 
 For development, use `--dev` to install as `iframer-dev`:
 
