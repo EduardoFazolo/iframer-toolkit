@@ -20,7 +20,7 @@ The browser runs inside Docker using your machine's real IP — no proxies, no r
 
 ```bash
 git clone https://github.com/EduardoFazolo/iframer-toolkit.git
-cd iframer
+cd iframer-toolkit
 cp .env.example .env
 # Edit .env — set ANTHROPIC_IFRAMER_SECRET (required for captcha solving)
 # Optionally set IFRAMER_SECRET to require auth
@@ -122,7 +122,7 @@ node bin/cli.js credentials add github.com
 node bin/cli.js credentials list
 
 # Open a live browser session
-node bin/cli.js interactive https://discord.com
+node bin/cli.js interactive https://example.com
 
 # Watch for agent sessions (opens noVNC automatically)
 node bin/cli.js watch
