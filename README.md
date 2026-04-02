@@ -122,7 +122,7 @@ node bin/cli.js credentials add github.com
 node bin/cli.js credentials list
 
 # Open a live browser session
-node bin/cli.js interactive https://discord.com
+node bin/cli.js interactive https://example.com
 
 # Watch for agent sessions (opens noVNC automatically)
 node bin/cli.js watch

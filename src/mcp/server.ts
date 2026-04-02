@@ -443,7 +443,7 @@ If typed=true (user asks to "infer types", "add types", "save as typescript", et
 
 Naming: convert endpoint paths to camelCase function names (e.g. GET /api/v9/channels/{id}/messages → getChannelMessages). Group related endpoints logically.
 
-The outputDir defaults to the current working directory + the domain name (e.g. ./discord_com/). Ask the user where to save if unclear.`,
+The outputDir defaults to the current working directory + the domain name (e.g. ./example_com/). Ask the user where to save if unclear.`,
   {
     steps: z.array(stepSchema).describe("Pipeline steps to execute while capturing API calls"),
     outputDir: z.string().optional().describe("Directory to save the captured API files. If not provided, ask the user or default to ./<domain>/"),
