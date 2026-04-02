@@ -22,7 +22,7 @@ The browser runs inside Docker using your machine's real IP — no proxies, no r
 git clone https://github.com/EduardoFazolo/iframer-toolkit.git
 cd iframer-toolkit
 cp .env.example .env
-# Edit .env — set ANTHROPIC_IFRAMER_SECRET (required for captcha solving)
+# Edit .env — set ANTHROPIC_API_KEY (required for captcha solving)
 # Optionally set IFRAMER_SECRET to require auth
 ```
 
@@ -64,7 +64,7 @@ node bin/cli.js install-mcp --dev
 | Variable            | Required | Description |
 |---------------------|----------|-------------|
 | `REDIS_URL`         | Yes      | Redis connection string (default: `redis://localhost:6379`, handled by docker compose) |
-| `ANTHROPIC_IFRAMER_SECRET` | Yes      | Used for vision-based captcha solving |
+| `ANTHROPIC_API_KEY` | Yes      | Used for vision-based captcha solving |
 | `IFRAMER_SECRET`           | No       | When set, all API requests must include `x-api-key: <value>`. Set with `openssl rand -hex 32` |
 | `PORT`              | No       | API port (default: `3021`) |
 
@@ -147,7 +147,7 @@ iframer auto-detects and solves reCAPTCHA and hCaptcha using Claude's vision API
 { "type": "solve-captcha" }
 ```
 
-Requires `ANTHROPIC_IFRAMER_SECRET` in `.env`.
+Requires `ANTHROPIC_API_KEY` in `.env`.
 
 ## Architecture
 
