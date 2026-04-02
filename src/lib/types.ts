@@ -39,6 +39,51 @@ export interface PipelineOptions {
   continueOnObstacle?: boolean;   // Default: true — try to auto-resolve obstacles
   maxAutoResolveAttempts?: number; // Default: 3
   continueOnError?: boolean;      // Default: false
+  captureApi?: boolean;           // Default: false — capture XHR/fetch requests during execution
+}
+
+// ─── Captured API Types ────────────────────────────────────────────
+
+export interface CapturedRequest {
+  method: string;
+  url: string;
+  path: string;
+  queryParams?: Record<string, string>;
+  requestHeaders: Record<string, string>;
+  requestBody?: any;
+  responseStatus: number;
+  responseHeaders: Record<string, string>;
+  responseBody?: any;
+  resourceType: string;
+  triggeredAtStep: number;
+  timestamp: number;
+}
+
+export interface CapturedAuth {
+  cookies: Record<string, string>;          // name → value from Cookie header
+  authorization?: string;                   // Authorization header value
+  tokens: Record<string, string>;           // other auth-like headers (x-csrf-token, x-api-key, etc.)
+}
+
+export interface CapturedApi {
+  domain: string;
+  baseUrl: string;
+  auth: CapturedAuth;                       // shared auth across all endpoints
+  endpoints: CapturedEndpoint[];
+  capturedAt: string;
+}
+
+export interface CapturedEndpoint {
+  method: string;
+  path: string;              // parameterized: /api/v9/channels/{id}/messages
+  rawPaths: string[];        // actual paths seen
+  queryParams?: Record<string, string>;
+  headers: Record<string, string>;         // all headers needed to replay (content-type, accept, custom)
+  requestBody?: any;         // example body
+  responseStatus: number;
+  responseBody?: any;        // example response
+  triggeredAtStep: number;
+  curl: string;              // ready-to-use curl command
 }
 
 // ─── Pipeline Results ───────────────────────────────────────────────
@@ -99,6 +144,7 @@ export interface PipelineResult {
   obstacles: ObstacleEncounter[];
   error?: ErrorContext;
   durationMs: number;
+  capturedApi?: CapturedApi[];  // Only present when captureApi is enabled
 }
 
 // ─── State Snapshot (for stale-state detection) ─────────────────────
