@@ -28,10 +28,9 @@ const AUTH_HEADER_PATTERNS = [
   /^x-access/i,
   /^x-client-token/i,
   /^x-request-token/i,
-  /^x-super-properties$/i,  // Discord
-  /^x-debug-options$/i,     // Discord
-  /^x-discord/i,            // Discord
-  /^x-fingerprint$/i,       // Discord
+  /^x-super-properties$/i,
+  /^x-debug-options$/i,
+  /^x-fingerprint$/i,
 ];
 
 function isAuthHeader(name: string): boolean {
