@@ -1,0 +1,32 @@
+name: iframer
+
+services:
+  redis:
+    container_name: iframer-redis
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+
+  api:
+    container_name: iframer-api
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3021:3021"
+      - "6080-6099:6080-6099"
+    env_file:
+      - .env
+    environment:
+      - PORT=3021
+      - REDIS_URL=redis://redis:6379
+      - VNC_BASE_DISPLAY=99
+      - VNC_MAX_SESSIONS=20
+      - VNC_SESSION_TIMEOUT_MS=300000
+    depends_on:
+      - redis
+
+volumes:
+  redis-data:

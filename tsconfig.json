@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "outDir": "./dist",
+    "rootDir": ".",
+    "declaration": true,
+    "resolveJsonModule": true,
+    "types": ["bun-types", "@types/node"]
+  },
+  "include": ["src/**/*.ts", "index.ts", "bin/**/*.ts"],
+  "exclude": ["node_modules", "dist", "mcp", "tests"]
+}
