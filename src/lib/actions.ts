@@ -16,7 +16,22 @@ import { solveHCaptcha } from "./captcha/hcaptcha";
 import { deriveKey, decrypt, generateTOTP } from "./auth/crypto";
 import { getCredential } from "./session/redis";
 import { saveScreenshot } from "./screenshot";
+import { takeSnapshot } from "./snapshot";
+import { annotatedScreenshot } from "./annotate";
 import type { StaleStateMonitor } from "./stale-monitor";
+
+/** Resolve @e refs to CSS selectors */
+function resolveSelector(selector: string, ctx: ExecutionContext): string {
+  if (selector.startsWith("@e")) {
+    const ref = ctx.refMap.get(selector);
+    if (!ref) {
+      const available = Array.from(ctx.refMap.keys()).join(", ");
+      throw new Error(`Unknown ref: ${selector}. ${available ? `Available refs: ${available}` : "No refs available — run a snapshot or annotated screenshot step first."}`);
+    }
+    return ref.selector;
+  }
+  return selector;
+}
 
 export async function executeAction(
   page: Page,
@@ -43,16 +58,16 @@ export async function executeAction(
         break;
 
       case "click":
-        await page.click(step.selector);
+        await page.click(resolveSelector(step.selector, ctx));
         break;
 
       case "fill":
-        await page.fill(step.selector, step.value);
+        await page.fill(resolveSelector(step.selector, ctx), step.value);
         break;
 
       case "human-click":
         if (step.selector) {
-          await humanClick(page, step.selector);
+          await humanClick(page, resolveSelector(step.selector, ctx));
         } else if (step.x !== undefined && step.y !== undefined) {
           await humanClickXY(page, step.x, step.y);
         } else {
@@ -62,7 +77,7 @@ export async function executeAction(
 
       case "right-click":
         if (step.selector) {
-          await page.click(step.selector, { button: "right" });
+          await page.click(resolveSelector(step.selector, ctx), { button: "right" });
         } else if (step.x !== undefined && step.y !== undefined) {
           await page.mouse.click(step.x, step.y, { button: "right" });
         } else {
@@ -71,7 +86,7 @@ export async function executeAction(
         break;
 
       case "human-type":
-        await humanType(page, step.selector, step.value);
+        await humanType(page, resolveSelector(step.selector, ctx), step.value);
         break;
 
       case "evaluate":
@@ -87,7 +102,7 @@ export async function executeAction(
         break;
 
       case "wait-for":
-        await page.waitForSelector(step.selector, { timeout: step.timeout || 10_000 });
+        await page.waitForSelector(resolveSelector(step.selector, ctx), { timeout: step.timeout || 10_000 });
         break;
 
       case "scroll":
@@ -100,7 +115,7 @@ export async function executeAction(
 
       case "type-code": {
         const code = String(step.value || "");
-        const selector = step.selector || 'input[type="tel"]';
+        const selector = step.selector ? resolveSelector(step.selector, ctx) : 'input[type="tel"]';
         const firstInput = await page.waitForSelector(selector, { timeout: 5_000 });
         await firstInput!.click();
         await page.waitForTimeout(200);
@@ -215,9 +230,103 @@ export async function executeAction(
       }
 
       case "screenshot": {
-        const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
-        const url = saveScreenshot(buf, `step-${Date.now()}.jpg`, ctx.screenshotDir, ctx.publicUrl);
-        result = { screenshotUrl: url };
+        if (step.annotate) {
+          const annotated = await annotatedScreenshot(page, ctx);
+          const refLines = annotated.refs.map(r => `  ${r.ref} ${r.role} "${r.name}"`).join("\n");
+          result = { screenshotUrl: annotated.screenshotUrl, refs: refLines };
+        } else {
+          const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
+          const url = saveScreenshot(buf, `step-${Date.now()}.jpg`, ctx.screenshotDir, ctx.publicUrl);
+          result = { screenshotUrl: url };
+        }
+        break;
+      }
+
+      case "snapshot": {
+        const snap = await takeSnapshot(page, ctx, {
+          interactiveOnly: step.interactiveOnly,
+          maxElements: step.maxElements,
+        });
+        result = { elementCount: snap.nodes.length, snapshot: snap.text };
+        break;
+      }
+
+      case "find": {
+        if (!step.role && !step.name && !step.text && !step.placeholder && !step.label) {
+          throw new Error("find requires at least one of: role, name, text, placeholder, label");
+        }
+
+        // Build a locator using Playwright's semantic API
+        let locator;
+        if (step.role) {
+          const opts: any = {};
+          if (step.name) opts.name = step.exact ? step.name : new RegExp(step.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+          if (step.exact !== undefined) opts.exact = step.exact;
+          locator = page.getByRole(step.role as any, opts);
+        } else if (step.label) {
+          locator = page.getByLabel(step.label, { exact: step.exact });
+        } else if (step.placeholder) {
+          locator = page.getByPlaceholder(step.placeholder, { exact: step.exact });
+        } else if (step.text) {
+          locator = page.getByText(step.text, { exact: step.exact });
+        } else {
+          // name-only: try getByRole with wildcard
+          locator = page.locator(`[aria-label="${step.name}"], [title="${step.name}"]`);
+        }
+
+        const count = await locator.count();
+        if (count === 0) {
+          throw new Error(`No element found matching: ${JSON.stringify({ role: step.role, name: step.name, text: step.text, placeholder: step.placeholder, label: step.label })}`);
+        }
+
+        const element = locator.first();
+        const box = await element.boundingBox();
+        const elInfo = await element.evaluate((el: Element) => {
+          const tag = el.tagName.toLowerCase();
+          const text = (el.textContent?.trim() || "").slice(0, 60);
+
+          // Build selector
+          const path: string[] = [];
+          let current: Element | null = el;
+          while (current && current !== document.body && current !== document.documentElement) {
+            let seg = current.tagName.toLowerCase();
+            if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
+              path.unshift(`#${current.id}`);
+              break;
+            }
+            const parent: Element | null = current.parentElement;
+            if (parent) {
+              const siblings = Array.from(parent.children).filter((c: Element) => c.tagName === current!.tagName);
+              if (siblings.length > 1) {
+                const idx = siblings.indexOf(current) + 1;
+                seg += `:nth-of-type(${idx})`;
+              }
+            }
+            path.unshift(seg);
+            current = parent;
+          }
+
+          return { tag, text, selector: path.join(" > ") };
+        });
+
+        const ref = `@e${ctx.nextRefId++}`;
+        const displayRole = step.role || elInfo.tag;
+
+        ctx.refMap.set(ref, {
+          ref,
+          role: displayRole,
+          name: elInfo.text,
+          selector: elInfo.selector,
+        });
+
+        result = {
+          ref,
+          role: displayRole,
+          name: elInfo.text,
+          tag: elInfo.tag,
+          boundingBox: box,
+          matchCount: count,
+        };
         break;
       }
 
@@ -244,19 +353,19 @@ export async function executeAction(
         };
 
         if (step.usernameSelector && credential.username) {
-          await reactFill(step.usernameSelector, credential.username);
+          await reactFill(resolveSelector(step.usernameSelector, ctx), credential.username);
         }
         if (step.passwordSelector && credential.password) {
-          await reactFill(step.passwordSelector, credential.password);
+          await reactFill(resolveSelector(step.passwordSelector, ctx), credential.password);
         }
         if (step.submitSelector) {
-          await humanClick(page, step.submitSelector);
+          await humanClick(page, resolveSelector(step.submitSelector, ctx));
           await page.waitForLoadState("domcontentloaded").catch(() => {});
           await page.waitForTimeout(1500);
         }
         if (step.totpSelector && credential.totp_secret) {
           const totp = generateTOTP(credential.totp_secret);
-          await page.click(step.totpSelector);
+          await page.click(resolveSelector(step.totpSelector, ctx));
           await page.keyboard.type(totp, { delay: 50 });
           await page.waitForTimeout(300);
         }

@@ -28538,7 +28538,9 @@ var stepSchema = exports_external.discriminatedUnion("type", [
   exports_external.object({ type: exports_external.literal("type-code"), value: exports_external.string(), selector: exports_external.string().optional() }),
   exports_external.object({ type: exports_external.literal("login"), domain: exports_external.string(), usernameSelector: exports_external.string().optional(), passwordSelector: exports_external.string().optional(), submitSelector: exports_external.string().optional(), totpSelector: exports_external.string().optional() }),
   exports_external.object({ type: exports_external.literal("solve-captcha") }),
-  exports_external.object({ type: exports_external.literal("screenshot") }),
+  exports_external.object({ type: exports_external.literal("screenshot"), annotate: exports_external.boolean().optional().describe("Overlay numbered badges on interactive elements. Returns refs (@e1, @e2...) you can use in subsequent steps.") }),
+  exports_external.object({ type: exports_external.literal("snapshot"), interactiveOnly: exports_external.boolean().optional().describe("Only include interactive elements (default: true)"), maxElements: exports_external.number().optional().describe("Max elements to return (default: 80)") }),
+  exports_external.object({ type: exports_external.literal("find"), role: exports_external.string().optional().describe("ARIA role: button, link, textbox, checkbox, etc."), name: exports_external.string().optional().describe("Accessible name — button text, aria-label"), text: exports_external.string().optional().describe("Visible text content"), placeholder: exports_external.string().optional().describe("Input placeholder text"), label: exports_external.string().optional().describe("Associated label text"), exact: exports_external.boolean().optional().describe("Exact match vs substring (default: substring)") }),
   exports_external.object({ type: exports_external.literal("recaptcha-click") }),
   exports_external.object({ type: exports_external.literal("recaptcha-select"), tiles: exports_external.array(exports_external.number()) }),
   exports_external.object({ type: exports_external.literal("recaptcha-verify") }),
@@ -28552,10 +28554,14 @@ Steps run sequentially. Each step has a 20-second stale-state timeout — if not
 
 Key step types:
 - navigate: go to a URL (obstacle detection runs after this)
+- snapshot: get the page's interactive elements as a structured list with refs (@e1, @e2...). Use this BEFORE interacting to see what's on the page. Then use refs in click/fill/human-click/human-type steps instead of CSS selectors.
+- find: locate a specific element by role, name, text, placeholder, or label. Returns a ref. Use when you know what you're looking for (e.g. find role=button name="Sign In" → @e1, then click @e1).
+- screenshot: take a screenshot. Add annotate=true to overlay numbered badges on interactive elements — returns refs you can use in subsequent steps.
 - extract: evaluate JS and include the result in the response
 - solve-captcha: auto-detect and auto-solve reCAPTCHA OR hCaptcha with vision (uses Claude) — works for both, no config needed
 - login: fill login form with stored credentials (never exposes passwords)
-- screenshot: take a mid-pipeline screenshot
+
+IMPORTANT — Element refs (@e1, @e2...): All selector fields (click, fill, human-click, human-type, wait-for) accept @e refs from snapshot, find, or annotated screenshot. PREFER refs over CSS selectors — they're more reliable. Run snapshot first to see what's available.
 
 API capture (options.captureApi): When enabled, records all XHR/fetch requests the page makes during execution. Use this when the user asks to "reverse engineer", "capture endpoints", "map the API", "remember how this works", or "save the endpoints". Returns structured endpoint data grouped by domain with parameterized paths, request/response bodies, and which pipeline step triggered each call. The agent can then save these to a directory for future direct API usage.
 
@@ -28581,12 +28587,22 @@ Returns: ok, completedSteps, results (with extract values), obstacles (what was 
 Final page: ${data.finalState.title}`);
       lines.push(`URL: ${data.finalState.url}`);
     }
-    const extracts = (data.results || []).filter((r) => r.ok && r.result !== undefined && r.result !== null);
-    if (extracts.length > 0) {
-      lines.push(`
-Extracted data:`);
-      for (const r of extracts) {
-        lines.push(`  step ${r.stepIndex}: ${JSON.stringify(r.result)}`);
+    const meaningful = (data.results || []).filter((r) => r.ok && r.result !== undefined && r.result !== null);
+    for (const r of meaningful) {
+      if (r.step?.type === "snapshot" && r.result?.snapshot) {
+        lines.push(`
+--- Snapshot (${r.result.elementCount} elements) ---`);
+        lines.push(r.result.snapshot);
+      } else if (r.step?.type === "find" && r.result?.ref) {
+        lines.push(`
+Found: ${r.result.ref} ${r.result.role} "${r.result.name}" (${r.result.matchCount} match${r.result.matchCount > 1 ? "es" : ""})`);
+      } else if (r.step?.type === "screenshot" && r.result?.refs) {
+        lines.push(`
+--- Annotated screenshot refs ---`);
+        lines.push(r.result.refs);
+      } else if (r.result !== undefined && r.result !== null) {
+        lines.push(`
+step ${r.stepIndex}: ${JSON.stringify(r.result)}`);
       }
     }
     if (data.obstacles && data.obstacles.length > 0) {
