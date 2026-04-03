@@ -19,6 +19,7 @@ async function apiPost(endpoint: string, body?: any) {
     method: "POST",
     headers: authHeaders(),
     body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(180_000), // 3 minutes — execute can be slow (navigation + captcha solving)
   });
   return res.json();
 }
