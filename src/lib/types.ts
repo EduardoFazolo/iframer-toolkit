@@ -18,13 +18,25 @@ export type PipelineStep =
   | { type: "type-code"; value: string; selector?: string }
   | { type: "login"; domain: string; usernameSelector?: string; passwordSelector?: string; submitSelector?: string; totpSelector?: string }
   | { type: "solve-captcha" }
-  | { type: "screenshot" }
+  | { type: "screenshot"; annotate?: boolean }
+  | { type: "snapshot"; interactiveOnly?: boolean; maxElements?: number }
+  | { type: "find"; role?: string; name?: string; text?: string; placeholder?: string; label?: string; exact?: boolean }
   | { type: "recaptcha-click" }
   | { type: "recaptcha-select"; tiles: number[] }
   | { type: "recaptcha-verify" }
   | { type: "recaptcha-info" }
   | { type: "recaptcha-solve" }
   | { type: "recaptcha-answer"; tiles: number[] };
+
+// ─── Element Ref System ────────────────────────────────────────────
+
+export interface ElementRef {
+  ref: string;           // @e1, @e2, ...
+  role: string;          // button, link, textbox, etc.
+  name: string;          // accessible name or visible text
+  selector: string;      // generated CSS selector for interaction
+  description?: string;  // extra context (placeholder, type, state)
+}
 
 // ─── Pipeline ───────────────────────────────────────────────────────
 
@@ -250,4 +262,6 @@ export interface ExecutionContext {
   screenshotDir: string;
   publicUrl: string;
   staleTimeoutMs: number;
+  refMap: Map<string, ElementRef>;
+  nextRefId: number;
 }
