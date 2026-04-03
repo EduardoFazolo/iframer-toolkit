@@ -28399,7 +28399,8 @@ async function apiPost(endpoint, body) {
   const res = await fetch(`${BASE_URL}${endpoint}`, {
     method: "POST",
     headers: authHeaders(),
-    body: body ? JSON.stringify(body) : undefined
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(180000)
   });
   return res.json();
 }
