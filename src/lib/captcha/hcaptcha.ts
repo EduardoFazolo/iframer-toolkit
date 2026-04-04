@@ -3,6 +3,9 @@ import type { Page } from "patchright";
 import { humanClickXY, humanMove } from "../browser/humanize";
 import type { StaleStateMonitor } from "../stale-monitor";
 import type { SolveResult } from "./recaptcha";
+import { createLogger } from "../logger";
+
+const log = createLogger("hcaptcha-solver");
 
 const MAX_ROUNDS = 8;
 const MAX_DURATION_MS = 60_000;
@@ -142,7 +145,7 @@ async function getChallengeInfo(page: Page): Promise<HCaptchaChallenge | null> {
     ? { x: Math.round(frameBox.x + verifyBtnBox.x), y: Math.round(frameBox.y + verifyBtnBox.y) }
     : { x: Math.round(frameBox.x + frameBox.width - 55), y: Math.round(frameBox.y + frameBox.height - 30) };
 
-  console.log(`[hcaptcha-solver] Round challenge: "${info.prompt}" (${info.rows}x${info.cols})`);
+  log.info(`Round challenge: "${info.prompt}" (${info.rows}x${info.cols})`);
 
   return { prompt: info.prompt, rows: info.rows, cols: info.cols, tiles, verifyButton, frameBox };
 }
@@ -162,7 +165,7 @@ async function screenshotChallenge(page: Page, challenge: HCaptchaChallenge): Pr
     }
     return buf.toString("base64");
   } catch (err: unknown) {
-    console.error(`[hcaptcha-solver] screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.error(`screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -190,7 +193,7 @@ async function classifyTiles(
     });
 
     const text = ((response.content[0] as { type: string; text?: string }).text ?? "").trim();
-    console.log(`[hcaptcha-solver] classify response: "${text}"`);
+    log.debug(`classify response: "${text}"`);
 
     if (text.toLowerCase().startsWith("none")) return [];
     return text
@@ -198,7 +201,7 @@ async function classifyTiles(
       .map((s: string) => parseInt(s.trim(), 10))
       .filter((n: number) => !isNaN(n) && n >= 0 && n < total);
   } catch (err: unknown) {
-    console.error(`[hcaptcha-solver] classification failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.error(`classification failed: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 }
@@ -235,7 +238,7 @@ export async function solveHCaptcha(page: Page, monitor?: StaleStateMonitor): Pr
   }
 
   if (solvedOnCheckbox) {
-    console.log("[hcaptcha-solver] Solved on checkbox click (no challenge)");
+    log.info("Solved on checkbox click (no challenge)");
     return { solved: true, rounds: 0, durationMs: Date.now() - startTime };
   }
 
@@ -249,7 +252,7 @@ export async function solveHCaptcha(page: Page, monitor?: StaleStateMonitor): Pr
 
     const challenge = await getChallengeInfo(page);
     if (!challenge) {
-      console.log("[hcaptcha-solver] Challenge frame gone — assuming solved");
+      log.info("Challenge frame gone — assuming solved");
       return { solved: true, rounds, durationMs: Date.now() - startTime };
     }
 
@@ -260,7 +263,7 @@ export async function solveHCaptcha(page: Page, monitor?: StaleStateMonitor): Pr
 
     monitor?.reportActivity();
     const matchingIndices = await classifyTiles(client, screenshotBase64, challenge);
-    console.log(`[hcaptcha-solver] Round ${rounds}: clicking tiles [${matchingIndices.join(", ")}]`);
+    log.info(`Round ${rounds}: clicking tiles [${matchingIndices.join(", ")}]`);
 
     monitor?.reportActivity();
 
@@ -277,11 +280,11 @@ export async function solveHCaptcha(page: Page, monitor?: StaleStateMonitor): Pr
     monitor?.reportActivity();
 
     if (solved) {
-      console.log(`[hcaptcha-solver] Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
+      log.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
       return { solved: true, rounds, durationMs: Date.now() - startTime };
     }
 
-    console.log(`[hcaptcha-solver] Round ${rounds}: not solved, retrying`);
+    log.info(`Round ${rounds}: not solved, retrying`);
     await sleep(rand(500, 1000));
   }
 

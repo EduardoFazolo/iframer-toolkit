@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs";
 import { registerRoutes, iframer } from "./src/api/routes";
 import { tokenAuth } from "./src/api/middleware";
+import { errorHandler } from "./src/api/error-handler";
 
 const app = express();
 const PORT = process.env.PORT || 3021;
@@ -15,6 +16,7 @@ app.use(express.json());
 app.use(tokenAuth);
 
 registerRoutes(app);
+app.use(errorHandler);
 
 const server = app.listen(PORT, () => console.log(`iframer listening on ${PORT}`));
 

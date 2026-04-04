@@ -2,7 +2,9 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { execSync } from "child_process";
+import { createLogger } from "../logger";
 
+const log = createLogger("chrome");
 const CHROME_VERSIONS_URL =
   "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json";
 
@@ -40,7 +42,7 @@ function getChromeExecutablePath(installDir: string): string {
 }
 
 export async function downloadChrome(installDir: string = DEFAULT_INSTALL_DIR): Promise<string> {
-  console.log("[chrome] Downloading Chrome for Testing (first time only)...");
+  log.info("Downloading Chrome for Testing (first time only)...");
 
   // Fetch version info
   const res = await fetch(CHROME_VERSIONS_URL);
@@ -56,8 +58,8 @@ export async function downloadChrome(installDir: string = DEFAULT_INSTALL_DIR): 
 
   const url = download.url;
   const version = channel.version;
-  console.log(`[chrome] Version ${version} for ${platform}`);
-  console.log(`[chrome] URL: ${url}`);
+  log.debug(`Version ${version} for ${platform}`);
+  log.debug(`URL: ${url}`);
 
   // Create install directory
   fs.mkdirSync(installDir, { recursive: true });
@@ -68,7 +70,7 @@ export async function downloadChrome(installDir: string = DEFAULT_INSTALL_DIR): 
   if (!dlRes.ok) throw new Error(`Download failed: ${dlRes.status}`);
   const buf = Buffer.from(await dlRes.arrayBuffer());
   fs.writeFileSync(zipPath, buf);
-  console.log(`[chrome] Downloaded ${(buf.length / 1024 / 1024).toFixed(1)}MB`);
+  log.info(`Downloaded ${(buf.length / 1024 / 1024).toFixed(1)}MB`);
 
   // Extract
   execSync(`unzip -o -q "${zipPath}" -d "${installDir}"`, { stdio: "inherit" });
@@ -87,7 +89,7 @@ export async function downloadChrome(installDir: string = DEFAULT_INSTALL_DIR): 
   // Save version info
   fs.writeFileSync(path.join(installDir, "version.json"), JSON.stringify({ version, platform, downloadedAt: new Date().toISOString() }));
 
-  console.log(`[chrome] Installed at: ${execPath}`);
+  log.info(`Installed at: ${execPath}`);
   return execPath;
 }
 
@@ -169,11 +171,11 @@ export async function ensureChrome(): Promise<string> {
   try {
     return await downloadChrome();
   } catch (err: unknown) {
-    console.error(`[chrome] Failed to download Chrome for Testing: ${err instanceof Error ? err.message : String(err)}`);
+    log.error(`Failed to download Chrome for Testing: ${err instanceof Error ? err.message : String(err)}`);
     // Fall back to system Chrome only if download fails
     const system = findChrome();
     if (system) {
-      console.log(`[chrome] Falling back to system Chrome: ${system}`);
+      log.warn(`Falling back to system Chrome: ${system}`);
       return system;
     }
     throw new Error("No Chrome found. Download failed and no system Chrome available.");

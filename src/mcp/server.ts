@@ -6,7 +6,9 @@ import path from "path";
 import os from "os";
 import type { Iframer } from "../lib/iframer";
 import type { PipelineResult } from "../lib/types";
+import { createLogger } from "../lib/logger";
 
+const log = createLogger("mcp");
 function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -223,8 +225,8 @@ server.tool(
       // Check Docker API health
       try {
         const health = await fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3000) });
-        const data = await health.json() as { ok?: boolean };
-        status.api = data.ok === true;
+        const healthCheck = await health.json() as { ok?: boolean };
+        status.api = healthCheck.ok === true;
       } catch {
         status.api = false;
       }
@@ -287,16 +289,16 @@ server.tool(
       const dockerRunning = await isDockerRunning();
       const useLocal = IFRAMER_MODE === "docker" ? false : !dockerRunning;
 
-      let data: any;
+      let fetchResult: any;
       if (useLocal) {
         const iframer = await getIframer();
-        data = await iframer.fetch(LOCAL_USER, LOCAL_TOKEN, params as any);
+        fetchResult = await iframer.fetch(LOCAL_USER, LOCAL_TOKEN, params as any);
       } else {
-        data = await apiPost("/fetch", params);
+        fetchResult = await apiPost("/fetch", params);
       }
 
-      if (!data.ok) return err(`Error: ${data.error}`);
-      const { html, ...rest } = data;
+      if (!fetchResult.ok) return err(`Error: ${fetchResult.error}`);
+      const { html, ...rest } = fetchResult;
       const text = html
         ? JSON.stringify(rest, null, 2) + "\n\n--- HTML ---\n" + html
         : JSON.stringify(rest, null, 2);
@@ -418,7 +420,7 @@ Auto-escalation is built in: if blocked, iframer automatically retries with stro
         const escalation = ["docker-headful", "binary-headful"];
         for (const nextMode of escalation) {
           if (nextMode === "docker-headful" && !dockerRunning) continue;
-          console.log(`[mcp] Auto-escalating to ${nextMode}`);
+          log.info(`Auto-escalating to ${nextMode}`);
           data = await runWithMode(nextMode);
           if (data.ok) break;
           if (data.error?.errorType !== "bot-blocked") break;
@@ -533,20 +535,20 @@ server.tool(
       if (action === "stop") {
         if (useLocal) {
           const iframer = await getIframer();
-          const data = await iframer.stopSession(LOCAL_USER, LOCAL_TOKEN);
-          return { content: [{ type: "text" as const, text: `Session stopped. State saved: ${data.sessionSaved}` }] };
+          const stopResult = await iframer.stopSession(LOCAL_USER, LOCAL_TOKEN);
+          return { content: [{ type: "text" as const, text: `Session stopped. State saved: ${stopResult.sessionSaved}` }] };
         }
-        const data = await apiPost<{ ok: boolean; error?: string; sessionSaved?: boolean }>("/interactive/stop");
-        if (!data.ok) return err(`Error: ${data.error}`);
-        return { content: [{ type: "text" as const, text: `Session stopped. State saved: ${data.sessionSaved}` }] };
+        const stopResult = await apiPost<{ ok: boolean; error?: string; sessionSaved?: boolean }>("/interactive/stop");
+        if (!stopResult.ok) return err(`Error: ${stopResult.error}`);
+        return { content: [{ type: "text" as const, text: `Session stopped. State saved: ${stopResult.sessionSaved}` }] };
       } else {
         if (useLocal) {
           const iframer = await getIframer();
           await iframer.clearSession(LOCAL_USER);
           return { content: [{ type: "text" as const, text: "Session data cleared." }] };
         }
-        const data = await apiDelete<{ ok: boolean; error?: string }>("/session");
-        if (!data.ok) return err(`Error: ${data.error}`);
+        const clearResult = await apiDelete<{ ok: boolean; error?: string }>("/session");
+        if (!clearResult.ok) return err(`Error: ${clearResult.error}`);
         return { content: [{ type: "text" as const, text: "Session data cleared." }] };
       }
     } catch (e: unknown) {
@@ -579,9 +581,9 @@ server.tool(
           const iframer = await getIframer();
           domains = await iframer.listCredentials(LOCAL_USER);
         } else {
-          const data = await apiGet<{ ok: boolean; error?: string; domains?: string[] }>("/credentials");
-          if (!data.ok) return err(`Error: ${data.error}`);
-          domains = data.domains || [];
+          const credList = await apiGet<{ ok: boolean; error?: string; domains?: string[] }>("/credentials");
+          if (!credList.ok) return err(`Error: ${credList.error}`);
+          domains = credList.domains || [];
         }
         if (!domains.length) {
           return { content: [{ type: "text" as const, text: "No credentials stored. Call this tool again with action=store and the domain to prompt the user for credentials now." }] };
@@ -615,8 +617,8 @@ server.tool(
           const iframer = await getIframer();
           await iframer.storeCredential(LOCAL_USER, LOCAL_TOKEN, { domain, username, password, totp_secret: totp_secret || undefined });
         } else {
-          const data = await apiPost<{ ok: boolean; error?: string }>("/credentials", { domain, username, password, totp_secret: totp_secret || undefined });
-          if (!data.ok) return err(`Error: ${data.error}`);
+          const storeResult = await apiPost<{ ok: boolean; error?: string }>("/credentials", { domain, username, password, totp_secret: totp_secret || undefined });
+          if (!storeResult.ok) return err(`Error: ${storeResult.error}`);
         }
         return { content: [{ type: "text" as const, text: `Credentials stored for ${domain}.` }] };
       }
@@ -627,12 +629,12 @@ server.tool(
           // In local mode, login is handled as a pipeline step — inform the agent
           return { content: [{ type: "text" as const, text: `Use a login step in "execute" to log in with stored credentials for ${domain}. Example: { "type": "login", "domain": "${domain}" }` }] };
         }
-        const data = await apiPost<{ ok: boolean; error?: string; url?: string; title?: string; totpGenerated?: boolean; screenshotUrl?: string }>("/credentials/login", { domain, usernameSelector, passwordSelector, submitSelector, totpSelector });
-        if (!data.ok) return err(`Error: ${data.error}`);
+        const loginResult = await apiPost<{ ok: boolean; error?: string; url?: string; title?: string; totpGenerated?: boolean; screenshotUrl?: string }>("/credentials/login", { domain, usernameSelector, passwordSelector, submitSelector, totpSelector });
+        if (!loginResult.ok) return err(`Error: ${loginResult.error}`);
 
-        const lines = [`Login attempted for ${domain}`, `URL: ${data.url}`, `Title: ${data.title}`];
-        if (data.totpGenerated) lines.push("TOTP code generated and entered automatically.");
-        if (data.screenshotUrl) lines.push(`Screenshot: ${data.screenshotUrl}`);
+        const lines = [`Login attempted for ${domain}`, `URL: ${loginResult.url}`, `Title: ${loginResult.title}`];
+        if (loginResult.totpGenerated) lines.push("TOTP code generated and entered automatically.");
+        if (loginResult.screenshotUrl) lines.push(`Screenshot: ${loginResult.screenshotUrl}`);
         return { content: [{ type: "text" as const, text: lines.join("\n") }] };
       }
 

@@ -5,7 +5,9 @@ import path from "path";
 import fs from "fs";
 import { ensureChrome } from "./chrome-downloader";
 import type { BrowserMode } from "../types";
+import { createLogger } from "../logger";
 
+const log = createLogger("cdp-launcher");
 export interface ChromeLaunchResult {
   process: ChildProcess;
   cdpUrl: string;       // ws://127.0.0.1:<port>/devtools/browser/<id>
@@ -53,8 +55,8 @@ export async function launchChrome(options: ChromeLaunchOptions): Promise<Chrome
   const chromePath = options.executablePath || await ensureChrome();
   const port = options.port || await getRandomPort();
 
-  console.log(`[cdp-launcher] Chrome: ${chromePath}`);
-  console.log(`[cdp-launcher] Mode: ${options.mode}, Port: ${port}`);
+  log.debug(`Chrome: ${chromePath}`);
+  log.debug(`Mode: ${options.mode}, Port: ${port}`);
 
   const args = [
     "--disable-blink-features=AutomationControlled",
