@@ -1899,6 +1899,171 @@ function resolveSelector(selector, ctx) {
   }
   return selector;
 }
+async function handleRecaptchaSolve(page) {
+  const solveResult = await clickRecaptchaCheckbox(page);
+  if (solveResult.solved)
+    return { solved: true };
+  const ci = solveResult.challengeInfo;
+  if (ci && ci.tiles && ci.tiles.length > 0) {
+    return { solved: false, prompt: ci.prompt, rows: ci.rows, cols: ci.cols, tiles: await screenshotTiles2(page, ci) };
+  }
+  return { solved: false, prompt: "", tiles: [] };
+}
+async function handleRecaptchaAnswer(page, tiles) {
+  await clickChallengeTiles(page, tiles);
+  const verifyResult = await clickChallengeVerify(page);
+  if (verifyResult.solved)
+    return { solved: true };
+  const ci = verifyResult.challengeInfo;
+  if (ci && ci.tiles && ci.tiles.length > 0) {
+    return { solved: false, prompt: ci.prompt, rows: ci.rows, cols: ci.cols, tiles: await screenshotTiles2(page, ci) };
+  }
+  return { solved: false, tiles: [] };
+}
+async function screenshotTiles2(page, ci) {
+  const tileSize = ci.bframeBox ? Math.round((ci.bframeBox.width - CAPTCHA_GRID.GRID_PADDING) / ci.cols) : CAPTCHA_GRID.DEFAULT_TILE_SIZE;
+  const tiles = [];
+  for (const tile of ci.tiles) {
+    const clip = {
+      x: tile.centerX - tileSize / 2,
+      y: tile.centerY - tileSize / 2,
+      width: tileSize,
+      height: tileSize
+    };
+    try {
+      const tileBuf = await page.screenshot({ type: "jpeg", quality: 60, clip });
+      tiles.push({ index: tile.index, image: tileBuf.toString("base64") });
+    } catch {
+      tiles.push({ index: tile.index, image: null });
+    }
+  }
+  return tiles;
+}
+async function handleSolveCaptcha(page, monitor) {
+  await page.waitForTimeout(TIMING.CAPTCHA_DETECT_WAIT);
+  const isHCaptcha = await page.evaluate(() => {
+    const iframes = Array.from(document.querySelectorAll("iframe"));
+    return iframes.some((f) => {
+      const src = f.src || "";
+      const title = (f.title || "").toLowerCase();
+      return src.includes("hcaptcha.com") || title.includes("hcaptcha") || !!document.querySelector("[data-hcaptcha-widget-id]");
+    });
+  }).catch((err) => {
+    log5.warn(`captcha detection failed: ${err}`);
+    return false;
+  });
+  log5.info(`detected: ${isHCaptcha ? "hCaptcha" : "reCAPTCHA"}`);
+  return isHCaptcha ? await solveHCaptcha(page, monitor) : await solveRecaptcha(page, monitor);
+}
+async function handleFind(page, step, ctx) {
+  if (!step.role && !step.name && !step.text && !step.placeholder && !step.label) {
+    throw new Error("find requires at least one of: role, name, text, placeholder, label");
+  }
+  let locator;
+  if (step.role) {
+    const opts = {};
+    if (step.name)
+      opts.name = step.exact ? step.name : new RegExp(step.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    if (step.exact !== undefined)
+      opts.exact = step.exact;
+    locator = page.getByRole(step.role, opts);
+  } else if (step.label) {
+    locator = page.getByLabel(step.label, { exact: step.exact });
+  } else if (step.placeholder) {
+    locator = page.getByPlaceholder(step.placeholder, { exact: step.exact });
+  } else if (step.text) {
+    locator = page.getByText(step.text, { exact: step.exact });
+  } else {
+    locator = page.locator(`[aria-label="${step.name}"], [title="${step.name}"]`);
+  }
+  const count = await locator.count();
+  if (count === 0) {
+    throw new Error(`No element found matching: ${JSON.stringify({ role: step.role, name: step.name, text: step.text, placeholder: step.placeholder, label: step.label })}`);
+  }
+  const element = locator.first();
+  const box = await element.boundingBox();
+  const elInfo = await element.evaluate((el) => {
+    const tag = el.tagName.toLowerCase();
+    const text = (el.textContent?.trim() || "").slice(0, 60);
+    const path2 = [];
+    let current = el;
+    while (current && current !== document.body && current !== document.documentElement) {
+      let seg = current.tagName.toLowerCase();
+      if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
+        path2.unshift(`#${current.id}`);
+        break;
+      }
+      const parent = current.parentElement;
+      if (parent && current) {
+        const currentTag = current.tagName;
+        const siblings = Array.from(parent.children).filter((c) => c.tagName === currentTag);
+        if (siblings.length > 1) {
+          const idx = siblings.indexOf(current) + 1;
+          seg += `:nth-of-type(${idx})`;
+        }
+      }
+      path2.unshift(seg);
+      current = parent;
+    }
+    return { tag, text, selector: path2.join(" > ") };
+  });
+  const ref = `@e${ctx.nextRefId++}`;
+  const displayRole = step.role || elInfo.tag;
+  ctx.refMap.set(ref, {
+    ref,
+    role: displayRole,
+    name: elInfo.text,
+    selector: elInfo.selector
+  });
+  return {
+    ref,
+    role: displayRole,
+    name: elInfo.text,
+    tag: elInfo.tag,
+    boundingBox: box,
+    matchCount: count
+  };
+}
+async function handleLogin(page, step, ctx) {
+  const credKey = await deriveKey(ctx.token, "credentials");
+  const blob = await ctx.store.getCredential(ctx.userId, step.domain);
+  if (!blob || blob.length === 0) {
+    throw new Error(`No credentials stored for ${step.domain}`);
+  }
+  const credential = JSON.parse(decrypt(blob, credKey));
+  const reactFill = async (selector, value) => {
+    await page.click(selector);
+    await page.waitForTimeout(TIMING.SCROLL_DELAY);
+    await page.evaluate(([sel, val]) => {
+      const el = document.querySelector(sel);
+      if (!el)
+        return;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(el, val);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    }, [selector, value]);
+    await page.waitForTimeout(TIMING.PRE_NAVIGATE[0] + Math.random() * (TIMING.PRE_NAVIGATE[1] - TIMING.PRE_NAVIGATE[0]));
+  };
+  if (step.usernameSelector && credential.username) {
+    await reactFill(resolveSelector(step.usernameSelector, ctx), credential.username);
+  }
+  if (step.passwordSelector && credential.password) {
+    await reactFill(resolveSelector(step.passwordSelector, ctx), credential.password);
+  }
+  if (step.submitSelector) {
+    await humanClick(page, resolveSelector(step.submitSelector, ctx));
+    await page.waitForLoadState("domcontentloaded").catch(() => {});
+    await page.waitForTimeout(TIMING.POST_LOGIN_WAIT);
+  }
+  if (step.totpSelector && credential.totp_secret) {
+    const totp = generateTOTP(credential.totp_secret);
+    await page.click(resolveSelector(step.totpSelector, ctx));
+    await page.keyboard.type(totp, { delay: 50 });
+    await page.waitForTimeout(TIMING.POST_TOTP_WAIT);
+  }
+  return { loggedIn: true, url: page.url() };
+}
 async function executeAction(page, step, ctx, monitor) {
   const start = Date.now();
   const stepIndex = -1;
@@ -1989,84 +2154,15 @@ async function executeAction(page, step, ctx, monitor) {
       case "recaptcha-info":
         result = await getChallengeInfo(page);
         break;
-      case "recaptcha-solve": {
-        const solveResult = await clickRecaptchaCheckbox(page);
-        if (solveResult.solved) {
-          result = { solved: true };
-          break;
-        }
-        const ci = solveResult.challengeInfo;
-        if (ci && ci.tiles && ci.tiles.length > 0) {
-          const tileSize = ci.bframeBox ? Math.round((ci.bframeBox.width - CAPTCHA_GRID.GRID_PADDING) / ci.cols) : CAPTCHA_GRID.DEFAULT_TILE_SIZE;
-          const tiles = [];
-          for (const tile of ci.tiles) {
-            const clip = {
-              x: tile.centerX - tileSize / 2,
-              y: tile.centerY - tileSize / 2,
-              width: tileSize,
-              height: tileSize
-            };
-            try {
-              const tileBuf = await page.screenshot({ type: "jpeg", quality: 60, clip });
-              tiles.push({ index: tile.index, image: tileBuf.toString("base64") });
-            } catch {
-              tiles.push({ index: tile.index, image: null });
-            }
-          }
-          result = { solved: false, prompt: ci.prompt, rows: ci.rows, cols: ci.cols, tiles };
-        } else {
-          result = { solved: false, prompt: "", tiles: [] };
-        }
+      case "recaptcha-solve":
+        result = await handleRecaptchaSolve(page);
         break;
-      }
-      case "recaptcha-answer": {
-        await clickChallengeTiles(page, step.tiles);
-        const verifyResult = await clickChallengeVerify(page);
-        if (verifyResult.solved) {
-          result = { solved: true };
-        } else {
-          const ci2 = verifyResult.challengeInfo;
-          if (ci2 && ci2.tiles && ci2.tiles.length > 0) {
-            const tileSize2 = ci2.bframeBox ? Math.round((ci2.bframeBox.width - CAPTCHA_GRID.GRID_PADDING) / ci2.cols) : CAPTCHA_GRID.DEFAULT_TILE_SIZE;
-            const tiles2 = [];
-            for (const tile of ci2.tiles) {
-              const clip = {
-                x: tile.centerX - tileSize2 / 2,
-                y: tile.centerY - tileSize2 / 2,
-                width: tileSize2,
-                height: tileSize2
-              };
-              try {
-                const tileBuf = await page.screenshot({ type: "jpeg", quality: 60, clip });
-                tiles2.push({ index: tile.index, image: tileBuf.toString("base64") });
-              } catch {
-                tiles2.push({ index: tile.index, image: null });
-              }
-            }
-            result = { solved: false, prompt: ci2.prompt, rows: ci2.rows, cols: ci2.cols, tiles: tiles2 };
-          } else {
-            result = { solved: false, tiles: [] };
-          }
-        }
+      case "recaptcha-answer":
+        result = await handleRecaptchaAnswer(page, step.tiles);
         break;
-      }
-      case "solve-captcha": {
-        await page.waitForTimeout(TIMING.CAPTCHA_DETECT_WAIT);
-        const isHCaptcha = await page.evaluate(() => {
-          const iframes = Array.from(document.querySelectorAll("iframe"));
-          return iframes.some((f) => {
-            const src = f.src || "";
-            const title = (f.title || "").toLowerCase();
-            return src.includes("hcaptcha.com") || title.includes("hcaptcha") || !!document.querySelector("[data-hcaptcha-widget-id]");
-          });
-        }).catch((err) => {
-          log5.warn(`captcha detection failed: ${err}`);
-          return false;
-        });
-        log5.info(`detected: ${isHCaptcha ? "hCaptcha" : "reCAPTCHA"}`);
-        result = isHCaptcha ? await solveHCaptcha(page, monitor) : await solveRecaptcha(page, monitor);
+      case "solve-captcha":
+        result = await handleSolveCaptcha(page, monitor);
         break;
-      }
       case "screenshot": {
         if (step.annotate) {
           const annotated = await annotatedScreenshot(page, ctx);
@@ -2088,117 +2184,12 @@ async function executeAction(page, step, ctx, monitor) {
         result = { elementCount: snap.nodes.length, snapshot: snap.text };
         break;
       }
-      case "find": {
-        if (!step.role && !step.name && !step.text && !step.placeholder && !step.label) {
-          throw new Error("find requires at least one of: role, name, text, placeholder, label");
-        }
-        let locator;
-        if (step.role) {
-          const opts = {};
-          if (step.name)
-            opts.name = step.exact ? step.name : new RegExp(step.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-          if (step.exact !== undefined)
-            opts.exact = step.exact;
-          locator = page.getByRole(step.role, opts);
-        } else if (step.label) {
-          locator = page.getByLabel(step.label, { exact: step.exact });
-        } else if (step.placeholder) {
-          locator = page.getByPlaceholder(step.placeholder, { exact: step.exact });
-        } else if (step.text) {
-          locator = page.getByText(step.text, { exact: step.exact });
-        } else {
-          locator = page.locator(`[aria-label="${step.name}"], [title="${step.name}"]`);
-        }
-        const count = await locator.count();
-        if (count === 0) {
-          throw new Error(`No element found matching: ${JSON.stringify({ role: step.role, name: step.name, text: step.text, placeholder: step.placeholder, label: step.label })}`);
-        }
-        const element = locator.first();
-        const box = await element.boundingBox();
-        const elInfo = await element.evaluate((el) => {
-          const tag = el.tagName.toLowerCase();
-          const text = (el.textContent?.trim() || "").slice(0, 60);
-          const path2 = [];
-          let current = el;
-          while (current && current !== document.body && current !== document.documentElement) {
-            let seg = current.tagName.toLowerCase();
-            if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-              path2.unshift(`#${current.id}`);
-              break;
-            }
-            const parent = current.parentElement;
-            if (parent && current) {
-              const currentTag = current.tagName;
-              const siblings = Array.from(parent.children).filter((c) => c.tagName === currentTag);
-              if (siblings.length > 1) {
-                const idx = siblings.indexOf(current) + 1;
-                seg += `:nth-of-type(${idx})`;
-              }
-            }
-            path2.unshift(seg);
-            current = parent;
-          }
-          return { tag, text, selector: path2.join(" > ") };
-        });
-        const ref = `@e${ctx.nextRefId++}`;
-        const displayRole = step.role || elInfo.tag;
-        ctx.refMap.set(ref, {
-          ref,
-          role: displayRole,
-          name: elInfo.text,
-          selector: elInfo.selector
-        });
-        result = {
-          ref,
-          role: displayRole,
-          name: elInfo.text,
-          tag: elInfo.tag,
-          boundingBox: box,
-          matchCount: count
-        };
+      case "find":
+        result = await handleFind(page, step, ctx);
         break;
-      }
-      case "login": {
-        const credKey = await deriveKey(ctx.token, "credentials");
-        const blob = await ctx.store.getCredential(ctx.userId, step.domain);
-        if (!blob || blob.length === 0) {
-          throw new Error(`No credentials stored for ${step.domain}`);
-        }
-        const credential = JSON.parse(decrypt(blob, credKey));
-        const reactFill = async (selector, value) => {
-          await page.click(selector);
-          await page.waitForTimeout(TIMING.SCROLL_DELAY);
-          await page.evaluate(([sel, val]) => {
-            const el = document.querySelector(sel);
-            if (!el)
-              return;
-            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-            setter?.call(el, val);
-            el.dispatchEvent(new Event("input", { bubbles: true }));
-            el.dispatchEvent(new Event("change", { bubbles: true }));
-          }, [selector, value]);
-          await page.waitForTimeout(TIMING.PRE_NAVIGATE[0] + Math.random() * (TIMING.PRE_NAVIGATE[1] - TIMING.PRE_NAVIGATE[0]));
-        };
-        if (step.usernameSelector && credential.username) {
-          await reactFill(resolveSelector(step.usernameSelector, ctx), credential.username);
-        }
-        if (step.passwordSelector && credential.password) {
-          await reactFill(resolveSelector(step.passwordSelector, ctx), credential.password);
-        }
-        if (step.submitSelector) {
-          await humanClick(page, resolveSelector(step.submitSelector, ctx));
-          await page.waitForLoadState("domcontentloaded").catch(() => {});
-          await page.waitForTimeout(TIMING.POST_LOGIN_WAIT);
-        }
-        if (step.totpSelector && credential.totp_secret) {
-          const totp = generateTOTP(credential.totp_secret);
-          await page.click(resolveSelector(step.totpSelector, ctx));
-          await page.keyboard.type(totp, { delay: 50 });
-          await page.waitForTimeout(TIMING.POST_TOTP_WAIT);
-        }
-        result = { loggedIn: true, url: page.url() };
+      case "login":
+        result = await handleLogin(page, step, ctx);
         break;
-      }
       default: {
         const _exhaustive = step;
         throw new Error(`Unknown step type: ${_exhaustive.type}`);
@@ -3294,8 +3285,22 @@ class BrowserDaemon {
     if (instance) {
       try {
         if (instance.browser.isConnected()) {
+          let page2 = instance.page;
+          let context2 = instance.context;
+          try {
+            await page2.evaluate("1");
+          } catch {
+            log7.info(`Page for ${mode} is dead, creating fresh context`);
+            try {
+              await context2.close();
+            } catch {}
+            context2 = await instance.browser.newContext();
+            page2 = await context2.newPage();
+            instance.context = context2;
+            instance.page = page2;
+          }
           this.resetIdleTimer(mode);
-          return { browser: instance.browser, context: instance.context, page: instance.page };
+          return { browser: instance.browser, context: context2, page: page2 };
         }
       } catch {}
       await this.stopMode(mode);
@@ -4036,22 +4041,20 @@ var init_iframer = __esm(() => {
 });
 
 // src/mcp/server.ts
-init_logger();
 var import_mcp = require("@modelcontextprotocol/sdk/server/mcp.js");
 var import_stdio = require("@modelcontextprotocol/sdk/server/stdio.js");
-var import_zod = require("zod");
+
+// src/mcp/helpers.ts
+init_logger();
 var import_path8 = __toESM(require("path"));
 var import_os6 = __toESM(require("os"));
 var log12 = createLogger("mcp");
-function getErrorMessage3(err) {
-  return err instanceof Error ? err.message : String(err);
-}
 var BASE_URL = process.env.IFRAMER_URL || "http://localhost:3021";
 var IFRAMER_SECRET = process.env.IFRAMER_SECRET;
 var IFRAMER_MODE = process.env.IFRAMER_MODE;
-var _iframer = null;
 var LOCAL_USER = "mcp-user";
 var LOCAL_TOKEN = IFRAMER_SECRET || "iframer-local-default-token";
+var _iframer = null;
 async function getIframer() {
   if (!_iframer) {
     const { Iframer: Iframer2 } = await Promise.resolve().then(() => (init_iframer(), exports_iframer));
@@ -4148,6 +4151,603 @@ async function ensureLocalChrome() {
     await downloadChrome2();
   }
 }
+function getErrorMessage3(err2) {
+  return err2 instanceof Error ? err2.message : String(err2);
+}
+
+// src/mcp/tools/status.ts
+function registerStatusTool(server) {
+  server.tool("status", `Get the full state of iframer in one call. Call this first. Returns: available browser modes, API health, active session, stored credentials, and domain memory.`, {}, async () => {
+    try {
+      const status = { modes: {}, api: false, session: null, credentials: [], domainMemory: null };
+      status.modes = await detectAvailableModes();
+      try {
+        const health = await fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3000) });
+        const healthCheck = await health.json();
+        status.api = healthCheck.ok === true;
+      } catch {
+        status.api = false;
+      }
+      if (status.api) {
+        try {
+          const sessionData = await apiGet("/interactive/status");
+          status.session = sessionData.active ? { active: true, noVncUrl: sessionData.noVncUrl, createdAt: sessionData.createdAt, url: sessionData.url } : { active: false };
+        } catch {}
+      }
+      try {
+        if (status.api) {
+          const credData = await apiGet("/credentials");
+          if (credData.ok)
+            status.credentials = credData.domains || [];
+        } else {
+          const iframer = await getIframer();
+          status.credentials = await iframer.listCredentials(LOCAL_USER);
+        }
+      } catch {}
+      try {
+        const { DomainModeStore: DomainModeStore2 } = await Promise.resolve().then(() => (init_domain_modes(), exports_domain_modes));
+        const domainModes = new DomainModeStore2;
+        status.domainMemory = domainModes.getSummary();
+      } catch {}
+      return { content: [{ type: "text", text: JSON.stringify(status, null, 2) }] };
+    } catch (e) {
+      return err(`Error: ${getErrorMessage3(e)}`);
+    }
+  });
+}
+
+// src/mcp/tools/browse.ts
+var import_zod = require("zod");
+function registerBrowseTool(server) {
+  server.tool("browse", `Fetch a web page with a headless browser. Use for pages that need JavaScript rendering but don't have bot detection walls. Session cookies persist across calls.`, {
+    url: import_zod.z.string().describe("URL to navigate to"),
+    extract: import_zod.z.string().optional().describe("JavaScript expression to evaluate (e.g. 'document.title')"),
+    actions: import_zod.z.array(import_zod.z.object({
+      type: import_zod.z.enum(["click", "fill", "wait", "scroll", "human-click", "human-type"]),
+      selector: import_zod.z.string().optional(),
+      value: import_zod.z.string().optional(),
+      ms: import_zod.z.number().optional()
+    })).optional().describe("Actions to execute before extracting"),
+    returnHtml: import_zod.z.boolean().optional().describe("Return full page HTML"),
+    waitForSelector: import_zod.z.string().optional().describe("Wait for this CSS selector before proceeding"),
+    sessionless: import_zod.z.boolean().optional().describe("Skip session persistence")
+  }, async (params) => {
+    try {
+      const dockerRunning = await isDockerRunning();
+      const useLocal = IFRAMER_MODE === "docker" ? false : !dockerRunning;
+      let fetchResult;
+      if (useLocal) {
+        const iframer = await getIframer();
+        fetchResult = await iframer.fetch(LOCAL_USER, LOCAL_TOKEN, params);
+      } else {
+        fetchResult = await apiPost("/fetch", params);
+      }
+      if (!fetchResult.ok)
+        return err(`Error: ${fetchResult.error}`);
+      const { html, ...rest } = fetchResult;
+      const text = html ? JSON.stringify(rest, null, 2) + `
+
+--- HTML ---
+` + html : JSON.stringify(rest, null, 2);
+      return { content: [{ type: "text", text }] };
+    } catch (e) {
+      return err(`Error: ${getErrorMessage3(e)}`);
+    }
+  });
+}
+
+// src/mcp/tools/execute.ts
+var import_zod3 = require("zod");
+
+// src/mcp/tools/step-schema.ts
+var import_zod2 = require("zod");
+var stepSchema = import_zod2.z.discriminatedUnion("type", [
+  import_zod2.z.object({ type: import_zod2.z.literal("navigate"), url: import_zod2.z.string(), waitUntil: import_zod2.z.string().optional() }),
+  import_zod2.z.object({ type: import_zod2.z.literal("click"), selector: import_zod2.z.string() }),
+  import_zod2.z.object({ type: import_zod2.z.literal("fill"), selector: import_zod2.z.string(), value: import_zod2.z.string() }),
+  import_zod2.z.object({ type: import_zod2.z.literal("human-click"), selector: import_zod2.z.string().optional(), x: import_zod2.z.number().optional(), y: import_zod2.z.number().optional() }),
+  import_zod2.z.object({ type: import_zod2.z.literal("right-click"), selector: import_zod2.z.string().optional(), x: import_zod2.z.number().optional(), y: import_zod2.z.number().optional() }),
+  import_zod2.z.object({ type: import_zod2.z.literal("human-type"), selector: import_zod2.z.string(), value: import_zod2.z.string() }),
+  import_zod2.z.object({ type: import_zod2.z.literal("evaluate"), expression: import_zod2.z.string() }),
+  import_zod2.z.object({ type: import_zod2.z.literal("extract"), expression: import_zod2.z.string() }),
+  import_zod2.z.object({ type: import_zod2.z.literal("wait"), ms: import_zod2.z.number() }),
+  import_zod2.z.object({ type: import_zod2.z.literal("wait-for"), selector: import_zod2.z.string(), timeout: import_zod2.z.number().optional() }),
+  import_zod2.z.object({ type: import_zod2.z.literal("scroll"), deltaY: import_zod2.z.number().optional() }),
+  import_zod2.z.object({ type: import_zod2.z.literal("keyboard"), key: import_zod2.z.string() }),
+  import_zod2.z.object({ type: import_zod2.z.literal("type-code"), value: import_zod2.z.string(), selector: import_zod2.z.string().optional() }),
+  import_zod2.z.object({ type: import_zod2.z.literal("login"), domain: import_zod2.z.string(), usernameSelector: import_zod2.z.string().optional(), passwordSelector: import_zod2.z.string().optional(), submitSelector: import_zod2.z.string().optional(), totpSelector: import_zod2.z.string().optional() }),
+  import_zod2.z.object({ type: import_zod2.z.literal("solve-captcha") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("screenshot"), annotate: import_zod2.z.boolean().optional().describe("Overlay numbered badges on interactive elements. Returns refs (@e1, @e2...) you can use in subsequent steps.") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("snapshot"), interactiveOnly: import_zod2.z.boolean().optional().describe("Only include interactive elements (default: true)"), maxElements: import_zod2.z.number().optional().describe("Max elements to return (default: 80)") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("find"), role: import_zod2.z.string().optional().describe("ARIA role: button, link, textbox, checkbox, etc."), name: import_zod2.z.string().optional().describe("Accessible name — button text, aria-label"), text: import_zod2.z.string().optional().describe("Visible text content"), placeholder: import_zod2.z.string().optional().describe("Input placeholder text"), label: import_zod2.z.string().optional().describe("Associated label text"), exact: import_zod2.z.boolean().optional().describe("Exact match vs substring (default: substring)") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("recaptcha-click") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("recaptcha-select"), tiles: import_zod2.z.array(import_zod2.z.number()) }),
+  import_zod2.z.object({ type: import_zod2.z.literal("recaptcha-verify") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("recaptcha-info") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("recaptcha-solve") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("recaptcha-answer"), tiles: import_zod2.z.array(import_zod2.z.number()) })
+]);
+
+// src/mcp/tools/execute.ts
+function registerExecuteTool(server) {
+  server.tool("execute", `Execute a pipeline of browser steps. Auto-starts a session if needed. Handles obstacles (captcha, cookie banners) automatically.
+
+Steps run sequentially. Each step has a 20-second stale-state timeout — if nothing changes on the page for 20s, execution stops and returns a detailed error so you can decide what to do.
+
+Key step types:
+- navigate: go to a URL (obstacle detection runs after this)
+- snapshot: get the page's interactive elements as a structured list with refs (@e1, @e2...). Use this BEFORE interacting to see what's on the page. Then use refs in click/fill/human-click/human-type steps instead of CSS selectors.
+- find: locate a specific element by role, name, text, placeholder, or label. Returns a ref. Use when you know what you're looking for (e.g. find role=button name="Sign In" → @e1, then click @e1).
+- screenshot: take a screenshot. Add annotate=true to overlay numbered badges on interactive elements — returns refs you can use in subsequent steps.
+- extract: evaluate JS and include the result in the response
+- solve-captcha: auto-detect and auto-solve reCAPTCHA OR hCaptcha with vision (uses Claude) — works for both, no config needed
+- login: fill login form with stored credentials (never exposes passwords)
+
+IMPORTANT — Element refs (@e1, @e2...): All selector fields (click, fill, human-click, human-type, wait-for) accept @e refs from snapshot, find, or annotated screenshot. PREFER refs over CSS selectors — they're more reliable. Run snapshot first to see what's available.
+
+API capture (options.captureApi): When enabled, records all XHR/fetch requests the page makes during execution. Use this when the user asks to "reverse engineer", "capture endpoints", "map the API", "remember how this works", or "save the endpoints". Returns structured endpoint data grouped by domain with parameterized paths, request/response bodies, and which pipeline step triggered each call. The agent can then save these to a directory for future direct API usage.
+
+Returns: ok, completedSteps, results (with extract values), obstacles (what was detected/resolved), capturedApi (when enabled), and on failure: errorContext with screenshot, URL, errorType, suggestion, retryable.
+
+Auto-escalation is built in: if blocked, iframer automatically retries with stronger browser modes (headless → docker → binary-headful) in a single call. You do not need to manually retry with different modes.`, {
+    steps: import_zod3.z.array(stepSchema).describe("Pipeline steps to execute sequentially"),
+    options: import_zod3.z.object({
+      staleTimeoutMs: import_zod3.z.number().optional().describe("Override the 20s stale-state timeout per step"),
+      screenshotAfterEach: import_zod3.z.boolean().optional().describe("Take a screenshot after every step (expensive)"),
+      continueOnObstacle: import_zod3.z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
+      continueOnError: import_zod3.z.boolean().optional().describe("Continue past failing steps (default: false)"),
+      captureApi: import_zod3.z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes. Use when the user wants to reverse-engineer, map, or save a site's API endpoints."),
+      mode: import_zod3.z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("Force a specific browser mode. If omitted, iframer auto-selects based on domain memory and escalates if blocked."),
+      autoEscalate: import_zod3.z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)")
+    }).optional()
+  }, async (params) => {
+    try {
+      const dockerRunning = await isDockerRunning();
+      async function runWithMode(mode) {
+        if (mode === "binary-headful") {
+          await ensureLocalChrome();
+          const iframer2 = await getIframer();
+          return iframer2.execute(LOCAL_USER, LOCAL_TOKEN, {
+            steps: params.steps,
+            options: { ...params.options, mode: "binary-headful", autoEscalate: false }
+          });
+        }
+        if (mode === "docker-headful" && dockerRunning) {
+          return apiPost("/execute", {
+            steps: params.steps,
+            options: { ...params.options, mode: "docker-headful", autoEscalate: false }
+          });
+        }
+        if (dockerRunning) {
+          return apiPost("/execute", {
+            steps: params.steps,
+            options: { ...params.options, mode: mode || undefined }
+          });
+        }
+        await ensureLocalChrome();
+        const iframer = await getIframer();
+        return iframer.execute(LOCAL_USER, LOCAL_TOKEN, {
+          steps: params.steps,
+          options: { ...params.options, mode: mode || undefined }
+        });
+      }
+      const requestedMode = params.options?.mode;
+      let execResult = await runWithMode(requestedMode);
+      if (!execResult.ok && execResult.error?.errorType === "bot-blocked" && params.options?.autoEscalate !== false && !requestedMode) {
+        const escalation = ["docker-headful", "binary-headful"];
+        for (const nextMode of escalation) {
+          if (nextMode === "docker-headful" && !dockerRunning)
+            continue;
+          log12.info(`Auto-escalating to ${nextMode}`);
+          execResult = await runWithMode(nextMode);
+          if (execResult.ok)
+            break;
+          if (execResult.error?.errorType !== "bot-blocked")
+            break;
+        }
+      }
+      const lines = formatExecuteResult(execResult);
+      let screenshotUrl = null;
+      if (execResult.error) {
+        screenshotUrl = execResult.error.pageState?.screenshotUrl ?? null;
+      } else {
+        screenshotUrl = execResult.finalState?.screenshotUrl ?? null;
+      }
+      const content = [{ type: "text", text: lines.join(`
+`) }];
+      if (screenshotUrl) {
+        const img = await fetchScreenshot(screenshotUrl);
+        if (img)
+          content.push(img);
+      }
+      if (!execResult.ok)
+        return { content, isError: true };
+      return { content };
+    } catch (e) {
+      return err(`Error: ${getErrorMessage3(e)}`);
+    }
+  });
+}
+function formatExecuteResult(data) {
+  const lines = [];
+  lines.push(`ok: ${data.ok}`);
+  lines.push(`steps: ${data.completedSteps}/${data.totalSteps}`);
+  if (data.durationMs)
+    lines.push(`duration: ${data.durationMs}ms`);
+  if (data.modeUsed)
+    lines.push(`mode: ${data.modeUsed}${data.modeEscalated ? " (auto-escalated)" : ""}`);
+  if (data.finalState) {
+    lines.push(`
+Final page: ${data.finalState.title}`);
+    lines.push(`URL: ${data.finalState.url}`);
+  }
+  const meaningful = (data.results || []).filter((r) => r.ok && r.result !== undefined && r.result !== null);
+  for (const r of meaningful) {
+    if (r.step?.type === "snapshot" && r.result?.snapshot) {
+      lines.push(`
+--- Snapshot (${r.result.elementCount} elements) ---`);
+      lines.push(r.result.snapshot);
+    } else if (r.step?.type === "find" && r.result?.ref) {
+      lines.push(`
+Found: ${r.result.ref} ${r.result.role} "${r.result.name}" (${r.result.matchCount} match${r.result.matchCount > 1 ? "es" : ""})`);
+    } else if (r.step?.type === "screenshot" && r.result?.refs) {
+      lines.push(`
+--- Annotated screenshot refs ---`);
+      lines.push(r.result.refs);
+    } else if (r.result !== undefined && r.result !== null) {
+      lines.push(`
+step ${r.stepIndex}: ${JSON.stringify(r.result)}`);
+    }
+  }
+  if (data.obstacles && data.obstacles.length > 0) {
+    lines.push(`
+Obstacles handled:`);
+    for (const o of data.obstacles) {
+      lines.push(`  [step ${o.detectedAtStep}] ${o.type}: ${o.resolved ? o.resolution : "UNRESOLVED - " + (o.resolution || "unknown")}`);
+    }
+  }
+  if (data.capturedApi && data.capturedApi.length > 0) {
+    lines.push(`
+--- Captured API ---`);
+    for (const api of data.capturedApi) {
+      lines.push(`
+${api.domain} (${api.baseUrl})`);
+      const authParts = [];
+      if (api.auth?.authorization)
+        authParts.push("Authorization header");
+      if (api.auth?.cookies && Object.keys(api.auth.cookies).length > 0)
+        authParts.push(`${Object.keys(api.auth.cookies).length} cookies`);
+      if (api.auth?.tokens && Object.keys(api.auth.tokens).length > 0)
+        authParts.push(`${Object.keys(api.auth.tokens).length} token headers (${Object.keys(api.auth.tokens).join(", ")})`);
+      if (authParts.length > 0)
+        lines.push(`  Auth: ${authParts.join(", ")}`);
+      lines.push("  Endpoints:");
+      for (const ep of api.endpoints) {
+        lines.push(`    ${ep.method} ${ep.path}  [step ${ep.triggeredAtStep}, status ${ep.responseStatus}]`);
+        if (ep.rawPaths.length > 1) {
+          lines.push(`      examples: ${ep.rawPaths.slice(0, 3).join(", ")}`);
+        }
+      }
+    }
+    lines.push(`
+The capturedApi field contains full endpoint data including auth, headers, request/response bodies, and curl commands. Save it to a directory for the user — use auth.json for shared credentials and one file per endpoint.`);
+  }
+  if (data.error) {
+    lines.push(`
+--- Failure ---`);
+    if (typeof data.error === "string") {
+      lines.push(`Error: ${data.error}`);
+    } else {
+      lines.push(`Failed at step ${data.error.failedAtStep}: ${JSON.stringify(data.error.failedStep)}`);
+      lines.push(`Error type: ${data.error.errorType}`);
+      lines.push(`Message: ${data.error.message}`);
+      lines.push(`Retryable: ${data.error.retryable}`);
+      if (data.error.suggestion)
+        lines.push(`Suggestion: ${data.error.suggestion}`);
+      if (data.error.pageState?.url)
+        lines.push(`URL at failure: ${data.error.pageState.url}`);
+    }
+  }
+  return lines;
+}
+
+// src/mcp/tools/session.ts
+var import_zod4 = require("zod");
+function registerSessionTool(server) {
+  server.tool("session", `Manage the browser session lifecycle. Use action=stop when done to save cookies/localStorage for future use. Use action=clear to wipe all stored session data.`, {
+    action: import_zod4.z.enum(["stop", "clear"]).describe("stop: end session and save state | clear: delete all stored session data")
+  }, async ({ action }) => {
+    try {
+      const dockerRunning = await isDockerRunning();
+      const useLocal = IFRAMER_MODE === "docker" ? false : !dockerRunning;
+      if (action === "stop") {
+        if (useLocal) {
+          const iframer = await getIframer();
+          const stopResult2 = await iframer.stopSession(LOCAL_USER, LOCAL_TOKEN);
+          return { content: [{ type: "text", text: `Session stopped. State saved: ${stopResult2.sessionSaved}` }] };
+        }
+        const stopResult = await apiPost("/interactive/stop");
+        if (!stopResult.ok)
+          return err(`Error: ${stopResult.error}`);
+        return { content: [{ type: "text", text: `Session stopped. State saved: ${stopResult.sessionSaved}` }] };
+      } else {
+        if (useLocal) {
+          const iframer = await getIframer();
+          await iframer.clearSession(LOCAL_USER);
+          return { content: [{ type: "text", text: "Session data cleared." }] };
+        }
+        const clearResult = await apiDelete("/session");
+        if (!clearResult.ok)
+          return err(`Error: ${clearResult.error}`);
+        return { content: [{ type: "text", text: "Session data cleared." }] };
+      }
+    } catch (e) {
+      return err(`Error: ${getErrorMessage3(e)}`);
+    }
+  });
+}
+
+// src/mcp/tools/credentials.ts
+var import_zod5 = require("zod");
+function registerCredentialsTool(server) {
+  server.tool("credentials", `Manage login credentials securely. When login is needed: FIRST call action=list to check if credentials exist. If they do, proceed with login. If not, call action=store — this prompts the user with a secure form (you never see passwords). NEVER ask the user "do you have credentials?" — just check and act.`, {
+    action: import_zod5.z.enum(["store", "login", "list"]).describe("store: prompt user for credentials | login: log in with stored credentials | list: show stored domains"),
+    domain: import_zod5.z.string().optional().describe("Domain (required for store and login)"),
+    usernameSelector: import_zod5.z.string().optional().describe("CSS selector for username field (for login)"),
+    passwordSelector: import_zod5.z.string().optional().describe("CSS selector for password field (for login)"),
+    submitSelector: import_zod5.z.string().optional().describe("CSS selector for submit button (for login)"),
+    totpSelector: import_zod5.z.string().optional().describe("CSS selector for 2FA code field (for login)")
+  }, async ({ action, domain, usernameSelector, passwordSelector, submitSelector, totpSelector }) => {
+    try {
+      const dockerRunning = await isDockerRunning();
+      const useLocal = IFRAMER_MODE === "docker" ? false : !dockerRunning;
+      if (action === "list") {
+        let domains;
+        if (useLocal) {
+          const iframer = await getIframer();
+          domains = await iframer.listCredentials(LOCAL_USER);
+        } else {
+          const credList = await apiGet("/credentials");
+          if (!credList.ok)
+            return err(`Error: ${credList.error}`);
+          domains = credList.domains || [];
+        }
+        if (!domains.length) {
+          return { content: [{ type: "text", text: "No credentials stored. Call this tool again with action=store and the domain to prompt the user for credentials now." }] };
+        }
+        return { content: [{ type: "text", text: `Stored credentials for:
+${domains.map((d) => `  - ${d}`).join(`
+`)}` }] };
+      }
+      if (action === "store") {
+        if (!domain)
+          return err("domain is required for action=store");
+        const result = await server.server.elicitInput({
+          mode: "form",
+          message: `Enter your login credentials for ${domain}. These are encrypted and stored locally — Claude never sees them.`,
+          requestedSchema: {
+            type: "object",
+            properties: {
+              username: { type: "string", title: "Username / Email" },
+              password: { type: "string", title: "Password" },
+              totp_secret: { type: "string", title: "TOTP Secret (leave empty if no 2FA)" }
+            },
+            required: ["username", "password"]
+          }
+        });
+        if (result.action === "decline" || !result.content) {
+          return { content: [{ type: "text", text: "Cancelled." }] };
+        }
+        const { username, password, totp_secret } = result.content;
+        if (useLocal) {
+          const iframer = await getIframer();
+          await iframer.storeCredential(LOCAL_USER, LOCAL_TOKEN, { domain, username, password, totp_secret: totp_secret || undefined });
+        } else {
+          const storeResult = await apiPost("/credentials", { domain, username, password, totp_secret: totp_secret || undefined });
+          if (!storeResult.ok)
+            return err(`Error: ${storeResult.error}`);
+        }
+        return { content: [{ type: "text", text: `Credentials stored for ${domain}.` }] };
+      }
+      if (action === "login") {
+        if (!domain)
+          return err("domain is required for action=login");
+        if (useLocal) {
+          return { content: [{ type: "text", text: `Use a login step in "execute" to log in with stored credentials for ${domain}. Example: { "type": "login", "domain": "${domain}" }` }] };
+        }
+        const loginResult = await apiPost("/credentials/login", { domain, usernameSelector, passwordSelector, submitSelector, totpSelector });
+        if (!loginResult.ok)
+          return err(`Error: ${loginResult.error}`);
+        const lines = [`Login attempted for ${domain}`, `URL: ${loginResult.url}`, `Title: ${loginResult.title}`];
+        if (loginResult.totpGenerated)
+          lines.push("TOTP code generated and entered automatically.");
+        if (loginResult.screenshotUrl)
+          lines.push(`Screenshot: ${loginResult.screenshotUrl}`);
+        return { content: [{ type: "text", text: lines.join(`
+`) }] };
+      }
+      return err("Unknown action");
+    } catch (e) {
+      if (e instanceof Error && e.message?.includes("does not support")) {
+        return err(`This client doesn't support secure input prompts. Store credentials via CLI:
+
+iframer credentials add ${domain}`);
+      }
+      return err(`Error: ${getErrorMessage3(e)}`);
+    }
+  });
+}
+
+// src/mcp/tools/reverse-engineer.ts
+var import_zod6 = require("zod");
+function registerReverseEngineerTool(server) {
+  server.tool("reverse-engineer", `Reverse-engineer a website's API. Navigates to a URL, performs the steps you specify, and captures every XHR/fetch request the page makes — including auth tokens, cookies, headers, request/response bodies, and ready-to-use curl commands.
+
+Use this when the user asks to:
+- "reverse engineer" or "map" a site's API
+- "capture the endpoints" or "save the API"
+- "figure out how this site works under the hood"
+- "record the API calls" so they can be replayed later
+
+How it works:
+1. You provide steps (same as execute) — navigate, click, fill, extract, etc.
+2. iframer runs them while recording all API calls the page makes
+3. Returns structured data per domain: shared auth (cookies, tokens, Authorization header) + each endpoint with method, path, headers, body, response, and a curl command
+
+After getting results, save them as RUNNABLE CODE to a directory:
+  <outputDir>/
+    auth.js                — exports shared cookies, tokens, authorization as an object
+    getMessages.js         — one .js file per endpoint: exports an async function that calls the endpoint using fetch, with auth imported from auth.js
+    index.js               — re-exports all endpoint functions
+    README.md              — summary of all endpoints and their dependency chain
+
+If typed=true (user asks to "infer types", "add types", "save as typescript", etc.), save as .ts instead:
+    auth.ts                — typed auth config with interface
+    getMessages.ts         — async function with inferred request/response types based on captured data
+    types.ts               — all inferred interfaces (e.g. Message, Channel, User) derived from response bodies
+    index.ts               — re-exports all endpoint functions
+
+Naming: convert endpoint paths to camelCase function names (e.g. GET /api/v9/channels/{id}/messages → getChannelMessages). Group related endpoints logically.
+
+The outputDir defaults to the current working directory + the domain name (e.g. ./example_com/). Ask the user where to save if unclear.`, {
+    steps: import_zod6.z.array(stepSchema).describe("Pipeline steps to execute while capturing API calls"),
+    outputDir: import_zod6.z.string().optional().describe("Directory to save the captured API files. If not provided, ask the user or default to ./<domain>/"),
+    typed: import_zod6.z.boolean().optional().describe("Save as .ts with inferred types instead of .js. Set to true when the user asks for types, typescript, or type inference."),
+    options: import_zod6.z.object({
+      staleTimeoutMs: import_zod6.z.number().optional().describe("Override the 20s stale-state timeout per step"),
+      continueOnObstacle: import_zod6.z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
+      continueOnError: import_zod6.z.boolean().optional().describe("Continue past failing steps (default: false)")
+    }).optional()
+  }, async (params) => {
+    try {
+      const execParams = {
+        steps: params.steps,
+        options: { ...params.options, captureApi: true }
+      };
+      const captureResult = await apiPost("/execute", execParams);
+      const lines = [];
+      lines.push(`ok: ${captureResult.ok}`);
+      lines.push(`steps: ${captureResult.completedSteps}/${captureResult.totalSteps}`);
+      if (captureResult.durationMs)
+        lines.push(`duration: ${captureResult.durationMs}ms`);
+      if (captureResult.finalState) {
+        lines.push(`
+Final page: ${captureResult.finalState.title}`);
+        lines.push(`URL: ${captureResult.finalState.url}`);
+      }
+      if (captureResult.capturedApi && captureResult.capturedApi.length > 0) {
+        formatCapturedApi(lines, captureResult.capturedApi, params);
+      } else {
+        lines.push(`
+No API calls were captured. The page may not have made any XHR/fetch requests during the steps, or the steps may not have triggered the expected behavior.`);
+      }
+      if (captureResult.error) {
+        lines.push(`
+--- Failure ---`);
+        if (typeof captureResult.error === "string") {
+          lines.push(`Error: ${captureResult.error}`);
+        } else {
+          lines.push(`Failed at step ${captureResult.error.failedAtStep}: ${JSON.stringify(captureResult.error.failedStep)}`);
+          lines.push(`Error type: ${captureResult.error.errorType}`);
+          lines.push(`Message: ${captureResult.error.message}`);
+          if (captureResult.error.suggestion)
+            lines.push(`Suggestion: ${captureResult.error.suggestion}`);
+        }
+      }
+      const content = [{ type: "text", text: lines.join(`
+`) }];
+      const screenshotUrl = captureResult.error?.pageState?.screenshotUrl ?? captureResult.finalState?.screenshotUrl;
+      if (screenshotUrl) {
+        const img = await fetchScreenshot(screenshotUrl);
+        if (img)
+          content.push(img);
+      }
+      if (captureResult.capturedApi && captureResult.capturedApi.length > 0) {
+        content.push({
+          type: "text",
+          text: `--- capturedApi JSON ---
+` + JSON.stringify(captureResult.capturedApi, null, 2)
+        });
+      }
+      if (!captureResult.ok)
+        return { content, isError: true };
+      return { content };
+    } catch (e) {
+      return err(`Connection error: ${getErrorMessage3(e)}. Is the API running at ${BASE_URL}?`);
+    }
+  });
+}
+function formatCapturedApi(lines, capturedApi, params) {
+  for (const api of capturedApi) {
+    lines.push(`
+━━━ ${api.domain} (${api.baseUrl}) ━━━`);
+    const authParts = [];
+    if (api.auth?.authorization)
+      authParts.push(`Authorization: ${api.auth.authorization.slice(0, 30)}...`);
+    if (api.auth?.cookies && Object.keys(api.auth.cookies).length > 0)
+      authParts.push(`${Object.keys(api.auth.cookies).length} cookies`);
+    if (api.auth?.tokens && Object.keys(api.auth.tokens).length > 0) {
+      for (const [k, v] of Object.entries(api.auth.tokens)) {
+        authParts.push(`${k}: ${String(v).slice(0, 30)}...`);
+      }
+    }
+    if (authParts.length > 0) {
+      lines.push(`
+Auth:`);
+      for (const part of authParts)
+        lines.push(`  ${part}`);
+    }
+    lines.push(`
+Endpoints (${api.endpoints.length}):`);
+    for (const ep of api.endpoints) {
+      lines.push(`
+  ${ep.method} ${ep.path}`);
+      lines.push(`    Status: ${ep.responseStatus}`);
+      lines.push(`    Triggered at step: ${ep.triggeredAtStep}`);
+      if (ep.rawPaths.length > 1) {
+        lines.push(`    Seen paths: ${ep.rawPaths.slice(0, 5).join(", ")}`);
+      }
+      if (ep.headers && Object.keys(ep.headers).length > 0) {
+        lines.push(`    Headers: ${Object.keys(ep.headers).join(", ")}`);
+      }
+      if (ep.requestBody) {
+        const bodyPreview = JSON.stringify(ep.requestBody).slice(0, 200);
+        lines.push(`    Request body: ${bodyPreview}${bodyPreview.length >= 200 ? "..." : ""}`);
+      }
+      if (ep.responseBody) {
+        const resPreview = JSON.stringify(ep.responseBody).slice(0, 200);
+        lines.push(`    Response: ${resPreview}${resPreview.length >= 200 ? "..." : ""}`);
+      }
+    }
+  }
+  const mainDomain = capturedApi[0]?.domain || "api";
+  const dir = params.outputDir || `./${mainDomain}`;
+  const ext = params.typed ? ".ts" : ".js";
+  lines.push(`
+━━━ Save instructions ━━━`);
+  lines.push(`Save to: ${dir}`);
+  lines.push(`Format: ${ext} files`);
+  lines.push(`
+Generate these files from the capturedApi data:`);
+  if (params.typed) {
+    lines.push(`  1. auth.ts — export the auth object with a typed interface (AuthConfig)`);
+    lines.push(`  2. types.ts — infer TypeScript interfaces from the response bodies (e.g. if response has {id: "123", content: "hi"} → interface Message { id: string; content: string; }). Name types based on the endpoint context.`);
+    lines.push(`  3. One .ts file per endpoint — export an async function that calls fetch with the right method, headers (from auth.ts), and body. Use the inferred types for params and return values.`);
+    lines.push(`  4. index.ts — re-export all endpoint functions`);
+    lines.push(`  5. README.md — endpoint summary and dependency chain`);
+  } else {
+    lines.push(`  1. auth.js — module.exports the auth object (cookies, tokens, authorization)`);
+    lines.push(`  2. One .js file per endpoint — module.exports an async function that calls fetch with the right method, headers (require from auth.js), and body.`);
+    lines.push(`  3. index.js — re-export all endpoint functions`);
+    lines.push(`  4. README.md — endpoint summary and dependency chain`);
+  }
+  lines.push(`
+Function naming: convert paths to camelCase (e.g. GET /api/v9/channels/{id}/messages → getChannelMessages, DELETE /api/v9/channels/{id}/messages/{id2} → deleteChannelMessage).`);
+  lines.push(`
+IMPORTANT: Auth data contains real tokens/cookies — they expire. Remind the user.`);
+}
+
+// src/mcp/server.ts
 var IS_DEV = process.env.IFRAMER_URL?.includes("localhost") || process.env.IFRAMER_URL?.includes("127.0.0.1");
 var INSTRUCTIONS = IS_DEV ? `iframer-dev — local development instance of iframer (connects to ${BASE_URL}).
 
@@ -4209,555 +4809,12 @@ CAPTCHA: ALWAYS use the "solve-captcha" step — it auto-detects reCAPTCHA vs hC
 
 REVERSE ENGINEERING: When the user asks to "reverse engineer", "map the API", "capture endpoints", or "figure out how this site works" — use the "reverse-engineer" tool.`;
 var server = new import_mcp.McpServer({ name: "iframer", version: "2.1.5" }, { instructions: INSTRUCTIONS });
-server.tool("status", `Get the full state of iframer in one call. Call this first. Returns: available browser modes, API health, active session, stored credentials, and domain memory.`, {}, async () => {
-  try {
-    const status = { modes: {}, api: false, session: null, credentials: [], domainMemory: null };
-    status.modes = await detectAvailableModes();
-    try {
-      const health = await fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3000) });
-      const healthCheck = await health.json();
-      status.api = healthCheck.ok === true;
-    } catch {
-      status.api = false;
-    }
-    if (status.api) {
-      try {
-        const sessionData = await apiGet("/interactive/status");
-        status.session = sessionData.active ? { active: true, noVncUrl: sessionData.noVncUrl, createdAt: sessionData.createdAt, url: sessionData.url } : { active: false };
-      } catch {}
-    }
-    try {
-      if (status.api) {
-        const credData = await apiGet("/credentials");
-        if (credData.ok)
-          status.credentials = credData.domains || [];
-      } else {
-        const iframer = await getIframer();
-        status.credentials = await iframer.listCredentials(LOCAL_USER);
-      }
-    } catch {}
-    try {
-      const { DomainModeStore: DomainModeStore2 } = await Promise.resolve().then(() => (init_domain_modes(), exports_domain_modes));
-      const domainModes = new DomainModeStore2;
-      status.domainMemory = domainModes.getSummary();
-    } catch {}
-    return { content: [{ type: "text", text: JSON.stringify(status, null, 2) }] };
-  } catch (e) {
-    return err(`Error: ${getErrorMessage3(e)}`);
-  }
-});
-server.tool("browse", `Fetch a web page with a headless browser. Use for pages that need JavaScript rendering but don't have bot detection walls. Session cookies persist across calls.`, {
-  url: import_zod.z.string().describe("URL to navigate to"),
-  extract: import_zod.z.string().optional().describe("JavaScript expression to evaluate (e.g. 'document.title')"),
-  actions: import_zod.z.array(import_zod.z.object({
-    type: import_zod.z.enum(["click", "fill", "wait", "scroll", "human-click", "human-type"]),
-    selector: import_zod.z.string().optional(),
-    value: import_zod.z.string().optional(),
-    ms: import_zod.z.number().optional()
-  })).optional().describe("Actions to execute before extracting"),
-  returnHtml: import_zod.z.boolean().optional().describe("Return full page HTML"),
-  waitForSelector: import_zod.z.string().optional().describe("Wait for this CSS selector before proceeding"),
-  sessionless: import_zod.z.boolean().optional().describe("Skip session persistence")
-}, async (params) => {
-  try {
-    const dockerRunning = await isDockerRunning();
-    const useLocal = IFRAMER_MODE === "docker" ? false : !dockerRunning;
-    let fetchResult;
-    if (useLocal) {
-      const iframer = await getIframer();
-      fetchResult = await iframer.fetch(LOCAL_USER, LOCAL_TOKEN, params);
-    } else {
-      fetchResult = await apiPost("/fetch", params);
-    }
-    if (!fetchResult.ok)
-      return err(`Error: ${fetchResult.error}`);
-    const { html, ...rest } = fetchResult;
-    const text = html ? JSON.stringify(rest, null, 2) + `
-
---- HTML ---
-` + html : JSON.stringify(rest, null, 2);
-    return { content: [{ type: "text", text }] };
-  } catch (e) {
-    return err(`Error: ${getErrorMessage3(e)}`);
-  }
-});
-var stepSchema = import_zod.z.discriminatedUnion("type", [
-  import_zod.z.object({ type: import_zod.z.literal("navigate"), url: import_zod.z.string(), waitUntil: import_zod.z.string().optional() }),
-  import_zod.z.object({ type: import_zod.z.literal("click"), selector: import_zod.z.string() }),
-  import_zod.z.object({ type: import_zod.z.literal("fill"), selector: import_zod.z.string(), value: import_zod.z.string() }),
-  import_zod.z.object({ type: import_zod.z.literal("human-click"), selector: import_zod.z.string().optional(), x: import_zod.z.number().optional(), y: import_zod.z.number().optional() }),
-  import_zod.z.object({ type: import_zod.z.literal("right-click"), selector: import_zod.z.string().optional(), x: import_zod.z.number().optional(), y: import_zod.z.number().optional() }),
-  import_zod.z.object({ type: import_zod.z.literal("human-type"), selector: import_zod.z.string(), value: import_zod.z.string() }),
-  import_zod.z.object({ type: import_zod.z.literal("evaluate"), expression: import_zod.z.string() }),
-  import_zod.z.object({ type: import_zod.z.literal("extract"), expression: import_zod.z.string() }),
-  import_zod.z.object({ type: import_zod.z.literal("wait"), ms: import_zod.z.number() }),
-  import_zod.z.object({ type: import_zod.z.literal("wait-for"), selector: import_zod.z.string(), timeout: import_zod.z.number().optional() }),
-  import_zod.z.object({ type: import_zod.z.literal("scroll"), deltaY: import_zod.z.number().optional() }),
-  import_zod.z.object({ type: import_zod.z.literal("keyboard"), key: import_zod.z.string() }),
-  import_zod.z.object({ type: import_zod.z.literal("type-code"), value: import_zod.z.string(), selector: import_zod.z.string().optional() }),
-  import_zod.z.object({ type: import_zod.z.literal("login"), domain: import_zod.z.string(), usernameSelector: import_zod.z.string().optional(), passwordSelector: import_zod.z.string().optional(), submitSelector: import_zod.z.string().optional(), totpSelector: import_zod.z.string().optional() }),
-  import_zod.z.object({ type: import_zod.z.literal("solve-captcha") }),
-  import_zod.z.object({ type: import_zod.z.literal("screenshot"), annotate: import_zod.z.boolean().optional().describe("Overlay numbered badges on interactive elements. Returns refs (@e1, @e2...) you can use in subsequent steps.") }),
-  import_zod.z.object({ type: import_zod.z.literal("snapshot"), interactiveOnly: import_zod.z.boolean().optional().describe("Only include interactive elements (default: true)"), maxElements: import_zod.z.number().optional().describe("Max elements to return (default: 80)") }),
-  import_zod.z.object({ type: import_zod.z.literal("find"), role: import_zod.z.string().optional().describe("ARIA role: button, link, textbox, checkbox, etc."), name: import_zod.z.string().optional().describe("Accessible name — button text, aria-label"), text: import_zod.z.string().optional().describe("Visible text content"), placeholder: import_zod.z.string().optional().describe("Input placeholder text"), label: import_zod.z.string().optional().describe("Associated label text"), exact: import_zod.z.boolean().optional().describe("Exact match vs substring (default: substring)") }),
-  import_zod.z.object({ type: import_zod.z.literal("recaptcha-click") }),
-  import_zod.z.object({ type: import_zod.z.literal("recaptcha-select"), tiles: import_zod.z.array(import_zod.z.number()) }),
-  import_zod.z.object({ type: import_zod.z.literal("recaptcha-verify") }),
-  import_zod.z.object({ type: import_zod.z.literal("recaptcha-info") }),
-  import_zod.z.object({ type: import_zod.z.literal("recaptcha-solve") }),
-  import_zod.z.object({ type: import_zod.z.literal("recaptcha-answer"), tiles: import_zod.z.array(import_zod.z.number()) })
-]);
-server.tool("execute", `Execute a pipeline of browser steps. Auto-starts a session if needed. Handles obstacles (captcha, cookie banners) automatically.
-
-Steps run sequentially. Each step has a 20-second stale-state timeout — if nothing changes on the page for 20s, execution stops and returns a detailed error so you can decide what to do.
-
-Key step types:
-- navigate: go to a URL (obstacle detection runs after this)
-- snapshot: get the page's interactive elements as a structured list with refs (@e1, @e2...). Use this BEFORE interacting to see what's on the page. Then use refs in click/fill/human-click/human-type steps instead of CSS selectors.
-- find: locate a specific element by role, name, text, placeholder, or label. Returns a ref. Use when you know what you're looking for (e.g. find role=button name="Sign In" → @e1, then click @e1).
-- screenshot: take a screenshot. Add annotate=true to overlay numbered badges on interactive elements — returns refs you can use in subsequent steps.
-- extract: evaluate JS and include the result in the response
-- solve-captcha: auto-detect and auto-solve reCAPTCHA OR hCaptcha with vision (uses Claude) — works for both, no config needed
-- login: fill login form with stored credentials (never exposes passwords)
-
-IMPORTANT — Element refs (@e1, @e2...): All selector fields (click, fill, human-click, human-type, wait-for) accept @e refs from snapshot, find, or annotated screenshot. PREFER refs over CSS selectors — they're more reliable. Run snapshot first to see what's available.
-
-API capture (options.captureApi): When enabled, records all XHR/fetch requests the page makes during execution. Use this when the user asks to "reverse engineer", "capture endpoints", "map the API", "remember how this works", or "save the endpoints". Returns structured endpoint data grouped by domain with parameterized paths, request/response bodies, and which pipeline step triggered each call. The agent can then save these to a directory for future direct API usage.
-
-Returns: ok, completedSteps, results (with extract values), obstacles (what was detected/resolved), capturedApi (when enabled), and on failure: errorContext with screenshot, URL, errorType, suggestion, retryable.
-
-Auto-escalation is built in: if blocked, iframer automatically retries with stronger browser modes (headless → docker → binary-headful) in a single call. You do not need to manually retry with different modes.`, {
-  steps: import_zod.z.array(stepSchema).describe("Pipeline steps to execute sequentially"),
-  options: import_zod.z.object({
-    staleTimeoutMs: import_zod.z.number().optional().describe("Override the 20s stale-state timeout per step"),
-    screenshotAfterEach: import_zod.z.boolean().optional().describe("Take a screenshot after every step (expensive)"),
-    continueOnObstacle: import_zod.z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
-    continueOnError: import_zod.z.boolean().optional().describe("Continue past failing steps (default: false)"),
-    captureApi: import_zod.z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes. Use when the user wants to reverse-engineer, map, or save a site's API endpoints."),
-    mode: import_zod.z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("Force a specific browser mode. If omitted, iframer auto-selects based on domain memory and escalates if blocked."),
-    autoEscalate: import_zod.z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)")
-  }).optional()
-}, async (params) => {
-  try {
-    const dockerRunning = await isDockerRunning();
-    async function runWithMode(mode) {
-      if (mode === "binary-headful") {
-        await ensureLocalChrome();
-        const iframer2 = await getIframer();
-        return iframer2.execute(LOCAL_USER, LOCAL_TOKEN, {
-          steps: params.steps,
-          options: { ...params.options, mode: "binary-headful", autoEscalate: false }
-        });
-      }
-      if (mode === "docker-headful" && dockerRunning) {
-        return apiPost("/execute", {
-          steps: params.steps,
-          options: { ...params.options, mode: "docker-headful", autoEscalate: false }
-        });
-      }
-      if (dockerRunning) {
-        return apiPost("/execute", {
-          steps: params.steps,
-          options: { ...params.options, mode: mode || undefined }
-        });
-      }
-      await ensureLocalChrome();
-      const iframer = await getIframer();
-      return iframer.execute(LOCAL_USER, LOCAL_TOKEN, {
-        steps: params.steps,
-        options: { ...params.options, mode: mode || undefined }
-      });
-    }
-    const requestedMode = params.options?.mode;
-    let data = await runWithMode(requestedMode);
-    if (!data.ok && data.error?.errorType === "bot-blocked" && params.options?.autoEscalate !== false && !requestedMode) {
-      const escalation = ["docker-headful", "binary-headful"];
-      for (const nextMode of escalation) {
-        if (nextMode === "docker-headful" && !dockerRunning)
-          continue;
-        log12.info(`Auto-escalating to ${nextMode}`);
-        data = await runWithMode(nextMode);
-        if (data.ok)
-          break;
-        if (data.error?.errorType !== "bot-blocked")
-          break;
-      }
-    }
-    const lines = [];
-    lines.push(`ok: ${data.ok}`);
-    lines.push(`steps: ${data.completedSteps}/${data.totalSteps}`);
-    if (data.durationMs)
-      lines.push(`duration: ${data.durationMs}ms`);
-    if (data.modeUsed)
-      lines.push(`mode: ${data.modeUsed}${data.modeEscalated ? " (auto-escalated)" : ""}`);
-    if (data.finalState) {
-      lines.push(`
-Final page: ${data.finalState.title}`);
-      lines.push(`URL: ${data.finalState.url}`);
-    }
-    const meaningful = (data.results || []).filter((r) => r.ok && r.result !== undefined && r.result !== null);
-    for (const r of meaningful) {
-      if (r.step?.type === "snapshot" && r.result?.snapshot) {
-        lines.push(`
---- Snapshot (${r.result.elementCount} elements) ---`);
-        lines.push(r.result.snapshot);
-      } else if (r.step?.type === "find" && r.result?.ref) {
-        lines.push(`
-Found: ${r.result.ref} ${r.result.role} "${r.result.name}" (${r.result.matchCount} match${r.result.matchCount > 1 ? "es" : ""})`);
-      } else if (r.step?.type === "screenshot" && r.result?.refs) {
-        lines.push(`
---- Annotated screenshot refs ---`);
-        lines.push(r.result.refs);
-      } else if (r.result !== undefined && r.result !== null) {
-        lines.push(`
-step ${r.stepIndex}: ${JSON.stringify(r.result)}`);
-      }
-    }
-    if (data.obstacles && data.obstacles.length > 0) {
-      lines.push(`
-Obstacles handled:`);
-      for (const o of data.obstacles) {
-        lines.push(`  [step ${o.detectedAtStep}] ${o.type}: ${o.resolved ? o.resolution : "UNRESOLVED - " + (o.resolution || "unknown")}`);
-      }
-    }
-    if (data.capturedApi && data.capturedApi.length > 0) {
-      lines.push(`
---- Captured API ---`);
-      for (const api of data.capturedApi) {
-        lines.push(`
-${api.domain} (${api.baseUrl})`);
-        const authParts = [];
-        if (api.auth?.authorization)
-          authParts.push("Authorization header");
-        if (api.auth?.cookies && Object.keys(api.auth.cookies).length > 0)
-          authParts.push(`${Object.keys(api.auth.cookies).length} cookies`);
-        if (api.auth?.tokens && Object.keys(api.auth.tokens).length > 0)
-          authParts.push(`${Object.keys(api.auth.tokens).length} token headers (${Object.keys(api.auth.tokens).join(", ")})`);
-        if (authParts.length > 0)
-          lines.push(`  Auth: ${authParts.join(", ")}`);
-        lines.push("  Endpoints:");
-        for (const ep of api.endpoints) {
-          lines.push(`    ${ep.method} ${ep.path}  [step ${ep.triggeredAtStep}, status ${ep.responseStatus}]`);
-          if (ep.rawPaths.length > 1) {
-            lines.push(`      examples: ${ep.rawPaths.slice(0, 3).join(", ")}`);
-          }
-        }
-      }
-      lines.push(`
-The capturedApi field contains full endpoint data including auth, headers, request/response bodies, and curl commands. Save it to a directory for the user — use auth.json for shared credentials and one file per endpoint.`);
-    }
-    let screenshotUrl = null;
-    if (data.error) {
-      lines.push(`
---- Failure ---`);
-      if (typeof data.error === "string") {
-        lines.push(`Error: ${data.error}`);
-      } else {
-        lines.push(`Failed at step ${data.error.failedAtStep}: ${JSON.stringify(data.error.failedStep)}`);
-        lines.push(`Error type: ${data.error.errorType}`);
-        lines.push(`Message: ${data.error.message}`);
-        lines.push(`Retryable: ${data.error.retryable}`);
-        if (data.error.suggestion)
-          lines.push(`Suggestion: ${data.error.suggestion}`);
-        if (data.error.pageState?.url)
-          lines.push(`URL at failure: ${data.error.pageState.url}`);
-        screenshotUrl = data.error.pageState?.screenshotUrl ?? null;
-      }
-    } else {
-      screenshotUrl = data.finalState?.screenshotUrl ?? null;
-    }
-    const content = [{ type: "text", text: lines.join(`
-`) }];
-    if (screenshotUrl) {
-      const img = await fetchScreenshot(screenshotUrl);
-      if (img)
-        content.push(img);
-    }
-    if (!data.ok)
-      return { content, isError: true };
-    return { content };
-  } catch (e) {
-    return err(`Error: ${getErrorMessage3(e)}`);
-  }
-});
-server.tool("session", `Manage the browser session lifecycle. Use action=stop when done to save cookies/localStorage for future use. Use action=clear to wipe all stored session data.`, {
-  action: import_zod.z.enum(["stop", "clear"]).describe("stop: end session and save state | clear: delete all stored session data")
-}, async ({ action }) => {
-  try {
-    const dockerRunning = await isDockerRunning();
-    const useLocal = IFRAMER_MODE === "docker" ? false : !dockerRunning;
-    if (action === "stop") {
-      if (useLocal) {
-        const iframer = await getIframer();
-        const stopResult2 = await iframer.stopSession(LOCAL_USER, LOCAL_TOKEN);
-        return { content: [{ type: "text", text: `Session stopped. State saved: ${stopResult2.sessionSaved}` }] };
-      }
-      const stopResult = await apiPost("/interactive/stop");
-      if (!stopResult.ok)
-        return err(`Error: ${stopResult.error}`);
-      return { content: [{ type: "text", text: `Session stopped. State saved: ${stopResult.sessionSaved}` }] };
-    } else {
-      if (useLocal) {
-        const iframer = await getIframer();
-        await iframer.clearSession(LOCAL_USER);
-        return { content: [{ type: "text", text: "Session data cleared." }] };
-      }
-      const clearResult = await apiDelete("/session");
-      if (!clearResult.ok)
-        return err(`Error: ${clearResult.error}`);
-      return { content: [{ type: "text", text: "Session data cleared." }] };
-    }
-  } catch (e) {
-    return err(`Error: ${getErrorMessage3(e)}`);
-  }
-});
-server.tool("credentials", `Manage login credentials securely. When login is needed: FIRST call action=list to check if credentials exist. If they do, proceed with login. If not, call action=store — this prompts the user with a secure form (you never see passwords). NEVER ask the user "do you have credentials?" — just check and act.`, {
-  action: import_zod.z.enum(["store", "login", "list"]).describe("store: prompt user for credentials | login: log in with stored credentials | list: show stored domains"),
-  domain: import_zod.z.string().optional().describe("Domain (required for store and login)"),
-  usernameSelector: import_zod.z.string().optional().describe("CSS selector for username field (for login)"),
-  passwordSelector: import_zod.z.string().optional().describe("CSS selector for password field (for login)"),
-  submitSelector: import_zod.z.string().optional().describe("CSS selector for submit button (for login)"),
-  totpSelector: import_zod.z.string().optional().describe("CSS selector for 2FA code field (for login)")
-}, async ({ action, domain, usernameSelector, passwordSelector, submitSelector, totpSelector }) => {
-  try {
-    const dockerRunning = await isDockerRunning();
-    const useLocal = IFRAMER_MODE === "docker" ? false : !dockerRunning;
-    if (action === "list") {
-      let domains;
-      if (useLocal) {
-        const iframer = await getIframer();
-        domains = await iframer.listCredentials(LOCAL_USER);
-      } else {
-        const credList = await apiGet("/credentials");
-        if (!credList.ok)
-          return err(`Error: ${credList.error}`);
-        domains = credList.domains || [];
-      }
-      if (!domains.length) {
-        return { content: [{ type: "text", text: "No credentials stored. Call this tool again with action=store and the domain to prompt the user for credentials now." }] };
-      }
-      return { content: [{ type: "text", text: `Stored credentials for:
-${domains.map((d) => `  - ${d}`).join(`
-`)}` }] };
-    }
-    if (action === "store") {
-      if (!domain)
-        return err("domain is required for action=store");
-      const result = await server.server.elicitInput({
-        mode: "form",
-        message: `Enter your login credentials for ${domain}. These are encrypted and stored locally — Claude never sees them.`,
-        requestedSchema: {
-          type: "object",
-          properties: {
-            username: { type: "string", title: "Username / Email" },
-            password: { type: "string", title: "Password" },
-            totp_secret: { type: "string", title: "TOTP Secret (leave empty if no 2FA)" }
-          },
-          required: ["username", "password"]
-        }
-      });
-      if (result.action === "decline" || !result.content) {
-        return { content: [{ type: "text", text: "Cancelled." }] };
-      }
-      const { username, password, totp_secret } = result.content;
-      if (useLocal) {
-        const iframer = await getIframer();
-        await iframer.storeCredential(LOCAL_USER, LOCAL_TOKEN, { domain, username, password, totp_secret: totp_secret || undefined });
-      } else {
-        const storeResult = await apiPost("/credentials", { domain, username, password, totp_secret: totp_secret || undefined });
-        if (!storeResult.ok)
-          return err(`Error: ${storeResult.error}`);
-      }
-      return { content: [{ type: "text", text: `Credentials stored for ${domain}.` }] };
-    }
-    if (action === "login") {
-      if (!domain)
-        return err("domain is required for action=login");
-      if (useLocal) {
-        return { content: [{ type: "text", text: `Use a login step in "execute" to log in with stored credentials for ${domain}. Example: { "type": "login", "domain": "${domain}" }` }] };
-      }
-      const loginResult = await apiPost("/credentials/login", { domain, usernameSelector, passwordSelector, submitSelector, totpSelector });
-      if (!loginResult.ok)
-        return err(`Error: ${loginResult.error}`);
-      const lines = [`Login attempted for ${domain}`, `URL: ${loginResult.url}`, `Title: ${loginResult.title}`];
-      if (loginResult.totpGenerated)
-        lines.push("TOTP code generated and entered automatically.");
-      if (loginResult.screenshotUrl)
-        lines.push(`Screenshot: ${loginResult.screenshotUrl}`);
-      return { content: [{ type: "text", text: lines.join(`
-`) }] };
-    }
-    return err("Unknown action");
-  } catch (e) {
-    if (e instanceof Error && e.message?.includes("does not support")) {
-      return err(`This client doesn't support secure input prompts. Store credentials via CLI:
-
-iframer credentials add ${domain}`);
-    }
-    return err(`Error: ${getErrorMessage3(e)}`);
-  }
-});
-server.tool("reverse-engineer", `Reverse-engineer a website's API. Navigates to a URL, performs the steps you specify, and captures every XHR/fetch request the page makes — including auth tokens, cookies, headers, request/response bodies, and ready-to-use curl commands.
-
-Use this when the user asks to:
-- "reverse engineer" or "map" a site's API
-- "capture the endpoints" or "save the API"
-- "figure out how this site works under the hood"
-- "record the API calls" so they can be replayed later
-
-How it works:
-1. You provide steps (same as execute) — navigate, click, fill, extract, etc.
-2. iframer runs them while recording all API calls the page makes
-3. Returns structured data per domain: shared auth (cookies, tokens, Authorization header) + each endpoint with method, path, headers, body, response, and a curl command
-
-After getting results, save them as RUNNABLE CODE to a directory:
-  <outputDir>/
-    auth.js                — exports shared cookies, tokens, authorization as an object
-    getMessages.js         — one .js file per endpoint: exports an async function that calls the endpoint using fetch, with auth imported from auth.js
-    index.js               — re-exports all endpoint functions
-    README.md              — summary of all endpoints and their dependency chain
-
-If typed=true (user asks to "infer types", "add types", "save as typescript", etc.), save as .ts instead:
-    auth.ts                — typed auth config with interface
-    getMessages.ts         — async function with inferred request/response types based on captured data
-    types.ts               — all inferred interfaces (e.g. Message, Channel, User) derived from response bodies
-    index.ts               — re-exports all endpoint functions
-
-Naming: convert endpoint paths to camelCase function names (e.g. GET /api/v9/channels/{id}/messages → getChannelMessages). Group related endpoints logically.
-
-The outputDir defaults to the current working directory + the domain name (e.g. ./example_com/). Ask the user where to save if unclear.`, {
-  steps: import_zod.z.array(stepSchema).describe("Pipeline steps to execute while capturing API calls"),
-  outputDir: import_zod.z.string().optional().describe("Directory to save the captured API files. If not provided, ask the user or default to ./<domain>/"),
-  typed: import_zod.z.boolean().optional().describe("Save as .ts with inferred types instead of .js. Set to true when the user asks for types, typescript, or type inference."),
-  options: import_zod.z.object({
-    staleTimeoutMs: import_zod.z.number().optional().describe("Override the 20s stale-state timeout per step"),
-    continueOnObstacle: import_zod.z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
-    continueOnError: import_zod.z.boolean().optional().describe("Continue past failing steps (default: false)")
-  }).optional()
-}, async (params) => {
-  try {
-    const execParams = {
-      steps: params.steps,
-      options: { ...params.options, captureApi: true }
-    };
-    const data = await apiPost("/execute", execParams);
-    const lines = [];
-    lines.push(`ok: ${data.ok}`);
-    lines.push(`steps: ${data.completedSteps}/${data.totalSteps}`);
-    if (data.durationMs)
-      lines.push(`duration: ${data.durationMs}ms`);
-    if (data.finalState) {
-      lines.push(`
-Final page: ${data.finalState.title}`);
-      lines.push(`URL: ${data.finalState.url}`);
-    }
-    if (data.capturedApi && data.capturedApi.length > 0) {
-      for (const api of data.capturedApi) {
-        lines.push(`
-━━━ ${api.domain} (${api.baseUrl}) ━━━`);
-        const authParts = [];
-        if (api.auth?.authorization)
-          authParts.push(`Authorization: ${api.auth.authorization.slice(0, 30)}...`);
-        if (api.auth?.cookies && Object.keys(api.auth.cookies).length > 0)
-          authParts.push(`${Object.keys(api.auth.cookies).length} cookies`);
-        if (api.auth?.tokens && Object.keys(api.auth.tokens).length > 0) {
-          for (const [k, v] of Object.entries(api.auth.tokens)) {
-            authParts.push(`${k}: ${String(v).slice(0, 30)}...`);
-          }
-        }
-        if (authParts.length > 0) {
-          lines.push(`
-Auth:`);
-          for (const part of authParts)
-            lines.push(`  ${part}`);
-        }
-        lines.push(`
-Endpoints (${api.endpoints.length}):`);
-        for (const ep of api.endpoints) {
-          lines.push(`
-  ${ep.method} ${ep.path}`);
-          lines.push(`    Status: ${ep.responseStatus}`);
-          lines.push(`    Triggered at step: ${ep.triggeredAtStep}`);
-          if (ep.rawPaths.length > 1) {
-            lines.push(`    Seen paths: ${ep.rawPaths.slice(0, 5).join(", ")}`);
-          }
-          if (ep.headers && Object.keys(ep.headers).length > 0) {
-            lines.push(`    Headers: ${Object.keys(ep.headers).join(", ")}`);
-          }
-          if (ep.requestBody) {
-            const bodyPreview = JSON.stringify(ep.requestBody).slice(0, 200);
-            lines.push(`    Request body: ${bodyPreview}${bodyPreview.length >= 200 ? "..." : ""}`);
-          }
-          if (ep.responseBody) {
-            const resPreview = JSON.stringify(ep.responseBody).slice(0, 200);
-            lines.push(`    Response: ${resPreview}${resPreview.length >= 200 ? "..." : ""}`);
-          }
-        }
-      }
-      const mainDomain = data.capturedApi[0]?.domain || "api";
-      const dir = params.outputDir || `./${mainDomain}`;
-      const ext = params.typed ? ".ts" : ".js";
-      lines.push(`
-━━━ Save instructions ━━━`);
-      lines.push(`Save to: ${dir}`);
-      lines.push(`Format: ${ext} files`);
-      lines.push(`
-Generate these files from the capturedApi data:`);
-      if (params.typed) {
-        lines.push(`  1. auth.ts — export the auth object with a typed interface (AuthConfig)`);
-        lines.push(`  2. types.ts — infer TypeScript interfaces from the response bodies (e.g. if response has {id: "123", content: "hi"} → interface Message { id: string; content: string; }). Name types based on the endpoint context.`);
-        lines.push(`  3. One .ts file per endpoint — export an async function that calls fetch with the right method, headers (from auth.ts), and body. Use the inferred types for params and return values.`);
-        lines.push(`  4. index.ts — re-export all endpoint functions`);
-        lines.push(`  5. README.md — endpoint summary and dependency chain`);
-      } else {
-        lines.push(`  1. auth.js — module.exports the auth object (cookies, tokens, authorization)`);
-        lines.push(`  2. One .js file per endpoint — module.exports an async function that calls fetch with the right method, headers (require from auth.js), and body.`);
-        lines.push(`  3. index.js — re-export all endpoint functions`);
-        lines.push(`  4. README.md — endpoint summary and dependency chain`);
-      }
-      lines.push(`
-Function naming: convert paths to camelCase (e.g. GET /api/v9/channels/{id}/messages → getChannelMessages, DELETE /api/v9/channels/{id}/messages/{id2} → deleteChannelMessage).`);
-      lines.push(`
-IMPORTANT: Auth data contains real tokens/cookies — they expire. Remind the user.`);
-    } else {
-      lines.push(`
-No API calls were captured. The page may not have made any XHR/fetch requests during the steps, or the steps may not have triggered the expected behavior.`);
-    }
-    if (data.error) {
-      lines.push(`
---- Failure ---`);
-      if (typeof data.error === "string") {
-        lines.push(`Error: ${data.error}`);
-      } else {
-        lines.push(`Failed at step ${data.error.failedAtStep}: ${JSON.stringify(data.error.failedStep)}`);
-        lines.push(`Error type: ${data.error.errorType}`);
-        lines.push(`Message: ${data.error.message}`);
-        if (data.error.suggestion)
-          lines.push(`Suggestion: ${data.error.suggestion}`);
-      }
-    }
-    const content = [{ type: "text", text: lines.join(`
-`) }];
-    const screenshotUrl = data.error?.pageState?.screenshotUrl ?? data.finalState?.screenshotUrl;
-    if (screenshotUrl) {
-      const img = await fetchScreenshot(screenshotUrl);
-      if (img)
-        content.push(img);
-    }
-    if (data.capturedApi && data.capturedApi.length > 0) {
-      content.push({
-        type: "text",
-        text: `--- capturedApi JSON ---
-` + JSON.stringify(data.capturedApi, null, 2)
-      });
-    }
-    if (!data.ok)
-      return { content, isError: true };
-    return { content };
-  } catch (e) {
-    return err(`Connection error: ${getErrorMessage3(e)}. Is the API running at ${BASE_URL}?`);
-  }
-});
+registerStatusTool(server);
+registerBrowseTool(server);
+registerExecuteTool(server);
+registerSessionTool(server);
+registerCredentialsTool(server);
+registerReverseEngineerTool(server);
 var transport = new import_stdio.StdioServerTransport;
 (async () => {
   await server.connect(transport);
