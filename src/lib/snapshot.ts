@@ -84,7 +84,8 @@ export async function takeSnapshot(
         }
         const parent: Element | null = current.parentElement;
         if (parent) {
-          const siblings = Array.from(parent.children).filter((c: Element) => c.tagName === current!.tagName);
+          const currentTag = current.tagName;
+          const siblings = Array.from(parent.children).filter((c: Element) => c.tagName === currentTag);
           if (siblings.length > 1) {
             const idx = siblings.indexOf(current) + 1;
             seg += `:nth-of-type(${idx})`;
