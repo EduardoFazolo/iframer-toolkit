@@ -68,10 +68,10 @@ export interface CapturedRequest {
   path: string;
   queryParams?: Record<string, string>;
   requestHeaders: Record<string, string>;
-  requestBody?: any;
+  requestBody?: unknown;
   responseStatus: number;
   responseHeaders: Record<string, string>;
-  responseBody?: any;
+  responseBody?: unknown;
   resourceType: string;
   triggeredAtStep: number;
   timestamp: number;
@@ -97,9 +97,9 @@ export interface CapturedEndpoint {
   rawPaths: string[];        // actual paths seen
   queryParams?: Record<string, string>;
   headers: Record<string, string>;         // all headers needed to replay (content-type, accept, custom)
-  requestBody?: any;         // example body
+  requestBody?: unknown;         // example body
   responseStatus: number;
-  responseBody?: any;        // example response
+  responseBody?: unknown;        // example response
   triggeredAtStep: number;
   curl: string;              // ready-to-use curl command
 }
@@ -110,7 +110,7 @@ export interface StepResult {
   stepIndex: number;
   step: PipelineStep;
   ok: boolean;
-  result?: any;
+  result?: unknown;
   durationMs: number;
   error?: string;
   screenshotUrl?: string;
@@ -198,7 +198,7 @@ export interface FetchResult {
   browser: string;
   url: string;
   html?: string;
-  result?: any;
+  result?: unknown;
   durationMs: number;
   error?: string;
 }

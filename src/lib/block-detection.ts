@@ -1,5 +1,6 @@
 import type { Page } from "patchright";
 import type { BlockDetectionResult } from "./types";
+import { THRESHOLDS } from "./constants";
 
 /**
  * Detect if a page load was blocked by bot protection.
@@ -52,7 +53,7 @@ export async function detectBlock(page: Page): Promise<BlockDetectionResult> {
     }
 
     // Generic captcha wall — look for reCAPTCHA or hCaptcha iframes on a mostly-empty page
-    if (bodyText.trim().length < 200) {
+    if (bodyText.trim().length < THRESHOLDS.MIN_BODY_TEXT) {
       const hasCaptchaIframe = await page.evaluate(() => {
         return !!(
           document.querySelector('iframe[src*="recaptcha"]') ||

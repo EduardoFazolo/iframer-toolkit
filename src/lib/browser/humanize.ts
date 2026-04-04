@@ -1,7 +1,12 @@
 import type { Page } from "patchright";
+import { TIMING, CAPTCHA_GRID, TIMEOUTS } from "../constants";
 
 function rand(min: number, max: number): number {
   return Math.random() * (max - min) + min;
+}
+
+function randRange(range: readonly [number, number]): number {
+  return rand(range[0], range[1]);
 }
 
 function bezierPoint(t: number, p0: number, p1: number, p2: number, p3: number): number {
@@ -36,10 +41,14 @@ function generatePath(fromX: number, fromY: number, toX: number, toY: number): {
   return points;
 }
 
+// Track last mouse position per page using a WeakMap to avoid `as any` on page internals
+const mousePositions = new WeakMap<Page, { x: number; y: number }>();
+
 export async function humanMove(page: Page, toX: number, toY: number): Promise<void> {
   const mouse = page.mouse;
-  const fromX = (page as any)._lastMouseX || rand(100, 400);
-  const fromY = (page as any)._lastMouseY || rand(100, 300);
+  const lastPos = mousePositions.get(page);
+  const fromX = lastPos?.x ?? randRange(TIMING.IDLE_MOUSE_X);
+  const fromY = lastPos?.y ?? randRange(TIMING.IDLE_MOUSE_Y);
 
   const path = generatePath(fromX, fromY, toX, toY);
 
@@ -48,45 +57,45 @@ export async function humanMove(page: Page, toX: number, toY: number): Promise<v
     await sleep(rand(2, 12));
   }
 
-  (page as any)._lastMouseX = toX;
-  (page as any)._lastMouseY = toY;
+  mousePositions.set(page, { x: toX, y: toY });
 }
 
 export async function humanClick(page: Page, selector: string): Promise<void> {
-  const element = await page.waitForSelector(selector, { timeout: 10_000 });
-  const box = await element!.boundingBox();
+  const element = await page.waitForSelector(selector, { timeout: TIMEOUTS.SELECTOR_WAIT });
+  if (!element) throw new Error(`Element not found: ${selector}`);
+  const box = await element.boundingBox();
   if (!box) throw new Error(`Element not visible: ${selector}`);
 
   const targetX = box.x + box.width * rand(0.3, 0.7);
   const targetY = box.y + box.height * rand(0.3, 0.7);
 
   await humanMove(page, targetX, targetY);
-  await sleep(rand(50, 200));
+  await sleep(randRange(TIMING.MOUSE_MOVE));
 
   await page.mouse.down();
-  await sleep(rand(30, 90));
+  await sleep(randRange(TIMING.CLICK_HOLD));
   await page.mouse.up();
-  await sleep(rand(100, 300));
+  await sleep(randRange(TIMING.POST_CLICK));
 }
 
 export async function humanClickXY(page: Page, x: number, y: number): Promise<void> {
   await humanMove(page, x, y);
-  await sleep(rand(50, 200));
+  await sleep(randRange(TIMING.MOUSE_MOVE));
   await page.mouse.down();
-  await sleep(rand(30, 90));
+  await sleep(randRange(TIMING.CLICK_HOLD));
   await page.mouse.up();
-  await sleep(rand(100, 300));
+  await sleep(randRange(TIMING.POST_CLICK));
 }
 
 export async function humanType(page: Page, selector: string, text: string): Promise<void> {
   await humanClick(page, selector);
-  await sleep(rand(100, 300));
+  await sleep(randRange(TIMING.POST_CLICK));
 
   for (const char of text) {
     await page.keyboard.type(char);
-    await sleep(rand(30, 150));
+    await sleep(randRange(TIMING.CHAR_DELAY));
     if (Math.random() < 0.05) {
-      await sleep(rand(200, 500));
+      await sleep(randRange(TIMING.WORD_PAUSE));
     }
   }
 }
@@ -111,25 +120,26 @@ export interface ChallengeInfo {
 export async function clickRecaptchaCheckbox(page: Page): Promise<{ solved: boolean; challenge: boolean; challengeInfo?: ChallengeInfo | null }> {
   const recaptchaFrame = await page.waitForSelector(
     'iframe[title*="reCAPTCHA"], iframe[src*="recaptcha/api2/anchor"]',
-    { timeout: 10_000 }
+    { timeout: TIMEOUTS.SELECTOR_WAIT }
   );
+  if (!recaptchaFrame) throw new Error("reCAPTCHA iframe not found");
 
-  const frame = await recaptchaFrame!.contentFrame();
+  const frame = await recaptchaFrame.contentFrame();
   if (!frame) throw new Error("Could not access reCAPTCHA iframe");
 
-  await frame.waitForSelector(".recaptcha-checkbox-border, #recaptcha-anchor", { timeout: 10_000 });
+  await frame.waitForSelector(".recaptcha-checkbox-border, #recaptcha-anchor", { timeout: TIMEOUTS.SELECTOR_WAIT });
 
-  const recaptchaBox = await recaptchaFrame!.boundingBox();
+  const recaptchaBox = await recaptchaFrame.boundingBox();
   if (!recaptchaBox) throw new Error("reCAPTCHA iframe not visible");
 
   const checkboxX = recaptchaBox.x + rand(20, 35);
   const checkboxY = recaptchaBox.y + recaptchaBox.height * rand(0.35, 0.65);
 
-  await humanMove(page, rand(200, 600), rand(150, 400));
-  await sleep(rand(300, 800));
+  await humanMove(page, randRange(TIMING.PRE_CHECKBOX_X), randRange(TIMING.PRE_CHECKBOX_Y));
+  await sleep(randRange(TIMING.PRE_CHECKBOX_WAIT));
 
   await humanClickXY(page, checkboxX, checkboxY);
-  await sleep(2500);
+  await sleep(TIMING.POST_CHECKBOX_WAIT);
 
   try {
     const checked = await frame.evaluate(() => {
@@ -147,7 +157,7 @@ export async function getChallengeInfo(page: Page): Promise<ChallengeInfo | null
   const bframe = await page
     .waitForSelector(
       'iframe[title*="desafio reCAPTCHA"], iframe[title*="recaptcha challenge"], iframe[src*="recaptcha/api2/bframe"]',
-      { timeout: 5_000 }
+      { timeout: TIMEOUTS.CHALLENGE_FRAME_WAIT }
     )
     .catch(() => null);
 
@@ -181,10 +191,10 @@ export async function getChallengeInfo(page: Page): Promise<ChallengeInfo | null
     })
     .catch(() => ({ prompt: "", rows: 0, cols: 0, verifyText: "" }));
 
-  const gridStartX = bframeBox.x + 12;
-  const gridStartY = bframeBox.y + 110;
-  const gridWidth = bframeBox.width - 24;
-  const gridHeight = bframeBox.width - 24;
+  const gridStartX = bframeBox.x + CAPTCHA_GRID.GRID_MARGIN;
+  const gridStartY = bframeBox.y + CAPTCHA_GRID.HCAPTCHA_HEADER_HEIGHT;
+  const gridWidth = bframeBox.width - CAPTCHA_GRID.GRID_PADDING;
+  const gridHeight = bframeBox.width - CAPTCHA_GRID.GRID_PADDING;
 
   const tileWidth = info.cols > 0 ? gridWidth / info.cols : 0;
   const tileHeight = info.rows > 0 ? gridHeight / info.rows : 0;
@@ -202,8 +212,8 @@ export async function getChallengeInfo(page: Page): Promise<ChallengeInfo | null
     }
   }
 
-  const verifyBtnY = bframeBox.y + bframeBox.height - 35;
-  const verifyBtnX = bframeBox.x + bframeBox.width - 60;
+  const verifyBtnY = bframeBox.y + bframeBox.height - CAPTCHA_GRID.VERIFY_BTN_BOTTOM_OFFSET;
+  const verifyBtnX = bframeBox.x + bframeBox.width - CAPTCHA_GRID.VERIFY_BTN_RIGHT_OFFSET;
 
   return {
     prompt: info.prompt,
@@ -230,7 +240,7 @@ export async function clickChallengeTiles(
     if (!tile) continue;
 
     await humanClickXY(page, tile.centerX, tile.centerY);
-    await sleep(rand(200, 500));
+    await sleep(randRange(TIMING.TILE_CLICK_DELAY));
     clicked.push(idx);
   }
 
@@ -244,10 +254,10 @@ export async function clickChallengeVerify(
   if (!challengeInfo) throw new Error("No active reCAPTCHA challenge found");
 
   await humanClickXY(page, challengeInfo.verifyButton.x, challengeInfo.verifyButton.y);
-  await sleep(2000);
+  await sleep(TIMING.POST_VERIFY_WAIT);
 
   const anchorFrame = await page
-    .waitForSelector('iframe[title*="reCAPTCHA"], iframe[src*="recaptcha/api2/anchor"]', { timeout: 5_000 })
+    .waitForSelector('iframe[title*="reCAPTCHA"], iframe[src*="recaptcha/api2/anchor"]', { timeout: TIMEOUTS.CHALLENGE_FRAME_WAIT })
     .catch(() => null);
 
   if (anchorFrame) {
