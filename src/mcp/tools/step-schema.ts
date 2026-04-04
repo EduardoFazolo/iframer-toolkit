@@ -1,0 +1,28 @@
+import { z } from "zod";
+
+export const stepSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("navigate"), url: z.string(), waitUntil: z.string().optional() }),
+  z.object({ type: z.literal("click"), selector: z.string() }),
+  z.object({ type: z.literal("fill"), selector: z.string(), value: z.string() }),
+  z.object({ type: z.literal("human-click"), selector: z.string().optional(), x: z.number().optional(), y: z.number().optional() }),
+  z.object({ type: z.literal("right-click"), selector: z.string().optional(), x: z.number().optional(), y: z.number().optional() }),
+  z.object({ type: z.literal("human-type"), selector: z.string(), value: z.string() }),
+  z.object({ type: z.literal("evaluate"), expression: z.string() }),
+  z.object({ type: z.literal("extract"), expression: z.string() }),
+  z.object({ type: z.literal("wait"), ms: z.number() }),
+  z.object({ type: z.literal("wait-for"), selector: z.string(), timeout: z.number().optional() }),
+  z.object({ type: z.literal("scroll"), deltaY: z.number().optional() }),
+  z.object({ type: z.literal("keyboard"), key: z.string() }),
+  z.object({ type: z.literal("type-code"), value: z.string(), selector: z.string().optional() }),
+  z.object({ type: z.literal("login"), domain: z.string(), usernameSelector: z.string().optional(), passwordSelector: z.string().optional(), submitSelector: z.string().optional(), totpSelector: z.string().optional() }),
+  z.object({ type: z.literal("solve-captcha") }),
+  z.object({ type: z.literal("screenshot"), annotate: z.boolean().optional().describe("Overlay numbered badges on interactive elements. Returns refs (@e1, @e2...) you can use in subsequent steps.") }),
+  z.object({ type: z.literal("snapshot"), interactiveOnly: z.boolean().optional().describe("Only include interactive elements (default: true)"), maxElements: z.number().optional().describe("Max elements to return (default: 80)") }),
+  z.object({ type: z.literal("find"), role: z.string().optional().describe("ARIA role: button, link, textbox, checkbox, etc."), name: z.string().optional().describe("Accessible name — button text, aria-label"), text: z.string().optional().describe("Visible text content"), placeholder: z.string().optional().describe("Input placeholder text"), label: z.string().optional().describe("Associated label text"), exact: z.boolean().optional().describe("Exact match vs substring (default: substring)") }),
+  z.object({ type: z.literal("recaptcha-click") }),
+  z.object({ type: z.literal("recaptcha-select"), tiles: z.array(z.number()) }),
+  z.object({ type: z.literal("recaptcha-verify") }),
+  z.object({ type: z.literal("recaptcha-info") }),
+  z.object({ type: z.literal("recaptcha-solve") }),
+  z.object({ type: z.literal("recaptcha-answer"), tiles: z.array(z.number()) }),
+]);
