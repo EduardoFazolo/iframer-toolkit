@@ -10,6 +10,7 @@ import type {
   CredentialInput,
   Credential,
   ExecutionContext,
+  ElementRef,
 } from "./types";
 import { PipelineRunner } from "./pipeline";
 import * as sessionManager from "./browser/session-manager";
@@ -29,6 +30,7 @@ export class Iframer {
   private screenshotDir: string;
   private publicUrl: string;
   private staleTimeoutMs: number;
+  private userRefs = new Map<string, { refMap: Map<string, ElementRef>; nextRefId: number }>();
 
   constructor(config: IframerConfig = {}) {
     this.screenshotDir = config.screenshotDir || DEFAULT_SCREENSHOT_DIR;
@@ -37,12 +39,20 @@ export class Iframer {
   }
 
   private makeContext(userId: string, token: string): ExecutionContext {
+    // Persist refs across execute calls for the same user session
+    if (!this.userRefs.has(userId)) {
+      this.userRefs.set(userId, { refMap: new Map(), nextRefId: 1 });
+    }
+    const refs = this.userRefs.get(userId)!;
+
     return {
       userId,
       token,
       screenshotDir: this.screenshotDir,
       publicUrl: this.publicUrl,
       staleTimeoutMs: this.staleTimeoutMs,
+      refMap: refs.refMap,
+      nextRefId: refs.nextRefId,
     };
   }
 
@@ -175,7 +185,13 @@ export class Iframer {
 
     const ctx = this.makeContext(userId, token);
     const runner = new PipelineRunner(ctx);
-    return runner.run(session.page, pipeline);
+    const result = await runner.run(session.page, pipeline);
+
+    // Sync nextRefId back to persisted state
+    const refs = this.userRefs.get(userId);
+    if (refs) refs.nextRefId = ctx.nextRefId;
+
+    return result;
   }
 
   // ─── Screenshots ─────────────────────────────────────────────────
