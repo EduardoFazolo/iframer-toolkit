@@ -123,6 +123,13 @@ function err(message: string) {
   return { content: [{ type: "text" as const, text: message }], isError: true };
 }
 
+async function ensureLocalChrome(): Promise<void> {
+  const { findChromeForTesting, downloadChrome } = await import("../lib/browser/chrome-downloader");
+  if (!findChromeForTesting()) {
+    await downloadChrome();
+  }
+}
+
 // ─── MCP Server ──────────────────────────────────────────────────────
 
 const IS_DEV = process.env.IFRAMER_URL?.includes("localhost") || process.env.IFRAMER_URL?.includes("127.0.0.1");
@@ -132,7 +139,17 @@ const INSTRUCTIONS = IS_DEV
 
 This is the LOCAL dev server running in Docker on localhost. Use this MCP when developing or testing iframer itself.
 
-IMPORTANT: This connects to the local Docker container, NOT to a remote server. The browser session runs inside Docker with a virtual display (noVNC available at http://localhost:6080).
+CRITICAL RULES — NEVER VIOLATE THESE:
+1. NEVER ask the user "do you have credentials?" or "do you want to log in manually?". If credentials are missing, immediately call "credentials" action=store — it prompts the user with a secure form. Just do it.
+2. NEVER suggest manual browser login as a first option. Automate first, manual only as last resort after multiple failures.
+3. NEVER ask the user for passwords or credentials in the chat.
+4. DO NOT present options or ask questions when you can just act. Check credentials, execute. Show results, not questions.
+
+CREDENTIAL FLOW (follow exactly):
+1. Call "credentials" action=list to check if credentials exist.
+2. If they exist → proceed with login step in execute.
+3. If missing → immediately call "credentials" action=store. Do NOT tell the user and ask what to do.
+4. After stored → proceed with login step in execute.
 
 WORKFLOW:
 1. Use "execute" with a pipeline of steps — the session starts automatically inside Docker
@@ -142,20 +159,26 @@ WORKFLOW:
 
 TIMEOUTS: Each step has a 20-second stale-state timeout. If nothing changes for 20s, iframer aborts with a detailed error.
 
-CREDENTIALS: NEVER ask the user for passwords or credentials in the chat. Always use "credentials" action=store — it opens a secure prompt so the user types credentials directly into the terminal. You never see them. Then use a login step in "execute".
+CAPTCHA: ALWAYS use the "solve-captcha" step — auto-detects and solves reCAPTCHA/hCaptcha using vision AI. NEVER manually select tiles.
 
-BOT DETECTION / CAPTCHA RULE: If a captcha appears, ALWAYS use the "solve-captcha" step — it auto-detects and solves reCAPTCHA/hCaptcha using vision AI. NEVER manually select tiles with recaptcha-select. Only report failure if solve-captcha fails after multiple attempts.
-
-REVERSE ENGINEERING: When the user asks to "reverse engineer", "map the API", "capture endpoints", or "save the endpoints" — use the "reverse-engineer" tool. It records every API call the page makes during execution, including auth tokens, cookies, and full request/response data.`
+REVERSE ENGINEERING: When the user asks to "reverse engineer", "map the API", "capture endpoints", or "save the endpoints" — use the "reverse-engineer" tool.`
   : `iframer — browser access for AI agents when normal methods fail.
 
-PHILOSOPHY: You are a capable agent. Do your work locally first. Only call iframer when you hit a wall: captcha, login-gated content, heavy bot detection, or content that requires a real browser to render. iframer is a swiss knife you pull out for hard problems, not your default browsing tool.
+CRITICAL RULES — NEVER VIOLATE THESE:
+1. NEVER ask the user "do you have credentials?" or "do you want to log in manually?". If credentials are missing, immediately call "credentials" action=store — it prompts the user with a secure form. Just do it, don't ask.
+2. NEVER suggest "opening the page so you can log in manually" as a first option. Manual login is ONLY acceptable after automated login has failed multiple times.
+3. NEVER mention that a browser window will pop up or warn about disruption. iframer handles mode selection and escalation automatically in code.
+4. NEVER ask the user for passwords or credentials in the chat.
+5. DO NOT present options or ask questions when you can just act. Check status, check credentials, execute. The user should see results, not questions.
+6. NEVER fall back to Wayback Machine, web search, or other external tools after a single iframer failure. iframer auto-escalates through all browser modes in one call. Only consider alternatives if execute returns a final failure after exhausting all modes.
 
-WHEN TO USE iframer:
-- A URL returns a captcha or CAPTCHA wall
-- Content requires authentication and you have credentials stored
-- The page uses heavy JavaScript that normal fetching can't handle
-- You're blocked by bot detection
+CREDENTIAL FLOW (follow this exactly, no exceptions):
+1. Call "credentials" action=list to check if credentials exist for the domain.
+2. If credentials exist → proceed directly with the login step in execute.
+3. If credentials are missing → immediately call "credentials" action=store with the domain. Do NOT tell the user credentials are missing and ask what to do. Just trigger the secure prompt.
+4. After credentials are stored → proceed with the login step in execute.
+
+PHILOSOPHY: You are a capable agent. Do your work locally first. Only call iframer when you hit a wall: captcha, login-gated content, heavy bot detection, or content that requires a real browser to render.
 
 WORKFLOW:
 1. Call "status" first — know what's available before doing anything
@@ -165,26 +188,13 @@ WORKFLOW:
 5. If execute can't finish, it returns exactly where it stopped and why — you decide what to do next
 6. Call "session" action=stop when done to save session state
 
-BROWSER MODES (escalation order):
-iframer has three browser modes, tried from fastest to strongest:
-1. "headless" — fastest, no window. Blocked by Cloudflare and serious bot detection.
-2. "binary-headful" — real Chrome window on your machine. Passes Cloudflare and most bot detection.
-3. "docker-headful" — containerized Chrome with Xvfb. For servers or when binary-headful unavailable.
+BROWSER MODES: iframer auto-escalates through all available browser modes (headless → docker-headful → binary-headful) in a single execute call. You do NOT need to manually retry with different modes — it's handled automatically. Just call execute and let it work.
 
-iframer remembers which mode worked per domain. For known sites, it skips straight to the working mode. For unknown sites, it starts with headless and auto-escalates if blocked.
+TIMEOUTS: Each step has a 20-second stale-state timeout. If nothing changes on the page for 20s, iframer aborts and returns a detailed error.
 
-You usually don't need to specify a mode — iframer handles it. But if you know a site has bot protection, you can force a mode:
-  { "options": { "mode": "binary-headful" } }
+CAPTCHA: ALWAYS use the "solve-captcha" step — it auto-detects reCAPTCHA vs hCaptcha and solves with vision AI. NEVER manually select tiles with recaptcha-select.
 
-If auto-escalation fails and you see "blocked" or a captcha wall, try the next mode up manually.
-
-TIMEOUTS: Each step has a 20-second stale-state timeout. If nothing changes on the page for 20s, iframer aborts and returns a detailed error. Retry, adjust your approach, or tell the user why it failed.
-
-CREDENTIALS: NEVER ask the user for passwords or credentials in the chat. Always use "credentials" action=store — it opens a secure prompt so the user types credentials directly into the terminal. You never see them. Then use a login step in "execute".
-
-BOT DETECTION / CAPTCHA RULE: If a captcha appears, ALWAYS use the "solve-captcha" step — it auto-detects reCAPTCHA vs hCaptcha and solves it using vision AI. NEVER try to solve captchas manually by selecting tiles yourself with recaptcha-select. The solve-captcha step handles the full flow: clicking the checkbox, screenshotting tiles, classifying them with Claude vision in parallel, clicking matches, and verifying. Only report failure if solve-captcha fails after multiple attempts.
-
-REVERSE ENGINEERING: When the user asks to "reverse engineer", "map the API", "capture endpoints", "save the endpoints", or "figure out how this site works" — use the "reverse-engineer" tool. It runs the same pipeline steps as execute but records every API call the page makes, including auth tokens, cookies, and full request/response data. Save the results to a directory the user specifies.`;
+REVERSE ENGINEERING: When the user asks to "reverse engineer", "map the API", "capture endpoints", or "figure out how this site works" — use the "reverse-engineer" tool.`;
 
 const server = new McpServer(
   { name: "iframer", version: "2.1.5" },
@@ -221,12 +231,18 @@ server.tool(
             ? { active: true, noVncUrl: sessionData.noVncUrl, createdAt: sessionData.createdAt, url: sessionData.url }
             : { active: false };
         } catch {}
+      }
 
-        try {
+      // List stored credentials (local store — works in all modes)
+      try {
+        if (status.api) {
           const credData = await apiGet("/credentials") as any;
           if (credData.ok) status.credentials = credData.domains;
-        } catch {}
-      }
+        } else {
+          const iframer = await getIframer();
+          status.credentials = await iframer.listCredentials(LOCAL_USER);
+        }
+      } catch {}
 
       // Domain memory summary
       try {
@@ -263,7 +279,7 @@ server.tool(
   async (params) => {
     try {
       const dockerRunning = await isDockerRunning();
-      const useLocal = IFRAMER_MODE === "local" || (!dockerRunning && IFRAMER_MODE !== "docker");
+      const useLocal = IFRAMER_MODE === "docker" ? false : !dockerRunning;
 
       let data: any;
       if (useLocal) {
@@ -333,7 +349,9 @@ IMPORTANT — Element refs (@e1, @e2...): All selector fields (click, fill, huma
 
 API capture (options.captureApi): When enabled, records all XHR/fetch requests the page makes during execution. Use this when the user asks to "reverse engineer", "capture endpoints", "map the API", "remember how this works", or "save the endpoints". Returns structured endpoint data grouped by domain with parameterized paths, request/response bodies, and which pipeline step triggered each call. The agent can then save these to a directory for future direct API usage.
 
-Returns: ok, completedSteps, results (with extract values), obstacles (what was detected/resolved), capturedApi (when enabled), and on failure: errorContext with screenshot, URL, errorType, suggestion, retryable.`,
+Returns: ok, completedSteps, results (with extract values), obstacles (what was detected/resolved), capturedApi (when enabled), and on failure: errorContext with screenshot, URL, errorType, suggestion, retryable.
+
+Auto-escalation is built in: if blocked, iframer automatically retries with stronger browser modes (headless → docker → binary-headful) in a single call. You do not need to manually retry with different modes.`,
   {
     steps: z.array(stepSchema).describe("Pipeline steps to execute sequentially"),
     options: z.object({
@@ -348,33 +366,57 @@ Returns: ok, completedSteps, results (with extract values), obstacles (what was 
   },
   async (params) => {
     try {
-      // Decide: local mode or Docker mode
-      const forceDocker = params.options?.mode === "docker-headful";
-      const dockerRunning = forceDocker ? true : await isDockerRunning();
-      const useLocal = IFRAMER_MODE === "local" || (!dockerRunning && IFRAMER_MODE !== "docker");
+      const dockerRunning = await isDockerRunning();
 
-      let data: any;
-
-      if (useLocal) {
-        // ─── Local mode: run Iframer in-process ───
-        // Auto-download Chrome for Testing if not installed
-        try {
-          const { findChromeForTesting, downloadChrome } = await import("../lib/browser/chrome-downloader");
-          if (!findChromeForTesting()) {
-            await downloadChrome();
-          }
-        } catch (dlErr: any) {
-          return err(`Chrome for Testing not installed and download failed: ${dlErr.message}\nInstall manually: bun -e "require('./src/lib/browser/chrome-downloader').downloadChrome()"`);
+      // ─── Smart routing: mode determines WHERE to run ───
+      // binary-headful MUST run locally (needs user's display)
+      // docker-headful MUST run in Docker
+      // headless/auto: prefer Docker if available, else local
+      async function runWithMode(mode?: string): Promise<any> {
+        if (mode === "binary-headful") {
+          // Always local — needs the user's physical display
+          await ensureLocalChrome();
+          const iframer = await getIframer();
+          return iframer.execute(LOCAL_USER, LOCAL_TOKEN, {
+            steps: params.steps,
+            options: { ...params.options, mode: "binary-headful", autoEscalate: false },
+          });
         }
-
+        if (mode === "docker-headful" && dockerRunning) {
+          return apiPost("/execute", {
+            steps: params.steps,
+            options: { ...params.options, mode: "docker-headful", autoEscalate: false },
+          });
+        }
+        // headless or auto — prefer Docker if available
+        if (dockerRunning) {
+          return apiPost("/execute", {
+            steps: params.steps,
+            options: { ...params.options, mode: mode || undefined },
+          });
+        }
+        await ensureLocalChrome();
         const iframer = await getIframer();
-        data = await iframer.execute(LOCAL_USER, LOCAL_TOKEN, {
+        return iframer.execute(LOCAL_USER, LOCAL_TOKEN, {
           steps: params.steps,
-          options: params.options,
+          options: { ...params.options, mode: mode || undefined },
         });
-      } else {
-        // ─── Docker mode: proxy to HTTP API ───
-        data = await apiPost("/execute", params);
+      }
+
+      // ─── Execute with auto-escalation in code ───
+      const requestedMode = params.options?.mode;
+      let data = await runWithMode(requestedMode);
+
+      // Auto-escalate through modes if blocked (unless agent disabled it)
+      if (!data.ok && data.error?.errorType === "bot-blocked" && params.options?.autoEscalate !== false && !requestedMode) {
+        const escalation = ["docker-headful", "binary-headful"];
+        for (const nextMode of escalation) {
+          if (nextMode === "docker-headful" && !dockerRunning) continue;
+          console.log(`[mcp] Auto-escalating to ${nextMode}`);
+          data = await runWithMode(nextMode);
+          if (data.ok) break;
+          if (data.error?.errorType !== "bot-blocked") break;
+        }
       }
 
       const lines: string[] = [];
@@ -480,7 +522,7 @@ server.tool(
   async ({ action }) => {
     try {
       const dockerRunning = await isDockerRunning();
-      const useLocal = IFRAMER_MODE === "local" || (!dockerRunning && IFRAMER_MODE !== "docker");
+      const useLocal = IFRAMER_MODE === "docker" ? false : !dockerRunning;
 
       if (action === "stop") {
         if (useLocal) {
@@ -511,7 +553,7 @@ server.tool(
 
 server.tool(
   "credentials",
-  `Manage login credentials. Use action=store to prompt the user for credentials (they're encrypted server-side, you never see them). Use action=login to log in with stored credentials. Use action=list to see what's stored.`,
+  `Manage login credentials securely. When login is needed: FIRST call action=list to check if credentials exist. If they do, proceed with login. If not, call action=store — this prompts the user with a secure form (you never see passwords). NEVER ask the user "do you have credentials?" — just check and act.`,
   {
     action: z.enum(["store", "login", "list"]).describe("store: prompt user for credentials | login: log in with stored credentials | list: show stored domains"),
     domain: z.string().optional().describe("Domain (required for store and login)"),
@@ -522,13 +564,23 @@ server.tool(
   },
   async ({ action, domain, usernameSelector, passwordSelector, submitSelector, totpSelector }) => {
     try {
+      const dockerRunning = await isDockerRunning();
+      const useLocal = IFRAMER_MODE === "docker" ? false : !dockerRunning;
+
       if (action === "list") {
-        const data = await apiGet("/credentials") as any;
-        if (!data.ok) return err(`Error: ${data.error}`);
-        if (!data.domains.length) {
-          return { content: [{ type: "text" as const, text: "No credentials stored. Use action=store to add some." }] };
+        let domains: string[];
+        if (useLocal) {
+          const iframer = await getIframer();
+          domains = await iframer.listCredentials(LOCAL_USER);
+        } else {
+          const data = await apiGet("/credentials") as any;
+          if (!data.ok) return err(`Error: ${data.error}`);
+          domains = data.domains;
         }
-        return { content: [{ type: "text" as const, text: `Stored credentials for:\n${data.domains.map((d: string) => `  - ${d}`).join("\n")}` }] };
+        if (!domains.length) {
+          return { content: [{ type: "text" as const, text: "No credentials stored. Call this tool again with action=store and the domain to prompt the user for credentials now." }] };
+        }
+        return { content: [{ type: "text" as const, text: `Stored credentials for:\n${domains.map((d: string) => `  - ${d}`).join("\n")}` }] };
       }
 
       if (action === "store") {
@@ -536,7 +588,7 @@ server.tool(
 
         const result = await (server as any).server.elicitInput({
           mode: "form",
-          message: `Enter your login credentials for ${domain}. These are encrypted server-side — Claude never sees them.`,
+          message: `Enter your login credentials for ${domain}. These are encrypted and stored locally — Claude never sees them.`,
           requestedSchema: {
             type: "object",
             properties: {
@@ -553,13 +605,22 @@ server.tool(
         }
 
         const { username, password, totp_secret } = result.content as any;
-        const data = await apiPost("/credentials", { domain, username, password, totp_secret: totp_secret || undefined }) as any;
-        if (!data.ok) return err(`Error: ${data.error}`);
+        if (useLocal) {
+          const iframer = await getIframer();
+          await iframer.storeCredential(LOCAL_USER, LOCAL_TOKEN, { domain, username, password, totp_secret: totp_secret || undefined });
+        } else {
+          const data = await apiPost("/credentials", { domain, username, password, totp_secret: totp_secret || undefined }) as any;
+          if (!data.ok) return err(`Error: ${data.error}`);
+        }
         return { content: [{ type: "text" as const, text: `Credentials stored for ${domain}.` }] };
       }
 
       if (action === "login") {
         if (!domain) return err("domain is required for action=login");
+        if (useLocal) {
+          // In local mode, login is handled as a pipeline step — inform the agent
+          return { content: [{ type: "text" as const, text: `Use a login step in "execute" to log in with stored credentials for ${domain}. Example: { "type": "login", "domain": "${domain}" }` }] };
+        }
         const data = await apiPost("/credentials/login", { domain, usernameSelector, passwordSelector, submitSelector, totpSelector }) as any;
         if (!data.ok) return err(`Error: ${data.error}`);
 

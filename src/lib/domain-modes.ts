@@ -5,7 +5,7 @@ import type { BrowserMode, DomainModeEntry, DomainAttempt } from "./types";
 
 const DEFAULT_FILE = path.join(os.homedir(), ".iframer", "domain-modes.json");
 const TTL_DAYS = 14;
-const ESCALATION_LADDER: BrowserMode[] = ["headless", "binary-headful", "docker-headful"];
+const ESCALATION_LADDER: BrowserMode[] = ["headless", "docker-headful", "binary-headful"];
 
 export class DomainModeStore {
   private data: Record<string, DomainModeEntry> = {};
