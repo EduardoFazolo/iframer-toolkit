@@ -30,8 +30,9 @@ import { DomainModeStore } from "./domain-modes";
 import { detectBlock } from "./block-detection";
 import { checkModeAvailability } from "./browser/cdp-launcher";
 import { TIMEOUTS, TIMING } from "./constants";
-import type { SessionData } from "./session/persistence";
+import { createLogger } from "./logger";import type { SessionData } from "./session/persistence";
 
+const log = createLogger("iframer");
 function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -265,7 +266,7 @@ export class Iframer {
 
       const nextMode = this.domainModes.getNextMode(failedMode, availableModes);
       if (nextMode) {
-        console.log(`[iframer] Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
+        log.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
 
         // Stop the failed mode's browser
         if (failedMode !== "docker-headful") {
@@ -284,7 +285,7 @@ export class Iframer {
           // Try one more escalation
           const thirdMode = this.domainModes.getNextMode(nextMode, availableModes);
           if (thirdMode) {
-            console.log(`[iframer] Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
+            log.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
             if (nextMode !== "docker-headful") {
               await this.daemon.stopMode(nextMode);
             }

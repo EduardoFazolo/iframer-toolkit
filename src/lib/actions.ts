@@ -18,7 +18,10 @@ import { saveScreenshot } from "./screenshot";
 import { takeSnapshot } from "./snapshot";
 import { annotatedScreenshot } from "./annotate";
 import type { StaleStateMonitor } from "./stale-monitor";
+import { createLogger } from "./logger";
 import { TIMING, CAPTCHA_GRID, TIMEOUTS } from "./constants";
+
+const log = createLogger("actions");
 
 function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -58,7 +61,9 @@ export async function executeAction(
         // patchright blocks addInitScript — evaluate stealth patches post-load instead
         // Use per-session fingerprinted script if available, else fall back to default
         const stealthScript = contextStealthScripts.get(page.context()) ?? STEALTH_SCRIPT;
-        try { await page.evaluate(stealthScript); } catch (_) {}
+        try { await page.evaluate(stealthScript); } catch (err) {
+          log.warn(`stealth injection failed: ${err}`);
+        }
         break;
 
       case "click":
@@ -224,9 +229,12 @@ export async function executeAction(
                    title.includes('hcaptcha') ||
                    !!document.querySelector('[data-hcaptcha-widget-id]');
           });
-        }).catch(() => false);
+        }).catch((err) => {
+          log.warn(`captcha detection failed: ${err}`);
+          return false;
+        });
 
-        console.log(`[solve-captcha] detected: ${isHCaptcha ? 'hCaptcha' : 'reCAPTCHA'}`);
+        log.info(`detected: ${isHCaptcha ? 'hCaptcha' : 'reCAPTCHA'}`);
 
         result = isHCaptcha
           ? await solveHCaptcha(page, monitor)

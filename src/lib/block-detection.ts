@@ -1,7 +1,9 @@
 import type { Page } from "patchright";
 import type { BlockDetectionResult } from "./types";
 import { THRESHOLDS } from "./constants";
+import { createLogger } from "./logger";
 
+const log = createLogger("block-detection");
 /**
  * Detect if a page load was blocked by bot protection.
  * Runs after navigation steps to determine if the mode should be escalated.
@@ -32,7 +34,10 @@ export async function detectBlock(page: Page): Promise<BlockDetectionResult> {
     // Check for Cloudflare challenge iframe
     const hasCfChallenge = await page.evaluate(() => {
       return !!document.querySelector('iframe[src*="challenges.cloudflare.com"]');
-    }).catch(() => false);
+    }).catch((err) => {
+      log.warn(`CF challenge check failed, assuming blocked: ${err}`);
+      return true;
+    });
     if (hasCfChallenge) {
       return { blocked: true, reason: "cloudflare-turnstile" };
     }
@@ -59,7 +64,10 @@ export async function detectBlock(page: Page): Promise<BlockDetectionResult> {
           document.querySelector('iframe[src*="recaptcha"]') ||
           document.querySelector('iframe[src*="hcaptcha"]')
         );
-      }).catch(() => false);
+      }).catch((err) => {
+        log.warn(`captcha iframe check failed, assuming blocked: ${err}`);
+        return true;
+      });
 
       if (hasCaptchaIframe) {
         return { blocked: true, reason: "captcha-wall" };
@@ -79,8 +87,9 @@ export async function detectBlock(page: Page): Promise<BlockDetectionResult> {
     }
 
     return { blocked: false };
-  } catch {
-    // If we can't even evaluate the page, something is wrong
-    return { blocked: false };
+  } catch (err) {
+    // If we can't even evaluate the page, assume blocked (safe default)
+    log.warn(`page evaluation failed, assuming blocked: ${err}`);
+    return { blocked: true, reason: "evaluation-failed" };
   }
 }
