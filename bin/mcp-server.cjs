@@ -3285,8 +3285,22 @@ class BrowserDaemon {
     if (instance) {
       try {
         if (instance.browser.isConnected()) {
+          let page2 = instance.page;
+          let context2 = instance.context;
+          try {
+            await page2.evaluate("1");
+          } catch {
+            log7.info(`Page for ${mode} is dead, creating fresh context`);
+            try {
+              await context2.close();
+            } catch {}
+            context2 = await instance.browser.newContext();
+            page2 = await context2.newPage();
+            instance.context = context2;
+            instance.page = page2;
+          }
           this.resetIdleTimer(mode);
-          return { browser: instance.browser, context: instance.context, page: instance.page };
+          return { browser: instance.browser, context: context2, page: page2 };
         }
       } catch {}
       await this.stopMode(mode);
