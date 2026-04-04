@@ -1,10 +1,15 @@
 import { chromium } from "patchright";
 import { firefox, webkit } from "playwright";
-import type { Express, Response } from "express";
+import type { Express, Request, Response } from "express";
 import type { AuthRequest } from "./middleware";
 import { Iframer } from "../lib/iframer";
 import { BROWSER_ORDER } from "../lib/browser/launcher";
 import fs from "fs";
+
+/** Cast Request to AuthRequest (populated by tokenAuth middleware) */
+function auth(req: Request): AuthRequest {
+  return req as AuthRequest;
+}
 
 const iframer = new Iframer();
 
@@ -30,14 +35,15 @@ export function registerRoutes(app: Express): void {
 
   // ─── Pipeline execution (new primary endpoint) ───────────────────
 
-  app.post("/execute", async (req: AuthRequest, res: Response) => {
+  app.post("/execute", async (req: Request, res: Response) => {
     const { steps, options } = req.body || {};
     if (!Array.isArray(steps) || steps.length === 0) {
       return res.status(400).json({ ok: false, error: "steps must be a non-empty array" });
     }
 
     try {
-      const result = await iframer.execute(req.userId, req.token, { steps, options });
+      const r = auth(req);
+      const result = await iframer.execute(r.userId, r.token, { steps, options });
       res.json(result);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -47,12 +53,13 @@ export function registerRoutes(app: Express): void {
 
   // ─── Interactive session endpoints ───────────────────────────────
 
-  app.post("/interactive/start", async (req: AuthRequest, res: Response) => {
+  app.post("/interactive/start", async (req: Request, res: Response) => {
     const { url, headers = {}, locale = "pt-BR" } = req.body || {};
 
     try {
-      const result = await iframer.startSession(req.userId, req.token, { url });
-      const existing = iframer.getSession(req.userId);
+      const r = auth(req);
+      const result = await iframer.startSession(r.userId, r.token, { url });
+      const existing = iframer.getSession(r.userId);
       res.json({
         ok: true,
         noVncUrl: result.noVncUrl,
@@ -65,8 +72,8 @@ export function registerRoutes(app: Express): void {
     }
   });
 
-  app.get("/interactive/status", (req: AuthRequest, res: Response) => {
-    const session = iframer.getSession(req.userId);
+  app.get("/interactive/status", (req: Request, res: Response) => {
+    const session = iframer.getSession(auth(req).userId);
     if (!session) return res.json({ ok: true, active: false });
 
     res.json({
@@ -78,9 +85,10 @@ export function registerRoutes(app: Express): void {
     });
   });
 
-  app.post("/interactive/stop", async (req: AuthRequest, res: Response) => {
+  app.post("/interactive/stop", async (req: Request, res: Response) => {
     try {
-      const result = await iframer.stopSession(req.userId, req.token);
+      const r = auth(req);
+      const result = await iframer.stopSession(r.userId, r.token);
       res.json(result);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -88,8 +96,9 @@ export function registerRoutes(app: Express): void {
     }
   });
 
-  app.get("/interactive/screenshot", async (req: AuthRequest, res: Response) => {
-    const session = iframer.getSession(req.userId);
+  app.get("/interactive/screenshot", async (req: Request, res: Response) => {
+    const r = auth(req);
+    const session = iframer.getSession(r.userId);
     if (!session) return res.status(404).json({ ok: false, error: "No active interactive session" });
 
     try {
@@ -100,7 +109,7 @@ export function registerRoutes(app: Express): void {
         return;
       }
 
-      const result = await iframer.screenshot(req.userId);
+      const result = await iframer.screenshot(r.userId);
       if (!result) return res.status(404).json({ ok: false, error: "No active interactive session" });
       res.json({ ok: true, ...result });
     } catch (err: unknown) {
@@ -111,15 +120,16 @@ export function registerRoutes(app: Express): void {
 
   // ─── Legacy single-action endpoint (delegates to execute) ────────
 
-  app.post("/interactive/act", async (req: AuthRequest, res: Response) => {
-    const session = iframer.getSession(req.userId);
+  app.post("/interactive/act", async (req: Request, res: Response) => {
+    const r = auth(req);
+    const session = iframer.getSession(r.userId);
     if (!session) return res.status(404).json({ ok: false, error: "No active interactive session" });
 
     const { action, screenshot: wantScreenshot = true } = req.body || {};
     if (!action || !action.type) return res.status(400).json({ ok: false, error: "Missing action.type" });
 
     try {
-      const result = await iframer.execute(req.userId, req.token, {
+      const result = await iframer.execute(r.userId, r.token, {
         steps: [action],
         options: { screenshotAfterEach: wantScreenshot, continueOnObstacle: false },
       });
@@ -141,8 +151,9 @@ export function registerRoutes(app: Express): void {
 
   // ─── Legacy batch endpoint (delegates to execute) ────────────────
 
-  app.post("/interactive/batch", async (req: AuthRequest, res: Response) => {
-    const session = iframer.getSession(req.userId);
+  app.post("/interactive/batch", async (req: Request, res: Response) => {
+    const r = auth(req);
+    const session = iframer.getSession(r.userId);
     if (!session) return res.status(404).json({ ok: false, error: "No active interactive session" });
 
     const { actions, screenshot: wantScreenshot = true, continueOnError = false } = req.body || {};
@@ -151,7 +162,7 @@ export function registerRoutes(app: Express): void {
     }
 
     try {
-      const result = await iframer.execute(req.userId, req.token, {
+      const result = await iframer.execute(r.userId, r.token, {
         steps: actions,
         options: { continueOnError, screenshotAfterEach: false },
       });
@@ -171,14 +182,14 @@ export function registerRoutes(app: Express): void {
 
   // ─── Session management ─────────────────────────────────────────
 
-  app.delete("/session", async (req: AuthRequest, res: Response) => {
-    await iframer.clearSession(req.userId);
+  app.delete("/session", async (req: Request, res: Response) => {
+    await iframer.clearSession(auth(req).userId);
     res.json({ ok: true });
   });
 
   // ─── Credential management ──────────────────────────────────────
 
-  app.post("/credentials", async (req: AuthRequest, res: Response) => {
+  app.post("/credentials", async (req: Request, res: Response) => {
     const { domain, username, password, totp_secret, fields } = req.body || {};
     if (!domain) return res.status(400).json({ ok: false, error: "Missing domain" });
     if (!username && !password && !fields) {
@@ -186,7 +197,8 @@ export function registerRoutes(app: Express): void {
     }
 
     try {
-      await iframer.storeCredential(req.userId, req.token, { domain, username, password, totp_secret, fields });
+      const r = auth(req);
+      await iframer.storeCredential(r.userId, r.token, { domain, username, password, totp_secret, fields });
       res.json({ ok: true, domain, message: "Credentials stored" });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -194,9 +206,9 @@ export function registerRoutes(app: Express): void {
     }
   });
 
-  app.get("/credentials", async (req: AuthRequest, res: Response) => {
+  app.get("/credentials", async (req: Request, res: Response) => {
     try {
-      const domains = await iframer.listCredentials(req.userId);
+      const domains = await iframer.listCredentials(auth(req).userId);
       res.json({ ok: true, domains });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -204,9 +216,9 @@ export function registerRoutes(app: Express): void {
     }
   });
 
-  app.delete("/credentials/:domain", async (req: AuthRequest, res: Response) => {
+  app.delete("/credentials/:domain", async (req: Request, res: Response) => {
     try {
-      await iframer.deleteCredential(req.userId, req.params.domain as string);
+      await iframer.deleteCredential(auth(req).userId, req.params.domain as string);
       res.json({ ok: true, message: `Credentials for ${req.params.domain} deleted` });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -214,12 +226,13 @@ export function registerRoutes(app: Express): void {
     }
   });
 
-  app.post("/credentials/login", async (req: AuthRequest, res: Response) => {
+  app.post("/credentials/login", async (req: Request, res: Response) => {
     const { domain, usernameSelector, passwordSelector, submitSelector, totpSelector } = req.body || {};
     if (!domain) return res.status(400).json({ ok: false, error: "Missing domain" });
 
     try {
-      const result = await iframer.loginWithCredentials(req.userId, req.token, domain, {
+      const r = auth(req);
+      const result = await iframer.loginWithCredentials(r.userId, r.token, domain, {
         username: usernameSelector,
         password: passwordSelector,
         submit: submitSelector,
@@ -237,12 +250,13 @@ export function registerRoutes(app: Express): void {
 
   // ─── Headless fetch ─────────────────────────────────────────────
 
-  app.post("/fetch", async (req: AuthRequest, res: Response) => {
+  app.post("/fetch", async (req: Request, res: Response) => {
     const { url } = req.body || {};
     if (!url) return res.status(400).json({ ok: false, error: "Missing url" });
 
     try {
-      const result = await iframer.fetch(req.userId || null, req.token || null, req.body);
+      const r = auth(req);
+      const result = await iframer.fetch(r.userId || null, r.token || null, req.body);
       res.json(result);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
