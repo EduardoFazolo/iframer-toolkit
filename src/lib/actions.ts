@@ -18,6 +18,11 @@ import { saveScreenshot } from "./screenshot";
 import { takeSnapshot } from "./snapshot";
 import { annotatedScreenshot } from "./annotate";
 import type { StaleStateMonitor } from "./stale-monitor";
+import { TIMING, CAPTCHA_GRID, TIMEOUTS } from "./constants";
+
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
 /** Resolve @e refs to CSS selectors */
 function resolveSelector(selector: string, ctx: ExecutionContext): string {
@@ -42,13 +47,13 @@ export async function executeAction(
   const stepIndex = -1; // caller sets this
 
   try {
-    let result: any = null;
+    let result: unknown = null;
 
     switch (step.type) {
       case "navigate":
         await page.goto(step.url, {
-          waitUntil: (step.waitUntil as any) || "domcontentloaded",
-          timeout: 60_000,
+          waitUntil: (step.waitUntil || "domcontentloaded") as "load" | "domcontentloaded" | "networkidle" | "commit",
+          timeout: TIMEOUTS.NAVIGATION,
         });
         // patchright blocks addInitScript — evaluate stealth patches post-load instead
         // Use per-session fingerprinted script if available, else fall back to default
@@ -89,11 +94,11 @@ export async function executeAction(
         break;
 
       case "evaluate":
-        result = await page.evaluate(step.expression as any);
+        result = await page.evaluate(step.expression);
         break;
 
       case "extract":
-        result = await page.evaluate(step.expression as any);
+        result = await page.evaluate(step.expression);
         break;
 
       case "wait":
@@ -101,7 +106,7 @@ export async function executeAction(
         break;
 
       case "wait-for":
-        await page.waitForSelector(resolveSelector(step.selector, ctx), { timeout: step.timeout || 10_000 });
+        await page.waitForSelector(resolveSelector(step.selector, ctx), { timeout: step.timeout || TIMEOUTS.SELECTOR_WAIT });
         break;
 
       case "scroll":
@@ -115,12 +120,13 @@ export async function executeAction(
       case "type-code": {
         const code = String(step.value || "");
         const selector = step.selector ? resolveSelector(step.selector, ctx) : 'input[type="tel"]';
-        const firstInput = await page.waitForSelector(selector, { timeout: 5_000 });
-        await firstInput!.click();
-        await page.waitForTimeout(200);
+        const firstInput = await page.waitForSelector(selector, { timeout: TIMEOUTS.TOTP_INPUT });
+        if (!firstInput) throw new Error(`Input not found: ${selector}`);
+        await firstInput.click();
+        await page.waitForTimeout(TIMING.POST_FORM_CLICK);
         for (const digit of code) {
           await page.keyboard.press(digit);
-          await page.waitForTimeout(80 + Math.random() * 120);
+          await page.waitForTimeout(TIMING.DIGIT_DELAY_BASE + Math.random() * TIMING.DIGIT_DELAY_RANGE);
         }
         result = { typed: code.length };
         break;
@@ -150,7 +156,7 @@ export async function executeAction(
         }
         const ci = solveResult.challengeInfo;
         if (ci && ci.tiles && ci.tiles.length > 0) {
-          const tileSize = ci.bframeBox ? Math.round((ci.bframeBox.width - 24) / ci.cols) : 125;
+          const tileSize = ci.bframeBox ? Math.round((ci.bframeBox.width - CAPTCHA_GRID.GRID_PADDING) / ci.cols) : CAPTCHA_GRID.DEFAULT_TILE_SIZE;
           const tiles: { index: number; image: string | null }[] = [];
           for (const tile of ci.tiles) {
             const clip = {
@@ -181,7 +187,7 @@ export async function executeAction(
         } else {
           const ci2 = verifyResult.challengeInfo;
           if (ci2 && ci2.tiles && ci2.tiles.length > 0) {
-            const tileSize2 = ci2.bframeBox ? Math.round((ci2.bframeBox.width - 24) / ci2.cols) : 125;
+            const tileSize2 = ci2.bframeBox ? Math.round((ci2.bframeBox.width - CAPTCHA_GRID.GRID_PADDING) / ci2.cols) : CAPTCHA_GRID.DEFAULT_TILE_SIZE;
             const tiles2: { index: number; image: string | null }[] = [];
             for (const tile of ci2.tiles) {
               const clip = {
@@ -207,7 +213,7 @@ export async function executeAction(
 
       case "solve-captcha": {
         // Wait briefly for captcha iframes to load, then auto-detect type
-        await page.waitForTimeout(1500);
+        await page.waitForTimeout(TIMING.CAPTCHA_DETECT_WAIT);
 
         const isHCaptcha = await page.evaluate(() => {
           const iframes = Array.from(document.querySelectorAll('iframe'));
@@ -258,10 +264,10 @@ export async function executeAction(
         // Build a locator using Playwright's semantic API
         let locator;
         if (step.role) {
-          const opts: any = {};
+          const opts: { name?: string | RegExp; exact?: boolean } = {};
           if (step.name) opts.name = step.exact ? step.name : new RegExp(step.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
           if (step.exact !== undefined) opts.exact = step.exact;
-          locator = page.getByRole(step.role as any, opts);
+          locator = page.getByRole(step.role as Parameters<typeof page.getByRole>[0], opts);
         } else if (step.label) {
           locator = page.getByLabel(step.label, { exact: step.exact });
         } else if (step.placeholder) {
@@ -294,8 +300,9 @@ export async function executeAction(
               break;
             }
             const parent: Element | null = current.parentElement;
-            if (parent) {
-              const siblings = Array.from(parent.children).filter((c: Element) => c.tagName === current!.tagName);
+            if (parent && current) {
+              const currentTag = current.tagName;
+              const siblings = Array.from(parent.children).filter((c: Element) => c.tagName === currentTag);
               if (siblings.length > 1) {
                 const idx = siblings.indexOf(current) + 1;
                 seg += `:nth-of-type(${idx})`;
@@ -339,7 +346,7 @@ export async function executeAction(
 
         const reactFill = async (selector: string, value: string) => {
           await page.click(selector);
-          await page.waitForTimeout(150);
+          await page.waitForTimeout(TIMING.SCROLL_DELAY);
           await page.evaluate(([sel, val]) => {
             const el = document.querySelector(sel) as HTMLInputElement;
             if (!el) return;
@@ -348,7 +355,7 @@ export async function executeAction(
             el.dispatchEvent(new Event('input', { bubbles: true }));
             el.dispatchEvent(new Event('change', { bubbles: true }));
           }, [selector, value]);
-          await page.waitForTimeout(300 + Math.random() * 400);
+          await page.waitForTimeout(TIMING.PRE_NAVIGATE[0] + Math.random() * (TIMING.PRE_NAVIGATE[1] - TIMING.PRE_NAVIGATE[0]));
         };
 
         if (step.usernameSelector && credential.username) {
@@ -360,20 +367,22 @@ export async function executeAction(
         if (step.submitSelector) {
           await humanClick(page, resolveSelector(step.submitSelector, ctx));
           await page.waitForLoadState("domcontentloaded").catch(() => {});
-          await page.waitForTimeout(1500);
+          await page.waitForTimeout(TIMING.POST_LOGIN_WAIT);
         }
         if (step.totpSelector && credential.totp_secret) {
           const totp = generateTOTP(credential.totp_secret);
           await page.click(resolveSelector(step.totpSelector, ctx));
           await page.keyboard.type(totp, { delay: 50 });
-          await page.waitForTimeout(300);
+          await page.waitForTimeout(TIMING.POST_TOTP_WAIT);
         }
         result = { loggedIn: true, url: page.url() };
         break;
       }
 
-      default:
-        throw new Error(`Unknown step type: ${(step as any).type}`);
+      default: {
+        const _exhaustive: never = step;
+        throw new Error(`Unknown step type: ${(_exhaustive as PipelineStep).type}`);
+      }
     }
 
     return {
@@ -383,12 +392,12 @@ export async function executeAction(
       result,
       durationMs: Date.now() - start,
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
     return {
       stepIndex,
       step,
       ok: false,
-      error: err.message,
+      error: getErrorMessage(err),
       durationMs: Date.now() - start,
     };
   }

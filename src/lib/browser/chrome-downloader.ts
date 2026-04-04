@@ -45,17 +45,17 @@ export async function downloadChrome(installDir: string = DEFAULT_INSTALL_DIR): 
   // Fetch version info
   const res = await fetch(CHROME_VERSIONS_URL);
   if (!res.ok) throw new Error(`Failed to fetch Chrome versions: ${res.status}`);
-  const data = (await res.json()) as any;
+  const data = (await res.json()) as { channels?: { Stable?: { version: string; downloads?: { chrome?: Array<{ platform: string; url: string }> } } } };
 
   const channel = data.channels?.Stable;
   if (!channel) throw new Error("No Stable channel found in Chrome for Testing versions");
 
   const platform = getPlatform();
-  const download = channel.downloads?.chrome?.find((d: any) => d.platform === platform);
+  const download = channel.downloads?.chrome?.find((d) => d.platform === platform);
   if (!download) throw new Error(`No Chrome for Testing download for platform: ${platform}`);
 
-  const url = download.url as string;
-  const version = channel.version as string;
+  const url = download.url;
+  const version = channel.version;
   console.log(`[chrome] Version ${version} for ${platform}`);
   console.log(`[chrome] URL: ${url}`);
 
@@ -168,8 +168,8 @@ export async function ensureChrome(): Promise<string> {
   // Download Chrome for Testing
   try {
     return await downloadChrome();
-  } catch (err: any) {
-    console.error(`[chrome] Failed to download Chrome for Testing: ${err.message}`);
+  } catch (err: unknown) {
+    console.error(`[chrome] Failed to download Chrome for Testing: ${err instanceof Error ? err.message : String(err)}`);
     // Fall back to system Chrome only if download fails
     const system = findChrome();
     if (system) {

@@ -19,7 +19,7 @@ export function registerRoutes(app: Express): void {
       ["webkit", webkit],
     ] as const) {
       try {
-        const execPath = (type as any).executablePath();
+        const execPath = (type as unknown as { executablePath(): string }).executablePath();
         browsers.push({ name, installed: fs.existsSync(execPath), executablePath: execPath });
       } catch {
         browsers.push({ name, installed: false, executablePath: null });
@@ -39,8 +39,9 @@ export function registerRoutes(app: Express): void {
     try {
       const result = await iframer.execute(req.userId, req.token, { steps, options });
       res.json(result);
-    } catch (err: any) {
-      res.status(500).json({ ok: false, error: err.message });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
     }
   });
 
@@ -58,8 +59,9 @@ export function registerRoutes(app: Express): void {
         wsPort: result.wsPort,
         message: existing ? "Session already active" : undefined,
       });
-    } catch (err: any) {
-      res.status(500).json({ ok: false, error: err.message });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
     }
   });
 
@@ -80,8 +82,9 @@ export function registerRoutes(app: Express): void {
     try {
       const result = await iframer.stopSession(req.userId, req.token);
       res.json(result);
-    } catch (err: any) {
-      res.status(500).json({ ok: false, error: err.message });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
     }
   });
 
@@ -100,8 +103,9 @@ export function registerRoutes(app: Express): void {
       const result = await iframer.screenshot(req.userId);
       if (!result) return res.status(404).json({ ok: false, error: "No active interactive session" });
       res.json({ ok: true, ...result });
-    } catch (err: any) {
-      res.status(500).json({ ok: false, error: err.message });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
     }
   });
 
@@ -129,8 +133,9 @@ export function registerRoutes(app: Express): void {
         title: result.finalState?.title,
         error: result.error?.message,
       });
-    } catch (err: any) {
-      res.status(500).json({ ok: false, error: err.message });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
     }
   });
 
@@ -158,8 +163,9 @@ export function registerRoutes(app: Express): void {
         url: result.finalState?.url,
         title: result.finalState?.title,
       });
-    } catch (err: any) {
-      res.status(500).json({ ok: false, error: err.message });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
     }
   });
 
@@ -182,8 +188,9 @@ export function registerRoutes(app: Express): void {
     try {
       await iframer.storeCredential(req.userId, req.token, { domain, username, password, totp_secret, fields });
       res.json({ ok: true, domain, message: "Credentials stored" });
-    } catch (err: any) {
-      res.status(500).json({ ok: false, error: err.message });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
     }
   });
 
@@ -191,8 +198,9 @@ export function registerRoutes(app: Express): void {
     try {
       const domains = await iframer.listCredentials(req.userId);
       res.json({ ok: true, domains });
-    } catch (err: any) {
-      res.status(500).json({ ok: false, error: err.message });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
     }
   });
 
@@ -200,8 +208,9 @@ export function registerRoutes(app: Express): void {
     try {
       await iframer.deleteCredential(req.userId, req.params.domain as string);
       res.json({ ok: true, message: `Credentials for ${req.params.domain} deleted` });
-    } catch (err: any) {
-      res.status(500).json({ ok: false, error: err.message });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
     }
   });
 
@@ -220,8 +229,9 @@ export function registerRoutes(app: Express): void {
       if (!result.ok) return res.status(400).json(result);
       const { ok: _ok, ...resultRest } = result;
       res.json({ ok: true, message: "Login attempted", ...resultRest });
-    } catch (err: any) {
-      res.status(500).json({ ok: false, error: err.message });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
     }
   });
 
@@ -234,8 +244,9 @@ export function registerRoutes(app: Express): void {
     try {
       const result = await iframer.fetch(req.userId || null, req.token || null, req.body);
       res.json(result);
-    } catch (err: any) {
-      res.status(500).json({ ok: false, error: err.message });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
     }
   });
 }
