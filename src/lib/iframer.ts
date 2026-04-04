@@ -48,9 +48,8 @@ export class Iframer {
     this.publicUrl = config.publicUrl || DEFAULT_PUBLIC_URL;
     this.staleTimeoutMs = config.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS;
 
-    // Storage: Redis if configured, otherwise file-based
+    // Storage: SQLite in data directory
     this.store = createStore({
-      redisUrl: config.redisUrl || process.env.REDIS_URL,
       dataDir: config.dataDir || path.join(os.homedir(), ".iframer"),
     });
 
@@ -61,7 +60,7 @@ export class Iframer {
     this.domainModes = new DomainModeStore();
 
     // Operating mode — determines if we use Docker session-manager or local daemon
-    this.operatingMode = config.mode || (config.redisUrl || process.env.REDIS_URL ? "docker" : "local");
+    this.operatingMode = config.mode || "local";
   }
 
   private makeContext(userId: string, token: string): ExecutionContext {
@@ -78,6 +77,7 @@ export class Iframer {
       staleTimeoutMs: this.staleTimeoutMs,
       refMap: refs.refMap,
       nextRefId: refs.nextRefId,
+      store: this.store,
     };
   }
 
@@ -238,7 +238,7 @@ export class Iframer {
 
     // Pick starting mode
     let mode: BrowserMode;
-    if (forcedMode) {
+    if (forcedMode && availableModes.includes(forcedMode)) {
       mode = forcedMode;
     } else if (domain) {
       mode = this.domainModes.getBestMode(domain, availableModes);
@@ -544,10 +544,9 @@ export class Iframer {
   async shutdown(): Promise<void> {
     await this.daemon.stopAll();
     await sessionManager.cleanupAllSessions();
-    // Close Redis if using Redis store
-    try {
-      const redis = await import("./session/redis");
-      await redis.closeRedis();
-    } catch {}
+    // Close SQLite if the store supports it
+    if ("close" in this.store && typeof this.store.close === "function") {
+      (this.store as any).close();
+    }
   }
 }

@@ -13,7 +13,7 @@ function getPlatform(): string {
   const platform = process.platform;
 
   if (platform === "darwin") return arch === "arm64" ? "mac-arm64" : "mac-x64";
-  if (platform === "linux") return "linux64";
+  if (platform === "linux") return arch === "arm64" ? "linux-arm64" : "linux64";
   if (platform === "win32") return "win64";
   throw new Error(`Unsupported platform: ${platform}-${arch}`);
 }
@@ -132,6 +132,13 @@ export function findChrome(): string | null {
             "/usr/bin/google-chrome",
             "/usr/bin/chromium-browser",
             "/usr/bin/chromium",
+            // Playwright/Patchright installed browsers (Docker containers)
+            ...(() => {
+              try {
+                const dirs = fs.readdirSync("/ms-playwright").filter(d => d.startsWith("chromium-")).sort().reverse();
+                return dirs.map(d => path.join("/ms-playwright", d, "chrome-linux", "chrome"));
+              } catch { return []; }
+            })(),
           ]
         : [
             "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",

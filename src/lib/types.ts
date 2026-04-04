@@ -232,7 +232,6 @@ export interface Credential extends CredentialInput {
 // ─── Iframer Config ─────────────────────────────────────────────────
 
 export interface IframerConfig {
-  redisUrl?: string;
   anthropicApiKey?: string;
   screenshotDir?: string;
   publicUrl?: string;
@@ -309,4 +308,5 @@ export interface ExecutionContext {
   staleTimeoutMs: number;
   refMap: Map<string, ElementRef>;
   nextRefId: number;
+  store: import("./storage").StorageBackend;
 }
