@@ -44,8 +44,23 @@ export class BrowserDaemon {
     if (instance) {
       try {
         if (instance.browser.isConnected()) {
+          // Browser is alive — check if the page is still usable
+          let page = instance.page;
+          let context = instance.context;
+          try {
+            // Test if the page is still responsive
+            await page.evaluate("1");
+          } catch {
+            // Page is dead — create a fresh context+page
+            log.info(`Page for ${mode} is dead, creating fresh context`);
+            try { await context.close(); } catch {}
+            context = await instance.browser.newContext();
+            page = await context.newPage();
+            instance.context = context;
+            instance.page = page;
+          }
           this.resetIdleTimer(mode);
-          return { browser: instance.browser, context: instance.context, page: instance.page };
+          return { browser: instance.browser, context, page };
         }
       } catch {}
       await this.stopMode(mode);
