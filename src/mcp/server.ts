@@ -2,11 +2,33 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import path from "path";
+import os from "os";
 
 // ─── Config ──────────────────────────────────────────────────────────
 
 const BASE_URL = process.env.IFRAMER_URL || "http://localhost:3021";
 const IFRAMER_SECRET = process.env.IFRAMER_SECRET;
+const IFRAMER_MODE = process.env.IFRAMER_MODE; // "docker" | "local" | undefined (auto)
+
+// ─── Local Iframer instance (lazy-loaded for local mode) ────────────
+
+let _iframer: any = null;
+const LOCAL_USER = "mcp-user";
+const LOCAL_TOKEN = IFRAMER_SECRET || "iframer-local-default-token";
+
+async function getIframer() {
+  if (!_iframer) {
+    const { Iframer } = await import("../lib/iframer");
+    const screenshotDir = path.join(os.tmpdir(), "iframer-screenshots");
+    _iframer = new Iframer({
+      screenshotDir,
+      publicUrl: `file://${screenshotDir}`,
+      mode: "local",
+    });
+  }
+  return _iframer;
+}
 
 function authHeaders() {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -32,6 +54,58 @@ async function apiGet(endpoint: string) {
 async function apiDelete(endpoint: string) {
   const res = await fetch(`${BASE_URL}${endpoint}`, { method: "DELETE", headers: authHeaders() });
   return res.json();
+}
+
+// ─── Mode Detection ──────────────────────────────────────────────────
+
+async function isDockerRunning(): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3000) });
+    const data = await res.json() as any;
+    return data.ok === true;
+  } catch {
+    return false;
+  }
+}
+
+function hasDisplay(): boolean {
+  if (process.platform === "darwin" || process.platform === "win32") return true;
+  return !!process.env.DISPLAY;
+}
+
+async function detectAvailableModes(): Promise<Record<string, { available: boolean; reason?: string }>> {
+  const dockerAvailable = await isDockerRunning();
+
+  let chromeInstalled = false;
+  try {
+    const { findChromeForTesting } = await import("../lib/browser/chrome-downloader");
+    chromeInstalled = !!findChromeForTesting();
+  } catch {}
+
+  const display = hasDisplay();
+
+  return {
+    headless: {
+      available: chromeInstalled,
+      reason: chromeInstalled ? undefined : "Chrome for Testing not installed. Run: bun tests/test-modes.ts (or the agent can auto-download it on first execute)",
+    },
+    "binary-headful": {
+      available: chromeInstalled && display,
+      reason: !chromeInstalled
+        ? "Chrome for Testing not installed"
+        : !display
+          ? "No display available ($DISPLAY not set)"
+          : undefined,
+    },
+    "docker-headful": {
+      available: dockerAvailable,
+      reason: dockerAvailable ? undefined : `Docker container not running at ${BASE_URL}`,
+    },
+    chromeForTesting: {
+      installed: chromeInstalled,
+      ...(!chromeInstalled ? { action: "Run this command to install: bun -e \"require('./src/lib/browser/chrome-downloader').downloadChrome()\"" } : {}),
+    } as any,
+  };
 }
 
 async function fetchScreenshot(url: string): Promise<{ type: "image"; data: string; mimeType: string } | null> {
@@ -91,6 +165,19 @@ WORKFLOW:
 5. If execute can't finish, it returns exactly where it stopped and why — you decide what to do next
 6. Call "session" action=stop when done to save session state
 
+BROWSER MODES (escalation order):
+iframer has three browser modes, tried from fastest to strongest:
+1. "headless" — fastest, no window. Blocked by Cloudflare and serious bot detection.
+2. "binary-headful" — real Chrome window on your machine. Passes Cloudflare and most bot detection.
+3. "docker-headful" — containerized Chrome with Xvfb. For servers or when binary-headful unavailable.
+
+iframer remembers which mode worked per domain. For known sites, it skips straight to the working mode. For unknown sites, it starts with headless and auto-escalates if blocked.
+
+You usually don't need to specify a mode — iframer handles it. But if you know a site has bot protection, you can force a mode:
+  { "options": { "mode": "binary-headful" } }
+
+If auto-escalation fails and you see "blocked" or a captcha wall, try the next mode up manually.
+
 TIMEOUTS: Each step has a 20-second stale-state timeout. If nothing changes on the page for 20s, iframer aborts and returns a detailed error. Retry, adjust your approach, or tell the user why it failed.
 
 CREDENTIALS: NEVER ask the user for passwords or credentials in the chat. Always use "credentials" action=store — it opens a secure prompt so the user types credentials directly into the terminal. You never see them. Then use a login step in "execute".
@@ -108,30 +195,44 @@ const server = new McpServer(
 
 server.tool(
   "status",
-  `Get the full state of iframer in one call. Call this first. Returns: API health, active session, stored credentials.`,
+  `Get the full state of iframer in one call. Call this first. Returns: available browser modes, API health, active session, stored credentials, and domain memory.`,
   {},
   async () => {
     try {
-      const status: any = { api: false, session: null, credentials: [] };
+      const status: any = { modes: {}, api: false, session: null, credentials: [], domainMemory: null };
 
+      // Detect available modes
+      status.modes = await detectAvailableModes();
+
+      // Check Docker API health
       try {
-        const health = await fetch(`${BASE_URL}/health`);
+        const health = await fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3000) });
         const data = await health.json() as any;
         status.api = data.ok === true;
       } catch {
-        return err(`API not running at ${BASE_URL}. Start it with: docker compose up -d`);
+        status.api = false;
       }
 
-      try {
-        const sessionData = await apiGet("/interactive/status") as any;
-        status.session = sessionData.active
-          ? { active: true, noVncUrl: sessionData.noVncUrl, createdAt: sessionData.createdAt, url: sessionData.url }
-          : { active: false };
-      } catch {}
+      // Check Docker session (if Docker is running)
+      if (status.api) {
+        try {
+          const sessionData = await apiGet("/interactive/status") as any;
+          status.session = sessionData.active
+            ? { active: true, noVncUrl: sessionData.noVncUrl, createdAt: sessionData.createdAt, url: sessionData.url }
+            : { active: false };
+        } catch {}
 
+        try {
+          const credData = await apiGet("/credentials") as any;
+          if (credData.ok) status.credentials = credData.domains;
+        } catch {}
+      }
+
+      // Domain memory summary
       try {
-        const credData = await apiGet("/credentials") as any;
-        if (credData.ok) status.credentials = credData.domains;
+        const { DomainModeStore } = await import("../lib/domain-modes");
+        const domainModes = new DomainModeStore();
+        status.domainMemory = domainModes.getSummary();
       } catch {}
 
       return { content: [{ type: "text" as const, text: JSON.stringify(status, null, 2) }] };
@@ -161,7 +262,17 @@ server.tool(
   },
   async (params) => {
     try {
-      const data = await apiPost("/fetch", params) as any;
+      const dockerRunning = await isDockerRunning();
+      const useLocal = IFRAMER_MODE === "local" || (!dockerRunning && IFRAMER_MODE !== "docker");
+
+      let data: any;
+      if (useLocal) {
+        const iframer = await getIframer();
+        data = await iframer.fetch(LOCAL_USER, LOCAL_TOKEN, params);
+      } else {
+        data = await apiPost("/fetch", params);
+      }
+
       if (!data.ok) return err(`Error: ${data.error}`);
       const { html, ...rest } = data;
       const text = html
@@ -169,7 +280,7 @@ server.tool(
         : JSON.stringify(rest, null, 2);
       return { content: [{ type: "text" as const, text }] };
     } catch (e: any) {
-      return err(`Connection error: ${e.message}. Is the API running at ${BASE_URL}?`);
+      return err(`Error: ${e.message}`);
     }
   }
 );
@@ -231,16 +342,46 @@ Returns: ok, completedSteps, results (with extract values), obstacles (what was 
       continueOnObstacle: z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
       continueOnError: z.boolean().optional().describe("Continue past failing steps (default: false)"),
       captureApi: z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes. Use when the user wants to reverse-engineer, map, or save a site's API endpoints."),
+      mode: z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("Force a specific browser mode. If omitted, iframer auto-selects based on domain memory and escalates if blocked."),
+      autoEscalate: z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)"),
     }).optional(),
   },
   async (params) => {
     try {
-      const data = await apiPost("/execute", params) as any;
+      // Decide: local mode or Docker mode
+      const forceDocker = params.options?.mode === "docker-headful";
+      const dockerRunning = forceDocker ? true : await isDockerRunning();
+      const useLocal = IFRAMER_MODE === "local" || (!dockerRunning && IFRAMER_MODE !== "docker");
+
+      let data: any;
+
+      if (useLocal) {
+        // ─── Local mode: run Iframer in-process ───
+        // Auto-download Chrome for Testing if not installed
+        try {
+          const { findChromeForTesting, downloadChrome } = await import("../lib/browser/chrome-downloader");
+          if (!findChromeForTesting()) {
+            await downloadChrome();
+          }
+        } catch (dlErr: any) {
+          return err(`Chrome for Testing not installed and download failed: ${dlErr.message}\nInstall manually: bun -e "require('./src/lib/browser/chrome-downloader').downloadChrome()"`);
+        }
+
+        const iframer = await getIframer();
+        data = await iframer.execute(LOCAL_USER, LOCAL_TOKEN, {
+          steps: params.steps,
+          options: params.options,
+        });
+      } else {
+        // ─── Docker mode: proxy to HTTP API ───
+        data = await apiPost("/execute", params);
+      }
 
       const lines: string[] = [];
       lines.push(`ok: ${data.ok}`);
       lines.push(`steps: ${data.completedSteps}/${data.totalSteps}`);
       if (data.durationMs) lines.push(`duration: ${data.durationMs}ms`);
+      if (data.modeUsed) lines.push(`mode: ${data.modeUsed}${data.modeEscalated ? " (auto-escalated)" : ""}`);
 
       if (data.finalState) {
         lines.push(`\nFinal page: ${data.finalState.title}`);
@@ -323,7 +464,7 @@ Returns: ok, completedSteps, results (with extract values), obstacles (what was 
       if (!data.ok) return { content, isError: true };
       return { content };
     } catch (e: any) {
-      return err(`Connection error: ${e.message}. Is the API running at ${BASE_URL}?`);
+      return err(`Error: ${e.message}`);
     }
   }
 );
@@ -338,17 +479,30 @@ server.tool(
   },
   async ({ action }) => {
     try {
+      const dockerRunning = await isDockerRunning();
+      const useLocal = IFRAMER_MODE === "local" || (!dockerRunning && IFRAMER_MODE !== "docker");
+
       if (action === "stop") {
+        if (useLocal) {
+          const iframer = await getIframer();
+          const data = await iframer.stopSession(LOCAL_USER, LOCAL_TOKEN);
+          return { content: [{ type: "text" as const, text: `Session stopped. State saved: ${data.sessionSaved}` }] };
+        }
         const data = await apiPost("/interactive/stop") as any;
         if (!data.ok) return err(`Error: ${data.error}`);
         return { content: [{ type: "text" as const, text: `Session stopped. State saved: ${data.sessionSaved}` }] };
       } else {
+        if (useLocal) {
+          const iframer = await getIframer();
+          await iframer.clearSession(LOCAL_USER);
+          return { content: [{ type: "text" as const, text: "Session data cleared." }] };
+        }
         const data = await apiDelete("/session") as any;
         if (!data.ok) return err(`Error: ${data.error}`);
         return { content: [{ type: "text" as const, text: "Session data cleared." }] };
       }
     } catch (e: any) {
-      return err(`Connection error: ${e.message}. Is the API running at ${BASE_URL}?`);
+      return err(`Error: ${e.message}`);
     }
   }
 );

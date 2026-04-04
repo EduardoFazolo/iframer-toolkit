@@ -401,9 +401,30 @@ async function main() {
     // ─── Install MCP ──────────────────────────────────────────────
 
     case "install-mcp": {
-      const mcpServerPath = path.join(__dirname, "mcp-server.cjs");
-      if (!fs.existsSync(mcpServerPath)) {
-        console.error("  MCP server bundle not found. Run: bun build src/mcp/server.ts --target node --format cjs --outfile bin/mcp-server.cjs");
+      const mcpServerTS = path.join(__dirname, "..", "src", "mcp", "server.ts");
+      const mcpServerCJS = path.join(__dirname, "mcp-server.cjs");
+
+      // Prefer running TS source directly with bun (no build step needed)
+      // Fall back to pre-built CJS bundle if bun is not available
+      let mcpCommand, mcpArgs;
+
+      // Check if bun is available
+      let bunPath;
+      try {
+        bunPath = execSync("which bun", { encoding: "utf8" }).trim();
+      } catch {}
+
+      if (bunPath && fs.existsSync(mcpServerTS)) {
+        mcpCommand = bunPath;
+        mcpArgs = ["run", mcpServerTS];
+        console.log("  Using bun to run MCP server from source (no build needed)");
+      } else if (fs.existsSync(mcpServerCJS)) {
+        mcpCommand = "node";
+        mcpArgs = [mcpServerCJS];
+        console.log("  Using pre-built MCP server bundle");
+      } else {
+        console.error("  MCP server not found. Need either bun + source or pre-built bundle.");
+        console.error("  Run: bun build src/mcp/server.ts --target node --format cjs --outfile bin/mcp-server.cjs");
         process.exit(1);
       }
 
@@ -428,14 +449,20 @@ async function main() {
       }
 
       if (!config.mcpServers) config.mcpServers = {};
-      const mcpEntry = { command: "node", args: [mcpServerPath] };
+      const mcpEntry = { command: mcpCommand, args: mcpArgs };
       if (secret) mcpEntry.env = { IFRAMER_SECRET: secret };
+      // Set local mode by default when not using --dev (Docker)
+      if (!isDev) {
+        if (!mcpEntry.env) mcpEntry.env = {};
+        mcpEntry.env.IFRAMER_MODE = "local";
+      }
       config.mcpServers[mcpName] = mcpEntry;
 
       fs.writeFileSync(claudeConfigPath, JSON.stringify(config, null, 2));
       console.log(`\n  ${mcpName} MCP installed!`);
       if (secret) console.log("  IFRAMER_SECRET loaded from .env");
-      else console.log("  No IFRAMER_SECRET found — API must be running without auth.");
+      if (!isDev) console.log("  Mode: local (headless + binary-headful, no Docker needed)");
+      else console.log("  Mode: docker (connects to Docker container)");
       console.log(`  Config written to: ${claudeConfigPath}`);
       console.log("  Restart Claude Code to activate the iframer tools.\n");
       break;

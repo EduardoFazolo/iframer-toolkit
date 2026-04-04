@@ -1,5 +1,9 @@
 import type { Page } from "patchright";
 
+// ─── Browser Modes ─────────────────────────────────────────────────
+
+export type BrowserMode = "headless" | "binary-headful" | "docker-headful";
+
 // ─── Pipeline Step Types ────────────────────────────────────────────
 
 export type PipelineStep =
@@ -52,6 +56,8 @@ export interface PipelineOptions {
   maxAutoResolveAttempts?: number; // Default: 3
   continueOnError?: boolean;      // Default: false
   captureApi?: boolean;           // Default: false — capture XHR/fetch requests during execution
+  mode?: BrowserMode;             // Force a specific browser mode (default: auto-select)
+  autoEscalate?: boolean;         // Auto-retry with stronger mode if blocked (default: true)
 }
 
 // ─── Captured API Types ────────────────────────────────────────────
@@ -125,7 +131,8 @@ export type PipelineErrorType =
   | "captcha-unsolvable"
   | "obstacle-unresolvable"
   | "action-failed"
-  | "session-not-found";
+  | "session-not-found"
+  | "bot-blocked";
 
 export interface ErrorContext {
   failedAtStep: number;
@@ -157,6 +164,8 @@ export interface PipelineResult {
   error?: ErrorContext;
   durationMs: number;
   capturedApi?: CapturedApi[];  // Only present when captureApi is enabled
+  modeUsed?: BrowserMode;       // Which browser mode was actually used
+  modeEscalated?: boolean;      // Whether auto-escalation happened
 }
 
 // ─── State Snapshot (for stale-state detection) ─────────────────────
@@ -229,6 +238,42 @@ export interface IframerConfig {
   publicUrl?: string;
   staleTimeoutMs?: number;        // Default: 20_000
   sessionTimeoutMs?: number;      // Default: 300_000
+  dataDir?: string;               // Default: ~/.iframer — file-based storage path
+  mode?: "docker" | "local";      // Default: auto-detect
+}
+
+// ─── Mode Availability ─────────────────────────────────────────────
+
+export interface ModeStatus {
+  available: boolean;
+  reason?: string;
+}
+
+export interface ModeAvailability {
+  headless: ModeStatus;
+  "binary-headful": ModeStatus;
+  "docker-headful": ModeStatus;
+}
+
+// ─── Domain Mode Memory ────────────────────────────────────────────
+
+export interface DomainAttempt {
+  result: "success" | "blocked";
+  reason?: string;
+  lastTried: string;   // ISO date
+}
+
+export interface DomainModeEntry {
+  mode: BrowserMode;       // last successful mode
+  lastSuccess: string;     // ISO date
+  attempts: Partial<Record<BrowserMode, DomainAttempt>>;
+}
+
+// ─── Block Detection ───────────────────────────────────────────────
+
+export interface BlockDetectionResult {
+  blocked: boolean;
+  reason?: string;
 }
 
 // ─── Obstacle Detection ─────────────────────────────────────────────

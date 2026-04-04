@@ -1,4 +1,5 @@
 import path from "path";
+import os from "os";
 import type {
   IframerConfig,
   Pipeline,
@@ -11,6 +12,8 @@ import type {
   Credential,
   ExecutionContext,
   ElementRef,
+  BrowserMode,
+  ModeAvailability,
 } from "./types";
 import { PipelineRunner } from "./pipeline";
 import * as sessionManager from "./browser/session-manager";
@@ -18,9 +21,13 @@ import { getBrowserWithFallback, BROWSER_ORDER } from "./browser/launcher";
 import { stealthContextOptions, applyStealthToPage } from "./browser/stealth";
 import { humanClick, humanType, clickRecaptchaCheckbox, clickChallengeTiles, clickChallengeVerify } from "./browser/humanize";
 import { deriveKey, encrypt, decrypt, generateTOTP } from "./auth/crypto";
-import { getSession, setSession, deleteSession, getCredential, setCredential, deleteCredential, listCredentialDomains, closeRedis } from "./session/redis";
 import { extractSession, injectCookies, injectStorage } from "./session/persistence";
 import { saveScreenshot } from "./screenshot";
+import { createStore, type StorageBackend } from "./storage";
+import { BrowserDaemon } from "./browser/daemon";
+import { DomainModeStore } from "./domain-modes";
+import { detectBlock } from "./block-detection";
+import { checkModeAvailability } from "./browser/cdp-launcher";
 
 const DEFAULT_SCREENSHOT_DIR = path.join(import.meta.dir, "../../.screenshots");
 const DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
@@ -31,15 +38,33 @@ export class Iframer {
   private publicUrl: string;
   private staleTimeoutMs: number;
   private userRefs = new Map<string, { refMap: Map<string, ElementRef>; nextRefId: number }>();
+  private store: StorageBackend;
+  private daemon: BrowserDaemon;
+  private domainModes: DomainModeStore;
+  private operatingMode: "docker" | "local";
 
   constructor(config: IframerConfig = {}) {
     this.screenshotDir = config.screenshotDir || DEFAULT_SCREENSHOT_DIR;
     this.publicUrl = config.publicUrl || DEFAULT_PUBLIC_URL;
     this.staleTimeoutMs = config.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS;
+
+    // Storage: Redis if configured, otherwise file-based
+    this.store = createStore({
+      redisUrl: config.redisUrl || process.env.REDIS_URL,
+      dataDir: config.dataDir || path.join(os.homedir(), ".iframer"),
+    });
+
+    // Browser daemon for local modes (headless + binary-headful)
+    this.daemon = new BrowserDaemon(config.sessionTimeoutMs);
+
+    // Domain mode memory
+    this.domainModes = new DomainModeStore();
+
+    // Operating mode — determines if we use Docker session-manager or local daemon
+    this.operatingMode = config.mode || (config.redisUrl || process.env.REDIS_URL ? "docker" : "local");
   }
 
   private makeContext(userId: string, token: string): ExecutionContext {
-    // Persist refs across execute calls for the same user session
     if (!this.userRefs.has(userId)) {
       this.userRefs.set(userId, { refMap: new Map(), nextRefId: 1 });
     }
@@ -53,6 +78,31 @@ export class Iframer {
       staleTimeoutMs: this.staleTimeoutMs,
       refMap: refs.refMap,
       nextRefId: refs.nextRefId,
+    };
+  }
+
+  // ─── Mode Detection ─────────────────────────────────────────────────
+
+  getAvailableModes(): BrowserMode[] {
+    const modes: BrowserMode[] = ["headless"];
+    const { binaryHeadful } = checkModeAvailability();
+    if (binaryHeadful) modes.push("binary-headful");
+    if (this.operatingMode === "docker") modes.push("docker-headful");
+    return modes;
+  }
+
+  async getModeAvailability(): Promise<ModeAvailability> {
+    const { binaryHeadful } = checkModeAvailability();
+    return {
+      headless: { available: true },
+      "binary-headful": {
+        available: binaryHeadful,
+        reason: binaryHeadful ? undefined : "No display available",
+      },
+      "docker-headful": {
+        available: this.operatingMode === "docker",
+        reason: this.operatingMode === "docker" ? undefined : "Docker not configured",
+      },
     };
   }
 
@@ -71,7 +121,7 @@ export class Iframer {
 
       if (useSession) {
         encryptionKey = await deriveKey(token!);
-        const blob = await getSession(userId!);
+        const blob = await this.store.getSession(userId!);
         if (blob && blob.length > 0) {
           sessionData = JSON.parse(decrypt(blob, encryptionKey));
         }
@@ -89,7 +139,6 @@ export class Iframer {
       if (sessionData) await injectStorage(page, sessionData);
       if (waitForSelector) await page.waitForSelector(waitForSelector, { timeout: 10_000 });
 
-      // Execute any simple actions
       for (const action of actions) {
         if (action.type === "click") await page.click((action as any).selector);
         else if (action.type === "fill") await page.fill((action as any).selector, (action as any).value);
@@ -109,7 +158,7 @@ export class Iframer {
       if (useSession) {
         const updatedSession = await extractSession(context, page);
         const encrypted = encrypt(JSON.stringify(updatedSession), encryptionKey!);
-        await setSession(userId!, encrypted);
+        await this.store.setSession(userId!, encrypted);
       }
 
       return { ok: true, browser: browserName, url: finalUrl, html, result, durationMs: Date.now() - startedAt };
@@ -120,7 +169,7 @@ export class Iframer {
     }
   }
 
-  // ─── Interactive Sessions ────────────────────────────────────────
+  // ─── Interactive Sessions (Docker mode) ──────────────────────────
 
   async startSession(userId: string, token: string, options: SessionStartOptions = {}): Promise<{ noVncUrl: string; wsPort: number }> {
     const existing = sessionManager.getSession(userId);
@@ -135,7 +184,7 @@ export class Iframer {
     const session = await sessionManager.startSession(userId);
 
     const encryptionKey = await deriveKey(token);
-    const blob = await getSession(userId);
+    const blob = await this.store.getSession(userId);
     let sessionData: any = null;
     if (blob && blob.length > 0) {
       sessionData = JSON.parse(decrypt(blob, encryptionKey));
@@ -158,24 +207,106 @@ export class Iframer {
   }
 
   async stopSession(userId: string, token: string): Promise<SessionStopResult> {
+    // Stop Docker session if active
     const sessionData = await sessionManager.stopSession(userId);
 
     if (sessionData && token) {
       const encryptionKey = await deriveKey(token);
       const encrypted = encrypt(JSON.stringify(sessionData), encryptionKey);
-      await setSession(userId, encrypted);
+      await this.store.setSession(userId, encrypted);
     }
+
+    // Also stop local daemon sessions
+    await this.daemon.stopAll();
 
     return { ok: true, sessionSaved: !!sessionData };
   }
 
-  // ─── Pipeline Execution (the main new feature) ────────────────────
+  // ─── Pipeline Execution (with three-mode support) ─────────────────
 
   async execute(userId: string, token: string, pipeline: Pipeline): Promise<PipelineResult> {
-    // Auto-start session if not active
+    const opts = pipeline.options || {};
+    const forcedMode = opts.mode;
+    const autoEscalate = opts.autoEscalate !== false;
+
+    // Extract domain from first navigate step for mode memory
+    const firstNav = (pipeline.steps as any[]).find(s => s.type === "navigate");
+    const domain = firstNav ? new URL(firstNav.url).hostname : null;
+
+    // Determine available modes
+    const availableModes = this.getAvailableModes();
+
+    // Pick starting mode
+    let mode: BrowserMode;
+    if (forcedMode) {
+      mode = forcedMode;
+    } else if (domain) {
+      mode = this.domainModes.getBestMode(domain, availableModes);
+    } else {
+      mode = availableModes[0] || "headless";
+    }
+
+    // Execute with the chosen mode
+    let result = await this.executeWithMode(userId, token, pipeline, mode);
+
+    // Auto-escalation: if blocked and autoEscalate is on, try next mode
+    if (!result.ok && autoEscalate && domain && result.error?.errorType === "bot-blocked") {
+      const failedMode = mode;
+      if (domain) this.domainModes.recordFailure(domain, failedMode, result.error?.message || "blocked");
+
+      const nextMode = this.domainModes.getNextMode(failedMode, availableModes);
+      if (nextMode) {
+        console.log(`[iframer] Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
+
+        // Stop the failed mode's browser
+        if (failedMode !== "docker-headful") {
+          await this.daemon.stopMode(failedMode);
+        }
+
+        result = await this.executeWithMode(userId, token, pipeline, nextMode);
+        result.modeEscalated = true;
+        result.modeUsed = nextMode;
+
+        if (result.ok && domain) {
+          this.domainModes.recordSuccess(domain, nextMode);
+        } else if (!result.ok && domain && result.error?.errorType === "bot-blocked") {
+          this.domainModes.recordFailure(domain, nextMode, result.error?.message || "blocked");
+
+          // Try one more escalation
+          const thirdMode = this.domainModes.getNextMode(nextMode, availableModes);
+          if (thirdMode) {
+            console.log(`[iframer] Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
+            if (nextMode !== "docker-headful") {
+              await this.daemon.stopMode(nextMode);
+            }
+            result = await this.executeWithMode(userId, token, pipeline, thirdMode);
+            result.modeEscalated = true;
+            result.modeUsed = thirdMode;
+
+            if (result.ok && domain) {
+              this.domainModes.recordSuccess(domain, thirdMode);
+            }
+          }
+        }
+      }
+    } else if (result.ok && domain) {
+      this.domainModes.recordSuccess(domain, mode);
+    }
+
+    return result;
+  }
+
+  private async executeWithMode(userId: string, token: string, pipeline: Pipeline, mode: BrowserMode): Promise<PipelineResult> {
+    if (mode === "docker-headful") {
+      return this.executeDocker(userId, token, pipeline);
+    }
+    return this.executeLocal(userId, token, pipeline, mode);
+  }
+
+  /** Execute via Docker session-manager (existing behavior) */
+  private async executeDocker(userId: string, token: string, pipeline: Pipeline): Promise<PipelineResult> {
     let session = sessionManager.getSession(userId);
     if (!session) {
-      // Pass the first navigate URL so startSession can inject localStorage at the right origin
       const firstNav = (pipeline.steps as any[]).find(s => s.type === "navigate");
       await this.startSession(userId, token, firstNav ? { url: firstNav.url } : {});
       session = sessionManager.getSession(userId)!;
@@ -187,11 +318,129 @@ export class Iframer {
     const runner = new PipelineRunner(ctx);
     const result = await runner.run(session.page, pipeline);
 
-    // Sync nextRefId back to persisted state
+    // Check for bot blocks after navigation
+    if (result.ok) {
+      const blockResult = await detectBlock(session.page);
+      if (blockResult.blocked) {
+        const pageState = await this.getPageState(session.page, ctx);
+        return {
+          ...result,
+          ok: false,
+          modeUsed: "docker-headful",
+          error: {
+            failedAtStep: result.completedSteps - 1,
+            failedStep: pipeline.steps[result.completedSteps - 1],
+            errorType: "bot-blocked",
+            message: `Page blocked by bot detection: ${blockResult.reason}`,
+            pageState,
+            suggestion: "The page is blocked by bot detection. Try a different browser mode.",
+            retryable: true,
+          },
+        };
+      }
+    }
+
+    // Sync refs
     const refs = this.userRefs.get(userId);
     if (refs) refs.nextRefId = ctx.nextRefId;
 
+    result.modeUsed = "docker-headful";
     return result;
+  }
+
+  /** Execute via local Chrome daemon (new behavior for headless + binary-headful) */
+  private async executeLocal(userId: string, token: string, pipeline: Pipeline, mode: BrowserMode): Promise<PipelineResult> {
+    const startTime = Date.now();
+
+    try {
+      // Get or launch Chrome in the requested mode
+      const { page } = await this.daemon.ensure(mode);
+
+      // Inject stored session data
+      const encryptionKey = await deriveKey(token);
+      const blob = await this.store.getSession(userId);
+      if (blob && blob.length > 0) {
+        try {
+          const sessionData = JSON.parse(decrypt(blob, encryptionKey));
+          await injectCookies(page.context(), sessionData);
+        } catch {}
+      }
+
+      // Run pipeline
+      const ctx = this.makeContext(userId, token);
+      const runner = new PipelineRunner(ctx);
+      const result = await runner.run(page, pipeline);
+
+      // Check for bot blocks after navigation
+      if (result.ok) {
+        const blockResult = await detectBlock(page);
+        if (blockResult.blocked) {
+          const pageState = await this.getPageState(page, ctx);
+          return {
+            ...result,
+            ok: false,
+            modeUsed: mode,
+            error: {
+              failedAtStep: result.completedSteps - 1,
+              failedStep: pipeline.steps[result.completedSteps - 1],
+              errorType: "bot-blocked",
+              message: `Page blocked by bot detection: ${blockResult.reason}`,
+              pageState,
+              suggestion: `The page was blocked in ${mode} mode. ${mode === "headless" ? "Try binary-headful mode." : "Try docker-headful mode."}`,
+              retryable: true,
+            },
+          };
+        }
+      }
+
+      // Save session state after successful execution
+      if (result.ok) {
+        try {
+          const updatedSession = await extractSession(page.context(), page);
+          const encrypted = encrypt(JSON.stringify(updatedSession), encryptionKey);
+          await this.store.setSession(userId, encrypted);
+        } catch {}
+      }
+
+      // Sync refs
+      const refs = this.userRefs.get(userId);
+      if (refs) refs.nextRefId = ctx.nextRefId;
+
+      result.modeUsed = mode;
+      return result;
+    } catch (err: any) {
+      return {
+        ok: false,
+        completedSteps: 0,
+        totalSteps: pipeline.steps.length,
+        results: [],
+        finalState: { url: "", title: "" },
+        obstacles: [],
+        error: {
+          failedAtStep: 0,
+          failedStep: pipeline.steps[0],
+          errorType: "action-failed",
+          message: `Failed to launch browser in ${mode} mode: ${err.message}`,
+          pageState: { url: "", title: "" },
+          suggestion: `Browser launch failed. ${mode === "binary-headful" ? "Make sure a display is available." : "Check Chrome installation."}`,
+          retryable: true,
+        },
+        durationMs: Date.now() - startTime,
+        modeUsed: mode,
+      };
+    }
+  }
+
+  private async getPageState(page: any, ctx: ExecutionContext) {
+    try {
+      const url = page.url();
+      const title = await page.title().catch(() => "");
+      const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false }).catch(() => null);
+      const screenshotUrl = buf ? saveScreenshot(buf, `block-${Date.now()}.jpg`, ctx.screenshotDir, ctx.publicUrl) : undefined;
+      return { url, title, screenshotUrl };
+    } catch {
+      return { url: "", title: "" };
+    }
   }
 
   // ─── Screenshots ─────────────────────────────────────────────────
@@ -221,22 +470,22 @@ export class Iframer {
       updatedAt: new Date().toISOString(),
     };
     const encrypted = encrypt(JSON.stringify(data), credKey);
-    await setCredential(userId, credential.domain, encrypted);
+    await this.store.setCredential(userId, credential.domain, encrypted);
   }
 
   async getCredential(userId: string, token: string, domain: string): Promise<Credential | null> {
     const credKey = await deriveKey(token, "credentials");
-    const blob = await getCredential(userId, domain);
+    const blob = await this.store.getCredential(userId, domain);
     if (!blob || blob.length === 0) return null;
     return JSON.parse(decrypt(blob, credKey));
   }
 
   async listCredentials(userId: string): Promise<string[]> {
-    return listCredentialDomains(userId);
+    return this.store.listCredentialDomains(userId);
   }
 
   async deleteCredential(userId: string, domain: string): Promise<void> {
-    await deleteCredential(userId, domain);
+    await this.store.deleteCredential(userId, domain);
   }
 
   async loginWithCredentials(
@@ -249,7 +498,7 @@ export class Iframer {
     if (!session) return { ok: false, url: "", title: "", error: "No active interactive session. Start one first." };
 
     const credKey = await deriveKey(token, "credentials");
-    const blob = await getCredential(userId, domain);
+    const blob = await this.store.getCredential(userId, domain);
     if (!blob || blob.length === 0) {
       return { ok: false, url: "", title: "", error: `No credentials stored for ${domain}` };
     }
@@ -287,13 +536,18 @@ export class Iframer {
   // ─── Session Data ─────────────────────────────────────────────────
 
   async clearSession(userId: string): Promise<void> {
-    await deleteSession(userId);
+    await this.store.deleteSession(userId);
   }
 
   // ─── Lifecycle ───────────────────────────────────────────────────
 
   async shutdown(): Promise<void> {
+    await this.daemon.stopAll();
     await sessionManager.cleanupAllSessions();
-    await closeRedis();
+    // Close Redis if using Redis store
+    try {
+      const redis = await import("./session/redis");
+      await redis.closeRedis();
+    } catch {}
   }
 }
