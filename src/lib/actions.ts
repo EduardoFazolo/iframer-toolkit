@@ -14,7 +14,6 @@ import {
 import { solveRecaptcha } from "./captcha/recaptcha";
 import { solveHCaptcha } from "./captcha/hcaptcha";
 import { deriveKey, decrypt, generateTOTP } from "./auth/crypto";
-import { getCredential } from "./session/redis";
 import { saveScreenshot } from "./screenshot";
 import { takeSnapshot } from "./snapshot";
 import { annotatedScreenshot } from "./annotate";
@@ -332,7 +331,7 @@ export async function executeAction(
 
       case "login": {
         const credKey = await deriveKey(ctx.token, "credentials");
-        const blob = await getCredential(ctx.userId, step.domain);
+        const blob = await ctx.store.getCredential(ctx.userId, step.domain);
         if (!blob || blob.length === 0) {
           throw new Error(`No credentials stored for ${step.domain}`);
         }
