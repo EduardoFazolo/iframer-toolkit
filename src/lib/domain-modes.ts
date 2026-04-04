@@ -2,7 +2,9 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import type { BrowserMode, DomainModeEntry, DomainAttempt } from "./types";
+import { createLogger } from "./logger";
 
+const log = createLogger("domain-modes");
 const DEFAULT_FILE = path.join(os.homedir(), ".iframer", "domain-modes.json");
 const TTL_DAYS = 14;
 const ESCALATION_LADDER: BrowserMode[] = ["headless", "docker-headful", "binary-headful"];
@@ -115,7 +117,7 @@ export class DomainModeStore {
       fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
       fs.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2));
     } catch (err) {
-      console.error("[domain-modes] Failed to save:", err);
+      log.error("Failed to save:", err);
     }
   }
 }

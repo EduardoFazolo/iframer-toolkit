@@ -3,7 +3,9 @@ import { chromium } from "patchright";
 import { chromium as realChromium, firefox, webkit } from "playwright";
 import { STEALTH_ARGS } from "./stealth";
 import type { Browser } from "patchright";
+import { createLogger } from "../logger";
 
+const log = createLogger("launcher");
 const UBLOCK_PATH = "/extensions/uBlock0.chromium";
 
 function findChromeExecutable(): string | undefined {
@@ -80,7 +82,7 @@ export async function launchHeadful(displayNum: number): Promise<Browser> {
   if (executablePath) launchOpts.executablePath = executablePath;
 
   const hasRealChrome = fs.existsSync("/usr/bin/google-chrome-stable") || !!process.env.CHROME_EXECUTABLE;
-  console.log(`[launcher] headful: ${executablePath || "patchright chromium"}, extensions: ${hasExtensions}, realChrome: ${hasRealChrome}`);
+  log.debug(`headful: ${executablePath || "patchright chromium"}, extensions: ${hasExtensions}, realChrome: ${hasRealChrome}`);
 
   // Use real Chrome (amd64) with playwright; fall back to patchright's patched Chromium (arm64)
   if (hasRealChrome) {

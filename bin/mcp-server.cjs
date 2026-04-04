@@ -26,6 +26,34 @@ var __export = (target, all) => {
 };
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 
+// src/lib/logger.ts
+function createLogger(tag) {
+  const prefix = `[${tag}]`;
+  return {
+    debug: (...args) => {
+      if (LEVELS[currentLevel] <= 0)
+        console.log(prefix, ...args);
+    },
+    info: (...args) => {
+      if (LEVELS[currentLevel] <= 1)
+        console.log(prefix, ...args);
+    },
+    warn: (...args) => {
+      if (LEVELS[currentLevel] <= 2)
+        console.warn(prefix, ...args);
+    },
+    error: (...args) => {
+      if (LEVELS[currentLevel] <= 3)
+        console.error(prefix, ...args);
+    }
+  };
+}
+var LEVELS, currentLevel;
+var init_logger = __esm(() => {
+  LEVELS = { debug: 0, info: 1, warn: 2, error: 3, silent: 4 };
+  currentLevel = process.env.LOG_LEVEL || "info";
+});
+
 // src/lib/browser/stealth.ts
 function buildStealthScript(fp) {
   const ua = fp?.userAgent ?? USER_AGENT;
@@ -471,19 +499,21 @@ async function launchHeadful(displayNum) {
   if (executablePath)
     launchOpts.executablePath = executablePath;
   const hasRealChrome = import_fs.default.existsSync("/usr/bin/google-chrome-stable") || !!process.env.CHROME_EXECUTABLE;
-  console.log(`[launcher] headful: ${executablePath || "patchright chromium"}, extensions: ${hasExtensions}, realChrome: ${hasRealChrome}`);
+  log.debug(`headful: ${executablePath || "patchright chromium"}, extensions: ${hasExtensions}, realChrome: ${hasRealChrome}`);
   if (hasRealChrome) {
     return import_playwright.chromium.launch(launchOpts);
   } else {
     return import_patchright.chromium.launch(launchOpts);
   }
 }
-var import_fs, import_patchright, import_playwright, UBLOCK_PATH = "/extensions/uBlock0.chromium", BROWSER_TYPES, BROWSER_ORDER, browsers;
+var import_fs, import_patchright, import_playwright, log, UBLOCK_PATH = "/extensions/uBlock0.chromium", BROWSER_TYPES, BROWSER_ORDER, browsers;
 var init_launcher = __esm(() => {
   init_stealth();
+  init_logger();
   import_fs = __toESM(require("fs"));
   import_patchright = require("patchright");
   import_playwright = require("playwright");
+  log = createLogger("launcher");
   BROWSER_TYPES = { chromium: import_patchright.chromium, firefox: import_playwright.firefox, webkit: import_playwright.webkit };
   BROWSER_ORDER = ["chromium", "firefox", "webkit"];
   browsers = {};
@@ -702,7 +732,7 @@ async function startSession(userId) {
   const stealthScript = buildStealthScript(fingerprint);
   contextStealthScripts.set(context, stealthScript);
   const page = await context.newPage();
-  console.log(`[session] fingerprint: ${fingerprint.userAgent.slice(0, 60)}... DPR=${fingerprint.deviceScaleFactor} screen=${fingerprint.screenWidth}x${fingerprint.screenHeight}`);
+  log2.debug(`fingerprint: ${fingerprint.userAgent.slice(0, 60)}... DPR=${fingerprint.deviceScaleFactor} screen=${fingerprint.screenWidth}x${fingerprint.screenHeight}`);
   const session = {
     displayNum,
     vncPort,
@@ -762,13 +792,15 @@ async function cleanupAllSessions() {
   const userIds = [...sessions.keys()];
   await Promise.all(userIds.map((id) => stopSession(id)));
 }
-var import_child_process, import_fs2, contextStealthScripts, BASE_DISPLAY, MAX_SESSIONS, SESSION_TIMEOUT, sessions, usedDisplays;
+var import_child_process, import_fs2, log2, contextStealthScripts, BASE_DISPLAY, MAX_SESSIONS, SESSION_TIMEOUT, sessions, usedDisplays;
 var init_session_manager = __esm(() => {
   init_launcher();
   init_stealth();
+  init_logger();
   init_fingerprint();
   import_child_process = require("child_process");
   import_fs2 = __toESM(require("fs"));
+  log2 = createLogger("session");
   contextStealthScripts = new Map;
   BASE_DISPLAY = parseInt(process.env.VNC_BASE_DISPLAY || "99", 10);
   MAX_SESSIONS = parseInt(process.env.VNC_MAX_SESSIONS || "20", 10);
@@ -1021,7 +1053,7 @@ async function screenshotFullGrid(page, challengeInfo) {
     const buf = await page.screenshot({ type: "jpeg", quality: 85, clip: gridClip });
     return buf.toString("base64");
   } catch (err) {
-    console.error(`[captcha-solver] full grid screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
+    log3.error(`full grid screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -1084,10 +1116,10 @@ Does this tile contain a ${target}? Reply ONLY "yes" or "no".`
       const answer = (response.content[0].text ?? "").toLowerCase().trim();
       const match = answer.startsWith("yes");
       if (match)
-        console.log(`[captcha-solver] tile ${tile.index} (r${tileRow}c${tileCol}): YES`);
+        log3.debug(`tile ${tile.index} (r${tileRow}c${tileCol}): YES`);
       return { index: tile.index, match };
     } catch (err) {
-      console.error(`[captcha-solver] tile ${tile.index} classification failed: ${err instanceof Error ? err.message : String(err)}`);
+      log3.error(`tile ${tile.index} classification failed: ${err instanceof Error ? err.message : String(err)}`);
       return { index: tile.index, match: false };
     }
   }));
@@ -1109,7 +1141,7 @@ async function submitForm(page) {
       if (el) {
         const visible = await el.isVisible();
         if (visible) {
-          console.log(`[captcha-solver] Submitting form via: ${selector}`);
+          log3.info(`Submitting form via: ${selector}`);
           await new Promise((r) => setTimeout(r, 500));
           await humanClick(page, selector);
           await new Promise((r) => setTimeout(r, 2000));
@@ -1118,7 +1150,7 @@ async function submitForm(page) {
       }
     } catch {}
   }
-  console.log("[captcha-solver] No submit button found — skipping form submission");
+  log3.info("No submit button found — skipping form submission");
   return false;
 }
 async function solveRecaptcha(page, monitor) {
@@ -1144,7 +1176,7 @@ async function solveRecaptcha(page, monitor) {
       return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge info lost" };
     }
     const target = extractTarget(challengeInfo.prompt);
-    console.log(`[captcha-solver] Round ${rounds}: looking for "${target}" in ${challengeInfo.rows}x${challengeInfo.cols} grid`);
+    log3.info(`Round ${rounds}: looking for "${target}" in ${challengeInfo.rows}x${challengeInfo.cols} grid`);
     const [fullGridImage, tileImages] = await Promise.all([
       screenshotFullGrid(page, challengeInfo),
       screenshotTiles(page, challengeInfo)
@@ -1154,7 +1186,7 @@ async function solveRecaptcha(page, monitor) {
     }
     monitor?.reportActivity();
     const matchingIndices = await classifyTiles(client, fullGridImage, tileImages, target, challengeInfo.rows, challengeInfo.cols);
-    console.log(`[captcha-solver] Round ${rounds}: matched tiles [${matchingIndices.join(", ")}]`);
+    log3.info(`Round ${rounds}: matched tiles [${matchingIndices.join(", ")}]`);
     monitor?.reportActivity();
     if (matchingIndices.length > 0) {
       await clickChallengeTiles(page, matchingIndices);
@@ -1173,7 +1205,7 @@ async function solveRecaptcha(page, monitor) {
               monitor?.reportActivity();
               const newMatches = await classifyTiles(client, newFullGrid, replacedTiles, target, newInfo.rows, newInfo.cols);
               if (newMatches.length > 0) {
-                console.log(`[captcha-solver] Round ${rounds}: dynamic tiles matched [${newMatches.join(", ")}]`);
+                log3.info(`Round ${rounds}: dynamic tiles matched [${newMatches.join(", ")}]`);
                 await clickChallengeTiles(page, newMatches);
                 await new Promise((r) => setTimeout(r, TILE_SETTLE_MS));
               }
@@ -1185,7 +1217,7 @@ async function solveRecaptcha(page, monitor) {
     const verifyResult = await clickChallengeVerify(page);
     monitor?.reportActivity();
     if (verifyResult.solved) {
-      console.log(`[captcha-solver] Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
+      log3.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
       const submitted = await submitForm(page);
       return { solved: true, rounds, durationMs: Date.now() - startTime, submitted };
     }
@@ -1193,15 +1225,17 @@ async function solveRecaptcha(page, monitor) {
     if (!challengeInfo) {
       return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge disappeared after verify" };
     }
-    console.log(`[captcha-solver] Round ${rounds}: not solved, new challenge appeared`);
+    log3.info(`Round ${rounds}: not solved, new challenge appeared`);
   }
   return { solved: false, rounds, durationMs: Date.now() - startTime, reason: `Max rounds (${MAX_ROUNDS}) exceeded` };
 }
-var import_sdk, MAX_ROUNDS = 8, MAX_DURATION_MS = 45000, TILE_SETTLE_MS, MODEL = "claude-haiku-4-5-20251001";
+var import_sdk, log3, MAX_ROUNDS = 8, MAX_DURATION_MS = 45000, TILE_SETTLE_MS, MODEL = "claude-haiku-4-5-20251001";
 var init_recaptcha = __esm(() => {
   init_humanize();
   init_constants();
+  init_logger();
   import_sdk = __toESM(require("@anthropic-ai/sdk"));
+  log3 = createLogger("captcha-solver");
   TILE_SETTLE_MS = TIMING.TILE_SETTLE;
 });
 
@@ -1300,7 +1334,7 @@ async function getChallengeInfo2(page) {
     return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
   }).catch(() => null);
   const verifyButton = verifyBtnBox ? { x: Math.round(frameBox.x + verifyBtnBox.x), y: Math.round(frameBox.y + verifyBtnBox.y) } : { x: Math.round(frameBox.x + frameBox.width - 55), y: Math.round(frameBox.y + frameBox.height - 30) };
-  console.log(`[hcaptcha-solver] Round challenge: "${info.prompt}" (${info.rows}x${info.cols})`);
+  log4.info(`Round challenge: "${info.prompt}" (${info.rows}x${info.cols})`);
   return { prompt: info.prompt, rows: info.rows, cols: info.cols, tiles, verifyButton, frameBox };
 }
 async function screenshotChallenge(page, challenge) {
@@ -1316,7 +1350,7 @@ async function screenshotChallenge(page, challenge) {
     }
     return buf.toString("base64");
   } catch (err) {
-    console.error(`[hcaptcha-solver] screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
+    log4.error(`screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -1337,12 +1371,12 @@ async function classifyTiles2(client, screenshotBase64, challenge) {
       }]
     });
     const text = (response.content[0].text ?? "").trim();
-    console.log(`[hcaptcha-solver] classify response: "${text}"`);
+    log4.debug(`classify response: "${text}"`);
     if (text.toLowerCase().startsWith("none"))
       return [];
     return text.split(/[,\s]+/).map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n) && n >= 0 && n < total);
   } catch (err) {
-    console.error(`[hcaptcha-solver] classification failed: ${err instanceof Error ? err.message : String(err)}`);
+    log4.error(`classification failed: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 }
@@ -1369,7 +1403,7 @@ async function solveHCaptcha(page, monitor) {
     return { solved: false, rounds: 0, durationMs: Date.now() - startTime, reason: err instanceof Error ? err.message : String(err) };
   }
   if (solvedOnCheckbox) {
-    console.log("[hcaptcha-solver] Solved on checkbox click (no challenge)");
+    log4.info("Solved on checkbox click (no challenge)");
     return { solved: true, rounds: 0, durationMs: Date.now() - startTime };
   }
   while (rounds < MAX_ROUNDS2) {
@@ -1380,7 +1414,7 @@ async function solveHCaptcha(page, monitor) {
     monitor?.reportActivity();
     const challenge = await getChallengeInfo2(page);
     if (!challenge) {
-      console.log("[hcaptcha-solver] Challenge frame gone — assuming solved");
+      log4.info("Challenge frame gone — assuming solved");
       return { solved: true, rounds, durationMs: Date.now() - startTime };
     }
     const screenshotBase64 = await screenshotChallenge(page, challenge);
@@ -1389,7 +1423,7 @@ async function solveHCaptcha(page, monitor) {
     }
     monitor?.reportActivity();
     const matchingIndices = await classifyTiles2(client, screenshotBase64, challenge);
-    console.log(`[hcaptcha-solver] Round ${rounds}: clicking tiles [${matchingIndices.join(", ")}]`);
+    log4.info(`Round ${rounds}: clicking tiles [${matchingIndices.join(", ")}]`);
     monitor?.reportActivity();
     for (const idx of matchingIndices) {
       const tile = challenge.tiles[idx];
@@ -1402,18 +1436,20 @@ async function solveHCaptcha(page, monitor) {
     const solved = await clickVerify(page, challenge);
     monitor?.reportActivity();
     if (solved) {
-      console.log(`[hcaptcha-solver] Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
+      log4.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
       return { solved: true, rounds, durationMs: Date.now() - startTime };
     }
-    console.log(`[hcaptcha-solver] Round ${rounds}: not solved, retrying`);
+    log4.info(`Round ${rounds}: not solved, retrying`);
     await sleep2(rand2(500, 1000));
   }
   return { solved: false, rounds, durationMs: Date.now() - startTime, reason: `Max rounds (${MAX_ROUNDS2}) exceeded` };
 }
-var import_sdk2, MAX_ROUNDS2 = 8, MAX_DURATION_MS2 = 60000, MODEL2 = "claude-haiku-4-5-20251001";
+var import_sdk2, log4, MAX_ROUNDS2 = 8, MAX_DURATION_MS2 = 60000, MODEL2 = "claude-haiku-4-5-20251001";
 var init_hcaptcha = __esm(() => {
   init_humanize();
+  init_logger();
   import_sdk2 = __toESM(require("@anthropic-ai/sdk"));
+  log4 = createLogger("hcaptcha-solver");
 });
 
 // src/lib/auth/crypto.ts
@@ -1877,7 +1913,9 @@ async function executeAction(page, step, ctx, monitor) {
         const stealthScript = contextStealthScripts.get(page.context()) ?? STEALTH_SCRIPT;
         try {
           await page.evaluate(stealthScript);
-        } catch (_) {}
+        } catch (err) {
+          log5.warn(`stealth injection failed: ${err}`);
+        }
         break;
       case "click":
         await page.click(resolveSelector(step.selector, ctx));
@@ -2021,8 +2059,11 @@ async function executeAction(page, step, ctx, monitor) {
             const title = (f.title || "").toLowerCase();
             return src.includes("hcaptcha.com") || title.includes("hcaptcha") || !!document.querySelector("[data-hcaptcha-widget-id]");
           });
-        }).catch(() => false);
-        console.log(`[solve-captcha] detected: ${isHCaptcha ? "hCaptcha" : "reCAPTCHA"}`);
+        }).catch((err) => {
+          log5.warn(`captcha detection failed: ${err}`);
+          return false;
+        });
+        log5.info(`detected: ${isHCaptcha ? "hCaptcha" : "reCAPTCHA"}`);
         result = isHCaptcha ? await solveHCaptcha(page, monitor) : await solveRecaptcha(page, monitor);
         break;
       }
@@ -2180,6 +2221,7 @@ async function executeAction(page, step, ctx, monitor) {
     };
   }
 }
+var log5;
 var init_actions = __esm(() => {
   init_stealth();
   init_session_manager();
@@ -2190,7 +2232,9 @@ var init_actions = __esm(() => {
   init_screenshot();
   init_snapshot();
   init_annotate();
+  init_logger();
   init_constants();
+  log5 = createLogger("actions");
 });
 
 // src/lib/stale-monitor.ts
@@ -3114,7 +3158,7 @@ function getChromeExecutablePath(installDir) {
   throw new Error(`Unsupported platform: ${platform}`);
 }
 async function downloadChrome(installDir = DEFAULT_INSTALL_DIR) {
-  console.log("[chrome] Downloading Chrome for Testing (first time only)...");
+  log6.info("Downloading Chrome for Testing (first time only)...");
   const res = await fetch(CHROME_VERSIONS_URL);
   if (!res.ok)
     throw new Error(`Failed to fetch Chrome versions: ${res.status}`);
@@ -3128,8 +3172,8 @@ async function downloadChrome(installDir = DEFAULT_INSTALL_DIR) {
     throw new Error(`No Chrome for Testing download for platform: ${platform}`);
   const url = download.url;
   const version = channel.version;
-  console.log(`[chrome] Version ${version} for ${platform}`);
-  console.log(`[chrome] URL: ${url}`);
+  log6.debug(`Version ${version} for ${platform}`);
+  log6.debug(`URL: ${url}`);
   import_fs5.default.mkdirSync(installDir, { recursive: true });
   const zipPath = import_path4.default.join(installDir, "chrome.zip");
   const dlRes = await fetch(url);
@@ -3137,7 +3181,7 @@ async function downloadChrome(installDir = DEFAULT_INSTALL_DIR) {
     throw new Error(`Download failed: ${dlRes.status}`);
   const buf = Buffer.from(await dlRes.arrayBuffer());
   import_fs5.default.writeFileSync(zipPath, buf);
-  console.log(`[chrome] Downloaded ${(buf.length / 1024 / 1024).toFixed(1)}MB`);
+  log6.info(`Downloaded ${(buf.length / 1024 / 1024).toFixed(1)}MB`);
   import_child_process2.execSync(`unzip -o -q "${zipPath}" -d "${installDir}"`, { stdio: "inherit" });
   import_fs5.default.unlinkSync(zipPath);
   const execPath = getChromeExecutablePath(installDir);
@@ -3148,7 +3192,7 @@ async function downloadChrome(installDir = DEFAULT_INSTALL_DIR) {
     import_fs5.default.chmodSync(execPath, 493);
   }
   import_fs5.default.writeFileSync(import_path4.default.join(installDir, "version.json"), JSON.stringify({ version, platform, downloadedAt: new Date().toISOString() }));
-  console.log(`[chrome] Installed at: ${execPath}`);
+  log6.info(`Installed at: ${execPath}`);
   return execPath;
 }
 function findChromeForTesting() {
@@ -3204,21 +3248,23 @@ async function ensureChrome() {
   try {
     return await downloadChrome();
   } catch (err) {
-    console.error(`[chrome] Failed to download Chrome for Testing: ${err instanceof Error ? err.message : String(err)}`);
+    log6.error(`Failed to download Chrome for Testing: ${err instanceof Error ? err.message : String(err)}`);
     const system = findChrome();
     if (system) {
-      console.log(`[chrome] Falling back to system Chrome: ${system}`);
+      log6.warn(`Falling back to system Chrome: ${system}`);
       return system;
     }
     throw new Error("No Chrome found. Download failed and no system Chrome available.");
   }
 }
-var import_fs5, import_path4, import_os2, import_child_process2, CHROME_VERSIONS_URL = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json", DEFAULT_INSTALL_DIR;
+var import_fs5, import_path4, import_os2, import_child_process2, log6, CHROME_VERSIONS_URL = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json", DEFAULT_INSTALL_DIR;
 var init_chrome_downloader = __esm(() => {
+  init_logger();
   import_fs5 = __toESM(require("fs"));
   import_path4 = __toESM(require("path"));
   import_os2 = __toESM(require("os"));
   import_child_process2 = require("child_process");
+  log6 = createLogger("chrome");
   DEFAULT_INSTALL_DIR = import_path4.default.join(import_os2.default.homedir(), ".iframer", "chrome");
 });
 
@@ -3229,7 +3275,7 @@ class BrowserDaemon {
   idleTimeout;
   constructor(idleTimeout = DEFAULT_IDLE_TIMEOUT) {
     this.idleTimeout = idleTimeout;
-    const cleanup = () => this.stopAll().catch(() => {});
+    const cleanup = () => this.stopAll().catch((err) => log7.warn(`cleanup failed: ${err}`));
     process.on("exit", cleanup);
     process.on("SIGINT", () => {
       cleanup();
@@ -3255,7 +3301,7 @@ class BrowserDaemon {
       await this.stopMode(mode);
     }
     const executablePath = await ensureChrome();
-    console.log(`[daemon] Launching Chrome for Testing in ${mode} mode: ${executablePath}`);
+    log7.info(`Launching Chrome for Testing in ${mode} mode: ${executablePath}`);
     const userDataDir = import_path5.default.join(import_os3.default.homedir(), ".iframer", "chrome-profile", mode);
     import_fs6.default.mkdirSync(userDataDir, { recursive: true });
     const browser = await import_playwright_core.chromium.launch({
@@ -3279,7 +3325,7 @@ class BrowserDaemon {
     };
     this.instances.set(mode, instance);
     this.resetIdleTimer(mode);
-    console.log(`[daemon] Chrome ${mode} ready`);
+    log7.info(`Chrome ${mode} ready`);
     return { browser, context, page };
   }
   isRunning(mode) {
@@ -3300,7 +3346,7 @@ class BrowserDaemon {
     if (timer)
       clearTimeout(timer);
     this.idleTimers.delete(mode);
-    console.log(`[daemon] Stopping Chrome ${mode}...`);
+    log7.info(`Stopping Chrome ${mode}...`);
     try {
       await instance.context.close();
     } catch {}
@@ -3318,18 +3364,20 @@ class BrowserDaemon {
     if (existing)
       clearTimeout(existing);
     this.idleTimers.set(mode, setTimeout(() => {
-      console.log(`[daemon] Idle timeout for ${mode}, stopping...`);
+      log7.info(`Idle timeout for ${mode}, stopping...`);
       this.stopMode(mode);
     }, this.idleTimeout));
   }
 }
-var import_playwright_core, import_os3, import_path5, import_fs6, DEFAULT_IDLE_TIMEOUT;
+var import_playwright_core, import_os3, import_path5, import_fs6, log7, DEFAULT_IDLE_TIMEOUT;
 var init_daemon = __esm(() => {
   init_chrome_downloader();
+  init_logger();
   import_playwright_core = require("playwright-core");
   import_os3 = __toESM(require("os"));
   import_path5 = __toESM(require("path"));
   import_fs6 = __toESM(require("fs"));
+  log7 = createLogger("daemon");
   DEFAULT_IDLE_TIMEOUT = 5 * 60 * 1000;
 });
 
@@ -3427,15 +3475,17 @@ class DomainModeStore {
       import_fs7.default.mkdirSync(import_path6.default.dirname(this.filePath), { recursive: true });
       import_fs7.default.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2));
     } catch (err) {
-      console.error("[domain-modes] Failed to save:", err);
+      log8.error("Failed to save:", err);
     }
   }
 }
-var import_fs7, import_path6, import_os4, DEFAULT_FILE, TTL_DAYS = 14, ESCALATION_LADDER;
+var import_fs7, import_path6, import_os4, log8, DEFAULT_FILE, TTL_DAYS = 14, ESCALATION_LADDER;
 var init_domain_modes = __esm(() => {
+  init_logger();
   import_fs7 = __toESM(require("fs"));
   import_path6 = __toESM(require("path"));
   import_os4 = __toESM(require("os"));
+  log8 = createLogger("domain-modes");
   DEFAULT_FILE = import_path6.default.join(import_os4.default.homedir(), ".iframer", "domain-modes.json");
   ESCALATION_LADDER = ["headless", "docker-headful", "binary-headful"];
 });
@@ -3459,7 +3509,10 @@ async function detectBlock(page) {
     }
     const hasCfChallenge = await page.evaluate(() => {
       return !!document.querySelector('iframe[src*="challenges.cloudflare.com"]');
-    }).catch(() => false);
+    }).catch((err) => {
+      log9.warn(`CF challenge check failed, assuming blocked: ${err}`);
+      return true;
+    });
     if (hasCfChallenge) {
       return { blocked: true, reason: "cloudflare-turnstile" };
     }
@@ -3475,7 +3528,10 @@ async function detectBlock(page) {
     if (bodyText.trim().length < THRESHOLDS.MIN_BODY_TEXT) {
       const hasCaptchaIframe = await page.evaluate(() => {
         return !!(document.querySelector('iframe[src*="recaptcha"]') || document.querySelector('iframe[src*="hcaptcha"]'));
-      }).catch(() => false);
+      }).catch((err) => {
+        log9.warn(`captcha iframe check failed, assuming blocked: ${err}`);
+        return true;
+      });
       if (hasCaptchaIframe) {
         return { blocked: true, reason: "captcha-wall" };
       }
@@ -3485,12 +3541,16 @@ async function detectBlock(page) {
     }
     if (!url.includes("about:blank") && bodyText.trim().length < 20 && title.length < 5) {}
     return { blocked: false };
-  } catch {
-    return { blocked: false };
+  } catch (err) {
+    log9.warn(`page evaluation failed, assuming blocked: ${err}`);
+    return { blocked: true, reason: "evaluation-failed" };
   }
 }
+var log9;
 var init_block_detection = __esm(() => {
   init_constants();
+  init_logger();
+  log9 = createLogger("block-detection");
 });
 
 // src/lib/browser/cdp-launcher.ts
@@ -3505,8 +3565,11 @@ function checkModeAvailability() {
     binaryHeadful: hasDisplay()
   };
 }
+var log10;
 var init_cdp_launcher = __esm(() => {
   init_chrome_downloader();
+  init_logger();
+  log10 = createLogger("cdp-launcher");
 });
 
 // src/lib/iframer.ts
@@ -3713,7 +3776,7 @@ class Iframer {
         this.domainModes.recordFailure(domain, failedMode, result.error?.message || "blocked");
       const nextMode = this.domainModes.getNextMode(failedMode, availableModes);
       if (nextMode) {
-        console.log(`[iframer] Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
+        log11.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
         if (failedMode !== "docker-headful") {
           await this.daemon.stopMode(failedMode);
         }
@@ -3726,7 +3789,7 @@ class Iframer {
           this.domainModes.recordFailure(domain, nextMode, result.error?.message || "blocked");
           const thirdMode = this.domainModes.getNextMode(nextMode, availableModes);
           if (thirdMode) {
-            console.log(`[iframer] Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
+            log11.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
             if (nextMode !== "docker-headful") {
               await this.daemon.stopMode(nextMode);
             }
@@ -3949,7 +4012,7 @@ class Iframer {
     }
   }
 }
-var import_path7, import_os5, DEFAULT_SCREENSHOT_DIR, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3 = 20000;
+var import_path7, import_os5, log11, DEFAULT_SCREENSHOT_DIR, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3 = 20000;
 var init_iframer = __esm(() => {
   init_pipeline();
   init_session_manager();
@@ -3964,18 +4027,22 @@ var init_iframer = __esm(() => {
   init_block_detection();
   init_cdp_launcher();
   init_constants();
+  init_logger();
   import_path7 = __toESM(require("path"));
   import_os5 = __toESM(require("os"));
+  log11 = createLogger("iframer");
   DEFAULT_SCREENSHOT_DIR = import_path7.default.join("/Users/eduardoverona/tools/iframer-toolkit/src/lib", "../../.screenshots");
   DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
 });
 
 // src/mcp/server.ts
+init_logger();
 var import_mcp = require("@modelcontextprotocol/sdk/server/mcp.js");
 var import_stdio = require("@modelcontextprotocol/sdk/server/stdio.js");
 var import_zod = require("zod");
 var import_path8 = __toESM(require("path"));
 var import_os6 = __toESM(require("os"));
+var log12 = createLogger("mcp");
 function getErrorMessage3(err) {
   return err instanceof Error ? err.message : String(err);
 }
@@ -4148,8 +4215,8 @@ server.tool("status", `Get the full state of iframer in one call. Call this firs
     status.modes = await detectAvailableModes();
     try {
       const health = await fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3000) });
-      const data = await health.json();
-      status.api = data.ok === true;
+      const healthCheck = await health.json();
+      status.api = healthCheck.ok === true;
     } catch {
       status.api = false;
     }
@@ -4195,16 +4262,16 @@ server.tool("browse", `Fetch a web page with a headless browser. Use for pages t
   try {
     const dockerRunning = await isDockerRunning();
     const useLocal = IFRAMER_MODE === "docker" ? false : !dockerRunning;
-    let data;
+    let fetchResult;
     if (useLocal) {
       const iframer = await getIframer();
-      data = await iframer.fetch(LOCAL_USER, LOCAL_TOKEN, params);
+      fetchResult = await iframer.fetch(LOCAL_USER, LOCAL_TOKEN, params);
     } else {
-      data = await apiPost("/fetch", params);
+      fetchResult = await apiPost("/fetch", params);
     }
-    if (!data.ok)
-      return err(`Error: ${data.error}`);
-    const { html, ...rest } = data;
+    if (!fetchResult.ok)
+      return err(`Error: ${fetchResult.error}`);
+    const { html, ...rest } = fetchResult;
     const text = html ? JSON.stringify(rest, null, 2) + `
 
 --- HTML ---
@@ -4308,7 +4375,7 @@ Auto-escalation is built in: if blocked, iframer automatically retries with stro
       for (const nextMode of escalation) {
         if (nextMode === "docker-headful" && !dockerRunning)
           continue;
-        console.log(`[mcp] Auto-escalating to ${nextMode}`);
+        log12.info(`Auto-escalating to ${nextMode}`);
         data = await runWithMode(nextMode);
         if (data.ok)
           break;
@@ -4422,22 +4489,22 @@ server.tool("session", `Manage the browser session lifecycle. Use action=stop wh
     if (action === "stop") {
       if (useLocal) {
         const iframer = await getIframer();
-        const data2 = await iframer.stopSession(LOCAL_USER, LOCAL_TOKEN);
-        return { content: [{ type: "text", text: `Session stopped. State saved: ${data2.sessionSaved}` }] };
+        const stopResult2 = await iframer.stopSession(LOCAL_USER, LOCAL_TOKEN);
+        return { content: [{ type: "text", text: `Session stopped. State saved: ${stopResult2.sessionSaved}` }] };
       }
-      const data = await apiPost("/interactive/stop");
-      if (!data.ok)
-        return err(`Error: ${data.error}`);
-      return { content: [{ type: "text", text: `Session stopped. State saved: ${data.sessionSaved}` }] };
+      const stopResult = await apiPost("/interactive/stop");
+      if (!stopResult.ok)
+        return err(`Error: ${stopResult.error}`);
+      return { content: [{ type: "text", text: `Session stopped. State saved: ${stopResult.sessionSaved}` }] };
     } else {
       if (useLocal) {
         const iframer = await getIframer();
         await iframer.clearSession(LOCAL_USER);
         return { content: [{ type: "text", text: "Session data cleared." }] };
       }
-      const data = await apiDelete("/session");
-      if (!data.ok)
-        return err(`Error: ${data.error}`);
+      const clearResult = await apiDelete("/session");
+      if (!clearResult.ok)
+        return err(`Error: ${clearResult.error}`);
       return { content: [{ type: "text", text: "Session data cleared." }] };
     }
   } catch (e) {
@@ -4461,10 +4528,10 @@ server.tool("credentials", `Manage login credentials securely. When login is nee
         const iframer = await getIframer();
         domains = await iframer.listCredentials(LOCAL_USER);
       } else {
-        const data = await apiGet("/credentials");
-        if (!data.ok)
-          return err(`Error: ${data.error}`);
-        domains = data.domains || [];
+        const credList = await apiGet("/credentials");
+        if (!credList.ok)
+          return err(`Error: ${credList.error}`);
+        domains = credList.domains || [];
       }
       if (!domains.length) {
         return { content: [{ type: "text", text: "No credentials stored. Call this tool again with action=store and the domain to prompt the user for credentials now." }] };
@@ -4497,9 +4564,9 @@ ${domains.map((d) => `  - ${d}`).join(`
         const iframer = await getIframer();
         await iframer.storeCredential(LOCAL_USER, LOCAL_TOKEN, { domain, username, password, totp_secret: totp_secret || undefined });
       } else {
-        const data = await apiPost("/credentials", { domain, username, password, totp_secret: totp_secret || undefined });
-        if (!data.ok)
-          return err(`Error: ${data.error}`);
+        const storeResult = await apiPost("/credentials", { domain, username, password, totp_secret: totp_secret || undefined });
+        if (!storeResult.ok)
+          return err(`Error: ${storeResult.error}`);
       }
       return { content: [{ type: "text", text: `Credentials stored for ${domain}.` }] };
     }
@@ -4509,14 +4576,14 @@ ${domains.map((d) => `  - ${d}`).join(`
       if (useLocal) {
         return { content: [{ type: "text", text: `Use a login step in "execute" to log in with stored credentials for ${domain}. Example: { "type": "login", "domain": "${domain}" }` }] };
       }
-      const data = await apiPost("/credentials/login", { domain, usernameSelector, passwordSelector, submitSelector, totpSelector });
-      if (!data.ok)
-        return err(`Error: ${data.error}`);
-      const lines = [`Login attempted for ${domain}`, `URL: ${data.url}`, `Title: ${data.title}`];
-      if (data.totpGenerated)
+      const loginResult = await apiPost("/credentials/login", { domain, usernameSelector, passwordSelector, submitSelector, totpSelector });
+      if (!loginResult.ok)
+        return err(`Error: ${loginResult.error}`);
+      const lines = [`Login attempted for ${domain}`, `URL: ${loginResult.url}`, `Title: ${loginResult.title}`];
+      if (loginResult.totpGenerated)
         lines.push("TOTP code generated and entered automatically.");
-      if (data.screenshotUrl)
-        lines.push(`Screenshot: ${data.screenshotUrl}`);
+      if (loginResult.screenshotUrl)
+        lines.push(`Screenshot: ${loginResult.screenshotUrl}`);
       return { content: [{ type: "text", text: lines.join(`
 `) }] };
     }
