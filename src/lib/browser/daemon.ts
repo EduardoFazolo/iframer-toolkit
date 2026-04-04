@@ -2,6 +2,9 @@ import { chromium } from "playwright-core";
 import type { Browser, BrowserContext, Page } from "patchright";
 import { ensureChrome } from "./chrome-downloader";
 import type { BrowserMode } from "../types";
+import { createLogger } from "../logger";
+
+const log = createLogger("daemon");
 import os from "os";
 import path from "path";
 import fs from "fs";
@@ -24,7 +27,7 @@ export class BrowserDaemon {
   constructor(idleTimeout = DEFAULT_IDLE_TIMEOUT) {
     this.idleTimeout = idleTimeout;
 
-    const cleanup = () => this.stopAll().catch(() => {});
+    const cleanup = () => this.stopAll().catch((err) => log.warn(`cleanup failed: ${err}`));
     process.on("exit", cleanup);
     process.on("SIGINT", () => { cleanup(); process.exit(0); });
     process.on("SIGTERM", () => { cleanup(); process.exit(0); });
@@ -50,7 +53,7 @@ export class BrowserDaemon {
 
     // Ensure Chrome for Testing is available
     const executablePath = await ensureChrome();
-    console.log(`[daemon] Launching Chrome for Testing in ${mode} mode: ${executablePath}`);
+    log.info(`Launching Chrome for Testing in ${mode} mode: ${executablePath}`);
 
     // Use a dedicated profile dir to avoid conflicts with user's Chrome
     const userDataDir = path.join(os.homedir(), ".iframer", "chrome-profile", mode);
@@ -82,7 +85,7 @@ export class BrowserDaemon {
     this.instances.set(mode, instance);
     this.resetIdleTimer(mode);
 
-    console.log(`[daemon] Chrome ${mode} ready`);
+    log.info(`Chrome ${mode} ready`);
     return { browser, context, page };
   }
 
@@ -104,7 +107,7 @@ export class BrowserDaemon {
     if (timer) clearTimeout(timer);
     this.idleTimers.delete(mode);
 
-    console.log(`[daemon] Stopping Chrome ${mode}...`);
+    log.info(`Stopping Chrome ${mode}...`);
 
     try { await instance.context.close(); } catch {}
     try { await instance.browser.close(); } catch {}
@@ -124,7 +127,7 @@ export class BrowserDaemon {
     this.idleTimers.set(
       mode,
       setTimeout(() => {
-        console.log(`[daemon] Idle timeout for ${mode}, stopping...`);
+        log.info(`Idle timeout for ${mode}, stopping...`);
         this.stopMode(mode);
       }, this.idleTimeout)
     );

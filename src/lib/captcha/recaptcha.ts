@@ -9,10 +9,12 @@ import {
   type ChallengeInfo,
 } from "../browser/humanize";
 import type { StaleStateMonitor } from "../stale-monitor";
+import { TIMING, CAPTCHA_GRID } from "../constants";
+import { createLogger } from "../logger";
 
+const log = createLogger("captcha-solver");
 const MAX_ROUNDS = 8;
 const MAX_DURATION_MS = 45_000;
-import { TIMING, CAPTCHA_GRID } from "../constants";
 const TILE_SETTLE_MS = TIMING.TILE_SETTLE;
 const MODEL = "claude-haiku-4-5-20251001";
 
@@ -66,7 +68,7 @@ async function screenshotFullGrid(
     const buf = await page.screenshot({ type: "jpeg", quality: 85, clip: gridClip });
     return buf.toString("base64");
   } catch (err: unknown) {
-    console.error(`[captcha-solver] full grid screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.error(`full grid screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -146,10 +148,10 @@ Does this tile contain a ${target}? Reply ONLY "yes" or "no".`,
 
         const answer = ((response.content[0] as { type: string; text?: string }).text ?? "").toLowerCase().trim();
         const match = answer.startsWith("yes");
-        if (match) console.log(`[captcha-solver] tile ${tile.index} (r${tileRow}c${tileCol}): YES`);
+        if (match) log.debug(`tile ${tile.index} (r${tileRow}c${tileCol}): YES`);
         return { index: tile.index, match };
       } catch (err: unknown) {
-        console.error(`[captcha-solver] tile ${tile.index} classification failed: ${err instanceof Error ? err.message : String(err)}`);
+        log.error(`tile ${tile.index} classification failed: ${err instanceof Error ? err.message : String(err)}`);
         return { index: tile.index, match: false };
       }
     })
@@ -175,7 +177,7 @@ async function submitForm(page: Page): Promise<boolean> {
       if (el) {
         const visible = await el.isVisible();
         if (visible) {
-          console.log(`[captcha-solver] Submitting form via: ${selector}`);
+          log.info(`Submitting form via: ${selector}`);
           await new Promise((r) => setTimeout(r, 500));
           await humanClick(page, selector);
           await new Promise((r) => setTimeout(r, 2000));
@@ -185,7 +187,7 @@ async function submitForm(page: Page): Promise<boolean> {
     } catch {}
   }
 
-  console.log("[captcha-solver] No submit button found — skipping form submission");
+  log.info("No submit button found — skipping form submission");
   return false;
 }
 
@@ -217,7 +219,7 @@ export async function solveRecaptcha(page: Page, monitor?: StaleStateMonitor): P
       return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge info lost" };
     }
     const target = extractTarget(challengeInfo.prompt);
-    console.log(`[captcha-solver] Round ${rounds}: looking for "${target}" in ${challengeInfo.rows}x${challengeInfo.cols} grid`);
+    log.info(`Round ${rounds}: looking for "${target}" in ${challengeInfo.rows}x${challengeInfo.cols} grid`);
 
     const [fullGridImage, tileImages] = await Promise.all([
       screenshotFullGrid(page, challengeInfo),
@@ -234,7 +236,7 @@ export async function solveRecaptcha(page: Page, monitor?: StaleStateMonitor): P
       challengeInfo.rows, challengeInfo.cols
     );
 
-    console.log(`[captcha-solver] Round ${rounds}: matched tiles [${matchingIndices.join(", ")}]`);
+    log.info(`Round ${rounds}: matched tiles [${matchingIndices.join(", ")}]`);
     monitor?.reportActivity();
 
     if (matchingIndices.length > 0) {
@@ -260,7 +262,7 @@ export async function solveRecaptcha(page: Page, monitor?: StaleStateMonitor): P
                 newInfo.rows, newInfo.cols
               );
               if (newMatches.length > 0) {
-                console.log(`[captcha-solver] Round ${rounds}: dynamic tiles matched [${newMatches.join(", ")}]`);
+                log.info(`Round ${rounds}: dynamic tiles matched [${newMatches.join(", ")}]`);
                 await clickChallengeTiles(page, newMatches);
                 await new Promise((r) => setTimeout(r, TILE_SETTLE_MS));
               }
@@ -273,7 +275,7 @@ export async function solveRecaptcha(page: Page, monitor?: StaleStateMonitor): P
     const verifyResult = await clickChallengeVerify(page);
     monitor?.reportActivity();
     if (verifyResult.solved) {
-      console.log(`[captcha-solver] Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
+      log.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
       const submitted = await submitForm(page);
       return { solved: true, rounds, durationMs: Date.now() - startTime, submitted };
     }
@@ -283,7 +285,7 @@ export async function solveRecaptcha(page: Page, monitor?: StaleStateMonitor): P
       return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge disappeared after verify" };
     }
 
-    console.log(`[captcha-solver] Round ${rounds}: not solved, new challenge appeared`);
+    log.info(`Round ${rounds}: not solved, new challenge appeared`);
   }
 
   return { solved: false, rounds, durationMs: Date.now() - startTime, reason: `Max rounds (${MAX_ROUNDS}) exceeded` };
