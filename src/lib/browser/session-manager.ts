@@ -2,7 +2,9 @@ import { spawn, type ChildProcess } from "child_process";
 import fs from "fs";
 import { launchHeadful } from "./launcher";
 import { stealthContextOptions, buildStealthScript } from "./stealth";
-import { generateWindowsFingerprint } from "./fingerprint";
+import { createLogger } from "../logger";
+
+const log = createLogger("session");import { generateWindowsFingerprint } from "./fingerprint";
 import type { Browser, BrowserContext, Page } from "patchright";
 
 // Map from context → per-session stealth script (fingerprint-parameterized)
@@ -100,7 +102,7 @@ export async function startSession(userId: string): Promise<Session> {
   const stealthScript = buildStealthScript(fingerprint);
   contextStealthScripts.set(context, stealthScript);
   const page = await context.newPage();
-  console.log(`[session] fingerprint: ${fingerprint.userAgent.slice(0, 60)}... DPR=${fingerprint.deviceScaleFactor} screen=${fingerprint.screenWidth}x${fingerprint.screenHeight}`);
+  log.debug(`fingerprint: ${fingerprint.userAgent.slice(0, 60)}... DPR=${fingerprint.deviceScaleFactor} screen=${fingerprint.screenWidth}x${fingerprint.screenHeight}`);
 
   const session: Session = {
     displayNum,
