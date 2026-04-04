@@ -14,7 +14,7 @@ function findChromeExecutable(): string | undefined {
   return undefined;
 }
 
-const BROWSER_TYPES: Record<string, typeof chromium> = { chromium, firefox: firefox as any, webkit: webkit as any };
+const BROWSER_TYPES: Record<string, typeof chromium> = { chromium, firefox: firefox as unknown as typeof chromium, webkit: webkit as unknown as typeof chromium };
 export const BROWSER_ORDER = ["chromium", "firefox", "webkit"];
 
 const browsers: Record<string, Browser> = {};
@@ -44,8 +44,8 @@ export async function getBrowserWithFallback(preferred?: string): Promise<{ brow
   for (const name of order) {
     try {
       return { browser: await getBrowser(name), name };
-    } catch (err: any) {
-      errors.push(`${name}: ${err.message}`);
+    } catch (err: unknown) {
+      errors.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -71,7 +71,7 @@ export async function launchHeadful(displayNum: number): Promise<Browser> {
 
   if (hasExtensions) args.push(`--load-extension=${UBLOCK_PATH}`);
 
-  const launchOpts: Record<string, any> = {
+  const launchOpts: Record<string, unknown> = {
     headless: false,
     args,
     env: { ...process.env, DISPLAY: `:${displayNum}` },
@@ -84,8 +84,8 @@ export async function launchHeadful(displayNum: number): Promise<Browser> {
 
   // Use real Chrome (amd64) with playwright; fall back to patchright's patched Chromium (arm64)
   if (hasRealChrome) {
-    return realChromium.launch(launchOpts) as any;
+    return realChromium.launch(launchOpts as Parameters<typeof realChromium.launch>[0]) as unknown as Browser;
   } else {
-    return chromium.launch(launchOpts) as any;
+    return chromium.launch(launchOpts as Parameters<typeof chromium.launch>[0]);
   }
 }

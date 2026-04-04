@@ -156,13 +156,13 @@ async function screenshotChallenge(page: Page, challenge: HCaptchaChallenge): Pr
     const challengeEl = await page.$('iframe[title="hCaptcha challenge"], iframe[title*="hcaptcha challenge" i]').catch(() => null);
     let buf: Buffer;
     if (challengeEl) {
-      buf = await challengeEl.screenshot({ type: "jpeg", quality: 85 }) as unknown as Buffer;
+      buf = Buffer.from(await challengeEl.screenshot({ type: "jpeg", quality: 85 }));
     } else {
       buf = await page.screenshot({ type: "jpeg", quality: 85, clip: frameBox });
     }
     return buf.toString("base64");
-  } catch (err: any) {
-    console.error(`[hcaptcha-solver] screenshot failed: ${err.message}`);
+  } catch (err: unknown) {
+    console.error(`[hcaptcha-solver] screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -189,7 +189,7 @@ async function classifyTiles(
       }],
     });
 
-    const text = (response.content[0] as any).text?.trim() || "";
+    const text = ((response.content[0] as { type: string; text?: string }).text ?? "").trim();
     console.log(`[hcaptcha-solver] classify response: "${text}"`);
 
     if (text.toLowerCase().startsWith("none")) return [];
@@ -197,8 +197,8 @@ async function classifyTiles(
       .split(/[,\s]+/)
       .map((s: string) => parseInt(s.trim(), 10))
       .filter((n: number) => !isNaN(n) && n >= 0 && n < total);
-  } catch (err: any) {
-    console.error(`[hcaptcha-solver] classification failed: ${err.message}`);
+  } catch (err: unknown) {
+    console.error(`[hcaptcha-solver] classification failed: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 }
@@ -230,8 +230,8 @@ export async function solveHCaptcha(page: Page, monitor?: StaleStateMonitor): Pr
   let solvedOnCheckbox = false;
   try {
     solvedOnCheckbox = await clickCheckbox(page);
-  } catch (err: any) {
-    return { solved: false, rounds: 0, durationMs: Date.now() - startTime, reason: err.message };
+  } catch (err: unknown) {
+    return { solved: false, rounds: 0, durationMs: Date.now() - startTime, reason: err instanceof Error ? err.message : String(err) };
   }
 
   if (solvedOnCheckbox) {

@@ -1,7 +1,8 @@
 import { FingerprintGenerator } from "fingerprint-generator";
+import { CHROME_MIN_VERSION, SCREEN_DEFAULTS } from "../constants";
 
 const generator = new FingerprintGenerator({
-  browsers: [{ name: "chrome", minVersion: 130 }],
+  browsers: [{ name: "chrome", minVersion: CHROME_MIN_VERSION }],
   operatingSystems: ["windows"],
   devices: ["desktop"],
   locales: ["en-US"],
@@ -34,8 +35,8 @@ export function generateWindowsFingerprint(): BrowserFingerprint {
   const dprOptions = [1.25, 1.5, 1.25, 1.5, 1.0]; // weighted toward 1.25
   const dpr = dprOptions[Math.floor(Math.random() * dprOptions.length)];
 
-  const w = (screen.width as number) || 1920;
-  const h = (screen.height as number) || 1080;
+  const w = (screen.width as number) || SCREEN_DEFAULTS.WIDTH;
+  const h = (screen.height as number) || SCREEN_DEFAULTS.HEIGHT;
 
   return {
     userAgent: nav.userAgent as string,
@@ -48,6 +49,6 @@ export function generateWindowsFingerprint(): BrowserFingerprint {
     hardwareConcurrency: (nav.hardwareConcurrency as number) || 8,
     deviceMemory: (nav.deviceMemory as number) || 8,
     languages: (nav.languages as string[]) || ["en-US", "en"],
-    uaData: nav.userAgentData as any,
+    uaData: nav.userAgentData as BrowserFingerprint["uaData"],
   };
 }

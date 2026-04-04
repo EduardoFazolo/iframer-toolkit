@@ -57,7 +57,7 @@ export class BrowserDaemon {
     fs.mkdirSync(userDataDir, { recursive: true });
 
     // Launch via Playwright with Chrome for Testing executable
-    const browser = await (chromium as any).launch({
+    const browser = await chromium.launch({
       executablePath,
       headless: mode === "headless",
       args: [
