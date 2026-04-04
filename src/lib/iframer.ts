@@ -1,5 +1,6 @@
 import path from "path";
 import os from "os";
+import type { Browser, Page } from "patchright";
 import type {
   IframerConfig,
   Pipeline,
@@ -28,6 +29,12 @@ import { BrowserDaemon } from "./browser/daemon";
 import { DomainModeStore } from "./domain-modes";
 import { detectBlock } from "./block-detection";
 import { checkModeAvailability } from "./browser/cdp-launcher";
+import { TIMEOUTS, TIMING } from "./constants";
+import type { SessionData } from "./session/persistence";
+
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
 const DEFAULT_SCREENSHOT_DIR = path.join(import.meta.dir, "../../.screenshots");
 const DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
@@ -113,10 +120,10 @@ export class Iframer {
 
     const useSession = !sessionless && !!userId && !!token;
     const startedAt = Date.now();
-    let context: any;
+    let context: Awaited<ReturnType<Browser["newContext"]>> | null = null;
 
     try {
-      let sessionData: any = null;
+      let sessionData: SessionData | null = null;
       let encryptionKey: Buffer | null = null;
 
       if (useSession) {
@@ -134,26 +141,28 @@ export class Iframer {
 
       const page = await context.newPage();
       await applyStealthToPage(page);
-      await page.goto(url, { waitUntil: waitUntil as any, timeout: 60_000 });
+      await page.goto(url, { waitUntil: (waitUntil || "domcontentloaded") as "load" | "domcontentloaded" | "networkidle" | "commit", timeout: TIMEOUTS.NAVIGATION });
 
       if (sessionData) await injectStorage(page, sessionData);
-      if (waitForSelector) await page.waitForSelector(waitForSelector, { timeout: 10_000 });
+      if (waitForSelector) await page.waitForSelector(waitForSelector, { timeout: TIMEOUTS.SELECTOR_WAIT });
 
       for (const action of actions) {
-        if (action.type === "click") await page.click((action as any).selector);
-        else if (action.type === "fill") await page.fill((action as any).selector, (action as any).value);
-        else if (action.type === "wait") await page.waitForTimeout((action as any).ms);
-        else if (action.type === "scroll") await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-        else if (action.type === "human-click") await humanClick(page, (action as any).selector);
-        else if (action.type === "human-type") await humanType(page, (action as any).selector, (action as any).value);
-        else if (action.type === "recaptcha-click") await clickRecaptchaCheckbox(page);
-        else if (action.type === "recaptcha-select") await clickChallengeTiles(page, (action as any).tiles);
-        else if (action.type === "recaptcha-verify") await clickChallengeVerify(page);
+        switch (action.type) {
+          case "click": await page.click(action.selector!); break;
+          case "fill": await page.fill(action.selector!, action.value!); break;
+          case "wait": await page.waitForTimeout(action.ms!); break;
+          case "scroll": await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)); break;
+          case "human-click": await humanClick(page, action.selector!); break;
+          case "human-type": await humanType(page, action.selector!, action.value!); break;
+          case "recaptcha-click": await clickRecaptchaCheckbox(page); break;
+          case "recaptcha-select": await clickChallengeTiles(page, (action as { tiles: number[] }).tiles); break;
+          case "recaptcha-verify": await clickChallengeVerify(page); break;
+        }
       }
 
       const finalUrl = page.url();
       const html = returnHtml ? await page.content() : undefined;
-      const result = extract ? await page.evaluate(extract as any) : undefined;
+      const result = extract ? await page.evaluate(extract) : undefined;
 
       if (useSession) {
         const updatedSession = await extractSession(context, page);
@@ -162,8 +171,8 @@ export class Iframer {
       }
 
       return { ok: true, browser: browserName, url: finalUrl, html, result, durationMs: Date.now() - startedAt };
-    } catch (err: any) {
-      return { ok: false, browser: "unknown", url, error: err.message, durationMs: Date.now() - startedAt };
+    } catch (err: unknown) {
+      return { ok: false, browser: "unknown", url, error: getErrorMessage(err), durationMs: Date.now() - startedAt };
     } finally {
       if (context) await context.close();
     }
@@ -185,14 +194,14 @@ export class Iframer {
 
     const encryptionKey = await deriveKey(token);
     const blob = await this.store.getSession(userId);
-    let sessionData: any = null;
+    let sessionData: SessionData | null = null;
     if (blob && blob.length > 0) {
-      sessionData = JSON.parse(decrypt(blob, encryptionKey));
-      await injectCookies(session.context, sessionData);
+      sessionData = JSON.parse(decrypt(blob, encryptionKey)) as SessionData;
+      if (sessionData) await injectCookies(session.context, sessionData);
     }
 
     if (options.url) {
-      await session.page.goto(options.url, { waitUntil: "domcontentloaded", timeout: 60_000 });
+      await session.page.goto(options.url, { waitUntil: "domcontentloaded", timeout: TIMEOUTS.NAVIGATION });
       if (sessionData) await injectStorage(session.page, sessionData);
     }
 
@@ -230,7 +239,7 @@ export class Iframer {
     const autoEscalate = opts.autoEscalate !== false;
 
     // Extract domain from first navigate step for mode memory
-    const firstNav = (pipeline.steps as any[]).find(s => s.type === "navigate");
+    const firstNav = pipeline.steps.find(s => s.type === "navigate");
     const domain = firstNav ? new URL(firstNav.url).hostname : null;
 
     // Determine available modes
@@ -307,7 +316,7 @@ export class Iframer {
   private async executeDocker(userId: string, token: string, pipeline: Pipeline): Promise<PipelineResult> {
     let session = sessionManager.getSession(userId);
     if (!session) {
-      const firstNav = (pipeline.steps as any[]).find(s => s.type === "navigate");
+      const firstNav = pipeline.steps.find(s => s.type === "navigate");
       await this.startSession(userId, token, firstNav ? { url: firstNav.url } : {});
       session = sessionManager.getSession(userId)!;
     }
@@ -408,7 +417,7 @@ export class Iframer {
 
       result.modeUsed = mode;
       return result;
-    } catch (err: any) {
+    } catch (err: unknown) {
       return {
         ok: false,
         completedSteps: 0,
@@ -420,7 +429,7 @@ export class Iframer {
           failedAtStep: 0,
           failedStep: pipeline.steps[0],
           errorType: "action-failed",
-          message: `Failed to launch browser in ${mode} mode: ${err.message}`,
+          message: `Failed to launch browser in ${mode} mode: ${getErrorMessage(err)}`,
           pageState: { url: "", title: "" },
           suggestion: `Browser launch failed. ${mode === "binary-headful" ? "Make sure a display is available." : "Check Chrome installation."}`,
           retryable: true,
@@ -431,7 +440,7 @@ export class Iframer {
     }
   }
 
-  private async getPageState(page: any, ctx: ExecutionContext) {
+  private async getPageState(page: Page, ctx: ExecutionContext) {
     try {
       const url = page.url();
       const title = await page.title().catch(() => "");
@@ -509,22 +518,22 @@ export class Iframer {
 
     if (selectors.username && credential.username) {
       await humanType(page, selectors.username, credential.username);
-      await page.waitForTimeout(300 + Math.random() * 500);
+      await page.waitForTimeout(TIMING.PRE_NAVIGATE[0] + Math.random() * (TIMING.PRE_NAVIGATE[1] - TIMING.PRE_NAVIGATE[0]));
     }
     if (selectors.password && credential.password) {
       await humanType(page, selectors.password, credential.password);
-      await page.waitForTimeout(300 + Math.random() * 500);
+      await page.waitForTimeout(TIMING.PRE_NAVIGATE[0] + Math.random() * (TIMING.PRE_NAVIGATE[1] - TIMING.PRE_NAVIGATE[0]));
     }
     if (selectors.submit) {
       await humanClick(page, selectors.submit);
       await page.waitForLoadState("domcontentloaded").catch(() => {});
-      await page.waitForTimeout(1500);
+      await page.waitForTimeout(TIMING.POST_LOGIN_WAIT);
     }
     if (selectors.totp && credential.totp_secret) {
       const totp = generateTOTP(credential.totp_secret);
       await page.click(selectors.totp);
       await page.keyboard.type(totp, { delay: 50 });
-      await page.waitForTimeout(300);
+      await page.waitForTimeout(TIMING.POST_TOTP_WAIT);
     }
 
     const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
@@ -545,8 +554,8 @@ export class Iframer {
     await this.daemon.stopAll();
     await sessionManager.cleanupAllSessions();
     // Close SQLite if the store supports it
-    if ("close" in this.store && typeof this.store.close === "function") {
-      (this.store as any).close();
+    if ("close" in this.store && typeof (this.store as StorageBackend & { close?: () => void }).close === "function") {
+      (this.store as StorageBackend & { close: () => void }).close();
     }
   }
 }

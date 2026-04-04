@@ -12,7 +12,8 @@ import type { StaleStateMonitor } from "../stale-monitor";
 
 const MAX_ROUNDS = 8;
 const MAX_DURATION_MS = 45_000;
-const TILE_SETTLE_MS = 800;
+import { TIMING, CAPTCHA_GRID } from "../constants";
+const TILE_SETTLE_MS = TIMING.TILE_SETTLE;
 const MODEL = "claude-haiku-4-5-20251001";
 
 export interface SolveResult {
@@ -64,8 +65,8 @@ async function screenshotFullGrid(
   try {
     const buf = await page.screenshot({ type: "jpeg", quality: 85, clip: gridClip });
     return buf.toString("base64");
-  } catch (err: any) {
-    console.error(`[captcha-solver] full grid screenshot failed: ${err.message}`);
+  } catch (err: unknown) {
+    console.error(`[captcha-solver] full grid screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -143,12 +144,12 @@ Does this tile contain a ${target}? Reply ONLY "yes" or "no".`,
           ],
         });
 
-        const answer = (response.content[0] as any).text?.toLowerCase().trim() || "";
+        const answer = ((response.content[0] as { type: string; text?: string }).text ?? "").toLowerCase().trim();
         const match = answer.startsWith("yes");
         if (match) console.log(`[captcha-solver] tile ${tile.index} (r${tileRow}c${tileCol}): YES`);
         return { index: tile.index, match };
-      } catch (err: any) {
-        console.error(`[captcha-solver] tile ${tile.index} classification failed: ${err.message}`);
+      } catch (err: unknown) {
+        console.error(`[captcha-solver] tile ${tile.index} classification failed: ${err instanceof Error ? err.message : String(err)}`);
         return { index: tile.index, match: false };
       }
     })
@@ -212,12 +213,15 @@ export async function solveRecaptcha(page: Page, monitor?: StaleStateMonitor): P
 
     rounds++;
     monitor?.reportActivity();
-    const target = extractTarget(challengeInfo!.prompt);
-    console.log(`[captcha-solver] Round ${rounds}: looking for "${target}" in ${challengeInfo!.rows}x${challengeInfo!.cols} grid`);
+    if (!challengeInfo) {
+      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge info lost" };
+    }
+    const target = extractTarget(challengeInfo.prompt);
+    console.log(`[captcha-solver] Round ${rounds}: looking for "${target}" in ${challengeInfo.rows}x${challengeInfo.cols} grid`);
 
     const [fullGridImage, tileImages] = await Promise.all([
-      screenshotFullGrid(page, challengeInfo!),
-      screenshotTiles(page, challengeInfo!),
+      screenshotFullGrid(page, challengeInfo),
+      screenshotTiles(page, challengeInfo),
     ]);
 
     if (!fullGridImage || tileImages.length === 0) {
@@ -227,7 +231,7 @@ export async function solveRecaptcha(page: Page, monitor?: StaleStateMonitor): P
     monitor?.reportActivity();
     const matchingIndices = await classifyTiles(
       client, fullGridImage, tileImages, target,
-      challengeInfo!.rows, challengeInfo!.cols
+      challengeInfo.rows, challengeInfo.cols
     );
 
     console.log(`[captcha-solver] Round ${rounds}: matched tiles [${matchingIndices.join(", ")}]`);
@@ -236,7 +240,7 @@ export async function solveRecaptcha(page: Page, monitor?: StaleStateMonitor): P
     if (matchingIndices.length > 0) {
       await clickChallengeTiles(page, matchingIndices);
 
-      const isDynamic = challengeInfo!.prompt.toLowerCase().includes("none left");
+      const isDynamic = challengeInfo.prompt.toLowerCase().includes("none left");
       if (isDynamic) {
         await new Promise((r) => setTimeout(r, TILE_SETTLE_MS));
 

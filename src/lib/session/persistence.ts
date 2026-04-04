@@ -1,7 +1,16 @@
 import type { BrowserContext, Page } from "patchright";
 
 export interface SessionData {
-  cookies: any[];
+  cookies: Array<{
+    name: string;
+    value: string;
+    domain: string;
+    path: string;
+    expires: number;
+    httpOnly: boolean;
+    secure: boolean;
+    sameSite: "Strict" | "Lax" | "None";
+  }>;
   localStorage: Record<string, Record<string, string>>;
   sessionStorage: Record<string, Record<string, string>>;
   extractedAt: string;

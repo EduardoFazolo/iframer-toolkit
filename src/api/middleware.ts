@@ -5,7 +5,7 @@ export interface AuthRequest extends Request {
   token: string;
 }
 
-export function tokenAuth(req: AuthRequest, res: Response, next: NextFunction): void {
+export function tokenAuth(req: Request, res: Response, next: NextFunction): void {
   // Single-user self-hosted: always "default". IFRAMER_SECRET optionally restricts access.
   const secret = process.env.IFRAMER_SECRET;
   if (secret && req.path !== "/health") {
@@ -15,7 +15,7 @@ export function tokenAuth(req: AuthRequest, res: Response, next: NextFunction): 
       return;
     }
   }
-  req.userId = "default";
-  req.token = process.env.IFRAMER_SECRET || "iframer-local";
+  (req as AuthRequest).userId = "default";
+  (req as AuthRequest).token = process.env.IFRAMER_SECRET || "iframer-local";
   next();
 }

@@ -4,6 +4,12 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import path from "path";
 import os from "os";
+import type { Iframer } from "../lib/iframer";
+import type { PipelineResult } from "../lib/types";
+
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
 // ─── Config ──────────────────────────────────────────────────────────
 
@@ -13,7 +19,7 @@ const IFRAMER_MODE = process.env.IFRAMER_MODE; // "docker" | "local" | undefined
 
 // ─── Local Iframer instance (lazy-loaded for local mode) ────────────
 
-let _iframer: any = null;
+let _iframer: Iframer | null = null;
 const LOCAL_USER = "mcp-user";
 const LOCAL_TOKEN = IFRAMER_SECRET || "iframer-local-default-token";
 
@@ -36,24 +42,24 @@ function authHeaders() {
   return headers;
 }
 
-async function apiPost(endpoint: string, body?: any) {
+async function apiPost<T = Record<string, unknown>>(endpoint: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE_URL}${endpoint}`, {
     method: "POST",
     headers: authHeaders(),
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(180_000), // 3 minutes — execute can be slow (navigation + captcha solving)
   });
-  return res.json();
+  return res.json() as Promise<T>;
 }
 
-async function apiGet(endpoint: string) {
+async function apiGet<T = Record<string, unknown>>(endpoint: string): Promise<T> {
   const res = await fetch(`${BASE_URL}${endpoint}`, { headers: authHeaders() });
-  return res.json();
+  return res.json() as Promise<T>;
 }
 
-async function apiDelete(endpoint: string) {
+async function apiDelete<T = Record<string, unknown>>(endpoint: string): Promise<T> {
   const res = await fetch(`${BASE_URL}${endpoint}`, { method: "DELETE", headers: authHeaders() });
-  return res.json();
+  return res.json() as Promise<T>;
 }
 
 // ─── Mode Detection ──────────────────────────────────────────────────
@@ -61,7 +67,7 @@ async function apiDelete(endpoint: string) {
 async function isDockerRunning(): Promise<boolean> {
   try {
     const res = await fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3000) });
-    const data = await res.json() as any;
+    const data = await res.json() as { ok?: boolean };
     return data.ok === true;
   } catch {
     return false;
@@ -73,7 +79,7 @@ function hasDisplay(): boolean {
   return !!process.env.DISPLAY;
 }
 
-async function detectAvailableModes(): Promise<Record<string, { available: boolean; reason?: string }>> {
+async function detectAvailableModes(): Promise<Record<string, Record<string, unknown>>> {
   const dockerAvailable = await isDockerRunning();
 
   let chromeInstalled = false;
@@ -104,7 +110,7 @@ async function detectAvailableModes(): Promise<Record<string, { available: boole
     chromeForTesting: {
       installed: chromeInstalled,
       ...(!chromeInstalled ? { action: "Run this command to install: bun -e \"require('./src/lib/browser/chrome-downloader').downloadChrome()\"" } : {}),
-    } as any,
+    },
   };
 }
 
@@ -209,7 +215,7 @@ server.tool(
   {},
   async () => {
     try {
-      const status: any = { modes: {}, api: false, session: null, credentials: [], domainMemory: null };
+      const status: { modes: Record<string, Record<string, unknown>>; api: boolean; session: unknown; credentials: string[]; domainMemory: unknown } = { modes: {}, api: false, session: null, credentials: [], domainMemory: null };
 
       // Detect available modes
       status.modes = await detectAvailableModes();
@@ -217,7 +223,7 @@ server.tool(
       // Check Docker API health
       try {
         const health = await fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3000) });
-        const data = await health.json() as any;
+        const data = await health.json() as { ok?: boolean };
         status.api = data.ok === true;
       } catch {
         status.api = false;
@@ -226,7 +232,7 @@ server.tool(
       // Check Docker session (if Docker is running)
       if (status.api) {
         try {
-          const sessionData = await apiGet("/interactive/status") as any;
+          const sessionData = await apiGet<{ active?: boolean; noVncUrl?: string; createdAt?: string; url?: string }>("/interactive/status");
           status.session = sessionData.active
             ? { active: true, noVncUrl: sessionData.noVncUrl, createdAt: sessionData.createdAt, url: sessionData.url }
             : { active: false };
@@ -236,8 +242,8 @@ server.tool(
       // List stored credentials (local store — works in all modes)
       try {
         if (status.api) {
-          const credData = await apiGet("/credentials") as any;
-          if (credData.ok) status.credentials = credData.domains;
+          const credData = await apiGet<{ ok?: boolean; domains?: string[] }>("/credentials");
+          if (credData.ok) status.credentials = credData.domains || [];
         } else {
           const iframer = await getIframer();
           status.credentials = await iframer.listCredentials(LOCAL_USER);
@@ -252,8 +258,8 @@ server.tool(
       } catch {}
 
       return { content: [{ type: "text" as const, text: JSON.stringify(status, null, 2) }] };
-    } catch (e: any) {
-      return err(`Error: ${e.message}`);
+    } catch (e: unknown) {
+      return err(`Error: ${getErrorMessage(e)}`);
     }
   }
 );
@@ -284,7 +290,7 @@ server.tool(
       let data: any;
       if (useLocal) {
         const iframer = await getIframer();
-        data = await iframer.fetch(LOCAL_USER, LOCAL_TOKEN, params);
+        data = await iframer.fetch(LOCAL_USER, LOCAL_TOKEN, params as any);
       } else {
         data = await apiPost("/fetch", params);
       }
@@ -295,8 +301,8 @@ server.tool(
         ? JSON.stringify(rest, null, 2) + "\n\n--- HTML ---\n" + html
         : JSON.stringify(rest, null, 2);
       return { content: [{ type: "text" as const, text }] };
-    } catch (e: any) {
-      return err(`Error: ${e.message}`);
+    } catch (e: unknown) {
+      return err(`Error: ${getErrorMessage(e)}`);
     }
   }
 );
@@ -399,7 +405,7 @@ Auto-escalation is built in: if blocked, iframer automatically retries with stro
         const iframer = await getIframer();
         return iframer.execute(LOCAL_USER, LOCAL_TOKEN, {
           steps: params.steps,
-          options: { ...params.options, mode: mode || undefined },
+          options: { ...params.options, mode: (mode as any) || undefined },
         });
       }
 
@@ -505,8 +511,8 @@ Auto-escalation is built in: if blocked, iframer automatically retries with stro
 
       if (!data.ok) return { content, isError: true };
       return { content };
-    } catch (e: any) {
-      return err(`Error: ${e.message}`);
+    } catch (e: unknown) {
+      return err(`Error: ${getErrorMessage(e)}`);
     }
   }
 );
@@ -530,7 +536,7 @@ server.tool(
           const data = await iframer.stopSession(LOCAL_USER, LOCAL_TOKEN);
           return { content: [{ type: "text" as const, text: `Session stopped. State saved: ${data.sessionSaved}` }] };
         }
-        const data = await apiPost("/interactive/stop") as any;
+        const data = await apiPost<{ ok: boolean; error?: string; sessionSaved?: boolean }>("/interactive/stop");
         if (!data.ok) return err(`Error: ${data.error}`);
         return { content: [{ type: "text" as const, text: `Session stopped. State saved: ${data.sessionSaved}` }] };
       } else {
@@ -539,12 +545,12 @@ server.tool(
           await iframer.clearSession(LOCAL_USER);
           return { content: [{ type: "text" as const, text: "Session data cleared." }] };
         }
-        const data = await apiDelete("/session") as any;
+        const data = await apiDelete<{ ok: boolean; error?: string }>("/session");
         if (!data.ok) return err(`Error: ${data.error}`);
         return { content: [{ type: "text" as const, text: "Session data cleared." }] };
       }
-    } catch (e: any) {
-      return err(`Error: ${e.message}`);
+    } catch (e: unknown) {
+      return err(`Error: ${getErrorMessage(e)}`);
     }
   }
 );
@@ -573,9 +579,9 @@ server.tool(
           const iframer = await getIframer();
           domains = await iframer.listCredentials(LOCAL_USER);
         } else {
-          const data = await apiGet("/credentials") as any;
+          const data = await apiGet<{ ok: boolean; error?: string; domains?: string[] }>("/credentials");
           if (!data.ok) return err(`Error: ${data.error}`);
-          domains = data.domains;
+          domains = data.domains || [];
         }
         if (!domains.length) {
           return { content: [{ type: "text" as const, text: "No credentials stored. Call this tool again with action=store and the domain to prompt the user for credentials now." }] };
@@ -586,7 +592,7 @@ server.tool(
       if (action === "store") {
         if (!domain) return err("domain is required for action=store");
 
-        const result = await (server as any).server.elicitInput({
+        const result = await (server as unknown as { server: { elicitInput: (opts: unknown) => Promise<{ action: string; content?: Record<string, string> }> } }).server.elicitInput({
           mode: "form",
           message: `Enter your login credentials for ${domain}. These are encrypted and stored locally — Claude never sees them.`,
           requestedSchema: {
@@ -604,12 +610,12 @@ server.tool(
           return { content: [{ type: "text" as const, text: "Cancelled." }] };
         }
 
-        const { username, password, totp_secret } = result.content as any;
+        const { username, password, totp_secret } = result.content as { username?: string; password?: string; totp_secret?: string };
         if (useLocal) {
           const iframer = await getIframer();
           await iframer.storeCredential(LOCAL_USER, LOCAL_TOKEN, { domain, username, password, totp_secret: totp_secret || undefined });
         } else {
-          const data = await apiPost("/credentials", { domain, username, password, totp_secret: totp_secret || undefined }) as any;
+          const data = await apiPost<{ ok: boolean; error?: string }>("/credentials", { domain, username, password, totp_secret: totp_secret || undefined });
           if (!data.ok) return err(`Error: ${data.error}`);
         }
         return { content: [{ type: "text" as const, text: `Credentials stored for ${domain}.` }] };
@@ -621,7 +627,7 @@ server.tool(
           // In local mode, login is handled as a pipeline step — inform the agent
           return { content: [{ type: "text" as const, text: `Use a login step in "execute" to log in with stored credentials for ${domain}. Example: { "type": "login", "domain": "${domain}" }` }] };
         }
-        const data = await apiPost("/credentials/login", { domain, usernameSelector, passwordSelector, submitSelector, totpSelector }) as any;
+        const data = await apiPost<{ ok: boolean; error?: string; url?: string; title?: string; totpGenerated?: boolean; screenshotUrl?: string }>("/credentials/login", { domain, usernameSelector, passwordSelector, submitSelector, totpSelector });
         if (!data.ok) return err(`Error: ${data.error}`);
 
         const lines = [`Login attempted for ${domain}`, `URL: ${data.url}`, `Title: ${data.title}`];
@@ -631,11 +637,11 @@ server.tool(
       }
 
       return err("Unknown action");
-    } catch (e: any) {
-      if ((e as any).message?.includes("does not support")) {
+    } catch (e: unknown) {
+      if (e instanceof Error && e.message?.includes("does not support")) {
         return err(`This client doesn't support secure input prompts. Store credentials via CLI:\n\niframer credentials add ${domain}`);
       }
-      return err(`Error: ${e.message}`);
+      return err(`Error: ${getErrorMessage(e)}`);
     }
   }
 );
@@ -690,7 +696,7 @@ The outputDir defaults to the current working directory + the domain name (e.g. 
         steps: params.steps,
         options: { ...params.options, captureApi: true },
       };
-      const data = await apiPost("/execute", execParams) as any;
+      const data = await apiPost<any>("/execute", execParams);
 
       const lines: string[] = [];
       lines.push(`ok: ${data.ok}`);
@@ -801,8 +807,8 @@ The outputDir defaults to the current working directory + the domain name (e.g. 
 
       if (!data.ok) return { content, isError: true };
       return { content };
-    } catch (e: any) {
-      return err(`Connection error: ${e.message}. Is the API running at ${BASE_URL}?`);
+    } catch (e: unknown) {
+      return err(`Connection error: ${getErrorMessage(e)}. Is the API running at ${BASE_URL}?`);
     }
   }
 );

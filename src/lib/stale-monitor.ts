@@ -1,5 +1,6 @@
 import type { Page } from "patchright";
 import type { StateSnapshot } from "./types";
+import { THRESHOLDS, TIMING } from "./constants";
 
 const DEFAULT_STALE_TIMEOUT_MS = 20_000;
 
@@ -52,7 +53,7 @@ export class StaleStateMonitor {
 
     // Significant change in content size (>5% or >100 chars)
     const textDiff = Math.abs(after.bodyTextLength - before.bodyTextLength);
-    if (textDiff > 100 || (before.bodyTextLength > 0 && textDiff / before.bodyTextLength > 0.05)) {
+    if (textDiff > THRESHOLDS.STALE_CHAR_CHANGE || (before.bodyTextLength > 0 && textDiff / before.bodyTextLength > THRESHOLDS.STALE_PERCENT_CHANGE)) {
       return true;
     }
 
@@ -121,7 +122,7 @@ export class StaleStateMonitor {
           `No state change detected for ${this.timeoutMs}ms`,
           this.timeoutMs
         ));
-      }, 2000); // Check every 2 seconds
+      }, TIMING.STALE_CHECK_INTERVAL); // Check every 2 seconds
 
       fn()
         .then((result) => {

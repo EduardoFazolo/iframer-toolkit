@@ -87,7 +87,7 @@ function parseCookies(cookieHeader: string): Record<string, string> {
   return cookies;
 }
 
-function tryParseJson(text: string): any {
+function tryParseJson(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
@@ -101,7 +101,7 @@ function buildCurl(
   url: string,
   headers: Record<string, string>,
   auth: CapturedAuth,
-  body?: any,
+  body?: unknown,
 ): string {
   const parts = [`curl -X ${method}`];
 
@@ -163,7 +163,7 @@ export class ApiCapture {
         const parsed = new URL(url);
         const allHeaders = req.headers();
 
-        let requestBody: any = undefined;
+        let requestBody: unknown = undefined;
         try {
           const postData = req.postData();
           if (postData) {
@@ -171,7 +171,7 @@ export class ApiCapture {
           }
         } catch {}
 
-        let responseBody: any = undefined;
+        let responseBody: unknown = undefined;
         try {
           const resText = await res.text();
           if (resText && resText.length < 100_000) {
@@ -255,7 +255,7 @@ export class ApiCapture {
       try {
         const host = new URL(req.url).origin;
         if (!byDomain.has(host)) byDomain.set(host, []);
-        byDomain.get(host)!.push(req);
+        byDomain.get(host)?.push(req);
       } catch {}
     }
 
@@ -284,7 +284,8 @@ export class ApiCapture {
             curl: buildCurl(req.method, req.url, endpointHeaders, auth, req.requestBody),
           });
         } else {
-          const existing = endpointMap.get(key)!;
+          const existing = endpointMap.get(key);
+          if (!existing) continue;
           if (!existing.rawPaths.includes(req.path)) {
             existing.rawPaths.push(req.path);
           }

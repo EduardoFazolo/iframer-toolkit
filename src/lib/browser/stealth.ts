@@ -352,7 +352,7 @@ function buildStealthScriptInner(p: {
 export const STEALTH_SCRIPT = buildStealthScript();
 
 export function stealthContextOptions(overrides: Record<string, any> = {}, _sessionId?: string, fp?: BrowserFingerprint): Record<string, any> {
-  const uaVersion = fp?.uaData?.brands?.find((b: any) => b.brand === "Google Chrome")?.version ?? "136";
+  const uaVersion = fp?.uaData?.brands?.find((b: { brand: string; version: string }) => b.brand === "Google Chrome")?.version ?? "136";
   return {
     userAgent: fp?.userAgent ?? USER_AGENT,
     locale: overrides.locale || "en-US",
@@ -375,7 +375,7 @@ export function stealthContextOptions(overrides: Record<string, any> = {}, _sess
 
 export async function applyStealthToPage(page: Page): Promise<void> {
   // Use context-level init script — more reliable with patchright than page-level
-  await (page.context() as any).addInitScript(STEALTH_SCRIPT);
+  await (page.context() as unknown as { addInitScript(script: string): Promise<void> }).addInitScript(STEALTH_SCRIPT);
 }
 
 export const STEALTH_ARGS = [

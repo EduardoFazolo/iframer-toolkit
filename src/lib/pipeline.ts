@@ -102,16 +102,17 @@ export class PipelineRunner {
           r.stepIndex = i;
           return r;
         });
-      } catch (err: any) {
+      } catch (err: unknown) {
         // StaleStateError or other wrapper errors
-        const errorType = classifyError(err, step);
+        const asError = err instanceof Error ? err : new Error(String(err));
+        const errorType = classifyError(asError, step);
         const pageState = await getPageState(page, this.ctx, true);
 
         stepResult = {
           stepIndex: i,
           step,
           ok: false,
-          error: err.message,
+          error: asError.message,
           durationMs: Date.now() - startTime,
         };
 
@@ -128,7 +129,7 @@ export class PipelineRunner {
             failedAtStep: i,
             failedStep: step,
             errorType,
-            message: err.message,
+            message: asError.message,
             pageState,
             suggestion: getSuggestion(errorType, step),
             retryable: isRetryable(errorType),

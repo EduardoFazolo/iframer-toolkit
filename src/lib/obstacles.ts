@@ -26,8 +26,8 @@ class RecaptchaResolver implements ObstacleResolver {
         return { resolved: true, resolution: `auto-solved-recaptcha in ${result.rounds} rounds` };
       }
       return { resolved: false, error: result.reason || "reCAPTCHA solve failed" };
-    } catch (err: any) {
-      return { resolved: false, error: err.message };
+    } catch (err: unknown) {
+      return { resolved: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 }
@@ -76,8 +76,8 @@ class HCaptchaResolver implements ObstacleResolver {
         return { resolved: true, resolution: `auto-solved-hcaptcha in ${result.rounds} rounds` };
       }
       return { resolved: false, error: result.reason || "hCaptcha solve failed" };
-    } catch (err: any) {
-      return { resolved: false, error: err.message };
+    } catch (err: unknown) {
+      return { resolved: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 }
@@ -104,7 +104,7 @@ export async function resolveObstacle(
 ): Promise<ResolutionResult> {
   for (const resolver of resolvers) {
     if (resolver.canResolve(obstacle)) {
-      return (resolver as any).resolve(page, obstacle, ctx, monitor);
+      return (resolver as ObstacleResolver & { resolve(page: Page, obstacle: DetectedObstacle, ctx: ExecutionContext, monitor?: StaleStateMonitor): Promise<ResolutionResult> }).resolve(page, obstacle, ctx, monitor);
     }
   }
   return { resolved: false, error: `No resolver for obstacle type: ${obstacle.type}` };
