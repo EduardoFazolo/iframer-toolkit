@@ -3884,7 +3884,7 @@ class Iframer {
               errorType: "bot-blocked",
               message: `Page blocked by bot detection: ${blockResult.reason}`,
               pageState,
-              suggestion: `The page was blocked in ${mode} mode. ${mode === "headless" ? "Try binary-headful mode." : "Try docker-headful mode."}`,
+              suggestion: `The page was blocked in ${mode} mode. ${mode === "headless" ? "Try docker-headful mode." : mode === "docker-headful" ? "Try binary-headful mode." : "All modes exhausted."}`,
               retryable: true
             }
           };
@@ -4289,7 +4289,7 @@ API capture (options.captureApi): When enabled, records all XHR/fetch requests t
 
 Returns: ok, completedSteps, results (with extract values), obstacles (what was detected/resolved), capturedApi (when enabled), and on failure: errorContext with screenshot, URL, errorType, suggestion, retryable.
 
-Auto-escalation is built in: if blocked, iframer automatically retries with stronger browser modes (headless → docker → binary-headful) in a single call. You do not need to manually retry with different modes.`, {
+IMPORTANT — Do NOT specify options.mode unless the user explicitly asks for a specific browser mode. iframer auto-selects the best mode and auto-escalates if blocked (headless → docker-headful → binary-headful) in a single call. Specifying a mode disables auto-escalation and often picks a worse mode than iframer would choose.`, {
     steps: import_zod3.z.array(stepSchema).describe("Pipeline steps to execute sequentially"),
     options: import_zod3.z.object({
       staleTimeoutMs: import_zod3.z.number().optional().describe("Override the 20s stale-state timeout per step"),
@@ -4297,7 +4297,7 @@ Auto-escalation is built in: if blocked, iframer automatically retries with stro
       continueOnObstacle: import_zod3.z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
       continueOnError: import_zod3.z.boolean().optional().describe("Continue past failing steps (default: false)"),
       captureApi: import_zod3.z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes. Use when the user wants to reverse-engineer, map, or save a site's API endpoints."),
-      mode: import_zod3.z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("Force a specific browser mode. If omitted, iframer auto-selects based on domain memory and escalates if blocked."),
+      mode: import_zod3.z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("DO NOT SET THIS unless user explicitly requests a mode. iframer auto-selects and auto-escalates. Setting this disables auto-escalation."),
       autoEscalate: import_zod3.z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)")
     }).optional()
   }, async (params) => {
@@ -4765,6 +4765,8 @@ CREDENTIAL FLOW (follow exactly):
 3. If missing → immediately call "credentials" action=store. Do NOT tell the user and ask what to do.
 4. After stored → proceed with login step in execute.
 
+BROWSER MODES: NEVER pass options.mode to execute. iframer auto-selects the best mode (headless → docker-headful → binary-headful) and escalates automatically. binary-headful opens a visible browser window on the user's screen — only use it as an absolute last resort.
+
 WORKFLOW:
 1. Use "execute" with a pipeline of steps — the session starts automatically inside Docker
 2. iframer handles obstacles (captcha, cookie banners) automatically
@@ -4801,7 +4803,7 @@ WORKFLOW:
 5. If execute can't finish, it returns exactly where it stopped and why — you decide what to do next
 6. Call "session" action=stop when done to save session state
 
-BROWSER MODES: iframer auto-escalates through all available browser modes (headless → docker-headful → binary-headful) in a single execute call. You do NOT need to manually retry with different modes — it's handled automatically. Just call execute and let it work.
+BROWSER MODES: NEVER specify options.mode — iframer auto-selects the best mode and auto-escalates if blocked (headless → docker-headful → binary-headful) in a single execute call. You do NOT need to pick a mode or retry with different modes. Just call execute without mode and let it work. The only exception: if the user explicitly asks for a specific mode.
 
 TIMEOUTS: Each step has a 20-second stale-state timeout. If nothing changes on the page for 20s, iframer aborts and returns a detailed error.
 
