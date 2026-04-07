@@ -30,6 +30,8 @@ CREDENTIAL FLOW (follow exactly):
 3. If missing → immediately call "credentials" action=store. Do NOT tell the user and ask what to do.
 4. After stored → proceed with login step in execute.
 
+BROWSER MODES: NEVER pass options.mode to execute. iframer auto-selects the best mode (headless → docker-headful → binary-headful) and escalates automatically. binary-headful opens a visible browser window on the user's screen — only use it as an absolute last resort.
+
 WORKFLOW:
 1. Use "execute" with a pipeline of steps — the session starts automatically inside Docker
 2. iframer handles obstacles (captcha, cookie banners) automatically
@@ -67,7 +69,7 @@ WORKFLOW:
 5. If execute can't finish, it returns exactly where it stopped and why — you decide what to do next
 6. Call "session" action=stop when done to save session state
 
-BROWSER MODES: iframer auto-escalates through all available browser modes (headless → docker-headful → binary-headful) in a single execute call. You do NOT need to manually retry with different modes — it's handled automatically. Just call execute and let it work.
+BROWSER MODES: NEVER specify options.mode — iframer auto-selects the best mode and auto-escalates if blocked (headless → docker-headful → binary-headful) in a single execute call. You do NOT need to pick a mode or retry with different modes. Just call execute without mode and let it work. The only exception: if the user explicitly asks for a specific mode.
 
 TIMEOUTS: Each step has a 20-second stale-state timeout. If nothing changes on the page for 20s, iframer aborts and returns a detailed error.
 
