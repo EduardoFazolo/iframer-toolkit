@@ -396,7 +396,7 @@ export class Iframer {
               errorType: "bot-blocked",
               message: `Page blocked by bot detection: ${blockResult.reason}`,
               pageState,
-              suggestion: `The page was blocked in ${mode} mode. ${mode === "headless" ? "Try binary-headful mode." : "Try docker-headful mode."}`,
+              suggestion: `The page was blocked in ${mode} mode. ${mode === "headless" ? "Try docker-headful mode." : mode === "docker-headful" ? "Try binary-headful mode." : "All modes exhausted."}`,
               retryable: true,
             },
           };

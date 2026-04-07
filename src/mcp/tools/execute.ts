@@ -25,7 +25,7 @@ API capture (options.captureApi): When enabled, records all XHR/fetch requests t
 
 Returns: ok, completedSteps, results (with extract values), obstacles (what was detected/resolved), capturedApi (when enabled), and on failure: errorContext with screenshot, URL, errorType, suggestion, retryable.
 
-Auto-escalation is built in: if blocked, iframer automatically retries with stronger browser modes (headless → docker → binary-headful) in a single call. You do not need to manually retry with different modes.`,
+IMPORTANT — Do NOT specify options.mode unless the user explicitly asks for a specific browser mode. iframer auto-selects the best mode and auto-escalates if blocked (headless → docker-headful → binary-headful) in a single call. Specifying a mode disables auto-escalation and often picks a worse mode than iframer would choose.`,
     {
       steps: z.array(stepSchema).describe("Pipeline steps to execute sequentially"),
       options: z.object({
@@ -34,7 +34,7 @@ Auto-escalation is built in: if blocked, iframer automatically retries with stro
         continueOnObstacle: z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
         continueOnError: z.boolean().optional().describe("Continue past failing steps (default: false)"),
         captureApi: z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes. Use when the user wants to reverse-engineer, map, or save a site's API endpoints."),
-        mode: z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("Force a specific browser mode. If omitted, iframer auto-selects based on domain memory and escalates if blocked."),
+        mode: z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("DO NOT SET THIS unless user explicitly requests a mode. iframer auto-selects and auto-escalates. Setting this disables auto-escalation."),
         autoEscalate: z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)"),
       }).optional(),
     },
