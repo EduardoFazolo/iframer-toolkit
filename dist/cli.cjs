@@ -4152,10 +4152,14 @@ var init_iframer = __esm(() => {
 // bin/cli.js
 var __dirname = "/Users/eduardoverona/tools/iframer-toolkit/bin";
 var fs8 = require("fs");
+var os6 = require("os");
 var path8 = require("path");
 var { execSync: execSync2 } = require("child_process");
 var readline = require("readline");
-var CONFIG_DIR = path8.join(require("os").homedir(), ".iframer");
+var HOME_DIR = os6.homedir();
+var CONFIG_DIR = path8.join(HOME_DIR, ".iframer");
+var CLAUDE_CONFIG_PATH = path8.join(HOME_DIR, ".claude.json");
+var CODEX_CONFIG_PATH = path8.join(HOME_DIR, ".codex", "config.toml");
 var DEFAULT_SERVER = process.env.IFRAMER_URL || "http://localhost:3021";
 var API_KEY = process.env.IFRAMER_SECRET;
 var USE_LOCAL = process.env.IFRAMER_MODE === "local" || !process.env.IFRAMER_URL;
@@ -4238,13 +4242,167 @@ async function apiDelete(endpoint) {
   const res = await fetch(`${DEFAULT_SERVER}${endpoint}`, { method: "DELETE", headers: authHeaders() });
   return res.json();
 }
+function resolveMcpRuntime() {
+  const mcpServerTS = path8.join(__dirname, "..", "src", "mcp", "server.ts");
+  const mcpServerCJS = path8.join(__dirname, "mcp-server.cjs");
+  let bunPath;
+  try {
+    bunPath = execSync2("which bun", { encoding: "utf8" }).trim();
+  } catch {}
+  if (bunPath && fs8.existsSync(mcpServerTS)) {
+    return {
+      command: bunPath,
+      args: ["run", mcpServerTS],
+      message: "  Using bun to run MCP server from source (no build needed)"
+    };
+  }
+  if (fs8.existsSync(mcpServerCJS)) {
+    return {
+      command: "node",
+      args: [mcpServerCJS],
+      message: "  Using pre-built MCP server bundle"
+    };
+  }
+  console.error("  MCP server not found. Need either bun + source or pre-built bundle.");
+  console.error("  Run: bun build src/mcp/server.ts --target node --format cjs --outfile bin/mcp-server.cjs");
+  process.exit(1);
+}
+function resolveIframerSecret() {
+  let secret = process.env.IFRAMER_SECRET;
+  if (secret)
+    return secret;
+  try {
+    const envPath = path8.join(__dirname, "..", ".env");
+    const envContent = fs8.readFileSync(envPath, "utf8");
+    const match = envContent.match(/^IFRAMER_SECRET=(.+)$/m);
+    if (match)
+      secret = match[1].trim();
+  } catch {}
+  return secret;
+}
+function loadClaudeConfig() {
+  try {
+    return JSON.parse(fs8.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+  } catch {
+    return {};
+  }
+}
+function installClaudeMcp(mcpName, mcpEntry) {
+  const config = loadClaudeConfig();
+  if (!config.mcpServers)
+    config.mcpServers = {};
+  config.mcpServers[mcpName] = mcpEntry;
+  fs8.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
+  return CLAUDE_CONFIG_PATH;
+}
+function removeClaudeMcp(mcpName) {
+  let config;
+  try {
+    config = JSON.parse(fs8.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+  } catch {
+    return { removed: false, path: CLAUDE_CONFIG_PATH };
+  }
+  if (!config.mcpServers || !config.mcpServers[mcpName]) {
+    return { removed: false, path: CLAUDE_CONFIG_PATH };
+  }
+  delete config.mcpServers[mcpName];
+  fs8.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
+  return { removed: true, path: CLAUDE_CONFIG_PATH };
+}
+function escapeTomlString(value) {
+  return String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+}
+function findCodexMcpSection(content, mcpName) {
+  const lines = content.split(`
+`);
+  const mainHeader = `[mcp_servers.${mcpName}]`;
+  const nestedPrefix = `[mcp_servers.${mcpName}.`;
+  let start = -1;
+  for (let i = 0;i < lines.length; i += 1) {
+    if (lines[i].trim() === mainHeader) {
+      start = i;
+      break;
+    }
+  }
+  if (start === -1)
+    return null;
+  let end = lines.length;
+  for (let i = start + 1;i < lines.length; i += 1) {
+    const line = lines[i].trim();
+    if (line.startsWith("[") && line.endsWith("]") && !line.startsWith(nestedPrefix)) {
+      end = i;
+      break;
+    }
+  }
+  let removeStart = start;
+  if (removeStart > 0 && lines[removeStart - 1].trim() === "")
+    removeStart -= 1;
+  let removeEnd = end;
+  if (removeEnd < lines.length && lines[removeEnd].trim() === "")
+    removeEnd += 1;
+  return { lines, start: removeStart, end: removeEnd };
+}
+function renderCodexMcpBlock(mcpName, mcpEntry) {
+  const lines = [
+    `[mcp_servers.${mcpName}]`,
+    `command = "${escapeTomlString(mcpEntry.command)}"`,
+    `args = [${mcpEntry.args.map((arg) => `"${escapeTomlString(arg)}"`).join(", ")}]`
+  ];
+  if (mcpEntry.env && Object.keys(mcpEntry.env).length > 0) {
+    lines.push("", `[mcp_servers.${mcpName}.env]`);
+    for (const [key, value] of Object.entries(mcpEntry.env)) {
+      lines.push(`${key} = "${escapeTomlString(value)}"`);
+    }
+  }
+  return lines.join(`
+`);
+}
+function installCodexMcp(mcpName, mcpEntry) {
+  fs8.mkdirSync(path8.dirname(CODEX_CONFIG_PATH), { recursive: true });
+  let content = "";
+  try {
+    content = fs8.readFileSync(CODEX_CONFIG_PATH, "utf8");
+  } catch {}
+  const existing = findCodexMcpSection(content, mcpName);
+  if (existing) {
+    content = [...existing.lines.slice(0, existing.start), ...existing.lines.slice(existing.end)].join(`
+`);
+  }
+  const trimmed = content.trimEnd();
+  const block = renderCodexMcpBlock(mcpName, mcpEntry);
+  fs8.writeFileSync(CODEX_CONFIG_PATH, trimmed ? `${trimmed}
+
+${block}
+` : `${block}
+`);
+  return CODEX_CONFIG_PATH;
+}
+function removeCodexMcp(mcpName) {
+  let content;
+  try {
+    content = fs8.readFileSync(CODEX_CONFIG_PATH, "utf8");
+  } catch {
+    return { removed: false, path: CODEX_CONFIG_PATH };
+  }
+  const existing = findCodexMcpSection(content, mcpName);
+  if (!existing) {
+    return { removed: false, path: CODEX_CONFIG_PATH };
+  }
+  const next = [...existing.lines.slice(0, existing.start), ...existing.lines.slice(existing.end)].join(`
+`).replace(/\n{3,}/g, `
+
+`).trimEnd();
+  fs8.writeFileSync(CODEX_CONFIG_PATH, next ? `${next}
+` : "");
+  return { removed: true, path: CODEX_CONFIG_PATH };
+}
 var _iframer = null;
 async function getLocalIframer() {
   if (_iframer)
     return _iframer;
   try {
     const { Iframer: Iframer2 } = await Promise.resolve().then(() => (init_iframer(), exports_iframer));
-    const screenshotDir = path8.join(require("os").tmpdir(), "iframer-screenshots");
+    const screenshotDir = path8.join(os6.tmpdir(), "iframer-screenshots");
     fs8.mkdirSync(screenshotDir, { recursive: true });
     _iframer = new Iframer2({
       screenshotDir,
@@ -4880,46 +5038,12 @@ async function main() {
       break;
     }
     case "install-mcp": {
-      const mcpServerTS = path8.join(__dirname, "..", "src", "mcp", "server.ts");
-      const mcpServerCJS = path8.join(__dirname, "mcp-server.cjs");
-      let mcpCommand, mcpArgs;
-      let bunPath;
-      try {
-        bunPath = execSync2("which bun", { encoding: "utf8" }).trim();
-      } catch {}
-      if (bunPath && fs8.existsSync(mcpServerTS)) {
-        mcpCommand = bunPath;
-        mcpArgs = ["run", mcpServerTS];
-        console.log("  Using bun to run MCP server from source (no build needed)");
-      } else if (fs8.existsSync(mcpServerCJS)) {
-        mcpCommand = "node";
-        mcpArgs = [mcpServerCJS];
-        console.log("  Using pre-built MCP server bundle");
-      } else {
-        console.error("  MCP server not found. Need either bun + source or pre-built bundle.");
-        console.error("  Run: bun build src/mcp/server.ts --target node --format cjs --outfile bin/mcp-server.cjs");
-        process.exit(1);
-      }
-      const claudeConfigPath = path8.join(require("os").homedir(), ".claude.json");
-      let config = {};
-      try {
-        config = JSON.parse(fs8.readFileSync(claudeConfigPath, "utf8"));
-      } catch {}
+      const runtime = resolveMcpRuntime();
+      console.log(runtime.message);
       const isDev = args.includes("--dev");
       const mcpName = isDev ? "iframer-dev" : "iframer";
-      let secret = process.env.IFRAMER_SECRET;
-      if (!secret) {
-        try {
-          const envPath = path8.join(__dirname, "..", ".env");
-          const envContent = fs8.readFileSync(envPath, "utf8");
-          const match = envContent.match(/^IFRAMER_SECRET=(.+)$/m);
-          if (match)
-            secret = match[1].trim();
-        } catch {}
-      }
-      if (!config.mcpServers)
-        config.mcpServers = {};
-      const mcpEntry = { command: mcpCommand, args: mcpArgs };
+      const secret = resolveIframerSecret();
+      const mcpEntry = { command: runtime.command, args: runtime.args };
       if (secret)
         mcpEntry.env = { IFRAMER_SECRET: secret };
       if (!isDev) {
@@ -4927,8 +5051,8 @@ async function main() {
           mcpEntry.env = {};
         mcpEntry.env.IFRAMER_MODE = "local";
       }
-      config.mcpServers[mcpName] = mcpEntry;
-      fs8.writeFileSync(claudeConfigPath, JSON.stringify(config, null, 2));
+      const claudeConfigPath = installClaudeMcp(mcpName, mcpEntry);
+      const codexConfigPath = installCodexMcp(mcpName, mcpEntry);
       console.log(`
   ${mcpName} MCP installed!`);
       if (secret)
@@ -4937,32 +5061,28 @@ async function main() {
         console.log("  Mode: local (headless + binary-headful, no Docker needed)");
       else
         console.log("  Mode: docker (connects to Docker container)");
-      console.log(`  Config written to: ${claudeConfigPath}`);
-      console.log(`  Restart Claude Code to activate the iframer tools.
+      console.log(`  Claude Code config written to: ${claudeConfigPath}`);
+      console.log(`  Codex config written to: ${codexConfigPath}`);
+      console.log(`  Restart Claude Code and Codex to activate the iframer tools.
 `);
       break;
     }
     case "remove-mcp": {
-      const claudeConfigPath2 = path8.join(require("os").homedir(), ".claude.json");
-      let config2 = {};
-      try {
-        config2 = JSON.parse(fs8.readFileSync(claudeConfigPath2, "utf8"));
-      } catch {
-        console.log("  No ~/.claude.json found — nothing to remove.");
+      const isDev = args.includes("--dev");
+      const mcpName = isDev ? "iframer-dev" : "iframer";
+      const claudeResult = removeClaudeMcp(mcpName);
+      const codexResult = removeCodexMcp(mcpName);
+      if (!claudeResult.removed && !codexResult.removed) {
+        console.log(`  ${mcpName} MCP is not installed in Claude Code or Codex.`);
         break;
       }
-      const isDev2 = args.includes("--dev");
-      const mcpName2 = isDev2 ? "iframer-dev" : "iframer";
-      if (!config2.mcpServers || !config2.mcpServers[mcpName2]) {
-        console.log(`  ${mcpName2} MCP is not installed.`);
-        break;
-      }
-      delete config2.mcpServers[mcpName2];
-      fs8.writeFileSync(claudeConfigPath2, JSON.stringify(config2, null, 2));
       console.log(`
-  ${mcpName2} MCP removed!`);
-      console.log(`  Config updated: ${claudeConfigPath2}`);
-      console.log(`  Restart Claude Code for the change to take effect.
+  ${mcpName} MCP removed!`);
+      if (claudeResult.removed)
+        console.log(`  Claude Code config updated: ${claudeResult.path}`);
+      if (codexResult.removed)
+        console.log(`  Codex config updated: ${codexResult.path}`);
+      console.log(`  Restart Claude Code and Codex for the change to take effect.
 `);
       break;
     }
@@ -5019,8 +5139,8 @@ async function main() {
 
   Setup:
     install <chromium|mcp|deps>     Install Chromium, MCP, or both
-    install-mcp [--dev]             Install iframer MCP into Claude Code
-    remove-mcp [--dev]              Remove iframer MCP from Claude Code
+    install-mcp [--dev]             Install iframer MCP into Claude Code and Codex
+    remove-mcp [--dev]              Remove iframer MCP from Claude Code and Codex
 
   Environment:
     IFRAMER_URL                     Docker API URL (default: http://localhost:3021)
