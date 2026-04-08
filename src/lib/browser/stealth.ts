@@ -1,5 +1,9 @@
-import type { Page } from "patchright";
+import type { Page, BrowserContext } from "patchright";
 import type { BrowserFingerprint } from "./fingerprint";
+
+// Map from context → per-session stealth script (fingerprint-parameterized).
+// Lives here so it can be imported by code that doesn't need the full session-manager.
+export const contextStealthScripts = new Map<BrowserContext, string>();
 
 export const CHROME_VERSION = "136.0.7103.93";
 // Default UA — will be overridden per-session by fingerprint-generator

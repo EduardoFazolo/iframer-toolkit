@@ -1,7 +1,6 @@
 import type { Page } from "patchright";
 import type { PipelineStep, StepResult, ExecutionContext } from "./types";
-import { STEALTH_SCRIPT } from "./browser/stealth";
-import { contextStealthScripts } from "./browser/session-manager";
+import { STEALTH_SCRIPT, contextStealthScripts } from "./browser/stealth";
 import {
   humanClick,
   humanClickXY,
@@ -193,7 +192,10 @@ async function handleLogin(page: Page, step: Extract<PipelineStep, { type: "logi
   }
   const credential = JSON.parse(decrypt(blob, credKey));
 
-  const reactFill = async (selector: string, value: string) => {
+  const beforeUrl = page.url();
+
+  /** Fill an input via native React-compatible setter + input/change events */
+  const reactFillSelector = async (selector: string, value: string) => {
     await page.click(selector);
     await page.waitForTimeout(TIMING.SCROLL_DELAY);
     await page.evaluate(([sel, val]) => {
@@ -207,24 +209,166 @@ async function handleLogin(page: Page, step: Extract<PipelineStep, { type: "logi
     await page.waitForTimeout(TIMING.PRE_NAVIGATE[0] + Math.random() * (TIMING.PRE_NAVIGATE[1] - TIMING.PRE_NAVIGATE[0]));
   };
 
-  if (step.usernameSelector && credential.username) {
-    await reactFill(resolveSelector(step.usernameSelector, ctx), credential.username);
-  }
-  if (step.passwordSelector && credential.password) {
-    await reactFill(resolveSelector(step.passwordSelector, ctx), credential.password);
-  }
-  if (step.submitSelector) {
-    await humanClick(page, resolveSelector(step.submitSelector, ctx));
+  const hasExplicitSelectors = !!(step.usernameSelector || step.passwordSelector || step.submitSelector);
+
+  if (hasExplicitSelectors) {
+    // ─── Explicit selector path (backwards compatible) ──────────────
+    if (step.usernameSelector && credential.username) {
+      await reactFillSelector(resolveSelector(step.usernameSelector, ctx), credential.username);
+    }
+    if (step.passwordSelector && credential.password) {
+      await reactFillSelector(resolveSelector(step.passwordSelector, ctx), credential.password);
+    }
+    if (step.submitSelector) {
+      await humanClick(page, resolveSelector(step.submitSelector, ctx));
+      await page.waitForLoadState("domcontentloaded").catch(() => {});
+      await page.waitForTimeout(TIMING.POST_LOGIN_WAIT);
+    }
+    if (step.totpSelector && credential.totp_secret) {
+      const totp = generateTOTP(credential.totp_secret);
+      await page.click(resolveSelector(step.totpSelector, ctx));
+      await page.keyboard.type(totp, { delay: 50 });
+      await page.waitForTimeout(TIMING.POST_TOTP_WAIT);
+    }
+  } else {
+    // ─── Auto-detect path ───────────────────────────────────────────
+    log.info(`login: auto-detecting form on ${beforeUrl}`);
+
+    // Wait for a visible password field to appear (login forms often render after hydration)
+    const passwordHandle = await page.waitForSelector(
+      'input[type="password"]:not([disabled]):not([readonly])',
+      { state: "visible", timeout: TIMEOUTS.SELECTOR_WAIT }
+    ).catch(() => null);
+
+    if (!passwordHandle) {
+      throw new Error(`login: no visible password field found on ${beforeUrl}. If the site uses a multi-step form, navigate to the actual password page first, or pass explicit selectors.`);
+    }
+
+    // Find the username field — prefer a sibling in the same <form>, then globally
+    const usernameHandle = await page.evaluateHandle(() => {
+      const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])') as HTMLInputElement | null;
+      if (!pwd) return null;
+      const scope: ParentNode = pwd.closest('form') || document;
+      const candidates = [
+        'input[type="email"]:not([disabled]):not([readonly])',
+        'input[autocomplete="username"]:not([disabled]):not([readonly])',
+        'input[autocomplete="email"]:not([disabled]):not([readonly])',
+        'input[name*="email" i]:not([disabled]):not([readonly])',
+        'input[name*="user" i]:not([disabled]):not([readonly])',
+        'input[name*="login" i]:not([disabled]):not([readonly])',
+        'input[id*="email" i]:not([disabled]):not([readonly])',
+        'input[id*="user" i]:not([disabled]):not([readonly])',
+        'input[type="text"]:not([disabled]):not([readonly])',
+        'input:not([type]):not([disabled]):not([readonly])',
+      ];
+      for (const sel of candidates) {
+        const el = scope.querySelector(sel) as HTMLInputElement | null;
+        if (el && el.offsetParent !== null) return el;
+      }
+      return null;
+    });
+    const usernameEl = usernameHandle.asElement();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fillHandle = async (handle: any, value: string) => {
+      await handle.scrollIntoViewIfNeeded().catch(() => {});
+      await handle.click({ delay: 40 }).catch(() => {});
+      await handle.evaluate((el: Element, val: string) => {
+        const input = el as HTMLInputElement;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+        setter?.call(input, val);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }, value);
+      await page.waitForTimeout(TIMING.PRE_NAVIGATE[0] + Math.random() * (TIMING.PRE_NAVIGATE[1] - TIMING.PRE_NAVIGATE[0]));
+    };
+
+    if (usernameEl && credential.username) {
+      await fillHandle(usernameEl, credential.username);
+    } else if (!usernameEl) {
+      log.warn("login: no username field detected, proceeding with password only");
+    }
+
+    if (credential.password) {
+      await fillHandle(passwordHandle, credential.password);
+    }
+
+    // Find and click the submit button (same form preferred, text match as fallback)
+    const submitHandle = await page.evaluateHandle(() => {
+      const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])') as HTMLInputElement | null;
+      const form = pwd?.closest('form');
+      const loginRe = /\b(log\s*in|sign\s*in|continue|submit|enter|next)\b/i;
+
+      const pick = (scope: ParentNode): HTMLElement | null => {
+        const typed = scope.querySelector('button[type="submit"]:not([disabled]), input[type="submit"]:not([disabled])') as HTMLElement | null;
+        if (typed) return typed;
+        const buttons = Array.from(scope.querySelectorAll('button:not([disabled]), [role="button"]:not([disabled])')) as HTMLElement[];
+        return buttons.find((b) => loginRe.test(b.textContent || "") && b.offsetParent !== null) || null;
+      };
+
+      if (form) {
+        const found = pick(form);
+        if (found) return found;
+      }
+      return pick(document);
+    });
+    const submitEl = submitHandle.asElement();
+
+    if (submitEl) {
+      await submitEl.scrollIntoViewIfNeeded().catch(() => {});
+      await submitEl.click({ delay: 40 }).catch(async () => {
+        // Fallback: dispatch via JS click
+        await submitEl.evaluate((el: Element) => (el as HTMLElement).click());
+      });
+    } else {
+      // Final fallback: press Enter in the password field
+      log.warn("login: no submit button detected, pressing Enter in password field");
+      await passwordHandle.press("Enter").catch(() => {});
+    }
+
     await page.waitForLoadState("domcontentloaded").catch(() => {});
+
+    // Wait for either a URL change, a TOTP field, or the initial timeout
+    await Promise.race([
+      page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {}),
+      page.waitForSelector(
+        'input[autocomplete="one-time-code"]:not([disabled]), input[inputmode="numeric"]:not([disabled]), input[name*="otp" i]:not([disabled]), input[name*="code" i]:not([disabled]), input[aria-label*="code" i]:not([disabled])',
+        { state: "visible", timeout: TIMEOUTS.NAVIGATION }
+      ).catch(() => null),
+    ]);
+
+    // If TOTP is configured and a code field is present, fill it
+    if (credential.totp_secret) {
+      const totpHandle = await page.$(
+        'input[autocomplete="one-time-code"]:not([disabled]), input[inputmode="numeric"]:not([disabled]), input[name*="otp" i]:not([disabled]), input[name*="code" i]:not([disabled]), input[aria-label*="code" i]:not([disabled])'
+      );
+      if (totpHandle) {
+        const totp = generateTOTP(credential.totp_secret);
+        await totpHandle.scrollIntoViewIfNeeded().catch(() => {});
+        await totpHandle.click({ delay: 40 }).catch(() => {});
+        await page.keyboard.type(totp, { delay: 60 });
+        await page.waitForTimeout(TIMING.POST_TOTP_WAIT);
+        // Some sites auto-submit on 6-digit completion, others need a click
+        const totpSubmit = await page.$('button[type="submit"]:not([disabled])');
+        if (totpSubmit) {
+          await totpSubmit.click({ delay: 40 }).catch(() => {});
+        }
+        await page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {});
+      }
+    }
+
     await page.waitForTimeout(TIMING.POST_LOGIN_WAIT);
   }
-  if (step.totpSelector && credential.totp_secret) {
-    const totp = generateTOTP(credential.totp_secret);
-    await page.click(resolveSelector(step.totpSelector, ctx));
-    await page.keyboard.type(totp, { delay: 50 });
-    await page.waitForTimeout(TIMING.POST_TOTP_WAIT);
-  }
-  return { loggedIn: true, url: page.url() };
+
+  // Honest loggedIn signal: URL must have changed AND no visible password field remains
+  const afterUrl = page.url();
+  const stillHasPasswordField = await page.evaluate(() => {
+    const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])') as HTMLInputElement | null;
+    return !!(pwd && pwd.offsetParent !== null);
+  }).catch(() => false);
+
+  const loggedIn = afterUrl !== beforeUrl && !stillHasPasswordField;
+  return { loggedIn, url: afterUrl, changedUrl: afterUrl !== beforeUrl, passwordFieldRemains: stillHasPasswordField };
 }
 
 // ─── Main executor ───��──────────────────────────────────────────────

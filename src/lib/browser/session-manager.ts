@@ -1,14 +1,11 @@
 import { spawn, type ChildProcess } from "child_process";
 import fs from "fs";
 import { launchHeadful } from "./launcher";
-import { stealthContextOptions, buildStealthScript } from "./stealth";
+import { stealthContextOptions, buildStealthScript, contextStealthScripts } from "./stealth";
 import { createLogger } from "../logger";
 
 const log = createLogger("session");import { generateWindowsFingerprint } from "./fingerprint";
 import type { Browser, BrowserContext, Page } from "patchright";
-
-// Map from context → per-session stealth script (fingerprint-parameterized)
-export const contextStealthScripts = new Map<BrowserContext, string>();
 
 const BASE_DISPLAY = parseInt(process.env.VNC_BASE_DISPLAY || "99", 10);
 const MAX_SESSIONS = parseInt(process.env.VNC_MAX_SESSIONS || "20", 10);

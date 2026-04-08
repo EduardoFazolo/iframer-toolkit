@@ -1,2 +1,0 @@
-#!/usr/bin/env bash
-IFRAMER_URL=http://localhost:3021 exec node "$(dirname "$0")/cli.js" "$@"

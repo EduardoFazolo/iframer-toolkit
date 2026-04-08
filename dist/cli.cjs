@@ -26,34 +26,6 @@ var __export = (target, all) => {
 };
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 
-// src/lib/logger.ts
-function createLogger(tag) {
-  const prefix = `[${tag}]`;
-  return {
-    debug: (...args) => {
-      if (LEVELS[currentLevel] <= 0)
-        console.log(prefix, ...args);
-    },
-    info: (...args) => {
-      if (LEVELS[currentLevel] <= 1)
-        console.log(prefix, ...args);
-    },
-    warn: (...args) => {
-      if (LEVELS[currentLevel] <= 2)
-        console.warn(prefix, ...args);
-    },
-    error: (...args) => {
-      if (LEVELS[currentLevel] <= 3)
-        console.error(prefix, ...args);
-    }
-  };
-}
-var LEVELS, currentLevel;
-var init_logger = __esm(() => {
-  LEVELS = { debug: 0, info: 1, warn: 2, error: 3, silent: 4 };
-  currentLevel = process.env.LOG_LEVEL || "info";
-});
-
 // src/lib/browser/stealth.ts
 function buildStealthScript(fp) {
   const ua = fp?.userAgent ?? USER_AGENT;
@@ -410,7 +382,7 @@ function stealthContextOptions(overrides = {}, _sessionId, fp) {
 async function applyStealthToPage(page) {
   await page.context().addInitScript(STEALTH_SCRIPT);
 }
-var CHROME_VERSION = "136.0.7103.93", USER_AGENT, NATIVE_TOSTRING_HELPER = `
+var contextStealthScripts, CHROME_VERSION = "136.0.7103.93", USER_AGENT, NATIVE_TOSTRING_HELPER = `
   const _nativeToStr = Function.prototype.toString;
   const _patchedFns = new Set();
   function _makeNative(fn, name) {
@@ -425,6 +397,7 @@ var CHROME_VERSION = "136.0.7103.93", USER_AGENT, NATIVE_TOSTRING_HELPER = `
   _makeNative(Function.prototype.toString, 'toString');
 `, STEALTH_SCRIPT, STEALTH_ARGS;
 var init_stealth = __esm(() => {
+  contextStealthScripts = new Map;
   USER_AGENT = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME_VERSION} Safari/537.36`;
   STEALTH_SCRIPT = buildStealthScript();
   STEALTH_ARGS = [
@@ -439,84 +412,6 @@ var init_stealth = __esm(() => {
     "--use-gl=angle",
     "--use-angle=swiftshader"
   ];
-});
-
-// src/lib/browser/launcher.ts
-function findChromeExecutable() {
-  if (process.env.CHROME_EXECUTABLE)
-    return process.env.CHROME_EXECUTABLE;
-  if (import_fs.default.existsSync("/usr/bin/google-chrome-stable"))
-    return "/usr/bin/google-chrome-stable";
-  return;
-}
-async function getBrowser(name = "chromium") {
-  if (browsers[name] && browsers[name].isConnected()) {
-    return browsers[name];
-  }
-  const type = BROWSER_TYPES[name];
-  if (!type)
-    throw new Error(`Unknown browser: ${name}. Must be one of: ${BROWSER_ORDER.join(", ")}`);
-  browsers[name] = await type.launch({
-    headless: true,
-    args: name === "chromium" ? STEALTH_ARGS : []
-  });
-  return browsers[name];
-}
-async function getBrowserWithFallback(preferred) {
-  const order = preferred ? [preferred, ...BROWSER_ORDER.filter((b) => b !== preferred)] : BROWSER_ORDER;
-  const errors = [];
-  for (const name of order) {
-    try {
-      return { browser: await getBrowser(name), name };
-    } catch (err) {
-      errors.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-  throw new Error(`All browsers failed to launch: ${errors.join("; ")}`);
-}
-async function launchHeadful(displayNum) {
-  const executablePath = findChromeExecutable();
-  const hasExtensions = import_fs.default.existsSync(UBLOCK_PATH);
-  const args = [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-blink-features=AutomationControlled",
-    "--disable-features=IsolateOrigins,site-per-process",
-    "--disable-infobars",
-    "--window-size=1920,1080",
-    "--force-device-scale-factor=1.25",
-    "--use-gl=angle",
-    "--use-angle=swiftshader"
-  ];
-  if (hasExtensions)
-    args.push(`--load-extension=${UBLOCK_PATH}`);
-  const launchOpts = {
-    headless: false,
-    args,
-    env: { ...process.env, DISPLAY: `:${displayNum}` }
-  };
-  if (executablePath)
-    launchOpts.executablePath = executablePath;
-  const hasRealChrome = import_fs.default.existsSync("/usr/bin/google-chrome-stable") || !!process.env.CHROME_EXECUTABLE;
-  log.debug(`headful: ${executablePath || "patchright chromium"}, extensions: ${hasExtensions}, realChrome: ${hasRealChrome}`);
-  if (hasRealChrome) {
-    return import_playwright.chromium.launch(launchOpts);
-  } else {
-    return import_patchright.chromium.launch(launchOpts);
-  }
-}
-var import_fs, import_patchright, import_playwright, log, UBLOCK_PATH = "/extensions/uBlock0.chromium", BROWSER_TYPES, BROWSER_ORDER, browsers;
-var init_launcher = __esm(() => {
-  init_stealth();
-  init_logger();
-  import_fs = __toESM(require("fs"));
-  import_patchright = require("patchright");
-  import_playwright = require("playwright");
-  log = createLogger("launcher");
-  BROWSER_TYPES = { chromium: import_patchright.chromium, firefox: import_playwright.firefox, webkit: import_playwright.webkit };
-  BROWSER_ORDER = ["chromium", "firefox", "webkit"];
-  browsers = {};
 });
 
 // src/lib/constants.ts
@@ -580,233 +475,6 @@ var init_constants = __esm(() => {
     HEALTH_CHECK: 3000,
     CHALLENGE_FRAME_WAIT: 5000
   };
-});
-
-// src/lib/browser/fingerprint.ts
-function generateWindowsFingerprint() {
-  const fp = generator.getFingerprint();
-  const { navigator: nav, screen } = fp.fingerprint;
-  const dprOptions = [1.25, 1.5, 1.25, 1.5, 1];
-  const dpr = dprOptions[Math.floor(Math.random() * dprOptions.length)];
-  const w = screen.width || SCREEN_DEFAULTS.WIDTH;
-  const h = screen.height || SCREEN_DEFAULTS.HEIGHT;
-  return {
-    userAgent: nav.userAgent,
-    platform: "Win32",
-    screenWidth: w,
-    screenHeight: h,
-    screenAvailHeight: h - 40,
-    colorDepth: 24,
-    deviceScaleFactor: dpr,
-    hardwareConcurrency: nav.hardwareConcurrency || 8,
-    deviceMemory: nav.deviceMemory || 8,
-    languages: nav.languages || ["en-US", "en"],
-    uaData: nav.userAgentData
-  };
-}
-var import_fingerprint_generator, generator;
-var init_fingerprint = __esm(() => {
-  init_constants();
-  import_fingerprint_generator = require("fingerprint-generator");
-  generator = new import_fingerprint_generator.FingerprintGenerator({
-    browsers: [{ name: "chrome", minVersion: CHROME_MIN_VERSION }],
-    operatingSystems: ["windows"],
-    devices: ["desktop"],
-    locales: ["en-US"]
-  });
-});
-
-// src/lib/session/persistence.ts
-var exports_persistence = {};
-__export(exports_persistence, {
-  injectStorage: () => injectStorage,
-  injectCookies: () => injectCookies,
-  extractSession: () => extractSession
-});
-async function extractSession(context, page) {
-  const cookies = await context.cookies();
-  const { localStorage, sessionStorage } = await page.evaluate(() => {
-    const ls = {};
-    const ss = {};
-    for (let i = 0;i < window.localStorage.length; i++) {
-      const key = window.localStorage.key(i);
-      ls[key] = window.localStorage.getItem(key);
-    }
-    for (let i = 0;i < window.sessionStorage.length; i++) {
-      const key = window.sessionStorage.key(i);
-      ss[key] = window.sessionStorage.getItem(key);
-    }
-    return { localStorage: ls, sessionStorage: ss };
-  });
-  const origin = new URL(page.url()).origin;
-  return {
-    cookies,
-    localStorage: { [origin]: localStorage },
-    sessionStorage: { [origin]: sessionStorage },
-    extractedAt: new Date().toISOString()
-  };
-}
-async function injectCookies(context, sessionData) {
-  if (sessionData?.cookies?.length > 0) {
-    await context.addCookies(sessionData.cookies);
-  }
-}
-async function injectStorage(page, sessionData) {
-  if (!sessionData)
-    return;
-  const origin = new URL(page.url()).origin;
-  const ls = sessionData.localStorage?.[origin];
-  const ss = sessionData.sessionStorage?.[origin];
-  if (ls && Object.keys(ls).length > 0) {
-    await page.evaluate((data) => {
-      for (const [key, value] of Object.entries(data)) {
-        window.localStorage.setItem(key, value);
-      }
-    }, ls);
-  }
-  if (ss && Object.keys(ss).length > 0) {
-    await page.evaluate((data) => {
-      for (const [key, value] of Object.entries(data)) {
-        window.sessionStorage.setItem(key, value);
-      }
-    }, ss);
-  }
-}
-
-// src/lib/browser/session-manager.ts
-function allocateDisplay() {
-  for (let i = 0;i < MAX_SESSIONS; i++) {
-    const num = BASE_DISPLAY + i;
-    if (!usedDisplays.has(num)) {
-      usedDisplays.add(num);
-      return num;
-    }
-  }
-  throw new Error("No available displays. Max concurrent sessions reached.");
-}
-function freeDisplay(num) {
-  usedDisplays.delete(num);
-}
-function waitForSocket(displayNum, timeoutMs = 5000) {
-  const socketPath = `/tmp/.X11-unix/X${displayNum}`;
-  return new Promise((resolve, reject) => {
-    const start = Date.now();
-    const check = () => {
-      if (import_fs2.default.existsSync(socketPath))
-        return resolve();
-      if (Date.now() - start > timeoutMs)
-        return reject(new Error(`Xvfb socket not ready after ${timeoutMs}ms`));
-      setTimeout(check, 100);
-    };
-    check();
-  });
-}
-function killProcess(proc) {
-  if (proc && !proc.killed) {
-    try {
-      proc.kill("SIGTERM");
-    } catch {}
-  }
-}
-async function startSession(userId) {
-  if (sessions.has(userId)) {
-    return sessions.get(userId);
-  }
-  const displayNum = allocateDisplay();
-  const vncPort = 5900 + displayNum;
-  const wsPort = 6080 + (displayNum - BASE_DISPLAY);
-  const xvfb = import_child_process.spawn("Xvfb", [`:${displayNum}`, "-screen", "0", "1920x1080x24", "-ac"], {
-    stdio: "ignore"
-  });
-  await waitForSocket(displayNum);
-  const x11vnc = import_child_process.spawn("x11vnc", ["-display", `:${displayNum}`, "-nopw", "-listen", "localhost", "-rfbport", String(vncPort), "-shared", "-forever"], { stdio: "ignore" });
-  const noVncPath = import_fs2.default.existsSync("/usr/share/novnc") ? "/usr/share/novnc" : "/usr/share/noVNC";
-  const websockify = import_child_process.spawn("websockify", ["--web", noVncPath, String(wsPort), `localhost:${vncPort}`], {
-    stdio: "ignore"
-  });
-  await new Promise((r) => setTimeout(r, 500));
-  const browser = await launchHeadful(displayNum);
-  const fingerprint = generateWindowsFingerprint();
-  const ctxOpts = stealthContextOptions({}, userId, fingerprint);
-  const context = await browser.newContext(ctxOpts);
-  const stealthScript = buildStealthScript(fingerprint);
-  contextStealthScripts.set(context, stealthScript);
-  const page = await context.newPage();
-  log2.debug(`fingerprint: ${fingerprint.userAgent.slice(0, 60)}... DPR=${fingerprint.deviceScaleFactor} screen=${fingerprint.screenWidth}x${fingerprint.screenHeight}`);
-  const session = {
-    displayNum,
-    vncPort,
-    wsPort,
-    xvfb,
-    x11vnc,
-    websockify,
-    browser,
-    context,
-    page,
-    createdAt: new Date,
-    timeoutTimer: null
-  };
-  session.timeoutTimer = setTimeout(() => stopSession(userId), SESSION_TIMEOUT);
-  sessions.set(userId, session);
-  return session;
-}
-function resetTimeout(userId) {
-  const session = sessions.get(userId);
-  if (session) {
-    clearTimeout(session.timeoutTimer);
-    session.timeoutTimer = setTimeout(() => stopSession(userId), SESSION_TIMEOUT);
-  }
-}
-function getSession(userId) {
-  return sessions.get(userId) || null;
-}
-async function stopSession(userId) {
-  const session = sessions.get(userId);
-  if (!session)
-    return null;
-  clearTimeout(session.timeoutTimer);
-  let sessionData = null;
-  try {
-    const { extractSession: extractSession2 } = await Promise.resolve().then(() => exports_persistence);
-    sessionData = await extractSession2(session.context, session.page);
-  } catch {}
-  contextStealthScripts.delete(session.context);
-  try {
-    await session.context.close();
-  } catch {}
-  try {
-    await session.browser.close();
-  } catch {}
-  killProcess(session.websockify);
-  killProcess(session.x11vnc);
-  killProcess(session.xvfb);
-  await new Promise((r) => setTimeout(r, 1000));
-  try {
-    import_fs2.default.unlinkSync(`/tmp/.X11-unix/X${session.displayNum}`);
-  } catch {}
-  freeDisplay(session.displayNum);
-  sessions.delete(userId);
-  return sessionData;
-}
-async function cleanupAllSessions() {
-  const userIds = [...sessions.keys()];
-  await Promise.all(userIds.map((id) => stopSession(id)));
-}
-var import_child_process, import_fs2, log2, contextStealthScripts, BASE_DISPLAY, MAX_SESSIONS, SESSION_TIMEOUT, sessions, usedDisplays;
-var init_session_manager = __esm(() => {
-  init_launcher();
-  init_stealth();
-  init_logger();
-  init_fingerprint();
-  import_child_process = require("child_process");
-  import_fs2 = __toESM(require("fs"));
-  log2 = createLogger("session");
-  contextStealthScripts = new Map;
-  BASE_DISPLAY = parseInt(process.env.VNC_BASE_DISPLAY || "99", 10);
-  MAX_SESSIONS = parseInt(process.env.VNC_MAX_SESSIONS || "20", 10);
-  SESSION_TIMEOUT = parseInt(process.env.VNC_SESSION_TIMEOUT_MS || "300000", 10);
-  sessions = new Map;
-  usedDisplays = new Set;
 });
 
 // src/lib/browser/humanize.ts
@@ -1016,6 +684,34 @@ var init_humanize = __esm(() => {
   mousePositions = new WeakMap;
 });
 
+// src/lib/logger.ts
+function createLogger(tag) {
+  const prefix = `[${tag}]`;
+  return {
+    debug: (...args) => {
+      if (LEVELS[currentLevel] <= 0)
+        console.log(prefix, ...args);
+    },
+    info: (...args) => {
+      if (LEVELS[currentLevel] <= 1)
+        console.log(prefix, ...args);
+    },
+    warn: (...args) => {
+      if (LEVELS[currentLevel] <= 2)
+        console.warn(prefix, ...args);
+    },
+    error: (...args) => {
+      if (LEVELS[currentLevel] <= 3)
+        console.error(prefix, ...args);
+    }
+  };
+}
+var LEVELS, currentLevel;
+var init_logger = __esm(() => {
+  LEVELS = { debug: 0, info: 1, warn: 2, error: 3, silent: 4 };
+  currentLevel = process.env.LOG_LEVEL || "info";
+});
+
 // src/lib/captcha/recaptcha.ts
 function getClient() {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -1053,7 +749,7 @@ async function screenshotFullGrid(page, challengeInfo) {
     const buf = await page.screenshot({ type: "jpeg", quality: 85, clip: gridClip });
     return buf.toString("base64");
   } catch (err) {
-    log3.error(`full grid screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.error(`full grid screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -1116,10 +812,10 @@ Does this tile contain a ${target}? Reply ONLY "yes" or "no".`
       const answer = (response.content[0].text ?? "").toLowerCase().trim();
       const match = answer.startsWith("yes");
       if (match)
-        log3.debug(`tile ${tile.index} (r${tileRow}c${tileCol}): YES`);
+        log.debug(`tile ${tile.index} (r${tileRow}c${tileCol}): YES`);
       return { index: tile.index, match };
     } catch (err) {
-      log3.error(`tile ${tile.index} classification failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.error(`tile ${tile.index} classification failed: ${err instanceof Error ? err.message : String(err)}`);
       return { index: tile.index, match: false };
     }
   }));
@@ -1141,7 +837,7 @@ async function submitForm(page) {
       if (el) {
         const visible = await el.isVisible();
         if (visible) {
-          log3.info(`Submitting form via: ${selector}`);
+          log.info(`Submitting form via: ${selector}`);
           await new Promise((r) => setTimeout(r, 500));
           await humanClick(page, selector);
           await new Promise((r) => setTimeout(r, 2000));
@@ -1150,7 +846,7 @@ async function submitForm(page) {
       }
     } catch {}
   }
-  log3.info("No submit button found — skipping form submission");
+  log.info("No submit button found — skipping form submission");
   return false;
 }
 async function solveRecaptcha(page, monitor) {
@@ -1176,7 +872,7 @@ async function solveRecaptcha(page, monitor) {
       return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge info lost" };
     }
     const target = extractTarget(challengeInfo.prompt);
-    log3.info(`Round ${rounds}: looking for "${target}" in ${challengeInfo.rows}x${challengeInfo.cols} grid`);
+    log.info(`Round ${rounds}: looking for "${target}" in ${challengeInfo.rows}x${challengeInfo.cols} grid`);
     const [fullGridImage, tileImages] = await Promise.all([
       screenshotFullGrid(page, challengeInfo),
       screenshotTiles(page, challengeInfo)
@@ -1186,7 +882,7 @@ async function solveRecaptcha(page, monitor) {
     }
     monitor?.reportActivity();
     const matchingIndices = await classifyTiles(client, fullGridImage, tileImages, target, challengeInfo.rows, challengeInfo.cols);
-    log3.info(`Round ${rounds}: matched tiles [${matchingIndices.join(", ")}]`);
+    log.info(`Round ${rounds}: matched tiles [${matchingIndices.join(", ")}]`);
     monitor?.reportActivity();
     if (matchingIndices.length > 0) {
       await clickChallengeTiles(page, matchingIndices);
@@ -1205,7 +901,7 @@ async function solveRecaptcha(page, monitor) {
               monitor?.reportActivity();
               const newMatches = await classifyTiles(client, newFullGrid, replacedTiles, target, newInfo.rows, newInfo.cols);
               if (newMatches.length > 0) {
-                log3.info(`Round ${rounds}: dynamic tiles matched [${newMatches.join(", ")}]`);
+                log.info(`Round ${rounds}: dynamic tiles matched [${newMatches.join(", ")}]`);
                 await clickChallengeTiles(page, newMatches);
                 await new Promise((r) => setTimeout(r, TILE_SETTLE_MS));
               }
@@ -1217,7 +913,7 @@ async function solveRecaptcha(page, monitor) {
     const verifyResult = await clickChallengeVerify(page);
     monitor?.reportActivity();
     if (verifyResult.solved) {
-      log3.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
+      log.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
       const submitted = await submitForm(page);
       return { solved: true, rounds, durationMs: Date.now() - startTime, submitted };
     }
@@ -1225,17 +921,17 @@ async function solveRecaptcha(page, monitor) {
     if (!challengeInfo) {
       return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge disappeared after verify" };
     }
-    log3.info(`Round ${rounds}: not solved, new challenge appeared`);
+    log.info(`Round ${rounds}: not solved, new challenge appeared`);
   }
   return { solved: false, rounds, durationMs: Date.now() - startTime, reason: `Max rounds (${MAX_ROUNDS}) exceeded` };
 }
-var import_sdk, log3, MAX_ROUNDS = 8, MAX_DURATION_MS = 45000, TILE_SETTLE_MS, MODEL = "claude-haiku-4-5-20251001";
+var import_sdk, log, MAX_ROUNDS = 8, MAX_DURATION_MS = 45000, TILE_SETTLE_MS, MODEL = "claude-haiku-4-5-20251001";
 var init_recaptcha = __esm(() => {
   init_humanize();
   init_constants();
   init_logger();
   import_sdk = __toESM(require("@anthropic-ai/sdk"));
-  log3 = createLogger("captcha-solver");
+  log = createLogger("captcha-solver");
   TILE_SETTLE_MS = TIMING.TILE_SETTLE;
 });
 
@@ -1334,7 +1030,7 @@ async function getChallengeInfo2(page) {
     return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
   }).catch(() => null);
   const verifyButton = verifyBtnBox ? { x: Math.round(frameBox.x + verifyBtnBox.x), y: Math.round(frameBox.y + verifyBtnBox.y) } : { x: Math.round(frameBox.x + frameBox.width - 55), y: Math.round(frameBox.y + frameBox.height - 30) };
-  log4.info(`Round challenge: "${info.prompt}" (${info.rows}x${info.cols})`);
+  log2.info(`Round challenge: "${info.prompt}" (${info.rows}x${info.cols})`);
   return { prompt: info.prompt, rows: info.rows, cols: info.cols, tiles, verifyButton, frameBox };
 }
 async function screenshotChallenge(page, challenge) {
@@ -1350,7 +1046,7 @@ async function screenshotChallenge(page, challenge) {
     }
     return buf.toString("base64");
   } catch (err) {
-    log4.error(`screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
+    log2.error(`screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -1371,12 +1067,12 @@ async function classifyTiles2(client, screenshotBase64, challenge) {
       }]
     });
     const text = (response.content[0].text ?? "").trim();
-    log4.debug(`classify response: "${text}"`);
+    log2.debug(`classify response: "${text}"`);
     if (text.toLowerCase().startsWith("none"))
       return [];
     return text.split(/[,\s]+/).map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n) && n >= 0 && n < total);
   } catch (err) {
-    log4.error(`classification failed: ${err instanceof Error ? err.message : String(err)}`);
+    log2.error(`classification failed: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 }
@@ -1403,7 +1099,7 @@ async function solveHCaptcha(page, monitor) {
     return { solved: false, rounds: 0, durationMs: Date.now() - startTime, reason: err instanceof Error ? err.message : String(err) };
   }
   if (solvedOnCheckbox) {
-    log4.info("Solved on checkbox click (no challenge)");
+    log2.info("Solved on checkbox click (no challenge)");
     return { solved: true, rounds: 0, durationMs: Date.now() - startTime };
   }
   while (rounds < MAX_ROUNDS2) {
@@ -1414,7 +1110,7 @@ async function solveHCaptcha(page, monitor) {
     monitor?.reportActivity();
     const challenge = await getChallengeInfo2(page);
     if (!challenge) {
-      log4.info("Challenge frame gone — assuming solved");
+      log2.info("Challenge frame gone — assuming solved");
       return { solved: true, rounds, durationMs: Date.now() - startTime };
     }
     const screenshotBase64 = await screenshotChallenge(page, challenge);
@@ -1423,7 +1119,7 @@ async function solveHCaptcha(page, monitor) {
     }
     monitor?.reportActivity();
     const matchingIndices = await classifyTiles2(client, screenshotBase64, challenge);
-    log4.info(`Round ${rounds}: clicking tiles [${matchingIndices.join(", ")}]`);
+    log2.info(`Round ${rounds}: clicking tiles [${matchingIndices.join(", ")}]`);
     monitor?.reportActivity();
     for (const idx of matchingIndices) {
       const tile = challenge.tiles[idx];
@@ -1436,20 +1132,20 @@ async function solveHCaptcha(page, monitor) {
     const solved = await clickVerify(page, challenge);
     monitor?.reportActivity();
     if (solved) {
-      log4.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
+      log2.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
       return { solved: true, rounds, durationMs: Date.now() - startTime };
     }
-    log4.info(`Round ${rounds}: not solved, retrying`);
+    log2.info(`Round ${rounds}: not solved, retrying`);
     await sleep2(rand2(500, 1000));
   }
   return { solved: false, rounds, durationMs: Date.now() - startTime, reason: `Max rounds (${MAX_ROUNDS2}) exceeded` };
 }
-var import_sdk2, log4, MAX_ROUNDS2 = 8, MAX_DURATION_MS2 = 60000, MODEL2 = "claude-haiku-4-5-20251001";
+var import_sdk2, log2, MAX_ROUNDS2 = 8, MAX_DURATION_MS2 = 60000, MODEL2 = "claude-haiku-4-5-20251001";
 var init_hcaptcha = __esm(() => {
   init_humanize();
   init_logger();
   import_sdk2 = __toESM(require("@anthropic-ai/sdk"));
-  log4 = createLogger("hcaptcha-solver");
+  log2 = createLogger("hcaptcha-solver");
 });
 
 // src/lib/auth/crypto.ts
@@ -1508,14 +1204,14 @@ var init_crypto = __esm(() => {
 
 // src/lib/screenshot.ts
 function saveScreenshot(buffer, filename, screenshotDir, publicUrl) {
-  import_fs3.default.mkdirSync(screenshotDir, { recursive: true });
+  import_fs.default.mkdirSync(screenshotDir, { recursive: true });
   const filePath = import_path.default.join(screenshotDir, filename);
-  import_fs3.default.writeFileSync(filePath, buffer);
+  import_fs.default.writeFileSync(filePath, buffer);
   return `${publicUrl}/screenshots/${filename}`;
 }
-var import_fs3, import_path;
+var import_fs, import_path;
 var init_screenshot = __esm(() => {
-  import_fs3 = __toESM(require("fs"));
+  import_fs = __toESM(require("fs"));
   import_path = __toESM(require("path"));
 });
 
@@ -1949,10 +1645,10 @@ async function handleSolveCaptcha(page, monitor) {
       return src.includes("hcaptcha.com") || title.includes("hcaptcha") || !!document.querySelector("[data-hcaptcha-widget-id]");
     });
   }).catch((err) => {
-    log5.warn(`captcha detection failed: ${err}`);
+    log3.warn(`captcha detection failed: ${err}`);
     return false;
   });
-  log5.info(`detected: ${isHCaptcha ? "hCaptcha" : "reCAPTCHA"}`);
+  log3.info(`detected: ${isHCaptcha ? "hCaptcha" : "reCAPTCHA"}`);
   return isHCaptcha ? await solveHCaptcha(page, monitor) : await solveRecaptcha(page, monitor);
 }
 async function handleFind(page, step, ctx) {
@@ -2031,7 +1727,8 @@ async function handleLogin(page, step, ctx) {
     throw new Error(`No credentials stored for ${step.domain}`);
   }
   const credential = JSON.parse(decrypt(blob, credKey));
-  const reactFill = async (selector, value) => {
+  const beforeUrl = page.url();
+  const reactFillSelector = async (selector, value) => {
     await page.click(selector);
     await page.waitForTimeout(TIMING.SCROLL_DELAY);
     await page.evaluate(([sel, val]) => {
@@ -2045,24 +1742,133 @@ async function handleLogin(page, step, ctx) {
     }, [selector, value]);
     await page.waitForTimeout(TIMING.PRE_NAVIGATE[0] + Math.random() * (TIMING.PRE_NAVIGATE[1] - TIMING.PRE_NAVIGATE[0]));
   };
-  if (step.usernameSelector && credential.username) {
-    await reactFill(resolveSelector(step.usernameSelector, ctx), credential.username);
-  }
-  if (step.passwordSelector && credential.password) {
-    await reactFill(resolveSelector(step.passwordSelector, ctx), credential.password);
-  }
-  if (step.submitSelector) {
-    await humanClick(page, resolveSelector(step.submitSelector, ctx));
+  const hasExplicitSelectors = !!(step.usernameSelector || step.passwordSelector || step.submitSelector);
+  if (hasExplicitSelectors) {
+    if (step.usernameSelector && credential.username) {
+      await reactFillSelector(resolveSelector(step.usernameSelector, ctx), credential.username);
+    }
+    if (step.passwordSelector && credential.password) {
+      await reactFillSelector(resolveSelector(step.passwordSelector, ctx), credential.password);
+    }
+    if (step.submitSelector) {
+      await humanClick(page, resolveSelector(step.submitSelector, ctx));
+      await page.waitForLoadState("domcontentloaded").catch(() => {});
+      await page.waitForTimeout(TIMING.POST_LOGIN_WAIT);
+    }
+    if (step.totpSelector && credential.totp_secret) {
+      const totp = generateTOTP(credential.totp_secret);
+      await page.click(resolveSelector(step.totpSelector, ctx));
+      await page.keyboard.type(totp, { delay: 50 });
+      await page.waitForTimeout(TIMING.POST_TOTP_WAIT);
+    }
+  } else {
+    log3.info(`login: auto-detecting form on ${beforeUrl}`);
+    const passwordHandle = await page.waitForSelector('input[type="password"]:not([disabled]):not([readonly])', { state: "visible", timeout: TIMEOUTS.SELECTOR_WAIT }).catch(() => null);
+    if (!passwordHandle) {
+      throw new Error(`login: no visible password field found on ${beforeUrl}. If the site uses a multi-step form, navigate to the actual password page first, or pass explicit selectors.`);
+    }
+    const usernameHandle = await page.evaluateHandle(() => {
+      const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])');
+      if (!pwd)
+        return null;
+      const scope = pwd.closest("form") || document;
+      const candidates = [
+        'input[type="email"]:not([disabled]):not([readonly])',
+        'input[autocomplete="username"]:not([disabled]):not([readonly])',
+        'input[autocomplete="email"]:not([disabled]):not([readonly])',
+        'input[name*="email" i]:not([disabled]):not([readonly])',
+        'input[name*="user" i]:not([disabled]):not([readonly])',
+        'input[name*="login" i]:not([disabled]):not([readonly])',
+        'input[id*="email" i]:not([disabled]):not([readonly])',
+        'input[id*="user" i]:not([disabled]):not([readonly])',
+        'input[type="text"]:not([disabled]):not([readonly])',
+        "input:not([type]):not([disabled]):not([readonly])"
+      ];
+      for (const sel of candidates) {
+        const el = scope.querySelector(sel);
+        if (el && el.offsetParent !== null)
+          return el;
+      }
+      return null;
+    });
+    const usernameEl = usernameHandle.asElement();
+    const fillHandle = async (handle, value) => {
+      await handle.scrollIntoViewIfNeeded().catch(() => {});
+      await handle.click({ delay: 40 }).catch(() => {});
+      await handle.evaluate((el, val) => {
+        const input = el;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        setter?.call(input, val);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      }, value);
+      await page.waitForTimeout(TIMING.PRE_NAVIGATE[0] + Math.random() * (TIMING.PRE_NAVIGATE[1] - TIMING.PRE_NAVIGATE[0]));
+    };
+    if (usernameEl && credential.username) {
+      await fillHandle(usernameEl, credential.username);
+    } else if (!usernameEl) {
+      log3.warn("login: no username field detected, proceeding with password only");
+    }
+    if (credential.password) {
+      await fillHandle(passwordHandle, credential.password);
+    }
+    const submitHandle = await page.evaluateHandle(() => {
+      const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])');
+      const form = pwd?.closest("form");
+      const loginRe = /\b(log\s*in|sign\s*in|continue|submit|enter|next)\b/i;
+      const pick = (scope) => {
+        const typed = scope.querySelector('button[type="submit"]:not([disabled]), input[type="submit"]:not([disabled])');
+        if (typed)
+          return typed;
+        const buttons = Array.from(scope.querySelectorAll('button:not([disabled]), [role="button"]:not([disabled])'));
+        return buttons.find((b) => loginRe.test(b.textContent || "") && b.offsetParent !== null) || null;
+      };
+      if (form) {
+        const found = pick(form);
+        if (found)
+          return found;
+      }
+      return pick(document);
+    });
+    const submitEl = submitHandle.asElement();
+    if (submitEl) {
+      await submitEl.scrollIntoViewIfNeeded().catch(() => {});
+      await submitEl.click({ delay: 40 }).catch(async () => {
+        await submitEl.evaluate((el) => el.click());
+      });
+    } else {
+      log3.warn("login: no submit button detected, pressing Enter in password field");
+      await passwordHandle.press("Enter").catch(() => {});
+    }
     await page.waitForLoadState("domcontentloaded").catch(() => {});
+    await Promise.race([
+      page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {}),
+      page.waitForSelector('input[autocomplete="one-time-code"]:not([disabled]), input[inputmode="numeric"]:not([disabled]), input[name*="otp" i]:not([disabled]), input[name*="code" i]:not([disabled]), input[aria-label*="code" i]:not([disabled])', { state: "visible", timeout: TIMEOUTS.NAVIGATION }).catch(() => null)
+    ]);
+    if (credential.totp_secret) {
+      const totpHandle = await page.$('input[autocomplete="one-time-code"]:not([disabled]), input[inputmode="numeric"]:not([disabled]), input[name*="otp" i]:not([disabled]), input[name*="code" i]:not([disabled]), input[aria-label*="code" i]:not([disabled])');
+      if (totpHandle) {
+        const totp = generateTOTP(credential.totp_secret);
+        await totpHandle.scrollIntoViewIfNeeded().catch(() => {});
+        await totpHandle.click({ delay: 40 }).catch(() => {});
+        await page.keyboard.type(totp, { delay: 60 });
+        await page.waitForTimeout(TIMING.POST_TOTP_WAIT);
+        const totpSubmit = await page.$('button[type="submit"]:not([disabled])');
+        if (totpSubmit) {
+          await totpSubmit.click({ delay: 40 }).catch(() => {});
+        }
+        await page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {});
+      }
+    }
     await page.waitForTimeout(TIMING.POST_LOGIN_WAIT);
   }
-  if (step.totpSelector && credential.totp_secret) {
-    const totp = generateTOTP(credential.totp_secret);
-    await page.click(resolveSelector(step.totpSelector, ctx));
-    await page.keyboard.type(totp, { delay: 50 });
-    await page.waitForTimeout(TIMING.POST_TOTP_WAIT);
-  }
-  return { loggedIn: true, url: page.url() };
+  const afterUrl = page.url();
+  const stillHasPasswordField = await page.evaluate(() => {
+    const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])');
+    return !!(pwd && pwd.offsetParent !== null);
+  }).catch(() => false);
+  const loggedIn = afterUrl !== beforeUrl && !stillHasPasswordField;
+  return { loggedIn, url: afterUrl, changedUrl: afterUrl !== beforeUrl, passwordFieldRemains: stillHasPasswordField };
 }
 async function executeAction(page, step, ctx, monitor) {
   const start = Date.now();
@@ -2079,7 +1885,7 @@ async function executeAction(page, step, ctx, monitor) {
         try {
           await page.evaluate(stealthScript);
         } catch (err) {
-          log5.warn(`stealth injection failed: ${err}`);
+          log3.warn(`stealth injection failed: ${err}`);
         }
         break;
       case "click":
@@ -2212,10 +2018,9 @@ async function executeAction(page, step, ctx, monitor) {
     };
   }
 }
-var log5;
+var log3;
 var init_actions = __esm(() => {
   init_stealth();
-  init_session_manager();
   init_humanize();
   init_recaptcha();
   init_hcaptcha();
@@ -2225,7 +2030,7 @@ var init_actions = __esm(() => {
   init_annotate();
   init_logger();
   init_constants();
-  log5 = createLogger("actions");
+  log3 = createLogger("actions");
 });
 
 // src/lib/stale-monitor.ts
@@ -3005,6 +2810,288 @@ var init_pipeline = __esm(() => {
   init_api_capture();
 });
 
+// src/lib/browser/launcher.ts
+function findChromeExecutable() {
+  if (process.env.CHROME_EXECUTABLE)
+    return process.env.CHROME_EXECUTABLE;
+  if (import_fs2.default.existsSync("/usr/bin/google-chrome-stable"))
+    return "/usr/bin/google-chrome-stable";
+  return;
+}
+async function getBrowser(_name = "chromium") {
+  if (cachedBrowser && cachedBrowser.isConnected())
+    return cachedBrowser;
+  cachedBrowser = await import_patchright.chromium.launch({
+    headless: true,
+    args: STEALTH_ARGS
+  });
+  return cachedBrowser;
+}
+async function getBrowserWithFallback(_preferred) {
+  return { browser: await getBrowser(), name: "chromium" };
+}
+async function launchHeadful(displayNum) {
+  const executablePath = findChromeExecutable();
+  const hasExtensions = import_fs2.default.existsSync(UBLOCK_PATH);
+  const args = [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-blink-features=AutomationControlled",
+    "--disable-features=IsolateOrigins,site-per-process",
+    "--disable-infobars",
+    "--window-size=1920,1080",
+    "--force-device-scale-factor=1.25",
+    "--use-gl=angle",
+    "--use-angle=swiftshader"
+  ];
+  if (hasExtensions)
+    args.push(`--load-extension=${UBLOCK_PATH}`);
+  const launchOpts = {
+    headless: false,
+    args,
+    env: { ...process.env, DISPLAY: `:${displayNum}` }
+  };
+  if (executablePath)
+    launchOpts.executablePath = executablePath;
+  log4.debug(`headful: ${executablePath || "patchright chromium"}, extensions: ${hasExtensions}`);
+  return import_patchright.chromium.launch(launchOpts);
+}
+var import_fs2, import_patchright, log4, UBLOCK_PATH = "/extensions/uBlock0.chromium", cachedBrowser = null;
+var init_launcher = __esm(() => {
+  init_stealth();
+  init_logger();
+  import_fs2 = __toESM(require("fs"));
+  import_patchright = require("patchright");
+  log4 = createLogger("launcher");
+});
+
+// src/lib/browser/fingerprint.ts
+function generateWindowsFingerprint() {
+  const fp = generator.getFingerprint();
+  const { navigator: nav, screen } = fp.fingerprint;
+  const dprOptions = [1.25, 1.5, 1.25, 1.5, 1];
+  const dpr = dprOptions[Math.floor(Math.random() * dprOptions.length)];
+  const w = screen.width || SCREEN_DEFAULTS.WIDTH;
+  const h = screen.height || SCREEN_DEFAULTS.HEIGHT;
+  return {
+    userAgent: nav.userAgent,
+    platform: "Win32",
+    screenWidth: w,
+    screenHeight: h,
+    screenAvailHeight: h - 40,
+    colorDepth: 24,
+    deviceScaleFactor: dpr,
+    hardwareConcurrency: nav.hardwareConcurrency || 8,
+    deviceMemory: nav.deviceMemory || 8,
+    languages: nav.languages || ["en-US", "en"],
+    uaData: nav.userAgentData
+  };
+}
+var import_fingerprint_generator, generator;
+var init_fingerprint = __esm(() => {
+  init_constants();
+  import_fingerprint_generator = require("fingerprint-generator");
+  generator = new import_fingerprint_generator.FingerprintGenerator({
+    browsers: [{ name: "chrome", minVersion: CHROME_MIN_VERSION }],
+    operatingSystems: ["windows"],
+    devices: ["desktop"],
+    locales: ["en-US"]
+  });
+});
+
+// src/lib/session/persistence.ts
+var exports_persistence = {};
+__export(exports_persistence, {
+  injectStorage: () => injectStorage,
+  injectCookies: () => injectCookies,
+  extractSession: () => extractSession
+});
+async function extractSession(context, page) {
+  const cookies = await context.cookies();
+  const { localStorage, sessionStorage } = await page.evaluate(() => {
+    const ls = {};
+    const ss = {};
+    for (let i = 0;i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      ls[key] = window.localStorage.getItem(key);
+    }
+    for (let i = 0;i < window.sessionStorage.length; i++) {
+      const key = window.sessionStorage.key(i);
+      ss[key] = window.sessionStorage.getItem(key);
+    }
+    return { localStorage: ls, sessionStorage: ss };
+  });
+  const origin = new URL(page.url()).origin;
+  return {
+    cookies,
+    localStorage: { [origin]: localStorage },
+    sessionStorage: { [origin]: sessionStorage },
+    extractedAt: new Date().toISOString()
+  };
+}
+async function injectCookies(context, sessionData) {
+  if (sessionData?.cookies?.length > 0) {
+    await context.addCookies(sessionData.cookies);
+  }
+}
+async function injectStorage(page, sessionData) {
+  if (!sessionData)
+    return;
+  const origin = new URL(page.url()).origin;
+  const ls = sessionData.localStorage?.[origin];
+  const ss = sessionData.sessionStorage?.[origin];
+  if (ls && Object.keys(ls).length > 0) {
+    await page.evaluate((data) => {
+      for (const [key, value] of Object.entries(data)) {
+        window.localStorage.setItem(key, value);
+      }
+    }, ls);
+  }
+  if (ss && Object.keys(ss).length > 0) {
+    await page.evaluate((data) => {
+      for (const [key, value] of Object.entries(data)) {
+        window.sessionStorage.setItem(key, value);
+      }
+    }, ss);
+  }
+}
+
+// src/lib/browser/session-manager.ts
+function allocateDisplay() {
+  for (let i = 0;i < MAX_SESSIONS; i++) {
+    const num = BASE_DISPLAY + i;
+    if (!usedDisplays.has(num)) {
+      usedDisplays.add(num);
+      return num;
+    }
+  }
+  throw new Error("No available displays. Max concurrent sessions reached.");
+}
+function freeDisplay(num) {
+  usedDisplays.delete(num);
+}
+function waitForSocket(displayNum, timeoutMs = 5000) {
+  const socketPath = `/tmp/.X11-unix/X${displayNum}`;
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const check = () => {
+      if (import_fs3.default.existsSync(socketPath))
+        return resolve();
+      if (Date.now() - start > timeoutMs)
+        return reject(new Error(`Xvfb socket not ready after ${timeoutMs}ms`));
+      setTimeout(check, 100);
+    };
+    check();
+  });
+}
+function killProcess(proc) {
+  if (proc && !proc.killed) {
+    try {
+      proc.kill("SIGTERM");
+    } catch {}
+  }
+}
+async function startSession(userId) {
+  if (sessions.has(userId)) {
+    return sessions.get(userId);
+  }
+  const displayNum = allocateDisplay();
+  const vncPort = 5900 + displayNum;
+  const wsPort = 6080 + (displayNum - BASE_DISPLAY);
+  const xvfb = import_child_process.spawn("Xvfb", [`:${displayNum}`, "-screen", "0", "1920x1080x24", "-ac"], {
+    stdio: "ignore"
+  });
+  await waitForSocket(displayNum);
+  const x11vnc = import_child_process.spawn("x11vnc", ["-display", `:${displayNum}`, "-nopw", "-listen", "localhost", "-rfbport", String(vncPort), "-shared", "-forever"], { stdio: "ignore" });
+  const noVncPath = import_fs3.default.existsSync("/usr/share/novnc") ? "/usr/share/novnc" : "/usr/share/noVNC";
+  const websockify = import_child_process.spawn("websockify", ["--web", noVncPath, String(wsPort), `localhost:${vncPort}`], {
+    stdio: "ignore"
+  });
+  await new Promise((r) => setTimeout(r, 500));
+  const browser = await launchHeadful(displayNum);
+  const fingerprint = generateWindowsFingerprint();
+  const ctxOpts = stealthContextOptions({}, userId, fingerprint);
+  const context = await browser.newContext(ctxOpts);
+  const stealthScript = buildStealthScript(fingerprint);
+  contextStealthScripts.set(context, stealthScript);
+  const page = await context.newPage();
+  log5.debug(`fingerprint: ${fingerprint.userAgent.slice(0, 60)}... DPR=${fingerprint.deviceScaleFactor} screen=${fingerprint.screenWidth}x${fingerprint.screenHeight}`);
+  const session = {
+    displayNum,
+    vncPort,
+    wsPort,
+    xvfb,
+    x11vnc,
+    websockify,
+    browser,
+    context,
+    page,
+    createdAt: new Date,
+    timeoutTimer: null
+  };
+  session.timeoutTimer = setTimeout(() => stopSession(userId), SESSION_TIMEOUT);
+  sessions.set(userId, session);
+  return session;
+}
+function resetTimeout(userId) {
+  const session = sessions.get(userId);
+  if (session) {
+    clearTimeout(session.timeoutTimer);
+    session.timeoutTimer = setTimeout(() => stopSession(userId), SESSION_TIMEOUT);
+  }
+}
+function getSession(userId) {
+  return sessions.get(userId) || null;
+}
+async function stopSession(userId) {
+  const session = sessions.get(userId);
+  if (!session)
+    return null;
+  clearTimeout(session.timeoutTimer);
+  let sessionData = null;
+  try {
+    const { extractSession: extractSession2 } = await Promise.resolve().then(() => exports_persistence);
+    sessionData = await extractSession2(session.context, session.page);
+  } catch {}
+  contextStealthScripts.delete(session.context);
+  try {
+    await session.context.close();
+  } catch {}
+  try {
+    await session.browser.close();
+  } catch {}
+  killProcess(session.websockify);
+  killProcess(session.x11vnc);
+  killProcess(session.xvfb);
+  await new Promise((r) => setTimeout(r, 1000));
+  try {
+    import_fs3.default.unlinkSync(`/tmp/.X11-unix/X${session.displayNum}`);
+  } catch {}
+  freeDisplay(session.displayNum);
+  sessions.delete(userId);
+  return sessionData;
+}
+async function cleanupAllSessions() {
+  const userIds = [...sessions.keys()];
+  await Promise.all(userIds.map((id) => stopSession(id)));
+}
+var import_child_process, import_fs3, log5, BASE_DISPLAY, MAX_SESSIONS, SESSION_TIMEOUT, sessions, usedDisplays;
+var init_session_manager = __esm(() => {
+  init_launcher();
+  init_stealth();
+  init_logger();
+  init_fingerprint();
+  import_child_process = require("child_process");
+  import_fs3 = __toESM(require("fs"));
+  log5 = createLogger("session");
+  BASE_DISPLAY = parseInt(process.env.VNC_BASE_DISPLAY || "99", 10);
+  MAX_SESSIONS = parseInt(process.env.VNC_MAX_SESSIONS || "20", 10);
+  SESSION_TIMEOUT = parseInt(process.env.VNC_SESSION_TIMEOUT_MS || "300000", 10);
+  sessions = new Map;
+  usedDisplays = new Set;
+});
+
 // src/lib/session/sqlite-store.ts
 function createBunDb(dbPath) {
   const { Database } = require("bun:sqlite");
@@ -3309,7 +3396,7 @@ class BrowserDaemon {
     log7.info(`Launching Chrome for Testing in ${mode} mode: ${executablePath}`);
     const userDataDir = import_path5.default.join(import_os3.default.homedir(), ".iframer", "chrome-profile", mode);
     import_fs6.default.mkdirSync(userDataDir, { recursive: true });
-    const browser = await import_playwright_core.chromium.launch({
+    const browser = await import_patchright2.chromium.launch({
       executablePath,
       headless: mode === "headless",
       args: [
@@ -3343,6 +3430,15 @@ class BrowserDaemon {
       return false;
     }
   }
+  liveInstances() {
+    return [...this.instances.values()].filter((inst) => {
+      try {
+        return inst.browser.isConnected();
+      } catch {
+        return false;
+      }
+    });
+  }
   async stopMode(mode) {
     const instance = this.instances.get(mode);
     if (!instance)
@@ -3374,11 +3470,11 @@ class BrowserDaemon {
     }, this.idleTimeout));
   }
 }
-var import_playwright_core, import_os3, import_path5, import_fs6, log7, DEFAULT_IDLE_TIMEOUT;
+var import_patchright2, import_os3, import_path5, import_fs6, log7, DEFAULT_IDLE_TIMEOUT;
 var init_daemon = __esm(() => {
   init_chrome_downloader();
   init_logger();
-  import_playwright_core = require("playwright-core");
+  import_patchright2 = require("patchright");
   import_os3 = __toESM(require("os"));
   import_path5 = __toESM(require("path"));
   import_fs6 = __toESM(require("fs"));
@@ -3387,11 +3483,6 @@ var init_daemon = __esm(() => {
 });
 
 // src/lib/domain-modes.ts
-var exports_domain_modes = {};
-__export(exports_domain_modes, {
-  DomainModeStore: () => DomainModeStore
-});
-
 class DomainModeStore {
   data = {};
   filePath;
@@ -3750,14 +3841,32 @@ class Iframer {
     return getSession(userId);
   }
   async stopSession(userId, token) {
-    const sessionData = await stopSession(userId);
-    if (sessionData && token) {
+    let sessionSaved = false;
+    if (token) {
       const encryptionKey = await deriveKey(token);
-      const encrypted = encrypt(JSON.stringify(sessionData), encryptionKey);
+      for (const inst of this.daemon.liveInstances()) {
+        try {
+          const data = await extractSession(inst.context, inst.page);
+          if (data) {
+            const encrypted = encrypt(JSON.stringify(data), encryptionKey);
+            await this.store.setSession(userId, encrypted);
+            sessionSaved = true;
+            break;
+          }
+        } catch (err) {
+          log11.warn(`stopSession: failed to extract daemon state: ${getErrorMessage2(err)}`);
+        }
+      }
+    }
+    const dockerSessionData = await stopSession(userId);
+    if (dockerSessionData && token) {
+      const encryptionKey = await deriveKey(token);
+      const encrypted = encrypt(JSON.stringify(dockerSessionData), encryptionKey);
       await this.store.setSession(userId, encrypted);
+      sessionSaved = true;
     }
     await this.daemon.stopAll();
-    return { ok: true, sessionSaved: !!sessionData };
+    return { ok: true, sessionSaved };
   }
   async execute(userId, token, pipeline) {
     const opts = pipeline.options || {};
@@ -4040,41 +4149,80 @@ var init_iframer = __esm(() => {
   DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
 });
 
-// src/mcp/server.ts
-var import_mcp = require("@modelcontextprotocol/sdk/server/mcp.js");
-var import_stdio = require("@modelcontextprotocol/sdk/server/stdio.js");
-
-// src/mcp/helpers.ts
-init_logger();
-var import_path8 = __toESM(require("path"));
-var import_os6 = __toESM(require("os"));
-var log12 = createLogger("mcp");
-var BASE_URL = process.env.IFRAMER_URL || "http://localhost:3021";
-var IFRAMER_SECRET = process.env.IFRAMER_SECRET;
-var IFRAMER_MODE = process.env.IFRAMER_MODE;
-var LOCAL_USER = "mcp-user";
-var LOCAL_TOKEN = IFRAMER_SECRET || "iframer-local-default-token";
-var _iframer = null;
-async function getIframer() {
-  if (!_iframer) {
-    const { Iframer: Iframer2 } = await Promise.resolve().then(() => (init_iframer(), exports_iframer));
-    const screenshotDir = import_path8.default.join(import_os6.default.tmpdir(), "iframer-screenshots");
-    _iframer = new Iframer2({
-      screenshotDir,
-      publicUrl: `file://${screenshotDir}`,
-      mode: "local"
-    });
+// bin/cli.js
+var __dirname = "/Users/redacted/tools/iframer-toolkit/bin";
+var fs8 = require("fs");
+var path8 = require("path");
+var { execSync: execSync2 } = require("child_process");
+var readline = require("readline");
+var CONFIG_DIR = path8.join(require("os").homedir(), ".iframer");
+var DEFAULT_SERVER = process.env.IFRAMER_URL || "http://localhost:3021";
+var API_KEY = process.env.IFRAMER_SECRET;
+var USE_LOCAL = process.env.IFRAMER_MODE === "local" || !process.env.IFRAMER_URL;
+function openBrowser(url) {
+  try {
+    if (process.platform === "darwin")
+      execSync2(`open "${url}"`);
+    else if (process.platform === "win32")
+      execSync2(`start "${url}"`);
+    else
+      execSync2(`xdg-open "${url}"`);
+  } catch {
+    console.log(`  Open this URL in your browser:
+  ${url}`);
   }
-  return _iframer;
+}
+function prompt(question) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
+function promptHidden(question) {
+  return new Promise((resolve) => {
+    process.stdout.write(question);
+    const stdin = process.stdin;
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding("utf8");
+    let input = "";
+    const onData = (char) => {
+      if (char === `
+` || char === "\r" || char === "\x04") {
+        stdin.setRawMode(false);
+        stdin.pause();
+        stdin.removeListener("data", onData);
+        process.stdout.write(`
+`);
+        resolve(input);
+      } else if (char === "\x03") {
+        process.stdout.write(`
+`);
+        process.exit(0);
+      } else if (char === "" || char === "\b") {
+        if (input.length > 0) {
+          input = input.slice(0, -1);
+          process.stdout.write("\b \b");
+        }
+      } else {
+        input += char;
+        process.stdout.write("*");
+      }
+    };
+    stdin.on("data", onData);
+  });
 }
 function authHeaders() {
   const headers = { "Content-Type": "application/json" };
-  if (IFRAMER_SECRET)
-    headers["x-api-key"] = IFRAMER_SECRET;
+  if (API_KEY)
+    headers["x-api-key"] = API_KEY;
   return headers;
 }
 async function apiPost(endpoint, body) {
-  const res = await fetch(`${BASE_URL}${endpoint}`, {
+  const res = await fetch(`${DEFAULT_SERVER}${endpoint}`, {
     method: "POST",
     headers: authHeaders(),
     body: body ? JSON.stringify(body) : undefined,
@@ -4083,741 +4231,806 @@ async function apiPost(endpoint, body) {
   return res.json();
 }
 async function apiGet(endpoint) {
-  const res = await fetch(`${BASE_URL}${endpoint}`, { headers: authHeaders() });
+  const res = await fetch(`${DEFAULT_SERVER}${endpoint}`, { headers: authHeaders() });
   return res.json();
 }
 async function apiDelete(endpoint) {
-  const res = await fetch(`${BASE_URL}${endpoint}`, { method: "DELETE", headers: authHeaders() });
+  const res = await fetch(`${DEFAULT_SERVER}${endpoint}`, { method: "DELETE", headers: authHeaders() });
   return res.json();
+}
+var _iframer = null;
+async function getLocalIframer() {
+  if (_iframer)
+    return _iframer;
+  try {
+    const { Iframer: Iframer2 } = await Promise.resolve().then(() => (init_iframer(), exports_iframer));
+    const screenshotDir = path8.join(require("os").tmpdir(), "iframer-screenshots");
+    fs8.mkdirSync(screenshotDir, { recursive: true });
+    _iframer = new Iframer2({
+      screenshotDir,
+      publicUrl: `file://${screenshotDir}`,
+      mode: "local"
+    });
+    return _iframer;
+  } catch (err) {
+    console.error(`  Failed to initialize local iframer: ${err.message}`);
+    console.error("  Make sure you're running with bun, or use Docker mode (IFRAMER_URL=http://localhost:3021).");
+    process.exit(1);
+  }
 }
 async function isDockerRunning() {
   try {
-    const res = await fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3000) });
+    const res = await fetch(`${DEFAULT_SERVER}/health`, { signal: AbortSignal.timeout(3000) });
     const data = await res.json();
     return data.ok === true;
   } catch {
     return false;
   }
 }
-function hasDisplay2() {
-  if (process.platform === "darwin" || process.platform === "win32")
+function parseFlag(args, flag, hasValue = true) {
+  const idx = args.indexOf(flag);
+  if (idx === -1)
+    return hasValue ? undefined : false;
+  if (!hasValue)
     return true;
-  return !!process.env.DISPLAY;
+  return args[idx + 1];
 }
-async function detectAvailableModes() {
-  const dockerAvailable = await isDockerRunning();
-  let chromeInstalled = false;
-  try {
-    const { findChromeForTesting: findChromeForTesting2 } = await Promise.resolve().then(() => (init_chrome_downloader(), exports_chrome_downloader));
-    chromeInstalled = !!findChromeForTesting2();
-  } catch {}
-  const display = hasDisplay2();
-  return {
-    headless: {
-      available: chromeInstalled,
-      reason: chromeInstalled ? undefined : "Chrome for Testing not installed. Run: bun tests/test-modes.ts (or the agent can auto-download it on first execute)"
-    },
-    "binary-headful": {
-      available: chromeInstalled && display,
-      reason: !chromeInstalled ? "Chrome for Testing not installed" : !display ? "No display available ($DISPLAY not set)" : undefined
-    },
-    "docker-headful": {
-      available: dockerAvailable,
-      reason: dockerAvailable ? undefined : `Docker container not running at ${BASE_URL}`
-    },
-    chromeForTesting: {
-      installed: chromeInstalled,
-      ...!chromeInstalled ? { action: `Run this command to install: bun -e "require('./src/lib/browser/chrome-downloader').downloadChrome()"` } : {}
-    }
-  };
+function hasFlag(args, flag) {
+  return args.includes(flag);
 }
-async function fetchScreenshot(url) {
-  try {
-    const res = await fetch(url);
-    if (!res.ok)
-      return null;
-    const buf = await res.arrayBuffer();
-    return { type: "image", data: Buffer.from(buf).toString("base64"), mimeType: "image/jpeg" };
-  } catch {
-    return null;
+function handleResponse(data, screenshotPath) {
+  const { screenshot, tileScreenshots, ...rest } = data;
+  if (screenshot && screenshotPath) {
+    fs8.writeFileSync(screenshotPath, Buffer.from(screenshot, "base64"));
+    rest._screenshotSaved = screenshotPath;
   }
-}
-function err(message) {
-  return { content: [{ type: "text", text: message }], isError: true };
-}
-async function ensureLocalChrome() {
-  const { findChromeForTesting: findChromeForTesting2, downloadChrome: downloadChrome2 } = await Promise.resolve().then(() => (init_chrome_downloader(), exports_chrome_downloader));
-  if (!findChromeForTesting2()) {
-    await downloadChrome2();
-  }
-}
-function getErrorMessage3(err2) {
-  return err2 instanceof Error ? err2.message : String(err2);
-}
-
-// src/mcp/tools/status.ts
-function registerStatusTool(server) {
-  server.tool("status", `Get the full state of iframer in one call. Call this first. Returns: available browser modes, API health, active session, stored credentials, and domain memory.`, {}, async () => {
-    try {
-      const status = { modes: {}, api: false, session: null, credentials: [], domainMemory: null };
-      status.modes = await detectAvailableModes();
-      try {
-        const health = await fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3000) });
-        const healthCheck = await health.json();
-        status.api = healthCheck.ok === true;
-      } catch {
-        status.api = false;
+  if (tileScreenshots && tileScreenshots.length > 0) {
+    const tileDir = "/tmp/browser-tiles";
+    fs8.mkdirSync(tileDir, { recursive: true });
+    const tilePaths = [];
+    for (const tile of tileScreenshots) {
+      if (tile.screenshot) {
+        const tilePath = `${tileDir}/tile-${tile.index}.png`;
+        fs8.writeFileSync(tilePath, Buffer.from(tile.screenshot, "base64"));
+        tilePaths.push(tilePath);
       }
-      if (status.api) {
+    }
+    rest._tilesSaved = tilePaths;
+  }
+  console.log(JSON.stringify(rest, null, 2));
+  if (!data.ok)
+    process.exit(1);
+}
+function printResult(data) {
+  console.log(JSON.stringify(data, null, 2));
+  if (!data.ok)
+    process.exit(1);
+}
+var [, , command, ...args] = process.argv;
+if (command === "install" && args.length > 0) {
+  const target = args.shift();
+  if (target === "chromium" || target === "chrome")
+    command = "install-chrome";
+  else if (target === "mcp")
+    command = "install-mcp";
+  else if (target === "deps" || target === "dependencies" || target === "all")
+    command = "install-all";
+  else {
+    console.error(`  Unknown install target: ${target}`);
+    console.error("  Usage: iframer install <chromium|mcp|deps>");
+    process.exit(1);
+  }
+}
+async function installChrome() {
+  const { downloadChrome: downloadChrome2 } = await Promise.resolve().then(() => (init_chrome_downloader(), exports_chrome_downloader));
+  await downloadChrome2();
+}
+async function main() {
+  switch (command) {
+    case "status": {
+      const docker = await isDockerRunning();
+      console.log(`  Server: ${DEFAULT_SERVER}`);
+      console.log(`  Docker API: ${docker ? "running" : "not reachable"}`);
+      if (API_KEY)
+        console.log("  Auth: IFRAMER_SECRET set");
+      try {
+        const { findChromeForTesting: findChromeForTesting2, findChrome: findChrome2 } = await Promise.resolve().then(() => (init_chrome_downloader(), exports_chrome_downloader));
+        const cft = findChromeForTesting2();
+        const system = findChrome2();
+        console.log(`  Chrome for Testing: ${cft ? cft : "not installed"}`);
+        if (!cft && system)
+          console.log(`  System Chrome: ${system}`);
+      } catch {}
+      const hasDisplay2 = process.platform === "darwin" || process.platform === "win32" || !!process.env.DISPLAY;
+      console.log(`  Display: ${hasDisplay2 ? "available" : "none ($DISPLAY not set)"}`);
+      console.log(`  Modes: headless${hasDisplay2 ? ", binary-headful" : ""}${docker ? ", docker-headful" : ""}`);
+      break;
+    }
+    case "modes": {
+      const docker = await isDockerRunning();
+      const hasDisplay2 = process.platform === "darwin" || process.platform === "win32" || !!process.env.DISPLAY;
+      let chromeInstalled = false;
+      try {
+        const { findChromeForTesting: findChromeForTesting2 } = await Promise.resolve().then(() => (init_chrome_downloader(), exports_chrome_downloader));
+        chromeInstalled = !!findChromeForTesting2();
+      } catch {}
+      console.log(`  Available browser modes:
+`);
+      console.log(`    headless          ${chromeInstalled ? "✓ available" : "✗ Chrome for Testing not installed"}`);
+      console.log(`    binary-headful    ${chromeInstalled && hasDisplay2 ? "✓ available" : "✗ " + (!chromeInstalled ? "Chrome not installed" : "no display")}`);
+      console.log(`    docker-headful    ${docker ? "✓ available" : "✗ Docker not running at " + DEFAULT_SERVER}`);
+      if (!chromeInstalled) {
+        console.log(`
+  Install Chrome for Testing:`);
+        console.log("    iframer install-chrome");
+      }
+      break;
+    }
+    case "install-chrome": {
+      try {
+        await installChrome();
+      } catch (err) {
+        console.error(`  Failed: ${err.message}`);
+        process.exit(1);
+      }
+      break;
+    }
+    case "install-all": {
+      console.log(`  Installing iframer-toolkit dependencies...
+`);
+      console.log("  [1/2] Chrome for Testing");
+      try {
+        await installChrome();
+      } catch (err) {
+        console.error(`  Chrome install failed: ${err.message}`);
+        process.exit(1);
+      }
+      console.log(`
+  [2/2] MCP server registration`);
+      command = "install-mcp";
+      return main();
+    }
+    case "execute": {
+      let pipeline;
+      const input = args[0];
+      if (!input) {
+        console.error("  Usage: iframer execute <pipeline.json | inline-json>");
+        console.error(`    iframer execute '[{"type":"navigate","url":"https://example.com"},{"type":"screenshot"}]'`);
+        console.error("    iframer execute pipeline.json");
+        console.error(`
+  Options:`);
+        console.error("    --mode <headless|binary-headful|docker-headful>");
+        console.error("    --capture-api        Record XHR/fetch requests");
+        console.error("    --continue-on-error  Don't stop on step failure");
+        console.error("    --timeout <ms>       Stale state timeout (default: 20000)");
+        process.exit(1);
+      }
+      let steps;
+      if (input.startsWith("[") || input.startsWith("{")) {
+        const parsed = JSON.parse(input);
+        steps = Array.isArray(parsed) ? parsed : parsed.steps;
+      } else if (fs8.existsSync(input)) {
+        const parsed = JSON.parse(fs8.readFileSync(input, "utf-8"));
+        steps = Array.isArray(parsed) ? parsed : parsed.steps;
+      } else {
+        console.error(`  File not found: ${input}`);
+        process.exit(1);
+      }
+      const options = {};
+      const mode = parseFlag(args, "--mode");
+      if (mode)
+        options.mode = mode;
+      if (hasFlag(args, "--capture-api"))
+        options.captureApi = true;
+      if (hasFlag(args, "--continue-on-error"))
+        options.continueOnError = true;
+      const timeout = parseFlag(args, "--timeout");
+      if (timeout)
+        options.staleTimeoutMs = parseInt(timeout);
+      const docker = await isDockerRunning();
+      let result;
+      if (mode === "docker-headful" && docker) {
+        result = await apiPost("/execute", { steps, options });
+      } else if (USE_LOCAL || !docker) {
+        const iframer = await getLocalIframer();
+        result = await iframer.execute("cli-user", API_KEY || "cli-local", { steps, options });
+      } else {
+        result = await apiPost("/execute", { steps, options });
+      }
+      printResult(result);
+      break;
+    }
+    case "browse":
+    case "fetch": {
+      const url = args[0];
+      if (!url) {
+        console.error("  Usage: iframer browse <url> [options]");
+        console.error("    --extract <js>       Evaluate JS and return result");
+        console.error("    --html               Return full page HTML");
+        console.error("    --wait-for <sel>     Wait for CSS selector");
+        console.error("    --sessionless        Skip session persistence");
+        process.exit(1);
+      }
+      const options = { url };
+      const extract = parseFlag(args, "--extract");
+      if (extract)
+        options.extract = extract;
+      if (hasFlag(args, "--html"))
+        options.returnHtml = true;
+      if (hasFlag(args, "--sessionless"))
+        options.sessionless = true;
+      const waitFor = parseFlag(args, "--wait-for");
+      if (waitFor)
+        options.waitForSelector = waitFor;
+      const docker = await isDockerRunning();
+      let result;
+      if (USE_LOCAL || !docker) {
+        const iframer = await getLocalIframer();
+        result = await iframer.fetch("cli-user", API_KEY || "cli-local", options);
+      } else {
+        result = await apiPost("/fetch", options);
+      }
+      printResult(result);
+      break;
+    }
+    case "screenshot": {
+      const url = args[0];
+      const outPath = parseFlag(args, "--output") || parseFlag(args, "-o") || "/tmp/iframer-screenshot.jpg";
+      if (url && url.startsWith("http")) {
+        const mode = parseFlag(args, "--mode") || "headless";
+        const annotate = hasFlag(args, "--annotate");
+        const docker = await isDockerRunning();
+        const steps = [
+          { type: "navigate", url, waitUntil: "networkidle" },
+          { type: "wait", ms: 2000 },
+          { type: "screenshot", annotate }
+        ];
+        let result;
+        if (USE_LOCAL || !docker) {
+          const iframer = await getLocalIframer();
+          result = await iframer.execute("cli-user", API_KEY || "cli-local", { steps, options: { mode } });
+        } else {
+          result = await apiPost("/execute", { steps, options: { mode } });
+        }
+        if (result.ok && result.finalState?.screenshotUrl) {
+          console.log(`  Screenshot: ${result.finalState.screenshotUrl}`);
+          if (annotate) {
+            const snapStep = result.results?.find((r) => r.step?.type === "screenshot");
+            if (snapStep?.result?.refs) {
+              console.log(`
+  Refs:`);
+              console.log(snapStep.result.refs);
+            }
+          }
+        } else {
+          printResult(result);
+        }
+      } else {
+        const res = await fetch(`${DEFAULT_SERVER}/interactive/screenshot?format=raw`, {
+          headers: authHeaders()
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          console.error(`  Error: ${data.error}`);
+          process.exit(1);
+        }
+        const buffer = Buffer.from(await res.arrayBuffer());
+        fs8.writeFileSync(outPath, buffer);
+        console.log(outPath);
+      }
+      break;
+    }
+    case "session": {
+      const sub = args[0];
+      if (sub === "stop") {
+        const docker = await isDockerRunning();
+        if (docker) {
+          const data = await apiPost("/interactive/stop", null);
+          if (!data.ok) {
+            console.error(`  Error: ${data.error}`);
+            process.exit(1);
+          }
+          console.log(`  Session stopped. State saved: ${data.sessionSaved}`);
+        } else {
+          const iframer = await getLocalIframer();
+          const result = await iframer.stopSession("cli-user", API_KEY || "cli-local");
+          console.log(`  Session stopped. State saved: ${result.sessionSaved}`);
+        }
+      } else if (sub === "clear") {
+        const docker = await isDockerRunning();
+        if (docker) {
+          const data = await apiDelete("/session");
+          if (!data.ok) {
+            console.error(`  Error: ${data.error}`);
+            process.exit(1);
+          }
+        } else {
+          const iframer = await getLocalIframer();
+          await iframer.clearSession("cli-user");
+        }
+        console.log("  Session data cleared.");
+      } else if (sub === "status") {
+        const docker = await isDockerRunning();
+        if (docker) {
+          const data = await apiGet("/interactive/status");
+          if (!data.active) {
+            console.log("  No active session.");
+          } else {
+            console.log(`  Active session`);
+            console.log(`  noVNC: ${data.noVncUrl}`);
+            console.log(`  Started: ${data.createdAt}`);
+          }
+        } else {
+          console.log("  Local mode — no persistent sessions (sessions live within execute calls).");
+        }
+      } else {
+        console.error("  Usage: iframer session <stop|clear|status>");
+        process.exit(1);
+      }
+      break;
+    }
+    case "credentials": {
+      const sub = args[0];
+      if (sub === "add") {
+        let domain = args[1];
+        const body = {};
+        const hasFlags = args.some((a) => a.startsWith("--"));
+        if (hasFlags && domain) {
+          body.domain = domain;
+          for (let i = 2;i < args.length; i++) {
+            if (args[i] === "--username" && args[i + 1])
+              body.username = args[++i];
+            else if (args[i] === "--password" && args[i + 1])
+              body.password = args[++i];
+            else if (args[i] === "--totp-secret" && args[i + 1])
+              body.totp_secret = args[++i];
+          }
+        } else {
+          console.log("");
+          if (!domain) {
+            domain = await prompt("  Domain (e.g. github.com): ");
+            if (!domain) {
+              console.error("  Domain is required.");
+              process.exit(1);
+            }
+          }
+          body.domain = domain;
+          console.log(`
+  Storing credentials for ${domain}
+`);
+          body.username = await prompt("  Username / email: ");
+          body.password = await promptHidden("  Password: ");
+          const totp = await prompt("  TOTP secret (press Enter to skip): ");
+          if (totp)
+            body.totp_secret = totp;
+        }
+        if (!body.username && !body.password) {
+          console.error("  Must provide at least username or password.");
+          process.exit(1);
+        }
+        const docker = await isDockerRunning();
+        if (USE_LOCAL || !docker) {
+          const iframer = await getLocalIframer();
+          await iframer.storeCredential("cli-user", API_KEY || "cli-local", body);
+        } else {
+          const data = await apiPost("/credentials", body);
+          if (!data.ok) {
+            console.error(`  Error: ${data.error}`);
+            process.exit(1);
+          }
+        }
+        console.log(`
+  Credentials stored for ${domain}`);
+      } else if (sub === "list") {
+        const docker = await isDockerRunning();
+        let domains;
+        if (USE_LOCAL || !docker) {
+          const iframer = await getLocalIframer();
+          domains = await iframer.listCredentials("cli-user");
+        } else {
+          const data = await apiGet("/credentials");
+          if (!data.ok) {
+            console.error(`  Error: ${data.error}`);
+            process.exit(1);
+          }
+          domains = data.domains;
+        }
+        if (domains.length === 0) {
+          console.log("  No credentials stored.");
+        } else {
+          console.log("  Stored credentials:");
+          for (const d of domains)
+            console.log(`    - ${d}`);
+        }
+      } else if (sub === "remove") {
+        const domain = args[1];
+        if (!domain) {
+          console.error("  Usage: iframer credentials remove <domain>");
+          process.exit(1);
+        }
+        const docker = await isDockerRunning();
+        if (USE_LOCAL || !docker) {
+          const iframer = await getLocalIframer();
+          await iframer.deleteCredential("cli-user", domain);
+        } else {
+          const data = await apiDelete(`/credentials/${encodeURIComponent(domain)}`);
+          if (!data.ok) {
+            console.error(`  Error: ${data.error}`);
+            process.exit(1);
+          }
+        }
+        console.log(`  Credentials for ${domain} removed.`);
+      } else {
+        console.error("  Usage: iframer credentials <add|list|remove>");
+        process.exit(1);
+      }
+      break;
+    }
+    case "reverse-engineer": {
+      const input = args[0];
+      if (!input) {
+        console.error("  Usage: iframer reverse-engineer <pipeline.json | url>");
+        console.error("    --output <dir>       Output directory (default: ./<domain>/)");
+        console.error("    --typed              Generate TypeScript instead of JS");
+        console.error("    --mode <mode>        Browser mode");
+        process.exit(1);
+      }
+      let steps;
+      if (input.startsWith("http")) {
+        steps = [
+          { type: "navigate", url: input, waitUntil: "networkidle" },
+          { type: "wait", ms: 5000 }
+        ];
+      } else if (input.startsWith("[") || input.startsWith("{")) {
+        const parsed = JSON.parse(input);
+        steps = Array.isArray(parsed) ? parsed : parsed.steps;
+      } else if (fs8.existsSync(input)) {
+        const parsed = JSON.parse(fs8.readFileSync(input, "utf-8"));
+        steps = Array.isArray(parsed) ? parsed : parsed.steps;
+      } else {
+        console.error(`  Not a URL or file: ${input}`);
+        process.exit(1);
+      }
+      const options = { captureApi: true };
+      const mode = parseFlag(args, "--mode");
+      if (mode)
+        options.mode = mode;
+      const docker = await isDockerRunning();
+      let result;
+      if (USE_LOCAL || !docker) {
+        const iframer = await getLocalIframer();
+        result = await iframer.execute("cli-user", API_KEY || "cli-local", { steps, options });
+      } else {
+        result = await apiPost("/execute", { steps, options });
+      }
+      if (result.capturedApi && result.capturedApi.length > 0) {
+        const outputDir = parseFlag(args, "--output") || `./${result.capturedApi[0].domain}`;
+        fs8.mkdirSync(outputDir, { recursive: true });
+        fs8.writeFileSync(path8.join(outputDir, "captured-api.json"), JSON.stringify(result.capturedApi, null, 2));
+        console.log(`  Captured ${result.capturedApi.reduce((sum, api) => sum + api.endpoints.length, 0)} endpoints`);
+        console.log(`  Saved to: ${outputDir}/captured-api.json`);
+        for (const api of result.capturedApi) {
+          console.log(`
+  ${api.domain} (${api.baseUrl}):`);
+          for (const ep of api.endpoints) {
+            console.log(`    ${ep.method} ${ep.path} → ${ep.responseStatus}`);
+          }
+        }
+      } else {
+        console.log("  No API calls captured.");
+        if (!result.ok)
+          printResult(result);
+      }
+      break;
+    }
+    case "interactive": {
+      const sub = args[0];
+      if (sub === "stop") {
+        const data = await apiPost("/interactive/stop", null);
+        if (!data.ok) {
+          console.error(`  Error: ${data.error}`);
+          process.exit(1);
+        }
+        console.log("  Interactive session stopped. Session saved.");
+      } else if (sub === "status") {
+        const data = await apiGet("/interactive/status");
+        if (!data.ok) {
+          console.error(`  Error: ${data.error}`);
+          process.exit(1);
+        }
+        if (!data.active) {
+          console.log("  No active interactive session.");
+        } else {
+          console.log(`  Active session`);
+          console.log(`  noVNC: ${data.noVncUrl}`);
+          console.log(`  Started: ${data.createdAt}`);
+        }
+      } else if (sub) {
+        const data = await apiPost("/interactive/start", { url: sub });
+        if (!data.ok) {
+          console.error(`  Error: ${data.error}`);
+          process.exit(1);
+        }
+        console.log(`
+  Interactive session started!`);
+        console.log(`  noVNC: ${data.noVncUrl}
+`);
+        console.log(`  Stop with: iframer interactive stop`);
+        openBrowser(data.noVncUrl);
+      } else {
+        console.error("  Usage: iframer interactive <url|stop|status>");
+        process.exit(1);
+      }
+      break;
+    }
+    case "watch": {
+      console.log(`  Watching for interactive session...
+`);
+      const poll = async () => {
         try {
-          const sessionData = await apiGet("/interactive/status");
-          status.session = sessionData.active ? { active: true, noVncUrl: sessionData.noVncUrl, createdAt: sessionData.createdAt, url: sessionData.url } : { active: false };
+          const data = await apiGet("/interactive/status");
+          if (data.ok && data.active)
+            return data.noVncUrl;
+        } catch {}
+        return null;
+      };
+      let vncUrl = await poll();
+      if (vncUrl) {
+        console.log(`  Session active! Opening noVNC viewer...`);
+        console.log(`  ${vncUrl}
+`);
+        openBrowser(vncUrl);
+      }
+      let lastUrl = vncUrl;
+      const interval = setInterval(async () => {
+        const url = await poll();
+        if (url && url !== lastUrl) {
+          console.log(`  New session detected! Opening noVNC viewer...`);
+          console.log(`  ${url}
+`);
+          openBrowser(url);
+        }
+        lastUrl = url;
+      }, 2000);
+      process.on("SIGINT", () => {
+        clearInterval(interval);
+        console.log(`
+  Stopped watching.`);
+        process.exit(0);
+      });
+      await new Promise(() => {});
+      break;
+    }
+    case "act": {
+      const actionType = args[0];
+      if (!actionType) {
+        console.error(`  Usage: iframer act <action-type> [options]
+
+  Actions:
+    click <selector>                Click an element
+    human-click <selector>          Click with human-like mouse movement
+    human-click <x> <y>             Click at coordinates with human-like movement
+    human-type <selector> <text>    Type with human-like keystroke timing
+    navigate <url>                  Navigate to a URL
+    scroll [deltaY]                 Scroll the page
+    wait <ms>                       Wait for milliseconds
+    evaluate <expression>           Evaluate JavaScript
+    wait-for-selector <selector>    Wait for element to appear
+    keyboard <key>                  Press a keyboard key
+
+  reCAPTCHA:
+    recaptcha-click                 Click the reCAPTCHA checkbox
+    recaptcha-select <tiles...>     Click tiles by index (e.g. 0 2 5)
+    recaptcha-verify                Click the verify button
+    recaptcha-info                  Get challenge info without clicking`);
+        process.exit(1);
+      }
+      let action = {};
+      const screenshotPath = "/tmp/browser-act.png";
+      switch (actionType) {
+        case "click":
+          action = { type: "click", selector: args[1] };
+          break;
+        case "human-click":
+          if (args[1] && !isNaN(args[1]) && args[2] && !isNaN(args[2])) {
+            action = { type: "human-click", x: parseFloat(args[1]), y: parseFloat(args[2]) };
+          } else {
+            action = { type: "human-click", selector: args[1] };
+          }
+          break;
+        case "human-type":
+          action = { type: "human-type", selector: args[1], value: args.slice(2).join(" ") };
+          break;
+        case "navigate":
+          action = { type: "navigate", url: args[1], waitUntil: args[2] || "networkidle" };
+          break;
+        case "scroll":
+          action = { type: "scroll", deltaY: args[1] ? parseInt(args[1]) : undefined };
+          break;
+        case "wait":
+          action = { type: "wait", ms: parseInt(args[1]) || 1000 };
+          break;
+        case "evaluate":
+          action = { type: "evaluate", expression: args.slice(1).join(" ") };
+          break;
+        case "wait-for-selector":
+          action = { type: "wait-for-selector", selector: args[1], timeout: args[2] ? parseInt(args[2]) : undefined };
+          break;
+        case "keyboard":
+          action = { type: "keyboard", key: args[1] };
+          break;
+        case "recaptcha-click":
+          action = { type: "recaptcha-click" };
+          break;
+        case "recaptcha-select":
+          action = { type: "recaptcha-select", tiles: args.slice(1).map(Number) };
+          break;
+        case "recaptcha-verify":
+          action = { type: "recaptcha-verify" };
+          break;
+        case "recaptcha-info":
+          action = { type: "recaptcha-info" };
+          break;
+        default:
+          console.error(`  Unknown action: ${actionType}`);
+          process.exit(1);
+      }
+      const data = await apiPost("/interactive/act", { action });
+      handleResponse(data, screenshotPath);
+      break;
+    }
+    case "install-mcp": {
+      const mcpServerTS = path8.join(__dirname, "..", "src", "mcp", "server.ts");
+      const mcpServerCJS = path8.join(__dirname, "mcp-server.cjs");
+      let mcpCommand, mcpArgs;
+      let bunPath;
+      try {
+        bunPath = execSync2("which bun", { encoding: "utf8" }).trim();
+      } catch {}
+      if (bunPath && fs8.existsSync(mcpServerTS)) {
+        mcpCommand = bunPath;
+        mcpArgs = ["run", mcpServerTS];
+        console.log("  Using bun to run MCP server from source (no build needed)");
+      } else if (fs8.existsSync(mcpServerCJS)) {
+        mcpCommand = "node";
+        mcpArgs = [mcpServerCJS];
+        console.log("  Using pre-built MCP server bundle");
+      } else {
+        console.error("  MCP server not found. Need either bun + source or pre-built bundle.");
+        console.error("  Run: bun build src/mcp/server.ts --target node --format cjs --outfile bin/mcp-server.cjs");
+        process.exit(1);
+      }
+      const claudeConfigPath = path8.join(require("os").homedir(), ".claude.json");
+      let config = {};
+      try {
+        config = JSON.parse(fs8.readFileSync(claudeConfigPath, "utf8"));
+      } catch {}
+      const isDev = args.includes("--dev");
+      const mcpName = isDev ? "iframer-dev" : "iframer";
+      let secret = process.env.IFRAMER_SECRET;
+      if (!secret) {
+        try {
+          const envPath = path8.join(__dirname, "..", ".env");
+          const envContent = fs8.readFileSync(envPath, "utf8");
+          const match = envContent.match(/^IFRAMER_SECRET=(.+)$/m);
+          if (match)
+            secret = match[1].trim();
         } catch {}
       }
+      if (!config.mcpServers)
+        config.mcpServers = {};
+      const mcpEntry = { command: mcpCommand, args: mcpArgs };
+      if (secret)
+        mcpEntry.env = { IFRAMER_SECRET: secret };
+      if (!isDev) {
+        if (!mcpEntry.env)
+          mcpEntry.env = {};
+        mcpEntry.env.IFRAMER_MODE = "local";
+      }
+      config.mcpServers[mcpName] = mcpEntry;
+      fs8.writeFileSync(claudeConfigPath, JSON.stringify(config, null, 2));
+      console.log(`
+  ${mcpName} MCP installed!`);
+      if (secret)
+        console.log("  IFRAMER_SECRET loaded from .env");
+      if (!isDev)
+        console.log("  Mode: local (headless + binary-headful, no Docker needed)");
+      else
+        console.log("  Mode: docker (connects to Docker container)");
+      console.log(`  Config written to: ${claudeConfigPath}`);
+      console.log(`  Restart Claude Code to activate the iframer tools.
+`);
+      break;
+    }
+    case "remove-mcp": {
+      const claudeConfigPath2 = path8.join(require("os").homedir(), ".claude.json");
+      let config2 = {};
       try {
-        if (status.api) {
-          const credData = await apiGet("/credentials");
-          if (credData.ok)
-            status.credentials = credData.domains || [];
-        } else {
-          const iframer = await getIframer();
-          status.credentials = await iframer.listCredentials(LOCAL_USER);
-        }
-      } catch {}
-      try {
-        const { DomainModeStore: DomainModeStore2 } = await Promise.resolve().then(() => (init_domain_modes(), exports_domain_modes));
-        const domainModes = new DomainModeStore2;
-        status.domainMemory = domainModes.getSummary();
-      } catch {}
-      return { content: [{ type: "text", text: JSON.stringify(status, null, 2) }] };
-    } catch (e) {
-      return err(`Error: ${getErrorMessage3(e)}`);
+        config2 = JSON.parse(fs8.readFileSync(claudeConfigPath2, "utf8"));
+      } catch {
+        console.log("  No ~/.claude.json found — nothing to remove.");
+        break;
+      }
+      const isDev2 = args.includes("--dev");
+      const mcpName2 = isDev2 ? "iframer-dev" : "iframer";
+      if (!config2.mcpServers || !config2.mcpServers[mcpName2]) {
+        console.log(`  ${mcpName2} MCP is not installed.`);
+        break;
+      }
+      delete config2.mcpServers[mcpName2];
+      fs8.writeFileSync(claudeConfigPath2, JSON.stringify(config2, null, 2));
+      console.log(`
+  ${mcpName2} MCP removed!`);
+      console.log(`  Config updated: ${claudeConfigPath2}`);
+      console.log(`  Restart Claude Code for the change to take effect.
+`);
+      break;
     }
-  });
-}
+    default:
+      console.log(`
+  iframer — browser automation for AI agents
 
-// src/mcp/tools/browse.ts
-var import_zod = require("zod");
-function registerBrowseTool(server) {
-  server.tool("browse", `Fetch a web page with a headless browser. Use for pages that need JavaScript rendering but don't have bot detection walls. Session cookies persist across calls.`, {
-    url: import_zod.z.string().describe("URL to navigate to"),
-    extract: import_zod.z.string().optional().describe("JavaScript expression to evaluate (e.g. 'document.title')"),
-    actions: import_zod.z.array(import_zod.z.object({
-      type: import_zod.z.enum(["click", "fill", "wait", "scroll", "human-click", "human-type"]),
-      selector: import_zod.z.string().optional(),
-      value: import_zod.z.string().optional(),
-      ms: import_zod.z.number().optional()
-    })).optional().describe("Actions to execute before extracting"),
-    returnHtml: import_zod.z.boolean().optional().describe("Return full page HTML"),
-    waitForSelector: import_zod.z.string().optional().describe("Wait for this CSS selector before proceeding"),
-    sessionless: import_zod.z.boolean().optional().describe("Skip session persistence")
-  }, async (params) => {
-    try {
-      const dockerRunning = await isDockerRunning();
-      const useLocal = IFRAMER_MODE === "docker" ? false : !dockerRunning;
-      let fetchResult;
-      if (useLocal) {
-        const iframer = await getIframer();
-        fetchResult = await iframer.fetch(LOCAL_USER, LOCAL_TOKEN, params);
-      } else {
-        fetchResult = await apiPost("/fetch", params);
-      }
-      if (!fetchResult.ok)
-        return err(`Error: ${fetchResult.error}`);
-      const { html, ...rest } = fetchResult;
-      const text = html ? JSON.stringify(rest, null, 2) + `
+  Pipeline:
+    execute <pipeline.json|json>    Run a pipeline of browser steps
+      --mode <mode>                 Force browser mode (headless, binary-headful, docker-headful)
+      --capture-api                 Record XHR/fetch requests during execution
+      --continue-on-error           Don't stop on step failure
+      --timeout <ms>                Stale state timeout (default: 20000)
 
---- HTML ---
-` + html : JSON.stringify(rest, null, 2);
-      return { content: [{ type: "text", text }] };
-    } catch (e) {
-      return err(`Error: ${getErrorMessage3(e)}`);
-    }
-  });
-}
+  Quick actions:
+    browse <url> [options]          Headless fetch with JS rendering
+      --extract <js>                Evaluate JS expression and return result
+      --html                        Return full page HTML
+      --wait-for <selector>         Wait for element before extracting
+      --sessionless                 Skip session persistence
+    screenshot <url> [options]      Take a screenshot of a URL
+      --mode <mode>                 Browser mode
+      --annotate                    Overlay element badges with refs
+      -o, --output <path>           Output file path
+    reverse-engineer <url|file>     Capture API calls a site makes
+      --output <dir>                Save directory
+      --typed                       Generate TypeScript
+      --mode <mode>                 Browser mode
 
-// src/mcp/tools/execute.ts
-var import_zod3 = require("zod");
+  Session:
+    session stop                    Stop session and save cookies/localStorage
+    session clear                   Wipe all stored session data
+    session status                  Check session state
 
-// src/mcp/tools/step-schema.ts
-var import_zod2 = require("zod");
-var stepSchema = import_zod2.z.discriminatedUnion("type", [
-  import_zod2.z.object({ type: import_zod2.z.literal("navigate"), url: import_zod2.z.string(), waitUntil: import_zod2.z.string().optional() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("click"), selector: import_zod2.z.string() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("fill"), selector: import_zod2.z.string(), value: import_zod2.z.string() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("human-click"), selector: import_zod2.z.string().optional(), x: import_zod2.z.number().optional(), y: import_zod2.z.number().optional() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("right-click"), selector: import_zod2.z.string().optional(), x: import_zod2.z.number().optional(), y: import_zod2.z.number().optional() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("human-type"), selector: import_zod2.z.string(), value: import_zod2.z.string() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("evaluate"), expression: import_zod2.z.string() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("extract"), expression: import_zod2.z.string() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("wait"), ms: import_zod2.z.number() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("wait-for"), selector: import_zod2.z.string(), timeout: import_zod2.z.number().optional() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("scroll"), deltaY: import_zod2.z.number().optional() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("keyboard"), key: import_zod2.z.string() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("type-code"), value: import_zod2.z.string(), selector: import_zod2.z.string().optional() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("login"), domain: import_zod2.z.string(), usernameSelector: import_zod2.z.string().optional(), passwordSelector: import_zod2.z.string().optional(), submitSelector: import_zod2.z.string().optional(), totpSelector: import_zod2.z.string().optional() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("solve-captcha") }),
-  import_zod2.z.object({ type: import_zod2.z.literal("screenshot"), annotate: import_zod2.z.boolean().optional().describe("Overlay numbered badges on interactive elements. Returns refs (@e1, @e2...) you can use in subsequent steps.") }),
-  import_zod2.z.object({ type: import_zod2.z.literal("snapshot"), interactiveOnly: import_zod2.z.boolean().optional().describe("Only include interactive elements (default: true)"), maxElements: import_zod2.z.number().optional().describe("Max elements to return (default: 80)") }),
-  import_zod2.z.object({ type: import_zod2.z.literal("find"), role: import_zod2.z.string().optional().describe("ARIA role: button, link, textbox, checkbox, etc."), name: import_zod2.z.string().optional().describe("Accessible name — button text, aria-label"), text: import_zod2.z.string().optional().describe("Visible text content"), placeholder: import_zod2.z.string().optional().describe("Input placeholder text"), label: import_zod2.z.string().optional().describe("Associated label text"), exact: import_zod2.z.boolean().optional().describe("Exact match vs substring (default: substring)") }),
-  import_zod2.z.object({ type: import_zod2.z.literal("recaptcha-click") }),
-  import_zod2.z.object({ type: import_zod2.z.literal("recaptcha-select"), tiles: import_zod2.z.array(import_zod2.z.number()) }),
-  import_zod2.z.object({ type: import_zod2.z.literal("recaptcha-verify") }),
-  import_zod2.z.object({ type: import_zod2.z.literal("recaptcha-info") }),
-  import_zod2.z.object({ type: import_zod2.z.literal("recaptcha-solve") }),
-  import_zod2.z.object({ type: import_zod2.z.literal("recaptcha-answer"), tiles: import_zod2.z.array(import_zod2.z.number()) })
-]);
+  Credentials:
+    credentials add <domain>        Store login credentials (encrypted)
+      --username <user>             Username or email
+      --password <pass>             Password
+      --totp-secret <secret>        TOTP secret for 2FA
+    credentials list                List domains with stored credentials
+    credentials remove <domain>     Delete credentials for a domain
 
-// src/mcp/tools/execute.ts
-function registerExecuteTool(server) {
-  server.tool("execute", `Execute a pipeline of browser steps. Auto-starts a session if needed. Handles obstacles (captcha, cookie banners) automatically.
+  Browser:
+    modes                           Show available browser modes
+    install chromium                Download Chrome for Testing
+    status                          Show system status
 
-Steps run sequentially. Each step has a 20-second stale-state timeout — if nothing changes on the page for 20s, execution stops and returns a detailed error so you can decide what to do.
+  Docker (interactive):
+    interactive <url>               Open a live headful browser session (Docker only)
+    interactive stop                Stop Docker session
+    interactive status              Check Docker session
+    watch                           Auto-open noVNC when session starts
+    act <action> [args...]          Send action to Docker session
 
-Key step types:
-- navigate: go to a URL (obstacle detection runs after this)
-- snapshot: get the page's interactive elements as a structured list with refs (@e1, @e2...). Use this BEFORE interacting to see what's on the page. Then use refs in click/fill/human-click/human-type steps instead of CSS selectors.
-- find: locate a specific element by role, name, text, placeholder, or label. Returns a ref. Use when you know what you're looking for (e.g. find role=button name="Sign In" → @e1, then click @e1).
-- screenshot: take a screenshot. Add annotate=true to overlay numbered badges on interactive elements — returns refs you can use in subsequent steps.
-- extract: evaluate JS and include the result in the response
-- solve-captcha: auto-detect and auto-solve reCAPTCHA OR hCaptcha with vision (uses Claude) — works for both, no config needed
-- login: fill login form with stored credentials (never exposes passwords)
+  Setup:
+    install <chromium|mcp|deps>     Install Chromium, MCP, or both
+    install-mcp [--dev]             Install iframer MCP into Claude Code
+    remove-mcp [--dev]              Remove iframer MCP from Claude Code
 
-IMPORTANT — Element refs (@e1, @e2...): All selector fields (click, fill, human-click, human-type, wait-for) accept @e refs from snapshot, find, or annotated screenshot. PREFER refs over CSS selectors — they're more reliable. Run snapshot first to see what's available.
-
-API capture (options.captureApi): When enabled, records all XHR/fetch requests the page makes during execution. Use this when the user asks to "reverse engineer", "capture endpoints", "map the API", "remember how this works", or "save the endpoints". Returns structured endpoint data grouped by domain with parameterized paths, request/response bodies, and which pipeline step triggered each call. The agent can then save these to a directory for future direct API usage.
-
-Returns: ok, completedSteps, results (with extract values), obstacles (what was detected/resolved), capturedApi (when enabled), and on failure: errorContext with screenshot, URL, errorType, suggestion, retryable.
-
-IMPORTANT — Do NOT specify options.mode unless the user explicitly asks for a specific browser mode. iframer auto-selects the best mode and auto-escalates if blocked (headless → docker-headful → binary-headful) in a single call. Specifying a mode disables auto-escalation and often picks a worse mode than iframer would choose.`, {
-    steps: import_zod3.z.array(stepSchema).describe("Pipeline steps to execute sequentially"),
-    options: import_zod3.z.object({
-      staleTimeoutMs: import_zod3.z.number().optional().describe("Override the 20s stale-state timeout per step"),
-      screenshotAfterEach: import_zod3.z.boolean().optional().describe("Take a screenshot after every step (expensive)"),
-      continueOnObstacle: import_zod3.z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
-      continueOnError: import_zod3.z.boolean().optional().describe("Continue past failing steps (default: false)"),
-      captureApi: import_zod3.z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes. Use when the user wants to reverse-engineer, map, or save a site's API endpoints."),
-      mode: import_zod3.z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("DO NOT SET THIS unless user explicitly requests a mode. iframer auto-selects and auto-escalates. Setting this disables auto-escalation."),
-      autoEscalate: import_zod3.z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)")
-    }).optional()
-  }, async (params) => {
-    try {
-      const dockerRunning = await isDockerRunning();
-      async function runWithMode(mode) {
-        if (mode === "binary-headful") {
-          await ensureLocalChrome();
-          const iframer2 = await getIframer();
-          return iframer2.execute(LOCAL_USER, LOCAL_TOKEN, {
-            steps: params.steps,
-            options: { ...params.options, mode: "binary-headful", autoEscalate: false }
-          });
-        }
-        if (mode === "docker-headful" && dockerRunning) {
-          return apiPost("/execute", {
-            steps: params.steps,
-            options: { ...params.options, mode: "docker-headful", autoEscalate: false }
-          });
-        }
-        if (dockerRunning) {
-          return apiPost("/execute", {
-            steps: params.steps,
-            options: { ...params.options, mode: mode || undefined }
-          });
-        }
-        await ensureLocalChrome();
-        const iframer = await getIframer();
-        return iframer.execute(LOCAL_USER, LOCAL_TOKEN, {
-          steps: params.steps,
-          options: { ...params.options, mode: mode || undefined }
-        });
-      }
-      const requestedMode = params.options?.mode;
-      let execResult = await runWithMode(requestedMode);
-      if (!execResult.ok && execResult.error?.errorType === "bot-blocked" && params.options?.autoEscalate !== false && !requestedMode) {
-        const escalation = ["docker-headful", "binary-headful"];
-        for (const nextMode of escalation) {
-          if (nextMode === "docker-headful" && !dockerRunning)
-            continue;
-          log12.info(`Auto-escalating to ${nextMode}`);
-          execResult = await runWithMode(nextMode);
-          if (execResult.ok)
-            break;
-          if (execResult.error?.errorType !== "bot-blocked")
-            break;
-        }
-      }
-      const lines = formatExecuteResult(execResult);
-      let screenshotUrl = null;
-      if (execResult.error) {
-        screenshotUrl = execResult.error.pageState?.screenshotUrl ?? null;
-      } else {
-        screenshotUrl = execResult.finalState?.screenshotUrl ?? null;
-      }
-      const content = [{ type: "text", text: lines.join(`
-`) }];
-      if (screenshotUrl) {
-        const img = await fetchScreenshot(screenshotUrl);
-        if (img)
-          content.push(img);
-      }
-      if (!execResult.ok)
-        return { content, isError: true };
-      return { content };
-    } catch (e) {
-      return err(`Error: ${getErrorMessage3(e)}`);
-    }
-  });
-}
-function formatExecuteResult(data) {
-  const lines = [];
-  lines.push(`ok: ${data.ok}`);
-  lines.push(`steps: ${data.completedSteps}/${data.totalSteps}`);
-  if (data.durationMs)
-    lines.push(`duration: ${data.durationMs}ms`);
-  if (data.modeUsed)
-    lines.push(`mode: ${data.modeUsed}${data.modeEscalated ? " (auto-escalated)" : ""}`);
-  if (data.finalState) {
-    lines.push(`
-Final page: ${data.finalState.title}`);
-    lines.push(`URL: ${data.finalState.url}`);
+  Environment:
+    IFRAMER_URL                     Docker API URL (default: http://localhost:3021)
+    IFRAMER_SECRET                  Auth token (must match Docker .env)
+    IFRAMER_MODE                    Force "local" or "docker" mode
+`);
+      break;
   }
-  const meaningful = (data.results || []).filter((r) => r.ok && r.result !== undefined && r.result !== null);
-  for (const r of meaningful) {
-    if (r.step?.type === "snapshot" && r.result?.snapshot) {
-      lines.push(`
---- Snapshot (${r.result.elementCount} elements) ---`);
-      lines.push(r.result.snapshot);
-    } else if (r.step?.type === "find" && r.result?.ref) {
-      lines.push(`
-Found: ${r.result.ref} ${r.result.role} "${r.result.name}" (${r.result.matchCount} match${r.result.matchCount > 1 ? "es" : ""})`);
-    } else if (r.step?.type === "screenshot" && r.result?.refs) {
-      lines.push(`
---- Annotated screenshot refs ---`);
-      lines.push(r.result.refs);
-    } else if (r.result !== undefined && r.result !== null) {
-      lines.push(`
-step ${r.stepIndex}: ${JSON.stringify(r.result)}`);
-    }
-  }
-  if (data.obstacles && data.obstacles.length > 0) {
-    lines.push(`
-Obstacles handled:`);
-    for (const o of data.obstacles) {
-      lines.push(`  [step ${o.detectedAtStep}] ${o.type}: ${o.resolved ? o.resolution : "UNRESOLVED - " + (o.resolution || "unknown")}`);
-    }
-  }
-  if (data.capturedApi && data.capturedApi.length > 0) {
-    lines.push(`
---- Captured API ---`);
-    for (const api of data.capturedApi) {
-      lines.push(`
-${api.domain} (${api.baseUrl})`);
-      const authParts = [];
-      if (api.auth?.authorization)
-        authParts.push("Authorization header");
-      if (api.auth?.cookies && Object.keys(api.auth.cookies).length > 0)
-        authParts.push(`${Object.keys(api.auth.cookies).length} cookies`);
-      if (api.auth?.tokens && Object.keys(api.auth.tokens).length > 0)
-        authParts.push(`${Object.keys(api.auth.tokens).length} token headers (${Object.keys(api.auth.tokens).join(", ")})`);
-      if (authParts.length > 0)
-        lines.push(`  Auth: ${authParts.join(", ")}`);
-      lines.push("  Endpoints:");
-      for (const ep of api.endpoints) {
-        lines.push(`    ${ep.method} ${ep.path}  [step ${ep.triggeredAtStep}, status ${ep.responseStatus}]`);
-        if (ep.rawPaths.length > 1) {
-          lines.push(`      examples: ${ep.rawPaths.slice(0, 3).join(", ")}`);
-        }
-      }
-    }
-    lines.push(`
-The capturedApi field contains full endpoint data including auth, headers, request/response bodies, and curl commands. Save it to a directory for the user — use auth.json for shared credentials and one file per endpoint.`);
-  }
-  if (data.error) {
-    lines.push(`
---- Failure ---`);
-    if (typeof data.error === "string") {
-      lines.push(`Error: ${data.error}`);
-    } else {
-      lines.push(`Failed at step ${data.error.failedAtStep}: ${JSON.stringify(data.error.failedStep)}`);
-      lines.push(`Error type: ${data.error.errorType}`);
-      lines.push(`Message: ${data.error.message}`);
-      lines.push(`Retryable: ${data.error.retryable}`);
-      if (data.error.suggestion)
-        lines.push(`Suggestion: ${data.error.suggestion}`);
-      if (data.error.pageState?.url)
-        lines.push(`URL at failure: ${data.error.pageState.url}`);
-    }
-  }
-  return lines;
 }
-
-// src/mcp/tools/session.ts
-var import_zod4 = require("zod");
-function registerSessionTool(server) {
-  server.tool("session", `Manage the browser session lifecycle. Use action=stop when done to save cookies/localStorage for future use. Use action=clear to wipe all stored session data.`, {
-    action: import_zod4.z.enum(["stop", "clear"]).describe("stop: end session and save state | clear: delete all stored session data")
-  }, async ({ action }) => {
-    try {
-      const dockerRunning = await isDockerRunning();
-      const useLocal = IFRAMER_MODE === "docker" ? false : !dockerRunning;
-      if (action === "stop") {
-        if (useLocal) {
-          const iframer = await getIframer();
-          const stopResult2 = await iframer.stopSession(LOCAL_USER, LOCAL_TOKEN);
-          return { content: [{ type: "text", text: `Session stopped. State saved: ${stopResult2.sessionSaved}` }] };
-        }
-        const stopResult = await apiPost("/interactive/stop");
-        if (!stopResult.ok)
-          return err(`Error: ${stopResult.error}`);
-        return { content: [{ type: "text", text: `Session stopped. State saved: ${stopResult.sessionSaved}` }] };
-      } else {
-        if (useLocal) {
-          const iframer = await getIframer();
-          await iframer.clearSession(LOCAL_USER);
-          return { content: [{ type: "text", text: "Session data cleared." }] };
-        }
-        const clearResult = await apiDelete("/session");
-        if (!clearResult.ok)
-          return err(`Error: ${clearResult.error}`);
-        return { content: [{ type: "text", text: "Session data cleared." }] };
-      }
-    } catch (e) {
-      return err(`Error: ${getErrorMessage3(e)}`);
-    }
-  });
-}
-
-// src/mcp/tools/credentials.ts
-var import_zod5 = require("zod");
-function registerCredentialsTool(server) {
-  server.tool("credentials", `Manage login credentials securely. When login is needed: FIRST call action=list to check if credentials exist. If they do, proceed with login. If not, call action=store — this prompts the user with a secure form (you never see passwords). NEVER ask the user "do you have credentials?" — just check and act.`, {
-    action: import_zod5.z.enum(["store", "login", "list"]).describe("store: prompt user for credentials | login: log in with stored credentials | list: show stored domains"),
-    domain: import_zod5.z.string().optional().describe("Domain (required for store and login)"),
-    usernameSelector: import_zod5.z.string().optional().describe("CSS selector for username field (for login)"),
-    passwordSelector: import_zod5.z.string().optional().describe("CSS selector for password field (for login)"),
-    submitSelector: import_zod5.z.string().optional().describe("CSS selector for submit button (for login)"),
-    totpSelector: import_zod5.z.string().optional().describe("CSS selector for 2FA code field (for login)")
-  }, async ({ action, domain, usernameSelector, passwordSelector, submitSelector, totpSelector }) => {
-    try {
-      const dockerRunning = await isDockerRunning();
-      const useLocal = IFRAMER_MODE === "docker" ? false : !dockerRunning;
-      if (action === "list") {
-        let domains;
-        if (useLocal) {
-          const iframer = await getIframer();
-          domains = await iframer.listCredentials(LOCAL_USER);
-        } else {
-          const credList = await apiGet("/credentials");
-          if (!credList.ok)
-            return err(`Error: ${credList.error}`);
-          domains = credList.domains || [];
-        }
-        if (!domains.length) {
-          return { content: [{ type: "text", text: "No credentials stored. Call this tool again with action=store and the domain to prompt the user for credentials now." }] };
-        }
-        return { content: [{ type: "text", text: `Stored credentials for:
-${domains.map((d) => `  - ${d}`).join(`
-`)}` }] };
-      }
-      if (action === "store") {
-        if (!domain)
-          return err("domain is required for action=store");
-        const result = await server.server.elicitInput({
-          mode: "form",
-          message: `Enter your login credentials for ${domain}. These are encrypted and stored locally — Claude never sees them.`,
-          requestedSchema: {
-            type: "object",
-            properties: {
-              username: { type: "string", title: "Username / Email" },
-              password: { type: "string", title: "Password" },
-              totp_secret: { type: "string", title: "TOTP Secret (leave empty if no 2FA)" }
-            },
-            required: ["username", "password"]
-          }
-        });
-        if (result.action === "decline" || !result.content) {
-          return { content: [{ type: "text", text: "Cancelled." }] };
-        }
-        const { username, password, totp_secret } = result.content;
-        if (useLocal) {
-          const iframer = await getIframer();
-          await iframer.storeCredential(LOCAL_USER, LOCAL_TOKEN, { domain, username, password, totp_secret: totp_secret || undefined });
-        } else {
-          const storeResult = await apiPost("/credentials", { domain, username, password, totp_secret: totp_secret || undefined });
-          if (!storeResult.ok)
-            return err(`Error: ${storeResult.error}`);
-        }
-        return { content: [{ type: "text", text: `Credentials stored for ${domain}.` }] };
-      }
-      if (action === "login") {
-        if (!domain)
-          return err("domain is required for action=login");
-        if (useLocal) {
-          return { content: [{ type: "text", text: `Use a login step in "execute" to log in with stored credentials for ${domain}. Example: { "type": "login", "domain": "${domain}" }` }] };
-        }
-        const loginResult = await apiPost("/credentials/login", { domain, usernameSelector, passwordSelector, submitSelector, totpSelector });
-        if (!loginResult.ok)
-          return err(`Error: ${loginResult.error}`);
-        const lines = [`Login attempted for ${domain}`, `URL: ${loginResult.url}`, `Title: ${loginResult.title}`];
-        if (loginResult.totpGenerated)
-          lines.push("TOTP code generated and entered automatically.");
-        if (loginResult.screenshotUrl)
-          lines.push(`Screenshot: ${loginResult.screenshotUrl}`);
-        return { content: [{ type: "text", text: lines.join(`
-`) }] };
-      }
-      return err("Unknown action");
-    } catch (e) {
-      if (e instanceof Error && e.message?.includes("does not support")) {
-        return err(`This client doesn't support secure input prompts. Store credentials via CLI:
-
-iframer credentials add ${domain}`);
-      }
-      return err(`Error: ${getErrorMessage3(e)}`);
-    }
-  });
-}
-
-// src/mcp/tools/reverse-engineer.ts
-var import_zod6 = require("zod");
-function registerReverseEngineerTool(server) {
-  server.tool("reverse-engineer", `Reverse-engineer a website's API. Navigates to a URL, performs the steps you specify, and captures every XHR/fetch request the page makes — including auth tokens, cookies, headers, request/response bodies, and ready-to-use curl commands.
-
-Use this when the user asks to:
-- "reverse engineer" or "map" a site's API
-- "capture the endpoints" or "save the API"
-- "figure out how this site works under the hood"
-- "record the API calls" so they can be replayed later
-
-How it works:
-1. You provide steps (same as execute) — navigate, click, fill, extract, etc.
-2. iframer runs them while recording all API calls the page makes
-3. Returns structured data per domain: shared auth (cookies, tokens, Authorization header) + each endpoint with method, path, headers, body, response, and a curl command
-
-After getting results, save them as RUNNABLE CODE to a directory:
-  <outputDir>/
-    auth.js                — exports shared cookies, tokens, authorization as an object
-    getMessages.js         — one .js file per endpoint: exports an async function that calls the endpoint using fetch, with auth imported from auth.js
-    index.js               — re-exports all endpoint functions
-    README.md              — summary of all endpoints and their dependency chain
-
-If typed=true (user asks to "infer types", "add types", "save as typescript", etc.), save as .ts instead:
-    auth.ts                — typed auth config with interface
-    getMessages.ts         — async function with inferred request/response types based on captured data
-    types.ts               — all inferred interfaces (e.g. Message, Channel, User) derived from response bodies
-    index.ts               — re-exports all endpoint functions
-
-Naming: convert endpoint paths to camelCase function names (e.g. GET /api/v9/channels/{id}/messages → getChannelMessages). Group related endpoints logically.
-
-The outputDir defaults to the current working directory + the domain name (e.g. ./example_com/). Ask the user where to save if unclear.`, {
-    steps: import_zod6.z.array(stepSchema).describe("Pipeline steps to execute while capturing API calls"),
-    outputDir: import_zod6.z.string().optional().describe("Directory to save the captured API files. If not provided, ask the user or default to ./<domain>/"),
-    typed: import_zod6.z.boolean().optional().describe("Save as .ts with inferred types instead of .js. Set to true when the user asks for types, typescript, or type inference."),
-    options: import_zod6.z.object({
-      staleTimeoutMs: import_zod6.z.number().optional().describe("Override the 20s stale-state timeout per step"),
-      continueOnObstacle: import_zod6.z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
-      continueOnError: import_zod6.z.boolean().optional().describe("Continue past failing steps (default: false)")
-    }).optional()
-  }, async (params) => {
-    try {
-      const execParams = {
-        steps: params.steps,
-        options: { ...params.options, captureApi: true }
-      };
-      const captureResult = await apiPost("/execute", execParams);
-      const lines = [];
-      lines.push(`ok: ${captureResult.ok}`);
-      lines.push(`steps: ${captureResult.completedSteps}/${captureResult.totalSteps}`);
-      if (captureResult.durationMs)
-        lines.push(`duration: ${captureResult.durationMs}ms`);
-      if (captureResult.finalState) {
-        lines.push(`
-Final page: ${captureResult.finalState.title}`);
-        lines.push(`URL: ${captureResult.finalState.url}`);
-      }
-      if (captureResult.capturedApi && captureResult.capturedApi.length > 0) {
-        formatCapturedApi(lines, captureResult.capturedApi, params);
-      } else {
-        lines.push(`
-No API calls were captured. The page may not have made any XHR/fetch requests during the steps, or the steps may not have triggered the expected behavior.`);
-      }
-      if (captureResult.error) {
-        lines.push(`
---- Failure ---`);
-        if (typeof captureResult.error === "string") {
-          lines.push(`Error: ${captureResult.error}`);
-        } else {
-          lines.push(`Failed at step ${captureResult.error.failedAtStep}: ${JSON.stringify(captureResult.error.failedStep)}`);
-          lines.push(`Error type: ${captureResult.error.errorType}`);
-          lines.push(`Message: ${captureResult.error.message}`);
-          if (captureResult.error.suggestion)
-            lines.push(`Suggestion: ${captureResult.error.suggestion}`);
-        }
-      }
-      const content = [{ type: "text", text: lines.join(`
-`) }];
-      const screenshotUrl = captureResult.error?.pageState?.screenshotUrl ?? captureResult.finalState?.screenshotUrl;
-      if (screenshotUrl) {
-        const img = await fetchScreenshot(screenshotUrl);
-        if (img)
-          content.push(img);
-      }
-      if (captureResult.capturedApi && captureResult.capturedApi.length > 0) {
-        content.push({
-          type: "text",
-          text: `--- capturedApi JSON ---
-` + JSON.stringify(captureResult.capturedApi, null, 2)
-        });
-      }
-      if (!captureResult.ok)
-        return { content, isError: true };
-      return { content };
-    } catch (e) {
-      return err(`Connection error: ${getErrorMessage3(e)}. Is the API running at ${BASE_URL}?`);
-    }
-  });
-}
-function formatCapturedApi(lines, capturedApi, params) {
-  for (const api of capturedApi) {
-    lines.push(`
-━━━ ${api.domain} (${api.baseUrl}) ━━━`);
-    const authParts = [];
-    if (api.auth?.authorization)
-      authParts.push(`Authorization: ${api.auth.authorization.slice(0, 30)}...`);
-    if (api.auth?.cookies && Object.keys(api.auth.cookies).length > 0)
-      authParts.push(`${Object.keys(api.auth.cookies).length} cookies`);
-    if (api.auth?.tokens && Object.keys(api.auth.tokens).length > 0) {
-      for (const [k, v] of Object.entries(api.auth.tokens)) {
-        authParts.push(`${k}: ${String(v).slice(0, 30)}...`);
-      }
-    }
-    if (authParts.length > 0) {
-      lines.push(`
-Auth:`);
-      for (const part of authParts)
-        lines.push(`  ${part}`);
-    }
-    lines.push(`
-Endpoints (${api.endpoints.length}):`);
-    for (const ep of api.endpoints) {
-      lines.push(`
-  ${ep.method} ${ep.path}`);
-      lines.push(`    Status: ${ep.responseStatus}`);
-      lines.push(`    Triggered at step: ${ep.triggeredAtStep}`);
-      if (ep.rawPaths.length > 1) {
-        lines.push(`    Seen paths: ${ep.rawPaths.slice(0, 5).join(", ")}`);
-      }
-      if (ep.headers && Object.keys(ep.headers).length > 0) {
-        lines.push(`    Headers: ${Object.keys(ep.headers).join(", ")}`);
-      }
-      if (ep.requestBody) {
-        const bodyPreview = JSON.stringify(ep.requestBody).slice(0, 200);
-        lines.push(`    Request body: ${bodyPreview}${bodyPreview.length >= 200 ? "..." : ""}`);
-      }
-      if (ep.responseBody) {
-        const resPreview = JSON.stringify(ep.responseBody).slice(0, 200);
-        lines.push(`    Response: ${resPreview}${resPreview.length >= 200 ? "..." : ""}`);
-      }
-    }
-  }
-  const mainDomain = capturedApi[0]?.domain || "api";
-  const dir = params.outputDir || `./${mainDomain}`;
-  const ext = params.typed ? ".ts" : ".js";
-  lines.push(`
-━━━ Save instructions ━━━`);
-  lines.push(`Save to: ${dir}`);
-  lines.push(`Format: ${ext} files`);
-  lines.push(`
-Generate these files from the capturedApi data:`);
-  if (params.typed) {
-    lines.push(`  1. auth.ts — export the auth object with a typed interface (AuthConfig)`);
-    lines.push(`  2. types.ts — infer TypeScript interfaces from the response bodies (e.g. if response has {id: "123", content: "hi"} → interface Message { id: string; content: string; }). Name types based on the endpoint context.`);
-    lines.push(`  3. One .ts file per endpoint — export an async function that calls fetch with the right method, headers (from auth.ts), and body. Use the inferred types for params and return values.`);
-    lines.push(`  4. index.ts — re-export all endpoint functions`);
-    lines.push(`  5. README.md — endpoint summary and dependency chain`);
-  } else {
-    lines.push(`  1. auth.js — module.exports the auth object (cookies, tokens, authorization)`);
-    lines.push(`  2. One .js file per endpoint — module.exports an async function that calls fetch with the right method, headers (require from auth.js), and body.`);
-    lines.push(`  3. index.js — re-export all endpoint functions`);
-    lines.push(`  4. README.md — endpoint summary and dependency chain`);
-  }
-  lines.push(`
-Function naming: convert paths to camelCase (e.g. GET /api/v9/channels/{id}/messages → getChannelMessages, DELETE /api/v9/channels/{id}/messages/{id2} → deleteChannelMessage).`);
-  lines.push(`
-IMPORTANT: Auth data contains real tokens/cookies — they expire. Remind the user.`);
-}
-
-// src/mcp/server.ts
-var IS_DEV = process.env.IFRAMER_URL?.includes("localhost") || process.env.IFRAMER_URL?.includes("127.0.0.1");
-var INSTRUCTIONS = IS_DEV ? `iframer-dev — local development instance of iframer (connects to ${BASE_URL}).
-
-This is the LOCAL dev server running in Docker on localhost. Use this MCP when developing or testing iframer itself.
-
-CRITICAL RULES — NEVER VIOLATE THESE:
-1. NEVER ask the user "do you have credentials?" or "do you want to log in manually?". If credentials are missing, immediately call "credentials" action=store — it prompts the user with a secure form. Just do it.
-2. NEVER suggest manual browser login as a first option. Automate first, manual only as last resort after multiple failures.
-3. NEVER ask the user for passwords or credentials in the chat.
-4. DO NOT present options or ask questions when you can just act. Check credentials, execute. Show results, not questions.
-
-CREDENTIAL FLOW (follow exactly):
-1. Call "credentials" action=list to check if credentials exist.
-2. If they exist → proceed with login step in execute.
-3. If missing → immediately call "credentials" action=store. Do NOT tell the user and ask what to do.
-4. After stored → proceed with login step in execute.
-
-BROWSER MODES: NEVER pass options.mode to execute. iframer auto-selects the best mode (headless → docker-headful → binary-headful) and escalates automatically. binary-headful opens a visible browser window on the user's screen — only use it as an absolute last resort.
-
-WORKFLOW:
-1. Use "execute" with a pipeline of steps — the session starts automatically inside Docker
-2. iframer handles obstacles (captcha, cookie banners) automatically
-3. If execute fails, read the error — it tells you exactly what went wrong and where
-4. Call "session" action=stop when done to save session state
-
-TIMEOUTS: Each step has a 20-second stale-state timeout. If nothing changes for 20s, iframer aborts with a detailed error.
-
-CAPTCHA: ALWAYS use the "solve-captcha" step — auto-detects and solves reCAPTCHA/hCaptcha using vision AI. NEVER manually select tiles.
-
-REVERSE ENGINEERING: When the user asks to "reverse engineer", "map the API", "capture endpoints", or "save the endpoints" — use the "reverse-engineer" tool.` : `iframer — browser access for AI agents when normal methods fail.
-
-CRITICAL RULES — NEVER VIOLATE THESE:
-1. NEVER ask the user "do you have credentials?" or "do you want to log in manually?". If credentials are missing, immediately call "credentials" action=store — it prompts the user with a secure form. Just do it, don't ask.
-2. NEVER suggest "opening the page so you can log in manually" as a first option. Manual login is ONLY acceptable after automated login has failed multiple times.
-3. NEVER mention that a browser window will pop up or warn about disruption. iframer handles mode selection and escalation automatically in code.
-4. NEVER ask the user for passwords or credentials in the chat.
-5. DO NOT present options or ask questions when you can just act. Check status, check credentials, execute. The user should see results, not questions.
-6. NEVER fall back to Wayback Machine, web search, or other external tools after a single iframer failure. iframer auto-escalates through all browser modes in one call. Only consider alternatives if execute returns a final failure after exhausting all modes.
-
-CREDENTIAL FLOW (follow this exactly, no exceptions):
-1. Call "credentials" action=list to check if credentials exist for the domain.
-2. If credentials exist → proceed directly with the login step in execute.
-3. If credentials are missing → immediately call "credentials" action=store with the domain. Do NOT tell the user credentials are missing and ask what to do. Just trigger the secure prompt.
-4. After credentials are stored → proceed with the login step in execute.
-
-PHILOSOPHY: You are a capable agent. Do your work locally first. Only call iframer when you hit a wall: captcha, login-gated content, heavy bot detection, or content that requires a real browser to render.
-
-WORKFLOW:
-1. Call "status" first — know what's available before doing anything
-2. For simple blocked pages: use "browse" (headless, fast)
-3. For captchas/logins/complex flows: use "execute" with a pipeline of steps
-4. iframer handles obstacles (captcha, cookie banners) automatically during execute
-5. If execute can't finish, it returns exactly where it stopped and why — you decide what to do next
-6. Call "session" action=stop when done to save session state
-
-BROWSER MODES: NEVER specify options.mode — iframer auto-selects the best mode and auto-escalates if blocked (headless → docker-headful → binary-headful) in a single execute call. You do NOT need to pick a mode or retry with different modes. Just call execute without mode and let it work. The only exception: if the user explicitly asks for a specific mode.
-
-TIMEOUTS: Each step has a 20-second stale-state timeout. If nothing changes on the page for 20s, iframer aborts and returns a detailed error.
-
-CAPTCHA: ALWAYS use the "solve-captcha" step — it auto-detects reCAPTCHA vs hCaptcha and solves with vision AI. NEVER manually select tiles with recaptcha-select.
-
-REVERSE ENGINEERING: When the user asks to "reverse engineer", "map the API", "capture endpoints", or "figure out how this site works" — use the "reverse-engineer" tool.`;
-var server = new import_mcp.McpServer({ name: "iframer", version: "2.1.5" }, { instructions: INSTRUCTIONS });
-registerStatusTool(server);
-registerBrowseTool(server);
-registerExecuteTool(server);
-registerSessionTool(server);
-registerCredentialsTool(server);
-registerReverseEngineerTool(server);
-var transport = new import_stdio.StdioServerTransport;
-(async () => {
-  await server.connect(transport);
-})();
+main().catch((err) => {
+  console.error(`  ${err.message}`);
+  process.exit(1);
+});

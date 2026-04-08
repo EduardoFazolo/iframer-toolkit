@@ -1,143 +1,129 @@
-# iframer
+# iframer-toolkit
 
-A self-hosted browser automation server for AI agents. Run it with Docker and connect it to Claude (or any MCP-compatible agent) to give your AI a real browser — with session persistence, stealth fingerprinting, credential storage, live noVNC viewing, and automatic captcha solving.
+Browser access for AI agents when normal fetching fails. Give Claude (or any MCP-compatible agent) a real browser — with session persistence, stealth fingerprinting, encrypted credential storage, and automatic captcha solving.
+
+Ships as:
+- **CLI** (`iframer-toolkit` / `iframer`) — browse, screenshot, credentials, sessions, reverse-engineer APIs
+- **MCP server** — plugs directly into Claude Code so agents can drive the browser themselves
+- **Self-hosted Docker server** (optional) — adds live headful browsing over noVNC for remote/multi-user setups
+
+## Install
+
+```sh
+npm install -g iframer-toolkit
+```
+
+Then pull in the runtime dependencies (Chrome for Testing + MCP registration):
+
+```sh
+iframer-toolkit install deps
+```
+
+This is shorthand for:
+
+```sh
+iframer-toolkit install chromium   # downloads Chrome for Testing to ~/.iframer
+iframer-toolkit install-mcp        # registers the MCP server in ~/.claude.json
+```
+
+Restart Claude Code and the `iframer` tools will be available.
+
+> **Note:** If you prefer, your agent can run `iframer-toolkit install deps` for you — it'll figure the rest out.
+
+## Quick start
+
+Once installed, you can either drive the browser via the CLI directly, or ask Claude to do it for you via the MCP.
+
+**CLI:**
+
+```sh
+iframer-toolkit status                                      # system + browser modes
+iframer-toolkit browse https://example.com --extract 'document.title'
+iframer-toolkit screenshot https://news.ycombinator.com -o /tmp/hn.png
+iframer-toolkit credentials add github.com                  # secure prompt
+iframer-toolkit reverse-engineer https://some-spa.com       # capture the APIs it calls
+```
+
+**From Claude Code** (after `install-mcp`):
+
+> "Log into my account on example.com and extract the latest invoice."
+
+Claude will call the MCP `credentials` tool (prompting you securely if needed), then run a pipeline via `execute`, and return the result. No copying cookies, no proxies, no manual login.
 
 ## How it works
 
 ```
-Claude (MCP) ──→ iframer MCP server ──→ HTTP API (localhost:3021)
-                                               └─ Docker container
-                                                    ├─ Chromium (headful + stealth)
-                                                    ├─ Redis (encrypted sessions)
-                                                    └─ noVNC (watch the browser live)
+Claude (MCP) ──→ iframer MCP server ──→ Iframer (local)
+                                            ├─ patchright (stealth Chromium)
+                                            ├─ Chrome for Testing
+                                            └─ SQLite (encrypted sessions + creds at ~/.iframer)
 ```
 
-The browser runs inside Docker using your machine's real IP — no proxies, no residential proxy fees. Sessions (cookies, localStorage) are encrypted and persisted in Redis so Claude stays logged in across restarts.
+By default, `install-mcp` runs in **local mode**: no Docker needed. The MCP spawns a stealth-patched Chromium (via [patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright)) on your machine and auto-escalates between `headless` → `binary-headful` based on what a site requires.
 
-## Quick start
+For live remote viewing, multi-user, or Linux server deployments, see [Self-hosting with Docker](#self-hosting-with-docker) below.
 
-**1. Clone and configure**
+## CLI reference
 
-```bash
-git clone https://github.com/EduardoFazolo/iframer-toolkit.git
-cd iframer-toolkit
-cp .env.example .env
-# Edit .env — set ANTHROPIC_API_KEY (required for captcha solving)
-# Optionally set IFRAMER_SECRET to require auth
+```
+iframer-toolkit <command> [args]
+
+Pipeline:
+  execute <pipeline.json|json>     Run a pipeline of browser steps
+
+Quick actions:
+  browse <url>                     Headless fetch with JS rendering
+    --extract <js>                 Evaluate JS and return result
+    --html                         Return full page HTML
+    --wait-for <selector>          Wait for element before extracting
+    --sessionless                  Skip session persistence
+  screenshot <url>                 Take a screenshot of a URL
+    --annotate                     Overlay element badges with refs
+    -o, --output <path>            Output file path
+  reverse-engineer <url|file>      Capture API calls a site makes
+    --output <dir>                 Save directory
+    --typed                        Generate TypeScript
+
+Session:
+  session stop                     Stop and save cookies/localStorage
+  session clear                    Wipe stored session data
+  session status                   Check session state
+
+Credentials:
+  credentials add <domain>         Store login credentials (encrypted)
+  credentials list                 List domains with stored credentials
+  credentials remove <domain>      Delete credentials for a domain
+
+Setup:
+  install chromium                 Download Chrome for Testing
+  install mcp                      Register MCP server in Claude Code
+  install deps                     Run both of the above
+  install-mcp [--dev]              Same as `install mcp`
+  remove-mcp [--dev]               Remove iframer MCP from Claude Code
+
+Browser:
+  modes                            Show available browser modes
+  status                           Show system status
 ```
 
-**2. Start**
-
-```bash
-bun run start:docker
-```
-
-Other Docker helpers:
-
-```bash
-bun run stop:docker   # stop containers
-bun run logs:docker   # tail container logs
-```
-
-**3. Install the MCP into Claude Code**
-
-```bash
-bun run mcp:install
-```
-
-This auto-reads `IFRAMER_SECRET` from your `.env` and writes the MCP config to `~/.claude.json`. Restart Claude Code and the `iframer` tools will appear automatically.
-
-To remove the MCP:
-
-```bash
-bun run mcp:remove
-```
-
-For development, use `--dev` to install as `iframer-dev`:
-
-```bash
-node bin/cli.js install-mcp --dev
-```
-
-## Environment variables
-
-| Variable            | Required | Description |
-|---------------------|----------|-------------|
-| `REDIS_URL`         | Yes      | Redis connection string (default: `redis://localhost:6379`, handled by docker compose) |
-| `ANTHROPIC_API_KEY` | Yes      | Used for vision-based captcha solving |
-| `IFRAMER_SECRET`           | No       | When set, all API requests must include `x-api-key: <value>`. Set with `openssl rand -hex 32` |
-| `PORT`              | No       | API port (default: `3021`) |
+The binary is available as either `iframer-toolkit` (full name) or `iframer` (short alias). `npx iframer-toolkit ...` also works without a global install.
 
 ## MCP tools
 
-Once installed, Claude has access to these tools:
+Once the MCP is registered, Claude has access to:
 
-### `status`
-Check API health, active session, and stored credentials. Call this first.
-
-### `execute`
-Run a pipeline of browser steps. Handles captchas and cookie banners automatically.
-
-```
-Steps: navigate, click, fill, human-click, human-type, scroll, wait, wait-for,
-       evaluate, extract, keyboard, login, solve-captcha, screenshot
-```
-
-Each step has a 20-second stale-state timeout. On failure, returns the exact step, error type, and a screenshot of what the browser was looking at.
-
-### `browse`
-Headless fetch with session persistence. Fast, for pages that don't need interaction.
-
-### `session`
-- `stop` — save cookies/localStorage to Redis for next time
-- `clear` — wipe stored session data
-
-### `credentials`
-Store encrypted login credentials server-side. Claude never sees them.
-
-- `store` — prompts you for username/password via a secure form
-- `login` — fills a login form using stored credentials
-- `list` — show domains with stored credentials
-
-## Watching the browser live
-
-When a session is active, open noVNC in your browser:
-
-```
-http://localhost:6080
-```
-
-Use `iframer watch` from the CLI to auto-open noVNC when a session starts.
-
-## CLI
-
-```bash
-# Check API health
-node bin/cli.js status
-
-# Store credentials for a site
-node bin/cli.js credentials add github.com
-
-# List stored credentials
-node bin/cli.js credentials list
-
-# Open a live browser session
-node bin/cli.js interactive https://example.com
-
-# Watch for agent sessions (opens noVNC automatically)
-node bin/cli.js watch
-
-# Take a screenshot of the active session
-node bin/cli.js screenshot /tmp/shot.png
-```
+- **`status`** — system health, session state, stored credentials
+- **`execute`** — run a pipeline of browser steps (navigate, click, fill, human-click, human-type, scroll, wait, evaluate, extract, keyboard, login, solve-captcha, screenshot). Each step has a 20s stale-state timeout; failures return the exact step, error type, and a screenshot.
+- **`browse`** — fast headless fetch with session persistence
+- **`reverse-engineer`** — capture the APIs a site calls so Claude can skip the browser next time
+- **`session`** — `stop` (save state) or `clear` (wipe)
+- **`credentials`** — `store` (secure prompt), `login`, `list` — agents never see passwords
 
 ## Session persistence
 
-Session data (cookies + localStorage) is extracted when you call `session stop` and encrypted with `IFRAMER_SECRET` before being written to Redis. Stored credentials (username/password/TOTP) are also encrypted with the same key. On the next `execute` or `interactive` call, the data is decrypted and injected back into the browser automatically.
+Session data (cookies + localStorage) and credentials are stored in SQLite at `~/.iframer/` and encrypted with AES-256. Data is automatically re-injected on the next `execute` or `browse` so Claude stays logged in across restarts.
 
-If `IFRAMER_SECRET` is not set, encryption falls back to the hardcoded string `"iframer-local"` — meaning anyone with Redis access can read your sessions and credentials. Set it.
-
-Redis data is persisted via Docker volume (`redis-data`) so sessions survive container restarts.
+Set `IFRAMER_SECRET` to your own key (generate with `openssl rand -hex 32`) to control the encryption passphrase. Without it, encryption falls back to a known default — fine for local use on a trusted machine, but set it if you care.
 
 ## Captcha solving
 
@@ -147,29 +133,93 @@ iframer auto-detects and solves reCAPTCHA and hCaptcha using Claude's vision API
 { "type": "solve-captcha" }
 ```
 
-Requires `ANTHROPIC_API_KEY` in `.env`.
+Requires `ANTHROPIC_API_KEY` in your environment.
+
+## Environment variables
+
+| Variable            | Required | Description |
+|---------------------|----------|-------------|
+| `ANTHROPIC_API_KEY` | For captcha | Used for vision-based captcha solving |
+| `IFRAMER_SECRET`    | No       | Encryption key for sessions & credentials. Also used as API auth when self-hosting. Generate with `openssl rand -hex 32`. |
+| `IFRAMER_MODE`      | No       | `local` (default) or `docker`. Force a mode regardless of what's running. |
+| `IFRAMER_URL`       | No       | Docker API URL when self-hosting (default: `http://localhost:3021`). |
+
+## Self-hosting with Docker
+
+The Docker server adds live headful browsing over noVNC (watch the agent drive the browser in real time), and lets multiple users share one browser pool. Recommended for remote Linux hosts or team setups.
+
+**1. Clone and configure**
+
+```sh
+git clone https://github.com/EduardoFazolo/iframer-toolkit.git
+cd iframer-toolkit
+cp .env.example .env
+# Edit .env — set ANTHROPIC_API_KEY (for captcha) and IFRAMER_SECRET (for auth)
+```
+
+**2. Start**
+
+```sh
+bun run start:docker   # docker compose up --build -d
+bun run logs:docker    # tail container logs
+bun run stop:docker    # stop containers
+```
+
+**3. Point the MCP at it**
+
+On the machine running Claude Code:
+
+```sh
+IFRAMER_URL=https://your-host:3021 iframer-toolkit install-mcp --dev
+```
+
+**4. Watch the browser live**
+
+When a session is active, open noVNC:
+
+```
+http://your-host:6080
+```
+
+Or run `iframer-toolkit watch` to auto-open it.
 
 ## Architecture
 
-| Component | Technology |
-|-----------|------------|
-| Browser engine | Patchright (patched Playwright + Chromium) |
-| Stealth | Custom fingerprint injection, WebRTC leak prevention, worker patching |
-| Session storage | Redis with AES-256 encryption |
-| Live viewing | Xvfb + x11vnc + noVNC + websockify |
-| MCP server | `@modelcontextprotocol/sdk` |
-| Runtime | Bun |
+| Component        | Technology |
+|------------------|------------|
+| Browser engine   | [patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright) (stealth-patched Playwright fork) |
+| Browser binary   | Chrome for Testing (downloaded to `~/.iframer`) |
+| Stealth          | Fingerprint injection, WebRTC leak prevention, worker patching |
+| Session storage  | SQLite with AES-256 encryption |
+| Live viewing     | Xvfb + x11vnc + noVNC + websockify (Docker mode only) |
+| MCP server       | `@modelcontextprotocol/sdk` |
+| Runtime          | Node.js ≥18 (Bun for development) |
 
-## Building from source
+## Development
 
-```bash
+```sh
+git clone https://github.com/EduardoFazolo/iframer-toolkit.git
+cd iframer-toolkit
 bun install
-bun run index.ts          # start API server
-bun run src/mcp/server.ts # start MCP server (dev)
 
-# Rebuild MCP bundle (after editing src/mcp/server.ts)
-bun build src/mcp/server.ts --target node --format cjs --outfile bin/mcp-server.cjs
+# Run the CLI from source (no build needed — bun runs .ts directly)
+bun run bin/cli.js status
+
+# Run the MCP server from source
+bun run src/mcp/server.ts
+
+# Run the Docker API server from source (no Docker)
+bun run start   # bun run index.ts
+
+# Rebuild the distributable bundles (dist/cli.cjs + dist/mcp-server.cjs)
+bun run build
+
+# Install the locally-built package globally for testing
+npm pack
+npm install -g ./iframer-toolkit-*.tgz
 ```
+
+`prepublishOnly` runs `bun run build` automatically, so `npm publish` always ships a fresh bundle.
 
 ## License
 

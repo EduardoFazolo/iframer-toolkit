@@ -217,19 +217,39 @@ export class Iframer {
   }
 
   async stopSession(userId: string, token: string): Promise<SessionStopResult> {
-    // Stop Docker session if active
-    const sessionData = await sessionManager.stopSession(userId);
+    let sessionSaved = false;
 
-    if (sessionData && token) {
+    // Extract state from any live local daemon instances BEFORE closing them
+    if (token) {
       const encryptionKey = await deriveKey(token);
-      const encrypted = encrypt(JSON.stringify(sessionData), encryptionKey);
-      await this.store.setSession(userId, encrypted);
+      for (const inst of this.daemon.liveInstances()) {
+        try {
+          const data = await extractSession(inst.context, inst.page);
+          if (data) {
+            const encrypted = encrypt(JSON.stringify(data), encryptionKey);
+            await this.store.setSession(userId, encrypted);
+            sessionSaved = true;
+            break; // one context is enough — they share the same logged-in state
+          }
+        } catch (err) {
+          log.warn(`stopSession: failed to extract daemon state: ${getErrorMessage(err)}`);
+        }
+      }
     }
 
-    // Also stop local daemon sessions
+    // Stop Docker session if active (Docker-mode only)
+    const dockerSessionData = await sessionManager.stopSession(userId);
+    if (dockerSessionData && token) {
+      const encryptionKey = await deriveKey(token);
+      const encrypted = encrypt(JSON.stringify(dockerSessionData), encryptionKey);
+      await this.store.setSession(userId, encrypted);
+      sessionSaved = true;
+    }
+
+    // Now tear down local daemon browsers
     await this.daemon.stopAll();
 
-    return { ok: true, sessionSaved: !!sessionData };
+    return { ok: true, sessionSaved };
   }
 
   // ─── Pipeline Execution (with three-mode support) ─────────────────

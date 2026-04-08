@@ -1,6 +1,5 @@
 import fs from "fs";
 import { chromium } from "patchright";
-import { chromium as realChromium, firefox, webkit } from "playwright";
 import { STEALTH_ARGS } from "./stealth";
 import type { Browser } from "patchright";
 import { createLogger } from "../logger";
@@ -12,46 +11,26 @@ function findChromeExecutable(): string | undefined {
   if (process.env.CHROME_EXECUTABLE) return process.env.CHROME_EXECUTABLE;
   // Real Chrome on amd64 (production)
   if (fs.existsSync("/usr/bin/google-chrome-stable")) return "/usr/bin/google-chrome-stable";
-  // On arm64, return undefined — let patchright use its own bundled Chromium
+  // Otherwise return undefined — let patchright use its own bundled Chromium
   return undefined;
 }
 
-const BROWSER_TYPES: Record<string, typeof chromium> = { chromium, firefox: firefox as unknown as typeof chromium, webkit: webkit as unknown as typeof chromium };
-export const BROWSER_ORDER = ["chromium", "firefox", "webkit"];
+export const BROWSER_ORDER = ["chromium"];
 
-const browsers: Record<string, Browser> = {};
+let cachedBrowser: Browser | null = null;
 
-export async function getBrowser(name: string = "chromium"): Promise<Browser> {
-  if (browsers[name] && browsers[name].isConnected()) {
-    return browsers[name];
-  }
-
-  const type = BROWSER_TYPES[name];
-  if (!type) throw new Error(`Unknown browser: ${name}. Must be one of: ${BROWSER_ORDER.join(", ")}`);
-
-  browsers[name] = await type.launch({
+export async function getBrowser(_name: string = "chromium"): Promise<Browser> {
+  if (cachedBrowser && cachedBrowser.isConnected()) return cachedBrowser;
+  cachedBrowser = await chromium.launch({
     headless: true,
-    args: name === "chromium" ? STEALTH_ARGS : [],
+    args: STEALTH_ARGS,
   });
-
-  return browsers[name];
+  return cachedBrowser;
 }
 
-export async function getBrowserWithFallback(preferred?: string): Promise<{ browser: Browser; name: string }> {
-  const order = preferred
-    ? [preferred, ...BROWSER_ORDER.filter((b) => b !== preferred)]
-    : BROWSER_ORDER;
-
-  const errors: string[] = [];
-  for (const name of order) {
-    try {
-      return { browser: await getBrowser(name), name };
-    } catch (err: unknown) {
-      errors.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  throw new Error(`All browsers failed to launch: ${errors.join("; ")}`);
+export async function getBrowserWithFallback(_preferred?: string): Promise<{ browser: Browser; name: string }> {
+  // Chromium-only via patchright (stealth-patched fork). No firefox/webkit fallback.
+  return { browser: await getBrowser(), name: "chromium" };
 }
 
 export async function launchHeadful(displayNum: number): Promise<Browser> {
@@ -81,13 +60,7 @@ export async function launchHeadful(displayNum: number): Promise<Browser> {
 
   if (executablePath) launchOpts.executablePath = executablePath;
 
-  const hasRealChrome = fs.existsSync("/usr/bin/google-chrome-stable") || !!process.env.CHROME_EXECUTABLE;
-  log.debug(`headful: ${executablePath || "patchright chromium"}, extensions: ${hasExtensions}, realChrome: ${hasRealChrome}`);
+  log.debug(`headful: ${executablePath || "patchright chromium"}, extensions: ${hasExtensions}`);
 
-  // Use real Chrome (amd64) with playwright; fall back to patchright's patched Chromium (arm64)
-  if (hasRealChrome) {
-    return realChromium.launch(launchOpts as Parameters<typeof realChromium.launch>[0]) as unknown as Browser;
-  } else {
-    return chromium.launch(launchOpts as Parameters<typeof chromium.launch>[0]);
-  }
+  return chromium.launch(launchOpts as Parameters<typeof chromium.launch>[0]);
 }

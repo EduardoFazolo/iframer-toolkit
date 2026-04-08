@@ -164,7 +164,25 @@ function printResult(data) {
 
 // ─── Commands ────────────────────────────────────────────────────────
 
-const [,, command, ...args] = process.argv;
+let [,, command, ...args] = process.argv;
+
+// Install router: `iframer install <target>` → dispatch to install-<target>
+if (command === "install" && args.length > 0) {
+  const target = args.shift();
+  if (target === "chromium" || target === "chrome") command = "install-chrome";
+  else if (target === "mcp") command = "install-mcp";
+  else if (target === "deps" || target === "dependencies" || target === "all") command = "install-all";
+  else {
+    console.error(`  Unknown install target: ${target}`);
+    console.error("  Usage: iframer install <chromium|mcp|deps>");
+    process.exit(1);
+  }
+}
+
+async function installChrome() {
+  const { downloadChrome } = await import("../src/lib/browser/chrome-downloader.ts");
+  await downloadChrome();
+}
 
 async function main() {
   switch (command) {
@@ -221,13 +239,29 @@ async function main() {
 
     case "install-chrome": {
       try {
-        const { downloadChrome } = await import("../src/lib/browser/chrome-downloader.ts");
-        await downloadChrome();
+        await installChrome();
       } catch (err) {
         console.error(`  Failed: ${err.message}`);
         process.exit(1);
       }
       break;
+    }
+
+    // ─── Install All Dependencies ────────────────────────────────────
+
+    case "install-all": {
+      console.log("  Installing iframer-toolkit dependencies...\n");
+      console.log("  [1/2] Chrome for Testing");
+      try {
+        await installChrome();
+      } catch (err) {
+        console.error(`  Chrome install failed: ${err.message}`);
+        process.exit(1);
+      }
+      console.log("\n  [2/2] MCP server registration");
+      // Re-dispatch to install-mcp by falling through via command rebind
+      command = "install-mcp";
+      return main();
     }
 
     // ─── Execute (pipeline) ──────────────────────────────────────────
@@ -861,7 +895,7 @@ async function main() {
 
   Browser:
     modes                           Show available browser modes
-    install-chrome                  Download Chrome for Testing
+    install chromium                Download Chrome for Testing
     status                          Show system status
 
   Docker (interactive):
@@ -872,6 +906,7 @@ async function main() {
     act <action> [args...]          Send action to Docker session
 
   Setup:
+    install <chromium|mcp|deps>     Install Chromium, MCP, or both
     install-mcp [--dev]             Install iframer MCP into Claude Code
     remove-mcp [--dev]              Remove iframer MCP from Claude Code
 
