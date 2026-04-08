@@ -1902,20 +1902,40 @@ async function handleLogin(page, step, ctx) {
       page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {}),
       page.waitForSelector('input[autocomplete="one-time-code"]:not([disabled]), input[inputmode="numeric"]:not([disabled]), input[name*="otp" i]:not([disabled]), input[name*="code" i]:not([disabled]), input[aria-label*="code" i]:not([disabled])', { state: "visible", timeout: TIMEOUTS.NAVIGATION }).catch(() => null)
     ]);
-    if (credential.totp_secret) {
-      const totpHandle = await page.$('input[autocomplete="one-time-code"]:not([disabled]), input[inputmode="numeric"]:not([disabled]), input[name*="otp" i]:not([disabled]), input[name*="code" i]:not([disabled]), input[aria-label*="code" i]:not([disabled])');
-      if (totpHandle) {
-        const totp = generateTOTP(credential.totp_secret);
-        await totpHandle.scrollIntoViewIfNeeded().catch(() => {});
-        await totpHandle.click({ delay: 40 }).catch(() => {});
-        await page.keyboard.type(totp, { delay: 60 });
-        await page.waitForTimeout(TIMING.POST_TOTP_WAIT);
-        const totpSubmit = await page.$('button[type="submit"]:not([disabled])');
-        if (totpSubmit) {
-          await totpSubmit.click({ delay: 40 }).catch(() => {});
+    const otpSelector = 'input[autocomplete="one-time-code"]:not([disabled]), input[inputmode="numeric"]:not([disabled]), input[name*="otp" i]:not([disabled]), input[name*="code" i]:not([disabled]), input[aria-label*="code" i]:not([disabled])';
+    const totpHandle = await page.$(otpSelector);
+    if (totpHandle) {
+      let code = null;
+      if (credential.totp_secret) {
+        code = generateTOTP(credential.totp_secret);
+        log3.info(`login: generated TOTP from stored secret for ${step.domain}`);
+      } else if (ctx.elicitOtp) {
+        log3.info(`login: prompting user for OTP for ${step.domain}`);
+        try {
+          code = await ctx.elicitOtp(step.domain);
+        } catch (err) {
+          log3.warn(`login: OTP elicitation failed: ${err instanceof Error ? err.message : String(err)}`);
         }
-        await page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {});
+        if (!code) {
+          throw new Error(`login: OTP required but user did not provide one for ${step.domain}`);
+        }
+      } else {
+        throw new Error(`login: OTP field present but no TOTP secret stored and no elicitation callback available. Store a secret with \`credentials add ${step.domain} --totp-secret <secret>\` or use the MCP execute tool (which supports OTP elicitation).`);
       }
+      await totpHandle.evaluate((el, val) => {
+        const input = el;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        setter?.call(input, val);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      }, code);
+      const totpSubmit = await page.$('button[type="submit"]:not([disabled])');
+      if (totpSubmit) {
+        await totpSubmit.click().catch(async () => {
+          await totpSubmit.evaluate((el) => el.click());
+        });
+      }
+      await page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {});
     }
     await page.waitForTimeout(TIMING.POST_LOGIN_WAIT);
   }
@@ -4165,7 +4185,16 @@ class Iframer {
     await this.daemon.stopAll();
     return { ok: true, sessionSaved };
   }
-  async execute(userId, token, pipeline) {
+  pendingElicitOtp;
+  async execute(userId, token, pipeline, runtime) {
+    this.pendingElicitOtp = runtime?.elicitOtp;
+    try {
+      return await this.executeInner(userId, token, pipeline);
+    } finally {
+      this.pendingElicitOtp = undefined;
+    }
+  }
+  async executeInner(userId, token, pipeline) {
     const opts = pipeline.options || {};
     const forcedMode = opts.mode;
     const autoEscalate = opts.autoEscalate !== false;
@@ -4277,6 +4306,8 @@ class Iframer {
       const ctx = this.makeContext(userId, token);
       if (sessionData)
         ctx.sessionData = sessionData;
+      if (this.pendingElicitOtp)
+        ctx.elicitOtp = this.pendingElicitOtp;
       const runner = new PipelineRunner(ctx);
       const result = await runner.run(page, pipeline);
       if (result.ok) {
