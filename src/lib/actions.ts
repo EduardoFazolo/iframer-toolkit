@@ -338,24 +338,51 @@ async function handleLogin(page: Page, step: Extract<PipelineStep, { type: "logi
       ).catch(() => null),
     ]);
 
-    // If TOTP is configured and a code field is present, fill it
-    if (credential.totp_secret) {
-      const totpHandle = await page.$(
-        'input[autocomplete="one-time-code"]:not([disabled]), input[inputmode="numeric"]:not([disabled]), input[name*="otp" i]:not([disabled]), input[name*="code" i]:not([disabled]), input[aria-label*="code" i]:not([disabled])'
-      );
-      if (totpHandle) {
-        const totp = generateTOTP(credential.totp_secret);
-        await totpHandle.scrollIntoViewIfNeeded().catch(() => {});
-        await totpHandle.click({ delay: 40 }).catch(() => {});
-        await page.keyboard.type(totp, { delay: 60 });
-        await page.waitForTimeout(TIMING.POST_TOTP_WAIT);
-        // Some sites auto-submit on 6-digit completion, others need a click
-        const totpSubmit = await page.$('button[type="submit"]:not([disabled])');
-        if (totpSubmit) {
-          await totpSubmit.click({ delay: 40 }).catch(() => {});
+    // Handle OTP field if present. We're post-auth now — no stealth needed.
+    // Fast path: stored TOTP secret → generate code locally.
+    // Elicit path: no secret → ask the user via MCP elicitation (email/SMS/app OTP).
+    const otpSelector = 'input[autocomplete="one-time-code"]:not([disabled]), input[inputmode="numeric"]:not([disabled]), input[name*="otp" i]:not([disabled]), input[name*="code" i]:not([disabled]), input[aria-label*="code" i]:not([disabled])';
+    const totpHandle = await page.$(otpSelector);
+
+    if (totpHandle) {
+      let code: string | null = null;
+
+      if (credential.totp_secret) {
+        code = generateTOTP(credential.totp_secret);
+        log.info(`login: generated TOTP from stored secret for ${step.domain}`);
+      } else if (ctx.elicitOtp) {
+        log.info(`login: prompting user for OTP for ${step.domain}`);
+        try {
+          code = await ctx.elicitOtp(step.domain);
+        } catch (err) {
+          log.warn(`login: OTP elicitation failed: ${err instanceof Error ? err.message : String(err)}`);
         }
-        await page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {});
+        if (!code) {
+          throw new Error(`login: OTP required but user did not provide one for ${step.domain}`);
+        }
+      } else {
+        // No stored secret and no elicitation callback — caller must retry with a pipeline that provides OTP.
+        throw new Error(`login: OTP field present but no TOTP secret stored and no elicitation callback available. Store a secret with \`credentials add ${step.domain} --totp-secret <secret>\` or use the MCP execute tool (which supports OTP elicitation).`);
       }
+
+      // Instant fill — setter + input/change events, no per-character typing, no waits.
+      // We're past any anti-bot checks at this point.
+      await totpHandle.evaluate((el: Element, val: string) => {
+        const input = el as HTMLInputElement;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        setter?.call(input, val);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      }, code);
+
+      // Click submit immediately (some sites auto-submit on 6-digit completion, others need a click)
+      const totpSubmit = await page.$('button[type="submit"]:not([disabled])');
+      if (totpSubmit) {
+        await totpSubmit.click().catch(async () => {
+          await totpSubmit.evaluate((el: Element) => (el as HTMLElement).click());
+        });
+      }
+      await page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {});
     }
 
     await page.waitForTimeout(TIMING.POST_LOGIN_WAIT);

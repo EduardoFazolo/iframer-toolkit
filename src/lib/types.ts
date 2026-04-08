@@ -312,4 +312,8 @@ export interface ExecutionContext {
   /** Pending localStorage/sessionStorage to re-inject after each navigate.
    *  Origin-scoped, so calling injectStorage is idempotent across navigations. */
   sessionData?: import("./session/persistence").SessionData;
+  /** Runtime callback to request a one-time code (email/SMS/app OTP) from the
+   *  user via the MCP client. Only wired up on the local execution path —
+   *  Docker mode has no way to elicit back to the MCP client mid-pipeline. */
+  elicitOtp?: (domain: string) => Promise<string | null>;
 }

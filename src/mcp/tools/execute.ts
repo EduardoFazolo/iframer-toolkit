@@ -44,14 +44,43 @@ IMPORTANT — Do NOT specify options.mode unless the user explicitly asks for a 
       try {
         const dockerRunning = await isDockerRunning();
 
+        /** Build an elicitation callback so the login action can request an OTP
+         *  from the user mid-pipeline when a 2FA field appears but no TOTP secret
+         *  is stored (email/SMS codes, or first-time 2FA users). Only available
+         *  on the local execution path — Docker mode can't round-trip elicitation. */
+        const elicitOtp = async (domain: string): Promise<string | null> => {
+          try {
+            const result = await (server as unknown as { server: { elicitInput: (opts: unknown) => Promise<{ action: string; content?: Record<string, string> }> } }).server.elicitInput({
+              mode: "form",
+              message: `${domain} is asking for a one-time code. Paste the code from your email / SMS / authenticator app:`,
+              requestedSchema: {
+                type: "object",
+                properties: {
+                  code: { type: "string", title: "One-time code" },
+                },
+                required: ["code"],
+              },
+            });
+            if (result.action === "decline" || !result.content) return null;
+            return (result.content.code || "").trim() || null;
+          } catch {
+            return null;
+          }
+        };
+
         async function runWithMode(mode?: string): Promise<any> {
           if (mode === "binary-headful") {
             await ensureLocalChrome();
             const iframer = await getIframer();
-            return iframer.execute(LOCAL_USER, LOCAL_TOKEN, {
-              steps: params.steps,
-              options: { ...params.options, mode: "binary-headful", autoEscalate: false },
-            });
+            return iframer.execute(
+              LOCAL_USER,
+              LOCAL_TOKEN,
+              {
+                steps: params.steps,
+                options: { ...params.options, mode: "binary-headful", autoEscalate: false },
+              },
+              { elicitOtp }
+            );
           }
           if (mode === "docker-headful") {
             if (!dockerRunning) {
@@ -90,10 +119,15 @@ IMPORTANT — Do NOT specify options.mode unless the user explicitly asks for a 
           }
           await ensureLocalChrome();
           const iframer = await getIframer();
-          return iframer.execute(LOCAL_USER, LOCAL_TOKEN, {
-            steps: params.steps,
-            options: { ...params.options, mode: (mode as any) || undefined },
-          });
+          return iframer.execute(
+            LOCAL_USER,
+            LOCAL_TOKEN,
+            {
+              steps: params.steps,
+              options: { ...params.options, mode: (mode as any) || undefined },
+            },
+            { elicitOtp }
+          );
         }
 
         const requestedMode = params.options?.mode;

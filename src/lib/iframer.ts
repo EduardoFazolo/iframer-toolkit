@@ -255,7 +255,26 @@ export class Iframer {
 
   // ─── Pipeline Execution (with three-mode support) ─────────────────
 
-  async execute(userId: string, token: string, pipeline: Pipeline): Promise<PipelineResult> {
+  /** Runtime elicitation hook, set per-call via execute(...). Stored on the
+   *  instance because the daemon's ExecutionContext is built inside a private
+   *  method — the hook is consumed once and immediately cleared. */
+  private pendingElicitOtp?: (domain: string) => Promise<string | null>;
+
+  async execute(
+    userId: string,
+    token: string,
+    pipeline: Pipeline,
+    runtime?: { elicitOtp?: (domain: string) => Promise<string | null> }
+  ): Promise<PipelineResult> {
+    this.pendingElicitOtp = runtime?.elicitOtp;
+    try {
+      return await this.executeInner(userId, token, pipeline);
+    } finally {
+      this.pendingElicitOtp = undefined;
+    }
+  }
+
+  private async executeInner(userId: string, token: string, pipeline: Pipeline): Promise<PipelineResult> {
     const opts = pipeline.options || {};
     const forcedMode = opts.mode;
     const autoEscalate = opts.autoEscalate !== false;
@@ -404,6 +423,7 @@ export class Iframer {
       // the correct origin (they're origin-scoped and can't be set from about:blank).
       const ctx = this.makeContext(userId, token);
       if (sessionData) ctx.sessionData = sessionData;
+      if (this.pendingElicitOtp) ctx.elicitOtp = this.pendingElicitOtp;
       const runner = new PipelineRunner(ctx);
       const result = await runner.run(page, pipeline);
 
