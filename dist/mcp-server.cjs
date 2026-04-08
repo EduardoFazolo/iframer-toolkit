@@ -4664,8 +4664,8 @@ ${domains.map((d) => `  - ${d}`).join(`
             type: "object",
             properties: {
               username: { type: "string", title: "Username / Email" },
-              password: { type: "string", title: "Password" },
-              totp_secret: { type: "string", title: "TOTP Secret (leave empty if no 2FA)" }
+              password: { type: "string", title: "Password", format: "password" },
+              totp_secret: { type: "string", title: "TOTP Secret (leave empty if no 2FA)", format: "password" }
             },
             required: ["username", "password"]
           }

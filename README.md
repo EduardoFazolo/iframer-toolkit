@@ -1,10 +1,10 @@
 # iframer-toolkit
 
-Browser access for AI agents when normal fetching fails. Give Claude (or any MCP-compatible agent) a real browser — with session persistence, stealth fingerprinting, encrypted credential storage, and automatic captcha solving.
+Browser access for AI agents when normal fetching fails. Give Claude, Codex, or any MCP-compatible agent a real browser — with session persistence, stealth fingerprinting, encrypted credential storage, and automatic captcha solving.
 
 Ships as:
 - **CLI** (`iframer-toolkit` / `iframer`) — browse, screenshot, credentials, sessions, reverse-engineer APIs
-- **MCP server** — plugs directly into Claude Code so agents can drive the browser themselves
+- **MCP server** — plugs directly into Claude Code or Codex so agents can drive the browser themselves
 - **Self-hosted Docker server** (optional) — adds live headful browsing over noVNC for remote/multi-user setups
 
 ## Install
@@ -23,10 +23,10 @@ This is shorthand for:
 
 ```sh
 iframer-toolkit install chromium   # downloads Chrome for Testing to ~/.iframer
-iframer-toolkit install-mcp        # registers the MCP server in ~/.claude.json
+iframer-toolkit install-mcp        # registers the MCP server in ~/.claude.json and ~/.codex/config.toml
 ```
 
-Restart Claude Code and the `iframer` tools will be available.
+Restart Claude Code or Codex and the `iframer` tools will be available.
 
 > **Note:** If you prefer, your agent can run `iframer-toolkit install deps` for you — it'll figure the rest out.
 
@@ -44,7 +44,7 @@ iframer-toolkit credentials add github.com                  # secure prompt
 iframer-toolkit reverse-engineer https://some-spa.com       # capture the APIs it calls
 ```
 
-**From Claude Code** (after `install-mcp`):
+**From Claude Code or Codex** (after `install-mcp`):
 
 > "Log into my account on example.com and extract the latest invoice."
 
@@ -59,7 +59,7 @@ Claude (MCP) ──→ iframer MCP server ──→ Iframer (local)
                                             └─ SQLite (encrypted sessions + creds at ~/.iframer)
 ```
 
-By default, `install-mcp` runs in **local mode**: no Docker needed. The MCP spawns a stealth-patched Chromium (via [patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright)) on your machine and auto-escalates between `headless` → `binary-headful` based on what a site requires.
+By default, `install-mcp` runs in **local mode**: no Docker needed. The MCP spawns a stealth-patched Chromium (via [patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright)) on your machine and auto-escalates between `headless` → `binary-headful` based on what a site requires. It installs the MCP in both Claude Code and Codex.
 
 For live remote viewing, multi-user, or Linux server deployments, see [Self-hosting with Docker](#self-hosting-with-docker) below.
 
@@ -96,10 +96,10 @@ Credentials:
 
 Setup:
   install chromium                 Download Chrome for Testing
-  install mcp                      Register MCP server in Claude Code
+  install mcp                      Register MCP server in Claude Code and Codex
   install deps                     Run both of the above
   install-mcp [--dev]              Same as `install mcp`
-  remove-mcp [--dev]               Remove iframer MCP from Claude Code
+  remove-mcp [--dev]               Remove iframer MCP from Claude Code and Codex
 
 Browser:
   modes                            Show available browser modes
@@ -167,7 +167,7 @@ bun run stop:docker    # stop containers
 
 **3. Point the MCP at it**
 
-On the machine running Claude Code:
+On the machine running Claude Code or Codex:
 
 ```sh
 IFRAMER_URL=https://your-host:3021 iframer-toolkit install-mcp --dev
