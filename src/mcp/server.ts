@@ -8,6 +8,7 @@ import { registerExecuteTool } from "./tools/execute";
 import { registerSessionTool } from "./tools/session";
 import { registerCredentialsTool } from "./tools/credentials";
 import { registerReverseEngineerTool } from "./tools/reverse-engineer";
+import { registerKnowledgeTool } from "./tools/knowledge";
 
 // ─── Instructions ───────────────────────────────────────────────────
 
@@ -90,6 +91,7 @@ registerExecuteTool(server);
 registerSessionTool(server);
 registerCredentialsTool(server);
 registerReverseEngineerTool(server);
+registerKnowledgeTool(server);
 
 // ─── Start ───────────────────────────────────────────────────────────
 

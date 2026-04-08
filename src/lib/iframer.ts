@@ -23,6 +23,7 @@ import { stealthContextOptions, applyStealthToPage } from "./browser/stealth";
 import { humanClick, humanType, clickRecaptchaCheckbox, clickChallengeTiles, clickChallengeVerify } from "./browser/humanize";
 import { deriveKey, encrypt, decrypt, generateTOTP } from "./auth/crypto";
 import { extractSession, injectCookies, injectStorage } from "./session/persistence";
+import { mergeKnowledge, type KnowledgeAuth, type KnowledgeEndpoint } from "./knowledge";
 import { saveScreenshot } from "./screenshot";
 import { createStore, type StorageBackend } from "./storage";
 import { BrowserDaemon } from "./browser/daemon";
@@ -386,18 +387,23 @@ export class Iframer {
       // Get or launch Chrome in the requested mode
       const { page } = await this.daemon.ensure(mode);
 
-      // Inject stored session data
+      // Load stored session (cookies + localStorage + sessionStorage)
       const encryptionKey = await deriveKey(token);
       const blob = await this.store.getSession(userId);
+      let sessionData: SessionData | null = null;
       if (blob && blob.length > 0) {
         try {
-          const sessionData = JSON.parse(decrypt(blob, encryptionKey));
+          sessionData = JSON.parse(decrypt(blob, encryptionKey)) as SessionData;
+          // Cookies inject at context level (no navigation needed)
           await injectCookies(page.context(), sessionData);
         } catch {}
       }
 
-      // Run pipeline
+      // Run pipeline. The navigate action will call injectStorage() after each
+      // page.goto so localStorage/sessionStorage are re-hydrated once we're on
+      // the correct origin (they're origin-scoped and can't be set from about:blank).
       const ctx = this.makeContext(userId, token);
+      if (sessionData) ctx.sessionData = sessionData;
       const runner = new PipelineRunner(ctx);
       const result = await runner.run(page, pipeline);
 
@@ -424,12 +430,23 @@ export class Iframer {
       }
 
       // Save session state after successful execution
+      let updatedSession: SessionData | null = null;
       if (result.ok) {
         try {
-          const updatedSession = await extractSession(page.context(), page);
+          updatedSession = await extractSession(page.context(), page);
           const encrypted = encrypt(JSON.stringify(updatedSession), encryptionKey);
           await this.store.setSession(userId, encrypted);
         } catch {}
+      }
+
+      // Update per-domain knowledge cache after successful runs so future
+      // invocations can potentially skip the browser entirely.
+      if (result.ok) {
+        try {
+          this.updateKnowledgeFromRun(pipeline, result, updatedSession, mode);
+        } catch (err) {
+          log.warn(`knowledge update failed: ${getErrorMessage(err)}`);
+        }
       }
 
       // Sync refs
@@ -459,6 +476,113 @@ export class Iframer {
         modeUsed: mode,
       };
     }
+  }
+
+  /**
+   * Extract per-domain knowledge from a successful pipeline run and merge it
+   * into the knowledge cache. Runs after every successful execute so the
+   * cache incrementally learns about every site the agent touches.
+   */
+  private updateKnowledgeFromRun(
+    pipeline: Pipeline,
+    result: PipelineResult,
+    sessionData: SessionData | null,
+    mode: BrowserMode
+  ): void {
+    // Determine target domain from the first navigate step
+    const firstNav = pipeline.steps.find((s) => s.type === "navigate");
+    if (!firstNav || firstNav.type !== "navigate") return;
+
+    let domain: string;
+    try {
+      domain = new URL(firstNav.url).hostname;
+    } catch {
+      return;
+    }
+
+    const domainRoot = domain.replace(/^www\./, "");
+    const hadLogin = pipeline.steps.some((s) => s.type === "login");
+
+    // Build auth structure from the session we just captured
+    const auth: KnowledgeAuth = { type: "unknown" };
+    const cookieNames: string[] = [];
+    const localStorageKeys: string[] = [];
+    const sessionStorageKeys: string[] = [];
+
+    if (sessionData) {
+      // Cookie names scoped to this domain (strip leading dot for display)
+      for (const c of sessionData.cookies ?? []) {
+        if (c.domain.endsWith(domainRoot) || domainRoot.endsWith(c.domain.replace(/^\./, ""))) {
+          if (!cookieNames.includes(c.name)) cookieNames.push(c.name);
+        }
+      }
+
+      // localStorage/sessionStorage keys for any origin matching the domain
+      for (const [origin, store] of Object.entries(sessionData.localStorage ?? {})) {
+        if (origin.includes(domainRoot)) {
+          for (const k of Object.keys(store)) {
+            if (!localStorageKeys.includes(k)) localStorageKeys.push(k);
+          }
+        }
+      }
+      for (const [origin, store] of Object.entries(sessionData.sessionStorage ?? {})) {
+        if (origin.includes(domainRoot)) {
+          for (const k of Object.keys(store)) {
+            if (!sessionStorageKeys.includes(k)) sessionStorageKeys.push(k);
+          }
+        }
+      }
+    }
+
+    if (cookieNames.length > 0 && localStorageKeys.length > 0) {
+      auth.type = "cookies+localStorage";
+    } else if (localStorageKeys.length > 0) {
+      auth.type = "localStorage";
+    } else if (cookieNames.length > 0) {
+      auth.type = "cookies";
+    }
+    if (cookieNames.length > 0) auth.cookieNames = cookieNames;
+    if (localStorageKeys.length > 0) auth.localStorageKeys = localStorageKeys;
+    if (sessionStorageKeys.length > 0) auth.sessionStorageKeys = sessionStorageKeys;
+
+    // If the run captured API calls (captureApi: true), fold them in as endpoints
+    const endpoints: KnowledgeEndpoint[] = [];
+    const replayHeaders = new Set<string>();
+
+    for (const api of result.capturedApi ?? []) {
+      // Only consider same-domain captured APIs
+      if (!api.domain.includes(domainRoot) && !domainRoot.includes(api.domain.replace(/^www\./, ""))) continue;
+
+      if (api.auth?.authorization) replayHeaders.add("Authorization");
+      for (const name of Object.keys(api.auth?.tokens ?? {})) replayHeaders.add(name);
+
+      for (const ep of api.endpoints ?? []) {
+        endpoints.push({
+          method: ep.method,
+          path: ep.path,
+          description: `Status ${ep.responseStatus}. Triggered at step ${ep.triggeredAtStep}.`,
+          example: ep.curl,
+          firstSeen: new Date().toISOString(),
+        });
+      }
+    }
+
+    if (replayHeaders.size > 0) {
+      auth.headers = [...replayHeaders];
+      if (!auth.type.includes("header")) auth.type = auth.type === "unknown" ? "headers" : `${auth.type}+headers`;
+    }
+
+    const notes: string[] = [];
+    if (hadLogin) notes.push(`Last successful login via browser in ${mode} mode.`);
+    if (result.obstacles?.some((o) => o.type?.includes("captcha"))) notes.push("Captcha encountered — browser required for fresh logins.");
+
+    mergeKnowledge(domainRoot, {
+      lastMode: mode,
+      browserRequired: true, // will flip to false only when the agent proves direct API works
+      auth,
+      endpoints,
+      notes,
+    });
   }
 
   private async getPageState(page: Page, ctx: ExecutionContext) {

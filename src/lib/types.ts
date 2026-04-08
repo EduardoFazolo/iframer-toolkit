@@ -309,4 +309,7 @@ export interface ExecutionContext {
   refMap: Map<string, ElementRef>;
   nextRefId: number;
   store: import("./storage").StorageBackend;
+  /** Pending localStorage/sessionStorage to re-inject after each navigate.
+   *  Origin-scoped, so calling injectStorage is idempotent across navigations. */
+  sessionData?: import("./session/persistence").SessionData;
 }
