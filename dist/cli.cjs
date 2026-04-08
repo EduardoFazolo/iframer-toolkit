@@ -1202,6 +1202,63 @@ var init_crypto = __esm(() => {
   import_crypto = __toESM(require("crypto"));
 });
 
+// src/lib/session/persistence.ts
+var exports_persistence = {};
+__export(exports_persistence, {
+  injectStorage: () => injectStorage,
+  injectCookies: () => injectCookies,
+  extractSession: () => extractSession
+});
+async function extractSession(context, page) {
+  const cookies = await context.cookies();
+  const { localStorage, sessionStorage } = await page.evaluate(() => {
+    const ls = {};
+    const ss = {};
+    for (let i = 0;i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      ls[key] = window.localStorage.getItem(key);
+    }
+    for (let i = 0;i < window.sessionStorage.length; i++) {
+      const key = window.sessionStorage.key(i);
+      ss[key] = window.sessionStorage.getItem(key);
+    }
+    return { localStorage: ls, sessionStorage: ss };
+  });
+  const origin = new URL(page.url()).origin;
+  return {
+    cookies,
+    localStorage: { [origin]: localStorage },
+    sessionStorage: { [origin]: sessionStorage },
+    extractedAt: new Date().toISOString()
+  };
+}
+async function injectCookies(context, sessionData) {
+  if (sessionData?.cookies?.length > 0) {
+    await context.addCookies(sessionData.cookies);
+  }
+}
+async function injectStorage(page, sessionData) {
+  if (!sessionData)
+    return;
+  const origin = new URL(page.url()).origin;
+  const ls = sessionData.localStorage?.[origin];
+  const ss = sessionData.sessionStorage?.[origin];
+  if (ls && Object.keys(ls).length > 0) {
+    await page.evaluate((data) => {
+      for (const [key, value] of Object.entries(data)) {
+        window.localStorage.setItem(key, value);
+      }
+    }, ls);
+  }
+  if (ss && Object.keys(ss).length > 0) {
+    await page.evaluate((data) => {
+      for (const [key, value] of Object.entries(data)) {
+        window.sessionStorage.setItem(key, value);
+      }
+    }, ss);
+  }
+}
+
 // src/lib/screenshot.ts
 function saveScreenshot(buffer, filename, screenshotDir, publicUrl) {
   import_fs.default.mkdirSync(screenshotDir, { recursive: true });
@@ -1886,6 +1943,13 @@ async function executeAction(page, step, ctx, monitor) {
           await page.evaluate(stealthScript);
         } catch (err) {
           log3.warn(`stealth injection failed: ${err}`);
+        }
+        if (ctx.sessionData) {
+          try {
+            await injectStorage(page, ctx.sessionData);
+          } catch (err) {
+            log3.warn(`storage injection after navigate failed: ${err}`);
+          }
         }
         break;
       case "click":
@@ -2900,63 +2964,6 @@ var init_fingerprint = __esm(() => {
   });
 });
 
-// src/lib/session/persistence.ts
-var exports_persistence = {};
-__export(exports_persistence, {
-  injectStorage: () => injectStorage,
-  injectCookies: () => injectCookies,
-  extractSession: () => extractSession
-});
-async function extractSession(context, page) {
-  const cookies = await context.cookies();
-  const { localStorage, sessionStorage } = await page.evaluate(() => {
-    const ls = {};
-    const ss = {};
-    for (let i = 0;i < window.localStorage.length; i++) {
-      const key = window.localStorage.key(i);
-      ls[key] = window.localStorage.getItem(key);
-    }
-    for (let i = 0;i < window.sessionStorage.length; i++) {
-      const key = window.sessionStorage.key(i);
-      ss[key] = window.sessionStorage.getItem(key);
-    }
-    return { localStorage: ls, sessionStorage: ss };
-  });
-  const origin = new URL(page.url()).origin;
-  return {
-    cookies,
-    localStorage: { [origin]: localStorage },
-    sessionStorage: { [origin]: sessionStorage },
-    extractedAt: new Date().toISOString()
-  };
-}
-async function injectCookies(context, sessionData) {
-  if (sessionData?.cookies?.length > 0) {
-    await context.addCookies(sessionData.cookies);
-  }
-}
-async function injectStorage(page, sessionData) {
-  if (!sessionData)
-    return;
-  const origin = new URL(page.url()).origin;
-  const ls = sessionData.localStorage?.[origin];
-  const ss = sessionData.sessionStorage?.[origin];
-  if (ls && Object.keys(ls).length > 0) {
-    await page.evaluate((data) => {
-      for (const [key, value] of Object.entries(data)) {
-        window.localStorage.setItem(key, value);
-      }
-    }, ls);
-  }
-  if (ss && Object.keys(ss).length > 0) {
-    await page.evaluate((data) => {
-      for (const [key, value] of Object.entries(data)) {
-        window.sessionStorage.setItem(key, value);
-      }
-    }, ss);
-  }
-}
-
 // src/lib/browser/session-manager.ts
 function allocateDisplay() {
   for (let i = 0;i < MAX_SESSIONS; i++) {
@@ -3092,6 +3099,296 @@ var init_session_manager = __esm(() => {
   usedDisplays = new Set;
 });
 
+// src/lib/knowledge.ts
+var exports_knowledge = {};
+__export(exports_knowledge, {
+  sanitizeDomain: () => sanitizeDomain,
+  readKnowledge: () => readKnowledge,
+  parseKnowledge: () => parseKnowledge,
+  mergeKnowledge: () => mergeKnowledge,
+  listKnowledge: () => listKnowledge,
+  getKnowledgePath: () => getKnowledgePath,
+  getKnowledgeDir: () => getKnowledgeDir,
+  clearKnowledge: () => clearKnowledge
+});
+function getKnowledgeDir() {
+  return import_path2.default.join(import_os.default.homedir(), ".iframer", "knowledge");
+}
+function getKnowledgePath(domain) {
+  const safe = sanitizeDomain(domain);
+  return import_path2.default.join(getKnowledgeDir(), `${safe}.md`);
+}
+function sanitizeDomain(input) {
+  let d = input.trim().toLowerCase();
+  try {
+    if (d.includes("://"))
+      d = new URL(d).hostname;
+  } catch {}
+  d = d.replace(/^www\./, "");
+  return d.replace(/[^a-z0-9.-]/g, "_");
+}
+function ensureDir() {
+  import_fs4.default.mkdirSync(getKnowledgeDir(), { recursive: true });
+}
+function readKnowledge(domain) {
+  const p = getKnowledgePath(domain);
+  try {
+    return import_fs4.default.readFileSync(p, "utf8");
+  } catch {
+    return null;
+  }
+}
+function parseKnowledge(domain) {
+  const raw = readKnowledge(domain);
+  if (!raw)
+    return null;
+  return parseMarkdown(raw);
+}
+function listKnowledge() {
+  const dir = getKnowledgeDir();
+  let entries = [];
+  try {
+    entries = import_fs4.default.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const results = [];
+  for (const file of entries) {
+    if (!file.endsWith(".md"))
+      continue;
+    const full = import_path2.default.join(dir, file);
+    try {
+      const stat = import_fs4.default.statSync(full);
+      const raw = import_fs4.default.readFileSync(full, "utf8");
+      const parsed = parseMarkdown(raw);
+      results.push({
+        domain: parsed?.domain ?? file.replace(/\.md$/, ""),
+        lastVerified: parsed?.lastVerified ?? new Date(stat.mtimeMs).toISOString(),
+        lastMode: parsed?.lastMode ?? "unknown",
+        sizeBytes: stat.size
+      });
+    } catch {}
+  }
+  results.sort((a, b) => a.lastVerified < b.lastVerified ? 1 : -1);
+  return results;
+}
+function clearKnowledge(domain) {
+  const dir = getKnowledgeDir();
+  if (domain) {
+    const p = getKnowledgePath(domain);
+    try {
+      import_fs4.default.unlinkSync(p);
+      return { removed: 1 };
+    } catch {
+      return { removed: 0 };
+    }
+  }
+  let removed = 0;
+  try {
+    const entries = import_fs4.default.readdirSync(dir);
+    for (const f of entries) {
+      if (f.endsWith(".md")) {
+        try {
+          import_fs4.default.unlinkSync(import_path2.default.join(dir, f));
+          removed++;
+        } catch {}
+      }
+    }
+  } catch {}
+  return { removed };
+}
+function mergeKnowledge(domain, updates) {
+  ensureDir();
+  const existing = parseKnowledge(domain);
+  const merged = {
+    domain: sanitizeDomain(domain),
+    lastVerified: updates.lastVerified ?? new Date().toISOString(),
+    lastMode: updates.lastMode ?? existing?.lastMode ?? "unknown",
+    browserRequired: updates.browserRequired ?? existing?.browserRequired ?? true,
+    auth: updates.auth ?? existing?.auth ?? { type: "unknown" },
+    endpoints: dedupeEndpoints([...existing?.endpoints ?? [], ...updates.endpoints ?? []]),
+    notes: dedupeNotes([...existing?.notes ?? [], ...updates.notes ?? []])
+  };
+  const md = renderMarkdown(merged);
+  import_fs4.default.writeFileSync(getKnowledgePath(domain), md, "utf8");
+  log6.info(`knowledge updated: ${merged.domain} (${merged.endpoints.length} endpoints)`);
+}
+function dedupeEndpoints(endpoints) {
+  const seen = new Map;
+  for (const ep of endpoints) {
+    const key = `${ep.method.toUpperCase()} ${ep.path}`;
+    const existing = seen.get(key);
+    if (!existing) {
+      seen.set(key, ep);
+    } else {
+      seen.set(key, {
+        ...existing,
+        description: ep.description || existing.description,
+        example: ep.example || existing.example,
+        firstSeen: existing.firstSeen || ep.firstSeen
+      });
+    }
+  }
+  return [...seen.values()].sort((a, b) => {
+    if (a.path !== b.path)
+      return a.path < b.path ? -1 : 1;
+    return a.method < b.method ? -1 : 1;
+  });
+}
+function dedupeNotes(notes) {
+  const seen = new Set;
+  const out = [];
+  for (const note of notes) {
+    const n = note.trim();
+    if (n && !seen.has(n)) {
+      seen.add(n);
+      out.push(n);
+    }
+  }
+  return out;
+}
+function renderMarkdown(data) {
+  const lines = [];
+  lines.push("---");
+  lines.push(`domain: ${data.domain}`);
+  lines.push(`lastVerified: ${data.lastVerified}`);
+  lines.push(`lastMode: ${data.lastMode}`);
+  lines.push(`browserRequired: ${data.browserRequired}`);
+  lines.push(`authType: ${data.auth.type}`);
+  lines.push("---");
+  lines.push("");
+  lines.push(`# ${data.domain}`);
+  lines.push("");
+  lines.push(`Last verified: **${data.lastVerified}** via \`${data.lastMode}\` mode.`);
+  lines.push("");
+  lines.push("## Auth material");
+  lines.push("");
+  lines.push(`**Type:** ${data.auth.type}`);
+  if (data.auth.cookieNames?.length) {
+    lines.push(`**Required cookies:** ${data.auth.cookieNames.map((n) => `\`${n}\``).join(", ")}`);
+  }
+  if (data.auth.localStorageKeys?.length) {
+    lines.push(`**localStorage keys:** ${data.auth.localStorageKeys.map((n) => `\`${n}\``).join(", ")}`);
+  }
+  if (data.auth.sessionStorageKeys?.length) {
+    lines.push(`**sessionStorage keys:** ${data.auth.sessionStorageKeys.map((n) => `\`${n}\``).join(", ")}`);
+  }
+  if (data.auth.headers?.length) {
+    lines.push(`**Request headers:** ${data.auth.headers.map((n) => `\`${n}\``).join(", ")}`);
+  }
+  lines.push("");
+  lines.push("> _Structure only — actual values are stored encrypted in the session store._");
+  lines.push("");
+  if (data.endpoints.length > 0) {
+    lines.push("## Known endpoints");
+    lines.push("");
+    lines.push("The agent can call these directly (with the auth material above) instead of launching a browser.");
+    lines.push("");
+    for (const ep of data.endpoints) {
+      lines.push(`### ${ep.method.toUpperCase()} ${ep.path}`);
+      if (ep.description)
+        lines.push("");
+      if (ep.description)
+        lines.push(ep.description);
+      if (ep.example) {
+        lines.push("");
+        lines.push("```");
+        lines.push(ep.example);
+        lines.push("```");
+      }
+      lines.push("");
+    }
+  } else {
+    lines.push("## Known endpoints");
+    lines.push("");
+    lines.push("_None captured yet. Enable `captureApi: true` on the next `execute` run to populate this section._");
+    lines.push("");
+  }
+  if (data.notes.length > 0) {
+    lines.push("## Notes");
+    lines.push("");
+    for (const n of data.notes)
+      lines.push(`- ${n}`);
+    lines.push("");
+  }
+  return lines.join(`
+`);
+}
+function parseMarkdown(raw) {
+  const frontmatterMatch = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n/);
+  if (!frontmatterMatch)
+    return null;
+  const fm = {};
+  for (const line of frontmatterMatch[1].split(`
+`)) {
+    const m = line.match(/^(\w+):\s*(.*)$/);
+    if (m)
+      fm[m[1]] = m[2].trim();
+  }
+  const body = raw.slice(frontmatterMatch[0].length);
+  const auth = { type: fm.authType ?? "unknown" };
+  const authSection = extractSection(body, "Auth material");
+  if (authSection) {
+    auth.cookieNames = extractBackticks(/\*\*Required cookies:\*\*\s+(.+)/, authSection);
+    auth.localStorageKeys = extractBackticks(/\*\*localStorage keys:\*\*\s+(.+)/, authSection);
+    auth.sessionStorageKeys = extractBackticks(/\*\*sessionStorage keys:\*\*\s+(.+)/, authSection);
+    auth.headers = extractBackticks(/\*\*Request headers:\*\*\s+(.+)/, authSection);
+  }
+  const endpoints = [];
+  const endpointSection = extractSection(body, "Known endpoints");
+  if (endpointSection) {
+    const endpointRegex = /^### (GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\S+)\s*$/gim;
+    let m;
+    while ((m = endpointRegex.exec(endpointSection)) !== null) {
+      endpoints.push({ method: m[1], path: m[2] });
+    }
+  }
+  const notes = [];
+  const notesSection = extractSection(body, "Notes");
+  if (notesSection) {
+    for (const line of notesSection.split(`
+`)) {
+      const m = line.match(/^-\s+(.+)$/);
+      if (m)
+        notes.push(m[1].trim());
+    }
+  }
+  return {
+    domain: fm.domain ?? "",
+    lastVerified: fm.lastVerified ?? "",
+    lastMode: fm.lastMode ?? "unknown",
+    browserRequired: fm.browserRequired !== "false",
+    auth,
+    endpoints,
+    notes
+  };
+}
+function extractSection(body, heading) {
+  const re = new RegExp(`^##\\s+${heading}\\s*$`, "m");
+  const match = body.match(re);
+  if (!match || match.index === undefined)
+    return null;
+  const start = match.index + match[0].length;
+  const nextSection = body.slice(start).match(/^##\s+/m);
+  const end = nextSection?.index != null ? start + nextSection.index : body.length;
+  return body.slice(start, end);
+}
+function extractBackticks(re, text) {
+  const m = text.match(re);
+  if (!m)
+    return;
+  const items = [...m[1].matchAll(/`([^`]+)`/g)].map((x) => x[1]);
+  return items.length > 0 ? items : undefined;
+}
+var import_fs4, import_path2, import_os, log6;
+var init_knowledge = __esm(() => {
+  init_logger();
+  import_fs4 = __toESM(require("fs"));
+  import_path2 = __toESM(require("path"));
+  import_os = __toESM(require("os"));
+  log6 = createLogger("knowledge");
+});
+
 // src/lib/session/sqlite-store.ts
 function createBunDb(dbPath) {
   const { Database } = require("bun:sqlite");
@@ -3131,8 +3428,8 @@ function createNodeDb(dbPath) {
 class SqliteStore {
   db;
   constructor(dataDir) {
-    import_fs4.default.mkdirSync(dataDir, { recursive: true });
-    const dbPath = import_path2.default.join(dataDir, "iframer.db");
+    import_fs5.default.mkdirSync(dataDir, { recursive: true });
+    const dbPath = import_path3.default.join(dataDir, "iframer.db");
     this.db = IS_BUN ? createBunDb(dbPath) : createNodeDb(dbPath);
     this.db.run(`
       CREATE TABLE IF NOT EXISTS sessions (
@@ -3177,23 +3474,23 @@ class SqliteStore {
     this.db.close();
   }
 }
-var import_path2, import_fs4, IS_BUN;
+var import_path3, import_fs5, IS_BUN;
 var init_sqlite_store = __esm(() => {
-  import_path2 = __toESM(require("path"));
-  import_fs4 = __toESM(require("fs"));
+  import_path3 = __toESM(require("path"));
+  import_fs5 = __toESM(require("fs"));
   IS_BUN = typeof globalThis.Bun !== "undefined";
 });
 
 // src/lib/storage.ts
 function createStore(options = {}) {
-  const dataDir = options.dataDir || import_path3.default.join(import_os.default.homedir(), ".iframer");
+  const dataDir = options.dataDir || import_path4.default.join(import_os2.default.homedir(), ".iframer");
   return new SqliteStore(dataDir);
 }
-var import_path3, import_os;
+var import_path4, import_os2;
 var init_storage = __esm(() => {
   init_sqlite_store();
-  import_path3 = __toESM(require("path"));
-  import_os = __toESM(require("os"));
+  import_path4 = __toESM(require("path"));
+  import_os2 = __toESM(require("os"));
 });
 
 // src/lib/browser/chrome-downloader.ts
@@ -3219,24 +3516,24 @@ function getPlatform() {
 function getChromeExecutablePath(installDir) {
   const platform = process.platform;
   if (platform === "darwin") {
-    const entries = import_fs5.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
+    const entries = import_fs6.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
     const dir = entries[0] || "chrome-mac-arm64";
-    return import_path4.default.join(installDir, dir, "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing");
+    return import_path5.default.join(installDir, dir, "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing");
   }
   if (platform === "linux") {
-    const entries = import_fs5.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
+    const entries = import_fs6.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
     const dir = entries[0] || "chrome-linux64";
-    return import_path4.default.join(installDir, dir, "chrome");
+    return import_path5.default.join(installDir, dir, "chrome");
   }
   if (platform === "win32") {
-    const entries = import_fs5.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
+    const entries = import_fs6.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
     const dir = entries[0] || "chrome-win64";
-    return import_path4.default.join(installDir, dir, "chrome.exe");
+    return import_path5.default.join(installDir, dir, "chrome.exe");
   }
   throw new Error(`Unsupported platform: ${platform}`);
 }
 async function downloadChrome(installDir = DEFAULT_INSTALL_DIR) {
-  log6.info("Downloading Chrome for Testing (first time only)...");
+  log7.info("Downloading Chrome for Testing (first time only)...");
   const res = await fetch(CHROME_VERSIONS_URL);
   if (!res.ok)
     throw new Error(`Failed to fetch Chrome versions: ${res.status}`);
@@ -3250,37 +3547,37 @@ async function downloadChrome(installDir = DEFAULT_INSTALL_DIR) {
     throw new Error(`No Chrome for Testing download for platform: ${platform}`);
   const url = download.url;
   const version = channel.version;
-  log6.debug(`Version ${version} for ${platform}`);
-  log6.debug(`URL: ${url}`);
-  import_fs5.default.mkdirSync(installDir, { recursive: true });
-  const zipPath = import_path4.default.join(installDir, "chrome.zip");
+  log7.debug(`Version ${version} for ${platform}`);
+  log7.debug(`URL: ${url}`);
+  import_fs6.default.mkdirSync(installDir, { recursive: true });
+  const zipPath = import_path5.default.join(installDir, "chrome.zip");
   const dlRes = await fetch(url);
   if (!dlRes.ok)
     throw new Error(`Download failed: ${dlRes.status}`);
   const buf = Buffer.from(await dlRes.arrayBuffer());
-  import_fs5.default.writeFileSync(zipPath, buf);
-  log6.info(`Downloaded ${(buf.length / 1024 / 1024).toFixed(1)}MB`);
+  import_fs6.default.writeFileSync(zipPath, buf);
+  log7.info(`Downloaded ${(buf.length / 1024 / 1024).toFixed(1)}MB`);
   import_child_process2.execSync(`unzip -o -q "${zipPath}" -d "${installDir}"`, { stdio: "inherit" });
-  import_fs5.default.unlinkSync(zipPath);
+  import_fs6.default.unlinkSync(zipPath);
   const execPath = getChromeExecutablePath(installDir);
-  if (!import_fs5.default.existsSync(execPath)) {
+  if (!import_fs6.default.existsSync(execPath)) {
     throw new Error(`Chrome executable not found after extraction: ${execPath}`);
   }
   if (process.platform !== "win32") {
-    import_fs5.default.chmodSync(execPath, 493);
+    import_fs6.default.chmodSync(execPath, 493);
   }
-  import_fs5.default.writeFileSync(import_path4.default.join(installDir, "version.json"), JSON.stringify({ version, platform, downloadedAt: new Date().toISOString() }));
-  log6.info(`Installed at: ${execPath}`);
+  import_fs6.default.writeFileSync(import_path5.default.join(installDir, "version.json"), JSON.stringify({ version, platform, downloadedAt: new Date().toISOString() }));
+  log7.info(`Installed at: ${execPath}`);
   return execPath;
 }
 function findChromeForTesting() {
   if (process.env.CHROME_EXECUTABLE) {
-    if (import_fs5.default.existsSync(process.env.CHROME_EXECUTABLE))
+    if (import_fs6.default.existsSync(process.env.CHROME_EXECUTABLE))
       return process.env.CHROME_EXECUTABLE;
   }
   try {
     const execPath = getChromeExecutablePath(DEFAULT_INSTALL_DIR);
-    if (import_fs5.default.existsSync(execPath))
+    if (import_fs6.default.existsSync(execPath))
       return execPath;
   } catch {}
   return null;
@@ -3300,8 +3597,8 @@ function findChrome() {
     "/usr/bin/chromium",
     ...(() => {
       try {
-        const dirs = import_fs5.default.readdirSync("/ms-playwright").filter((d) => d.startsWith("chromium-")).sort().reverse();
-        return dirs.map((d) => import_path4.default.join("/ms-playwright", d, "chrome-linux", "chrome"));
+        const dirs = import_fs6.default.readdirSync("/ms-playwright").filter((d) => d.startsWith("chromium-")).sort().reverse();
+        return dirs.map((d) => import_path5.default.join("/ms-playwright", d, "chrome-linux", "chrome"));
       } catch {
         return [];
       }
@@ -3311,7 +3608,7 @@ function findChrome() {
     "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
   ];
   for (const p of systemPaths) {
-    if (import_fs5.default.existsSync(p))
+    if (import_fs6.default.existsSync(p))
       return p;
   }
   return null;
@@ -3326,24 +3623,24 @@ async function ensureChrome() {
   try {
     return await downloadChrome();
   } catch (err) {
-    log6.error(`Failed to download Chrome for Testing: ${err instanceof Error ? err.message : String(err)}`);
+    log7.error(`Failed to download Chrome for Testing: ${err instanceof Error ? err.message : String(err)}`);
     const system = findChrome();
     if (system) {
-      log6.warn(`Falling back to system Chrome: ${system}`);
+      log7.warn(`Falling back to system Chrome: ${system}`);
       return system;
     }
     throw new Error("No Chrome found. Download failed and no system Chrome available.");
   }
 }
-var import_fs5, import_path4, import_os2, import_child_process2, log6, CHROME_VERSIONS_URL = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json", DEFAULT_INSTALL_DIR;
+var import_fs6, import_path5, import_os3, import_child_process2, log7, CHROME_VERSIONS_URL = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json", DEFAULT_INSTALL_DIR;
 var init_chrome_downloader = __esm(() => {
   init_logger();
-  import_fs5 = __toESM(require("fs"));
-  import_path4 = __toESM(require("path"));
-  import_os2 = __toESM(require("os"));
+  import_fs6 = __toESM(require("fs"));
+  import_path5 = __toESM(require("path"));
+  import_os3 = __toESM(require("os"));
   import_child_process2 = require("child_process");
-  log6 = createLogger("chrome");
-  DEFAULT_INSTALL_DIR = import_path4.default.join(import_os2.default.homedir(), ".iframer", "chrome");
+  log7 = createLogger("chrome");
+  DEFAULT_INSTALL_DIR = import_path5.default.join(import_os3.default.homedir(), ".iframer", "chrome");
 });
 
 // src/lib/browser/daemon.ts
@@ -3353,7 +3650,7 @@ class BrowserDaemon {
   idleTimeout;
   constructor(idleTimeout = DEFAULT_IDLE_TIMEOUT) {
     this.idleTimeout = idleTimeout;
-    const cleanup = () => this.stopAll().catch((err) => log7.warn(`cleanup failed: ${err}`));
+    const cleanup = () => this.stopAll().catch((err) => log8.warn(`cleanup failed: ${err}`));
     process.on("exit", cleanup);
     process.on("SIGINT", () => {
       cleanup();
@@ -3377,7 +3674,7 @@ class BrowserDaemon {
           try {
             await page2.evaluate("1");
           } catch {
-            log7.info(`Page for ${mode} is dead, creating fresh context`);
+            log8.info(`Page for ${mode} is dead, creating fresh context`);
             try {
               await context2.close();
             } catch {}
@@ -3393,9 +3690,9 @@ class BrowserDaemon {
       await this.stopMode(mode);
     }
     const executablePath = await ensureChrome();
-    log7.info(`Launching Chrome for Testing in ${mode} mode: ${executablePath}`);
-    const userDataDir = import_path5.default.join(import_os3.default.homedir(), ".iframer", "chrome-profile", mode);
-    import_fs6.default.mkdirSync(userDataDir, { recursive: true });
+    log8.info(`Launching Chrome for Testing in ${mode} mode: ${executablePath}`);
+    const userDataDir = import_path6.default.join(import_os4.default.homedir(), ".iframer", "chrome-profile", mode);
+    import_fs7.default.mkdirSync(userDataDir, { recursive: true });
     const browser = await import_patchright2.chromium.launch({
       executablePath,
       headless: mode === "headless",
@@ -3417,7 +3714,7 @@ class BrowserDaemon {
     };
     this.instances.set(mode, instance);
     this.resetIdleTimer(mode);
-    log7.info(`Chrome ${mode} ready`);
+    log8.info(`Chrome ${mode} ready`);
     return { browser, context, page };
   }
   isRunning(mode) {
@@ -3447,7 +3744,7 @@ class BrowserDaemon {
     if (timer)
       clearTimeout(timer);
     this.idleTimers.delete(mode);
-    log7.info(`Stopping Chrome ${mode}...`);
+    log8.info(`Stopping Chrome ${mode}...`);
     try {
       await instance.context.close();
     } catch {}
@@ -3465,20 +3762,20 @@ class BrowserDaemon {
     if (existing)
       clearTimeout(existing);
     this.idleTimers.set(mode, setTimeout(() => {
-      log7.info(`Idle timeout for ${mode}, stopping...`);
+      log8.info(`Idle timeout for ${mode}, stopping...`);
       this.stopMode(mode);
     }, this.idleTimeout));
   }
 }
-var import_patchright2, import_os3, import_path5, import_fs6, log7, DEFAULT_IDLE_TIMEOUT;
+var import_patchright2, import_os4, import_path6, import_fs7, log8, DEFAULT_IDLE_TIMEOUT;
 var init_daemon = __esm(() => {
   init_chrome_downloader();
   init_logger();
   import_patchright2 = require("patchright");
-  import_os3 = __toESM(require("os"));
-  import_path5 = __toESM(require("path"));
-  import_fs6 = __toESM(require("fs"));
-  log7 = createLogger("daemon");
+  import_os4 = __toESM(require("os"));
+  import_path6 = __toESM(require("path"));
+  import_fs7 = __toESM(require("fs"));
+  log8 = createLogger("daemon");
   DEFAULT_IDLE_TIMEOUT = 5 * 60 * 1000;
 });
 
@@ -3559,8 +3856,8 @@ class DomainModeStore {
   }
   load() {
     try {
-      if (import_fs7.default.existsSync(this.filePath)) {
-        this.data = JSON.parse(import_fs7.default.readFileSync(this.filePath, "utf-8"));
+      if (import_fs8.default.existsSync(this.filePath)) {
+        this.data = JSON.parse(import_fs8.default.readFileSync(this.filePath, "utf-8"));
       }
     } catch {
       this.data = {};
@@ -3568,21 +3865,21 @@ class DomainModeStore {
   }
   save() {
     try {
-      import_fs7.default.mkdirSync(import_path6.default.dirname(this.filePath), { recursive: true });
-      import_fs7.default.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2));
+      import_fs8.default.mkdirSync(import_path7.default.dirname(this.filePath), { recursive: true });
+      import_fs8.default.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2));
     } catch (err) {
-      log8.error("Failed to save:", err);
+      log9.error("Failed to save:", err);
     }
   }
 }
-var import_fs7, import_path6, import_os4, log8, DEFAULT_FILE, TTL_DAYS = 14, ESCALATION_LADDER;
+var import_fs8, import_path7, import_os5, log9, DEFAULT_FILE, TTL_DAYS = 14, ESCALATION_LADDER;
 var init_domain_modes = __esm(() => {
   init_logger();
-  import_fs7 = __toESM(require("fs"));
-  import_path6 = __toESM(require("path"));
-  import_os4 = __toESM(require("os"));
-  log8 = createLogger("domain-modes");
-  DEFAULT_FILE = import_path6.default.join(import_os4.default.homedir(), ".iframer", "domain-modes.json");
+  import_fs8 = __toESM(require("fs"));
+  import_path7 = __toESM(require("path"));
+  import_os5 = __toESM(require("os"));
+  log9 = createLogger("domain-modes");
+  DEFAULT_FILE = import_path7.default.join(import_os5.default.homedir(), ".iframer", "domain-modes.json");
   ESCALATION_LADDER = ["headless", "docker-headful", "binary-headful"];
 });
 
@@ -3606,7 +3903,7 @@ async function detectBlock(page) {
     const hasCfChallenge = await page.evaluate(() => {
       return !!document.querySelector('iframe[src*="challenges.cloudflare.com"]');
     }).catch((err) => {
-      log9.warn(`CF challenge check failed, assuming blocked: ${err}`);
+      log10.warn(`CF challenge check failed, assuming blocked: ${err}`);
       return true;
     });
     if (hasCfChallenge) {
@@ -3625,7 +3922,7 @@ async function detectBlock(page) {
       const hasCaptchaIframe = await page.evaluate(() => {
         return !!(document.querySelector('iframe[src*="recaptcha"]') || document.querySelector('iframe[src*="hcaptcha"]'));
       }).catch((err) => {
-        log9.warn(`captcha iframe check failed, assuming blocked: ${err}`);
+        log10.warn(`captcha iframe check failed, assuming blocked: ${err}`);
         return true;
       });
       if (hasCaptchaIframe) {
@@ -3638,15 +3935,15 @@ async function detectBlock(page) {
     if (!url.includes("about:blank") && bodyText.trim().length < 20 && title.length < 5) {}
     return { blocked: false };
   } catch (err) {
-    log9.warn(`page evaluation failed, assuming blocked: ${err}`);
+    log10.warn(`page evaluation failed, assuming blocked: ${err}`);
     return { blocked: true, reason: "evaluation-failed" };
   }
 }
-var log9;
+var log10;
 var init_block_detection = __esm(() => {
   init_constants();
   init_logger();
-  log9 = createLogger("block-detection");
+  log10 = createLogger("block-detection");
 });
 
 // src/lib/browser/cdp-launcher.ts
@@ -3661,11 +3958,11 @@ function checkModeAvailability() {
     binaryHeadful: hasDisplay()
   };
 }
-var log10;
+var log11;
 var init_cdp_launcher = __esm(() => {
   init_chrome_downloader();
   init_logger();
-  log10 = createLogger("cdp-launcher");
+  log11 = createLogger("cdp-launcher");
 });
 
 // src/lib/iframer.ts
@@ -3691,7 +3988,7 @@ class Iframer {
     this.publicUrl = config.publicUrl || DEFAULT_PUBLIC_URL;
     this.staleTimeoutMs = config.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS3;
     this.store = createStore({
-      dataDir: config.dataDir || import_path7.default.join(import_os5.default.homedir(), ".iframer")
+      dataDir: config.dataDir || import_path8.default.join(import_os6.default.homedir(), ".iframer")
     });
     this.daemon = new BrowserDaemon(config.sessionTimeoutMs);
     this.domainModes = new DomainModeStore;
@@ -3854,7 +4151,7 @@ class Iframer {
             break;
           }
         } catch (err) {
-          log11.warn(`stopSession: failed to extract daemon state: ${getErrorMessage2(err)}`);
+          log12.warn(`stopSession: failed to extract daemon state: ${getErrorMessage2(err)}`);
         }
       }
     }
@@ -3890,7 +4187,7 @@ class Iframer {
         this.domainModes.recordFailure(domain, failedMode, result.error?.message || "blocked");
       const nextMode = this.domainModes.getNextMode(failedMode, availableModes);
       if (nextMode) {
-        log11.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
+        log12.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
         if (failedMode !== "docker-headful") {
           await this.daemon.stopMode(failedMode);
         }
@@ -3903,7 +4200,7 @@ class Iframer {
           this.domainModes.recordFailure(domain, nextMode, result.error?.message || "blocked");
           const thirdMode = this.domainModes.getNextMode(nextMode, availableModes);
           if (thirdMode) {
-            log11.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
+            log12.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
             if (nextMode !== "docker-headful") {
               await this.daemon.stopMode(nextMode);
             }
@@ -3970,13 +4267,16 @@ class Iframer {
       const { page } = await this.daemon.ensure(mode);
       const encryptionKey = await deriveKey(token);
       const blob = await this.store.getSession(userId);
+      let sessionData = null;
       if (blob && blob.length > 0) {
         try {
-          const sessionData = JSON.parse(decrypt(blob, encryptionKey));
+          sessionData = JSON.parse(decrypt(blob, encryptionKey));
           await injectCookies(page.context(), sessionData);
         } catch {}
       }
       const ctx = this.makeContext(userId, token);
+      if (sessionData)
+        ctx.sessionData = sessionData;
       const runner = new PipelineRunner(ctx);
       const result = await runner.run(page, pipeline);
       if (result.ok) {
@@ -3999,12 +4299,20 @@ class Iframer {
           };
         }
       }
+      let updatedSession = null;
       if (result.ok) {
         try {
-          const updatedSession = await extractSession(page.context(), page);
+          updatedSession = await extractSession(page.context(), page);
           const encrypted = encrypt(JSON.stringify(updatedSession), encryptionKey);
           await this.store.setSession(userId, encrypted);
         } catch {}
+      }
+      if (result.ok) {
+        try {
+          this.updateKnowledgeFromRun(pipeline, result, updatedSession, mode);
+        } catch (err) {
+          log12.warn(`knowledge update failed: ${getErrorMessage2(err)}`);
+        }
       }
       const refs = this.userRefs.get(userId);
       if (refs)
@@ -4032,6 +4340,96 @@ class Iframer {
         modeUsed: mode
       };
     }
+  }
+  updateKnowledgeFromRun(pipeline, result, sessionData, mode) {
+    const firstNav = pipeline.steps.find((s) => s.type === "navigate");
+    if (!firstNav || firstNav.type !== "navigate")
+      return;
+    let domain;
+    try {
+      domain = new URL(firstNav.url).hostname;
+    } catch {
+      return;
+    }
+    const domainRoot = domain.replace(/^www\./, "");
+    const hadLogin = pipeline.steps.some((s) => s.type === "login");
+    const auth = { type: "unknown" };
+    const cookieNames = [];
+    const localStorageKeys = [];
+    const sessionStorageKeys = [];
+    if (sessionData) {
+      for (const c of sessionData.cookies ?? []) {
+        if (c.domain.endsWith(domainRoot) || domainRoot.endsWith(c.domain.replace(/^\./, ""))) {
+          if (!cookieNames.includes(c.name))
+            cookieNames.push(c.name);
+        }
+      }
+      for (const [origin, store] of Object.entries(sessionData.localStorage ?? {})) {
+        if (origin.includes(domainRoot)) {
+          for (const k of Object.keys(store)) {
+            if (!localStorageKeys.includes(k))
+              localStorageKeys.push(k);
+          }
+        }
+      }
+      for (const [origin, store] of Object.entries(sessionData.sessionStorage ?? {})) {
+        if (origin.includes(domainRoot)) {
+          for (const k of Object.keys(store)) {
+            if (!sessionStorageKeys.includes(k))
+              sessionStorageKeys.push(k);
+          }
+        }
+      }
+    }
+    if (cookieNames.length > 0 && localStorageKeys.length > 0) {
+      auth.type = "cookies+localStorage";
+    } else if (localStorageKeys.length > 0) {
+      auth.type = "localStorage";
+    } else if (cookieNames.length > 0) {
+      auth.type = "cookies";
+    }
+    if (cookieNames.length > 0)
+      auth.cookieNames = cookieNames;
+    if (localStorageKeys.length > 0)
+      auth.localStorageKeys = localStorageKeys;
+    if (sessionStorageKeys.length > 0)
+      auth.sessionStorageKeys = sessionStorageKeys;
+    const endpoints = [];
+    const replayHeaders = new Set;
+    for (const api of result.capturedApi ?? []) {
+      if (!api.domain.includes(domainRoot) && !domainRoot.includes(api.domain.replace(/^www\./, "")))
+        continue;
+      if (api.auth?.authorization)
+        replayHeaders.add("Authorization");
+      for (const name of Object.keys(api.auth?.tokens ?? {}))
+        replayHeaders.add(name);
+      for (const ep of api.endpoints ?? []) {
+        endpoints.push({
+          method: ep.method,
+          path: ep.path,
+          description: `Status ${ep.responseStatus}. Triggered at step ${ep.triggeredAtStep}.`,
+          example: ep.curl,
+          firstSeen: new Date().toISOString()
+        });
+      }
+    }
+    if (replayHeaders.size > 0) {
+      auth.headers = [...replayHeaders];
+      if (!auth.type.includes("header"))
+        auth.type = auth.type === "unknown" ? "headers" : `${auth.type}+headers`;
+    }
+    const notes = [];
+    if (hadLogin)
+      notes.push(`Last successful login via browser in ${mode} mode.`);
+    if (result.obstacles?.some((o) => o.type?.includes("captcha")))
+      notes.push("Captcha encountered — browser required for fresh logins.");
+    mergeKnowledge(domainRoot, {
+      lastMode: mode,
+      browserRequired: true,
+      auth,
+      endpoints,
+      notes
+    });
   }
   async getPageState(page, ctx) {
     try {
@@ -4126,7 +4524,7 @@ class Iframer {
     }
   }
 }
-var import_path7, import_os5, log11, DEFAULT_SCREENSHOT_DIR, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3 = 20000;
+var import_path8, import_os6, log12, DEFAULT_SCREENSHOT_DIR, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3 = 20000;
 var init_iframer = __esm(() => {
   init_pipeline();
   init_session_manager();
@@ -4134,6 +4532,7 @@ var init_iframer = __esm(() => {
   init_stealth();
   init_humanize();
   init_crypto();
+  init_knowledge();
   init_screenshot();
   init_storage();
   init_daemon();
@@ -4142,24 +4541,24 @@ var init_iframer = __esm(() => {
   init_cdp_launcher();
   init_constants();
   init_logger();
-  import_path7 = __toESM(require("path"));
-  import_os5 = __toESM(require("os"));
-  log11 = createLogger("iframer");
-  DEFAULT_SCREENSHOT_DIR = import_path7.default.join("/Users/eduardoverona/tools/iframer-toolkit/src/lib", "../../.screenshots");
+  import_path8 = __toESM(require("path"));
+  import_os6 = __toESM(require("os"));
+  log12 = createLogger("iframer");
+  DEFAULT_SCREENSHOT_DIR = import_path8.default.join("/Users/eduardoverona/tools/iframer-toolkit/src/lib", "../../.screenshots");
   DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
 });
 
 // bin/cli.js
 var __dirname = "/Users/eduardoverona/tools/iframer-toolkit/bin";
-var fs8 = require("fs");
-var os6 = require("os");
-var path8 = require("path");
+var fs9 = require("fs");
+var os7 = require("os");
+var path9 = require("path");
 var { execSync: execSync2 } = require("child_process");
 var readline = require("readline");
-var HOME_DIR = os6.homedir();
-var CONFIG_DIR = path8.join(HOME_DIR, ".iframer");
-var CLAUDE_CONFIG_PATH = path8.join(HOME_DIR, ".claude.json");
-var CODEX_CONFIG_PATH = path8.join(HOME_DIR, ".codex", "config.toml");
+var HOME_DIR = os7.homedir();
+var CONFIG_DIR = path9.join(HOME_DIR, ".iframer");
+var CLAUDE_CONFIG_PATH = path9.join(HOME_DIR, ".claude.json");
+var CODEX_CONFIG_PATH = path9.join(HOME_DIR, ".codex", "config.toml");
 var DEFAULT_SERVER = process.env.IFRAMER_URL || "http://localhost:3021";
 var API_KEY = process.env.IFRAMER_SECRET;
 var USE_LOCAL = process.env.IFRAMER_MODE === "local" || !process.env.IFRAMER_URL;
@@ -4243,20 +4642,20 @@ async function apiDelete(endpoint) {
   return res.json();
 }
 function resolveMcpRuntime() {
-  const mcpServerTS = path8.join(__dirname, "..", "src", "mcp", "server.ts");
-  const mcpServerCJS = path8.join(__dirname, "mcp-server.cjs");
+  const mcpServerTS = path9.join(__dirname, "..", "src", "mcp", "server.ts");
+  const mcpServerCJS = path9.join(__dirname, "mcp-server.cjs");
   let bunPath;
   try {
     bunPath = execSync2("which bun", { encoding: "utf8" }).trim();
   } catch {}
-  if (bunPath && fs8.existsSync(mcpServerTS)) {
+  if (bunPath && fs9.existsSync(mcpServerTS)) {
     return {
       command: bunPath,
       args: ["run", mcpServerTS],
       message: "  Using bun to run MCP server from source (no build needed)"
     };
   }
-  if (fs8.existsSync(mcpServerCJS)) {
+  if (fs9.existsSync(mcpServerCJS)) {
     return {
       command: "node",
       args: [mcpServerCJS],
@@ -4272,8 +4671,8 @@ function resolveIframerSecret() {
   if (secret)
     return secret;
   try {
-    const envPath = path8.join(__dirname, "..", ".env");
-    const envContent = fs8.readFileSync(envPath, "utf8");
+    const envPath = path9.join(__dirname, "..", ".env");
+    const envContent = fs9.readFileSync(envPath, "utf8");
     const match = envContent.match(/^IFRAMER_SECRET=(.+)$/m);
     if (match)
       secret = match[1].trim();
@@ -4282,7 +4681,7 @@ function resolveIframerSecret() {
 }
 function loadClaudeConfig() {
   try {
-    return JSON.parse(fs8.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    return JSON.parse(fs9.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
   } catch {
     return {};
   }
@@ -4292,13 +4691,13 @@ function installClaudeMcp(mcpName, mcpEntry) {
   if (!config.mcpServers)
     config.mcpServers = {};
   config.mcpServers[mcpName] = mcpEntry;
-  fs8.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
+  fs9.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
   return CLAUDE_CONFIG_PATH;
 }
 function removeClaudeMcp(mcpName) {
   let config;
   try {
-    config = JSON.parse(fs8.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    config = JSON.parse(fs9.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
   } catch {
     return { removed: false, path: CLAUDE_CONFIG_PATH };
   }
@@ -4306,7 +4705,7 @@ function removeClaudeMcp(mcpName) {
     return { removed: false, path: CLAUDE_CONFIG_PATH };
   }
   delete config.mcpServers[mcpName];
-  fs8.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
+  fs9.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
   return { removed: true, path: CLAUDE_CONFIG_PATH };
 }
 function escapeTomlString(value) {
@@ -4358,10 +4757,10 @@ function renderCodexMcpBlock(mcpName, mcpEntry) {
 `);
 }
 function installCodexMcp(mcpName, mcpEntry) {
-  fs8.mkdirSync(path8.dirname(CODEX_CONFIG_PATH), { recursive: true });
+  fs9.mkdirSync(path9.dirname(CODEX_CONFIG_PATH), { recursive: true });
   let content = "";
   try {
-    content = fs8.readFileSync(CODEX_CONFIG_PATH, "utf8");
+    content = fs9.readFileSync(CODEX_CONFIG_PATH, "utf8");
   } catch {}
   const existing = findCodexMcpSection(content, mcpName);
   if (existing) {
@@ -4370,7 +4769,7 @@ function installCodexMcp(mcpName, mcpEntry) {
   }
   const trimmed = content.trimEnd();
   const block = renderCodexMcpBlock(mcpName, mcpEntry);
-  fs8.writeFileSync(CODEX_CONFIG_PATH, trimmed ? `${trimmed}
+  fs9.writeFileSync(CODEX_CONFIG_PATH, trimmed ? `${trimmed}
 
 ${block}
 ` : `${block}
@@ -4380,7 +4779,7 @@ ${block}
 function removeCodexMcp(mcpName) {
   let content;
   try {
-    content = fs8.readFileSync(CODEX_CONFIG_PATH, "utf8");
+    content = fs9.readFileSync(CODEX_CONFIG_PATH, "utf8");
   } catch {
     return { removed: false, path: CODEX_CONFIG_PATH };
   }
@@ -4392,7 +4791,7 @@ function removeCodexMcp(mcpName) {
 `).replace(/\n{3,}/g, `
 
 `).trimEnd();
-  fs8.writeFileSync(CODEX_CONFIG_PATH, next ? `${next}
+  fs9.writeFileSync(CODEX_CONFIG_PATH, next ? `${next}
 ` : "");
   return { removed: true, path: CODEX_CONFIG_PATH };
 }
@@ -4402,8 +4801,8 @@ async function getLocalIframer() {
     return _iframer;
   try {
     const { Iframer: Iframer2 } = await Promise.resolve().then(() => (init_iframer(), exports_iframer));
-    const screenshotDir = path8.join(os6.tmpdir(), "iframer-screenshots");
-    fs8.mkdirSync(screenshotDir, { recursive: true });
+    const screenshotDir = path9.join(os7.tmpdir(), "iframer-screenshots");
+    fs9.mkdirSync(screenshotDir, { recursive: true });
     _iframer = new Iframer2({
       screenshotDir,
       publicUrl: `file://${screenshotDir}`,
@@ -4439,17 +4838,17 @@ function hasFlag(args, flag) {
 function handleResponse(data, screenshotPath) {
   const { screenshot, tileScreenshots, ...rest } = data;
   if (screenshot && screenshotPath) {
-    fs8.writeFileSync(screenshotPath, Buffer.from(screenshot, "base64"));
+    fs9.writeFileSync(screenshotPath, Buffer.from(screenshot, "base64"));
     rest._screenshotSaved = screenshotPath;
   }
   if (tileScreenshots && tileScreenshots.length > 0) {
     const tileDir = "/tmp/browser-tiles";
-    fs8.mkdirSync(tileDir, { recursive: true });
+    fs9.mkdirSync(tileDir, { recursive: true });
     const tilePaths = [];
     for (const tile of tileScreenshots) {
       if (tile.screenshot) {
         const tilePath = `${tileDir}/tile-${tile.index}.png`;
-        fs8.writeFileSync(tilePath, Buffer.from(tile.screenshot, "base64"));
+        fs9.writeFileSync(tilePath, Buffer.from(tile.screenshot, "base64"));
         tilePaths.push(tilePath);
       }
     }
@@ -4465,6 +4864,13 @@ function printResult(data) {
     process.exit(1);
 }
 var [, , command, ...args] = process.argv;
+if (command === "--cache") {
+  command = "knowledge";
+  args = args.length > 0 ? ["get", ...args] : ["list"];
+} else if (command === "--clear-cache") {
+  command = "knowledge";
+  args = ["clear", ...args];
+}
 if (command === "install" && args.length > 0) {
   const target = args.shift();
   if (target === "chromium" || target === "chrome")
@@ -4533,6 +4939,55 @@ async function main() {
       }
       break;
     }
+    case "knowledge": {
+      const sub = args[0];
+      const { readKnowledge: readKnowledge2, listKnowledge: listKnowledge2, clearKnowledge: clearKnowledge2, sanitizeDomain: sanitizeDomain2, getKnowledgeDir: getKnowledgeDir2 } = await Promise.resolve().then(() => (init_knowledge(), exports_knowledge));
+      if (!sub || sub === "list") {
+        const entries = listKnowledge2();
+        if (entries.length === 0) {
+          console.log(`  No cached knowledge.`);
+          console.log(`  Cache location: ${getKnowledgeDir2()}`);
+        } else {
+          console.log(`  ${entries.length} domain${entries.length === 1 ? "" : "s"} cached (${getKnowledgeDir2()}):
+`);
+          for (const e of entries) {
+            const size = e.sizeBytes < 1024 ? `${e.sizeBytes}B` : `${(e.sizeBytes / 1024).toFixed(1)}KB`;
+            console.log(`    ${e.domain.padEnd(30)} ${e.lastMode.padEnd(16)} ${e.lastVerified}  ${size}`);
+          }
+          console.log(`
+  Inspect one: iframer --cache <domain>`);
+          console.log(`  Clear all:   iframer --clear-cache`);
+        }
+        break;
+      }
+      if (sub === "get") {
+        const domain = args[1];
+        if (!domain) {
+          console.error("  Usage: iframer knowledge get <domain>");
+          process.exit(1);
+        }
+        const md = readKnowledge2(domain);
+        if (!md) {
+          console.log(`  No cache for ${sanitizeDomain2(domain)}.`);
+          process.exit(1);
+        }
+        console.log(md);
+        break;
+      }
+      if (sub === "clear") {
+        const domain = args[1];
+        const { removed } = clearKnowledge2(domain);
+        if (domain) {
+          console.log(`  Cleared ${removed} entr${removed === 1 ? "y" : "ies"} for ${sanitizeDomain2(domain)}.`);
+        } else {
+          console.log(`  Cleared ${removed} cached domain${removed === 1 ? "" : "s"}.`);
+        }
+        break;
+      }
+      console.error(`  Unknown knowledge action: ${sub}`);
+      console.error("  Usage: iframer knowledge <list|get <domain>|clear [domain]>");
+      process.exit(1);
+    }
     case "install-all": {
       console.log(`  Installing iframer-toolkit dependencies...
 `);
@@ -4567,8 +5022,8 @@ async function main() {
       if (input.startsWith("[") || input.startsWith("{")) {
         const parsed = JSON.parse(input);
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
-      } else if (fs8.existsSync(input)) {
-        const parsed = JSON.parse(fs8.readFileSync(input, "utf-8"));
+      } else if (fs9.existsSync(input)) {
+        const parsed = JSON.parse(fs9.readFileSync(input, "utf-8"));
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
       } else {
         console.error(`  File not found: ${input}`);
@@ -4673,7 +5128,7 @@ async function main() {
           process.exit(1);
         }
         const buffer = Buffer.from(await res.arrayBuffer());
-        fs8.writeFileSync(outPath, buffer);
+        fs9.writeFileSync(outPath, buffer);
         console.log(outPath);
       }
       break;
@@ -4842,8 +5297,8 @@ async function main() {
       } else if (input.startsWith("[") || input.startsWith("{")) {
         const parsed = JSON.parse(input);
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
-      } else if (fs8.existsSync(input)) {
-        const parsed = JSON.parse(fs8.readFileSync(input, "utf-8"));
+      } else if (fs9.existsSync(input)) {
+        const parsed = JSON.parse(fs9.readFileSync(input, "utf-8"));
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
       } else {
         console.error(`  Not a URL or file: ${input}`);
@@ -4863,8 +5318,8 @@ async function main() {
       }
       if (result.capturedApi && result.capturedApi.length > 0) {
         const outputDir = parseFlag(args, "--output") || `./${result.capturedApi[0].domain}`;
-        fs8.mkdirSync(outputDir, { recursive: true });
-        fs8.writeFileSync(path8.join(outputDir, "captured-api.json"), JSON.stringify(result.capturedApi, null, 2));
+        fs9.mkdirSync(outputDir, { recursive: true });
+        fs9.writeFileSync(path9.join(outputDir, "captured-api.json"), JSON.stringify(result.capturedApi, null, 2));
         console.log(`  Captured ${result.capturedApi.reduce((sum, api) => sum + api.endpoints.length, 0)} endpoints`);
         console.log(`  Saved to: ${outputDir}/captured-api.json`);
         for (const api of result.capturedApi) {
@@ -5124,6 +5579,15 @@ async function main() {
       --totp-secret <secret>        TOTP secret for 2FA
     credentials list                List domains with stored credentials
     credentials remove <domain>     Delete credentials for a domain
+
+  Knowledge cache:
+    --cache                         List all cached domains
+    --cache <domain>                Show knowledge cache for one domain
+    --clear-cache                   Wipe all cached knowledge
+    --clear-cache <domain>          Wipe one domain's cache
+    knowledge list                  Same as --cache
+    knowledge get <domain>          Same as --cache <domain>
+    knowledge clear [domain]        Same as --clear-cache
 
   Browser:
     modes                           Show available browser modes
