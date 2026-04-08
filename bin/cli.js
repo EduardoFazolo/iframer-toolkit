@@ -342,6 +342,20 @@ function printResult(data) {
 
 let [,, command, ...args] = process.argv;
 
+// Top-level knowledge flags:
+//   iframer --cache                list all cached domains
+//   iframer --cache <domain>       show one domain's cached knowledge
+//   iframer --clear-cache          wipe all cached knowledge
+//   iframer --clear-cache <domain> wipe one domain
+// These rewrite into the `knowledge` subcommand below.
+if (command === "--cache") {
+  command = "knowledge";
+  args = args.length > 0 ? ["get", ...args] : ["list"];
+} else if (command === "--clear-cache") {
+  command = "knowledge";
+  args = ["clear", ...args];
+}
+
 // Install router: `iframer install <target>` → dispatch to install-<target>
 if (command === "install" && args.length > 0) {
   const target = args.shift();
@@ -421,6 +435,61 @@ async function main() {
         process.exit(1);
       }
       break;
+    }
+
+    // ─── Knowledge Cache ─────────────────────────────────────────────
+
+    case "knowledge": {
+      const sub = args[0];
+      const { readKnowledge, listKnowledge, clearKnowledge, sanitizeDomain, getKnowledgeDir } =
+        await import("../src/lib/knowledge.ts");
+
+      if (!sub || sub === "list") {
+        const entries = listKnowledge();
+        if (entries.length === 0) {
+          console.log(`  No cached knowledge.`);
+          console.log(`  Cache location: ${getKnowledgeDir()}`);
+        } else {
+          console.log(`  ${entries.length} domain${entries.length === 1 ? "" : "s"} cached (${getKnowledgeDir()}):\n`);
+          for (const e of entries) {
+            const size = e.sizeBytes < 1024 ? `${e.sizeBytes}B` : `${(e.sizeBytes / 1024).toFixed(1)}KB`;
+            console.log(`    ${e.domain.padEnd(30)} ${e.lastMode.padEnd(16)} ${e.lastVerified}  ${size}`);
+          }
+          console.log(`\n  Inspect one: iframer --cache <domain>`);
+          console.log(`  Clear all:   iframer --clear-cache`);
+        }
+        break;
+      }
+
+      if (sub === "get") {
+        const domain = args[1];
+        if (!domain) {
+          console.error("  Usage: iframer knowledge get <domain>");
+          process.exit(1);
+        }
+        const md = readKnowledge(domain);
+        if (!md) {
+          console.log(`  No cache for ${sanitizeDomain(domain)}.`);
+          process.exit(1);
+        }
+        console.log(md);
+        break;
+      }
+
+      if (sub === "clear") {
+        const domain = args[1];
+        const { removed } = clearKnowledge(domain);
+        if (domain) {
+          console.log(`  Cleared ${removed} entr${removed === 1 ? "y" : "ies"} for ${sanitizeDomain(domain)}.`);
+        } else {
+          console.log(`  Cleared ${removed} cached domain${removed === 1 ? "" : "s"}.`);
+        }
+        break;
+      }
+
+      console.error(`  Unknown knowledge action: ${sub}`);
+      console.error("  Usage: iframer knowledge <list|get <domain>|clear [domain]>");
+      process.exit(1);
     }
 
     // ─── Install All Dependencies ────────────────────────────────────
@@ -1021,6 +1090,15 @@ async function main() {
       --totp-secret <secret>        TOTP secret for 2FA
     credentials list                List domains with stored credentials
     credentials remove <domain>     Delete credentials for a domain
+
+  Knowledge cache:
+    --cache                         List all cached domains
+    --cache <domain>                Show knowledge cache for one domain
+    --clear-cache                   Wipe all cached knowledge
+    --clear-cache <domain>          Wipe one domain's cache
+    knowledge list                  Same as --cache
+    knowledge get <domain>          Same as --cache <domain>
+    knowledge clear [domain]        Same as --clear-cache
 
   Browser:
     modes                           Show available browser modes

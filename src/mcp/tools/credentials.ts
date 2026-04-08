@@ -45,8 +45,12 @@ export function registerCredentialsTool(server: McpServer) {
               type: "object",
               properties: {
                 username: { type: "string", title: "Username / Email" },
-                password: { type: "string", title: "Password", format: "password" },
-                totp_secret: { type: "string", title: "TOTP Secret (leave empty if no 2FA)", format: "password" },
+                // The MCP elicitation spec only allows format: email|uri|date|date-time
+                // for string primitives — there's no "password" format, so we can't
+                // ask clients to mask this field at the schema level. Masking depends
+                // on the client's own rendering choices for sensitive-looking titles.
+                password: { type: "string", title: "Password" },
+                totp_secret: { type: "string", title: "TOTP Secret (leave empty if no 2FA)" },
               },
               required: ["username", "password"],
             },

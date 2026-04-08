@@ -5,7 +5,9 @@ import { apiPost, getIframer, isDockerRunning, err, getErrorMessage, IFRAMER_MOD
 export function registerBrowseTool(server: McpServer) {
   server.tool(
     "browse",
-    `Fetch a web page with a headless browser. Use for pages that need JavaScript rendering but don't have bot detection walls. Session cookies persist across calls.`,
+    `Fetch a web page with a headless browser. Use for pages that need JavaScript rendering but don't have bot detection walls. Session cookies persist across calls.
+
+PRE-FLIGHT: Call \`knowledge get <domain>\` first. If the cache shows a direct-API path for the data you need, skip this tool and hit the endpoints directly — it's orders of magnitude faster.`,
     {
       url: z.string().describe("URL to navigate to"),
       extract: z.string().optional().describe("JavaScript expression to evaluate (e.g. 'document.title')"),

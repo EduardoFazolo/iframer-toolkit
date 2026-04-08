@@ -8,6 +8,8 @@ export function registerExecuteTool(server: McpServer) {
     "execute",
     `Execute a pipeline of browser steps. Auto-starts a session if needed. Handles obstacles (captcha, cookie banners) automatically.
 
+MANDATORY PRE-FLIGHT: Before calling this tool for any website, call \`knowledge get <domain>\` first. If the cache shows a direct-API path that satisfies the user's request, skip this tool entirely — direct API calls are orders of magnitude faster than a browser pipeline. Only fall through to \`execute\` when the cache is missing, stale, or insufficient. Every successful run here updates the knowledge cache automatically.
+
 Steps run sequentially. Each step has a 20-second stale-state timeout — if nothing changes on the page for 20s, execution stops and returns a detailed error so you can decide what to do.
 
 Key step types:
@@ -142,6 +144,14 @@ export function formatExecuteResult(data: any): string[] {
   if (data.finalState) {
     lines.push(`\nFinal page: ${data.finalState.title}`);
     lines.push(`URL: ${data.finalState.url}`);
+  }
+
+  // Breadcrumb for the agent: hint at the knowledge cache so future calls check it first
+  if (data.ok && data.finalState?.url) {
+    try {
+      const domain = new URL(data.finalState.url).hostname.replace(/^www\./, "");
+      lines.push(`\n💡 Knowledge cache updated for ${domain}. Before the next browser run on this domain, call \`knowledge get ${domain}\` — you may be able to skip the browser entirely.`);
+    } catch {}
   }
 
   const meaningful = (data.results || []).filter((r: any) => r.ok && r.result !== undefined && r.result !== null);

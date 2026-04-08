@@ -13,6 +13,7 @@ import {
 import { solveRecaptcha } from "./captcha/recaptcha";
 import { solveHCaptcha } from "./captcha/hcaptcha";
 import { deriveKey, decrypt, generateTOTP } from "./auth/crypto";
+import { injectStorage } from "./session/persistence";
 import { saveScreenshot } from "./screenshot";
 import { takeSnapshot } from "./snapshot";
 import { annotatedScreenshot } from "./annotate";
@@ -394,6 +395,15 @@ export async function executeAction(
         const stealthScript = contextStealthScripts.get(page.context()) ?? STEALTH_SCRIPT;
         try { await page.evaluate(stealthScript); } catch (err) {
           log.warn(`stealth injection failed: ${err}`);
+        }
+        // Re-inject localStorage/sessionStorage for this origin (origin-scoped, idempotent).
+        // Cookies were already injected at context level before the pipeline started.
+        if (ctx.sessionData) {
+          try {
+            await injectStorage(page, ctx.sessionData);
+          } catch (err) {
+            log.warn(`storage injection after navigate failed: ${err}`);
+          }
         }
         break;
 
