@@ -1,5 +1,4 @@
 import { chromium } from "patchright";
-import { firefox, webkit } from "playwright";
 import type { Express, Request, Response } from "express";
 import type { AuthRequest } from "./middleware";
 import { Iframer } from "../lib/iframer";
@@ -19,17 +18,11 @@ export function registerRoutes(app: Express): void {
 
   app.get("/browsers", async (_req, res) => {
     const browsers: { name: string; installed: boolean; executablePath: string | null }[] = [];
-    for (const [name, type] of [
-      ["chromium", chromium],
-      ["firefox", firefox],
-      ["webkit", webkit],
-    ] as const) {
-      try {
-        const execPath = (type as unknown as { executablePath(): string }).executablePath();
-        browsers.push({ name, installed: fs.existsSync(execPath), executablePath: execPath });
-      } catch {
-        browsers.push({ name, installed: false, executablePath: null });
-      }
+    try {
+      const execPath = (chromium as unknown as { executablePath(): string }).executablePath();
+      browsers.push({ name: "chromium", installed: fs.existsSync(execPath), executablePath: execPath });
+    } catch {
+      browsers.push({ name: "chromium", installed: false, executablePath: null });
     }
     res.json({ ok: true, browsers });
   });
