@@ -51,7 +51,30 @@ IMPORTANT — Do NOT specify options.mode unless the user explicitly asks for a 
               options: { ...params.options, mode: "binary-headful", autoEscalate: false },
             });
           }
-          if (mode === "docker-headful" && dockerRunning) {
+          if (mode === "docker-headful") {
+            if (!dockerRunning) {
+              // Explicit request for docker-headful but Docker isn't reachable.
+              // Don't silently degrade — return a clear error so the caller knows.
+              return {
+                ok: false,
+                completedSteps: 0,
+                totalSteps: params.steps.length,
+                results: [],
+                finalState: { url: "", title: "" },
+                obstacles: [],
+                durationMs: 0,
+                modeUsed: "docker-headful",
+                error: {
+                  failedAtStep: 0,
+                  failedStep: params.steps[0],
+                  errorType: "action-failed",
+                  message: `docker-headful mode was requested but the Docker API is not reachable. Start the Docker server (\`bun run start:docker\`) or omit the mode override to let iframer auto-select.`,
+                  pageState: { url: "", title: "" },
+                  suggestion: "Start Docker with `bun run start:docker`, or remove options.mode to use auto-selection (headless → binary-headful).",
+                  retryable: false,
+                },
+              };
+            }
             return apiPost("/execute", {
               steps: params.steps,
               options: { ...params.options, mode: "docker-headful", autoEscalate: false },

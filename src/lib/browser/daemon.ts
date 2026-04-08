@@ -1,4 +1,4 @@
-import { chromium } from "playwright-core";
+import { chromium } from "patchright";
 import type { Browser, BrowserContext, Page } from "patchright";
 import { ensureChrome } from "./chrome-downloader";
 import type { BrowserMode } from "../types";
@@ -74,7 +74,7 @@ export class BrowserDaemon {
     const userDataDir = path.join(os.homedir(), ".iframer", "chrome-profile", mode);
     fs.mkdirSync(userDataDir, { recursive: true });
 
-    // Launch via Playwright with Chrome for Testing executable
+    // Launch via patchright (stealth-patched Playwright) using Chrome for Testing
     const browser = await chromium.launch({
       executablePath,
       headless: mode === "headless",
@@ -84,7 +84,7 @@ export class BrowserDaemon {
         "--no-default-browser-check",
         "--disable-infobars",
       ],
-    }) as Browser;
+    });
 
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -112,6 +112,17 @@ export class BrowserDaemon {
     } catch {
       return false;
     }
+  }
+
+  /** Return all currently-live instances (for extracting session state before teardown) */
+  liveInstances(): DaemonInstance[] {
+    return [...this.instances.values()].filter((inst) => {
+      try {
+        return inst.browser.isConnected();
+      } catch {
+        return false;
+      }
+    });
   }
 
   async stopMode(mode: BrowserMode): Promise<void> {
