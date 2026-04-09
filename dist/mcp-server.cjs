@@ -4752,10 +4752,11 @@ var _iframer = null;
 async function getIframer() {
   if (!_iframer) {
     const { Iframer: Iframer2 } = await Promise.resolve().then(() => (init_iframer(), exports_iframer));
-    const screenshotDir = import_path10.default.join(import_os4.default.tmpdir(), "iframer-screenshots");
+    const baseDir = import_path10.default.join(import_os4.default.tmpdir(), "iframer-screenshots");
+    const screenshotDir = import_path10.default.join(baseDir, "screenshots");
     _iframer = new Iframer2({
       screenshotDir,
-      publicUrl: `file://${screenshotDir}`,
+      publicUrl: `file://${baseDir}`,
       mode: "local"
     });
   }
@@ -4823,6 +4824,13 @@ async function detectAvailableModes() {
 }
 async function fetchScreenshot(url) {
   try {
+    if (url.startsWith("file://")) {
+      const fs10 = await import("fs");
+      const { fileURLToPath } = await import("url");
+      const filePath = fileURLToPath(url);
+      const buf2 = fs10.readFileSync(filePath);
+      return { type: "image", data: buf2.toString("base64"), mimeType: "image/jpeg" };
+    }
     const res = await fetch(url);
     if (!res.ok)
       return null;
