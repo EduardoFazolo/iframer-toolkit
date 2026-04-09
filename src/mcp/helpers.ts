@@ -22,10 +22,16 @@ let _iframer: Iframer | null = null;
 export async function getIframer(): Promise<Iframer> {
   if (!_iframer) {
     const { Iframer } = await import("../lib/iframer");
-    const screenshotDir = path.join(os.tmpdir(), "iframer-screenshots");
+    // `saveScreenshot` returns URLs of the form `${publicUrl}/screenshots/${file}`
+    // to match the Docker API's `/screenshots` static mount. In local mode we
+    // have no web server, so we mirror that layout on disk: write the file into
+    // a `screenshots` subdirectory and point `publicUrl` at the parent, so the
+    // returned `file://` URL resolves to a real path.
+    const baseDir = path.join(os.tmpdir(), "iframer-screenshots");
+    const screenshotDir = path.join(baseDir, "screenshots");
     _iframer = new Iframer({
       screenshotDir,
-      publicUrl: `file://${screenshotDir}`,
+      publicUrl: `file://${baseDir}`,
       mode: "local",
     });
   }
@@ -110,6 +116,15 @@ export async function detectAvailableModes(): Promise<Record<string, Record<stri
 
 export async function fetchScreenshot(url: string): Promise<{ type: "image"; data: string; mimeType: string } | null> {
   try {
+    // Node's fetch() doesn't support file:// URLs, so handle that scheme
+    // directly. Local mode writes screenshots to disk and returns file:// URLs.
+    if (url.startsWith("file://")) {
+      const fs = await import("fs");
+      const { fileURLToPath } = await import("url");
+      const filePath = fileURLToPath(url);
+      const buf = fs.readFileSync(filePath);
+      return { type: "image", data: buf.toString("base64"), mimeType: "image/jpeg" };
+    }
     const res = await fetch(url);
     if (!res.ok) return null;
     const buf = await res.arrayBuffer();
