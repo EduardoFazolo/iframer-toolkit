@@ -2,7 +2,6 @@ import { chromium } from "patchright";
 import type { Express, Request, Response } from "express";
 import type { AuthRequest } from "./middleware";
 import { Iframer } from "../lib/iframer";
-import { BROWSER_ORDER } from "../lib/browser/launcher";
 import { asyncHandler, AppError } from "./error-handler";
 import fs from "fs";
 
