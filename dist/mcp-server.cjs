@@ -54,6 +54,92 @@ var init_logger = __esm(() => {
   currentLevel = process.env.LOG_LEVEL || "info";
 });
 
+// src/lib/paths.ts
+function getDataDir() {
+  return process.env.IFRAMER_DATA_DIR || import_path.default.join(import_os.default.homedir(), ".iframer");
+}
+var import_path, import_os;
+var init_paths = __esm(() => {
+  import_path = __toESM(require("path"));
+  import_os = __toESM(require("os"));
+});
+
+// src/lib/auth/crypto.ts
+function getLocalToken() {
+  if (process.env.IFRAMER_SECRET)
+    return process.env.IFRAMER_SECRET;
+  const dir = getDataDir();
+  const file = import_path2.default.join(dir, "secret");
+  try {
+    const existing = import_fs.default.readFileSync(file, "utf8").trim();
+    if (existing)
+      return existing;
+  } catch {}
+  try {
+    import_fs.default.mkdirSync(dir, { recursive: true });
+    const secret = import_crypto.default.randomBytes(32).toString("hex");
+    import_fs.default.writeFileSync(file, secret, { mode: 384 });
+    return secret;
+  } catch {
+    return "iframer-local-default-token";
+  }
+}
+function deriveKey(token, purpose = INFO) {
+  return new Promise((resolve, reject) => {
+    import_crypto.default.hkdf("sha256", token, SALT, purpose, KEY_LENGTH, (err, key) => {
+      if (err)
+        return reject(err);
+      resolve(Buffer.from(key));
+    });
+  });
+}
+function encrypt(plaintext, key) {
+  const iv = import_crypto.default.randomBytes(IV_LENGTH);
+  const cipher = import_crypto.default.createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, tag, encrypted]);
+}
+function decrypt(blob, key) {
+  const iv = blob.subarray(0, IV_LENGTH);
+  const tag = blob.subarray(IV_LENGTH, IV_LENGTH + TAG_LENGTH);
+  const ciphertext = blob.subarray(IV_LENGTH + TAG_LENGTH);
+  const decipher = import_crypto.default.createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(tag);
+  return decipher.update(ciphertext, undefined, "utf8") + decipher.final("utf8");
+}
+function generateTOTP(secret, period = 30, digits = 6) {
+  const base32Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const cleanSecret = secret.replace(/[\s=-]/g, "").toUpperCase();
+  let bits = "";
+  for (const c of cleanSecret) {
+    const val = base32Chars.indexOf(c);
+    if (val === -1)
+      continue;
+    bits += val.toString(2).padStart(5, "0");
+  }
+  const keyBytes = [];
+  for (let i = 0;i + 8 <= bits.length; i += 8) {
+    keyBytes.push(parseInt(bits.substring(i, i + 8), 2));
+  }
+  const key = Buffer.from(keyBytes);
+  const time = Math.floor(Date.now() / 1000 / period);
+  const timeBuffer = Buffer.alloc(8);
+  timeBuffer.writeUInt32BE(Math.floor(time / 4294967296), 0);
+  timeBuffer.writeUInt32BE(time & 4294967295, 4);
+  const hmac = import_crypto.default.createHmac("sha1", key).update(timeBuffer).digest();
+  const offset = hmac[hmac.length - 1] & 15;
+  const code = ((hmac[offset] & 127) << 24 | (hmac[offset + 1] & 255) << 16 | (hmac[offset + 2] & 255) << 8 | hmac[offset + 3] & 255) % Math.pow(10, digits);
+  return code.toString().padStart(digits, "0");
+}
+var import_crypto, import_fs, import_path2, SALT = "iframer-session", INFO = "encryption", KEY_LENGTH = 32, IV_LENGTH = 12, TAG_LENGTH = 16;
+var init_crypto = __esm(() => {
+  init_paths();
+  import_crypto = __toESM(require("crypto"));
+  import_fs = __toESM(require("fs"));
+  import_path2 = __toESM(require("path"));
+});
+
 // src/lib/browser/stealth.ts
 function buildStealthScript(fp) {
   const ua = fp?.userAgent ?? USER_AGENT;
@@ -541,8 +627,8 @@ async function humanMove(page, toX, toY) {
   const lastPos = mousePositions.get(page);
   const fromX = lastPos?.x ?? randRange(TIMING.IDLE_MOUSE_X);
   const fromY = lastPos?.y ?? randRange(TIMING.IDLE_MOUSE_Y);
-  const path = generatePath(fromX, fromY, toX, toY);
-  for (const point of path) {
+  const path3 = generatePath(fromX, fromY, toX, toY);
+  for (const point of path3) {
     await mouse.move(point.x, point.y);
     await sleep(rand(2, 12));
   }
@@ -1148,58 +1234,305 @@ var init_hcaptcha = __esm(() => {
   log2 = createLogger("hcaptcha-solver");
 });
 
-// src/lib/auth/crypto.ts
-function deriveKey(token, purpose = INFO) {
-  return new Promise((resolve, reject) => {
-    import_crypto.default.hkdf("sha256", token, SALT, purpose, KEY_LENGTH, (err, key) => {
-      if (err)
-        return reject(err);
-      resolve(Buffer.from(key));
-    });
+// src/lib/knowledge.ts
+function getKnowledgeDir() {
+  return import_path3.default.join(getDataDir(), "knowledge");
+}
+function getKnowledgePath(domain) {
+  const safe = sanitizeDomain(domain);
+  return import_path3.default.join(getKnowledgeDir(), `${safe}.md`);
+}
+function normalizeDomain(input) {
+  let d = (input || "").trim().toLowerCase();
+  if (!d)
+    return "";
+  try {
+    if (d.includes("://")) {
+      d = new URL(d).hostname;
+    } else if (d.includes("/")) {
+      d = new URL(`https://${d}`).hostname;
+    }
+  } catch {}
+  d = d.replace(/:\d+$/, "");
+  d = d.replace(/^www\./, "");
+  return d;
+}
+function domainLookupChain(input) {
+  const normalized = normalizeDomain(input);
+  if (!normalized)
+    return [];
+  const chain = [normalized];
+  const parts = normalized.split(".");
+  while (parts.length > 2) {
+    parts.shift();
+    chain.push(parts.join("."));
+  }
+  return chain;
+}
+function sanitizeDomain(input) {
+  const normalized = normalizeDomain(input);
+  return normalized.replace(/[^a-z0-9.-]/g, "_");
+}
+function ensureDir() {
+  import_fs2.default.mkdirSync(getKnowledgeDir(), { recursive: true });
+}
+function readKnowledge(domain) {
+  const p = getKnowledgePath(domain);
+  try {
+    return import_fs2.default.readFileSync(p, "utf8");
+  } catch {
+    return null;
+  }
+}
+function parseKnowledge(domain) {
+  const raw = readKnowledge(domain);
+  if (!raw)
+    return null;
+  return parseMarkdown(raw);
+}
+function listKnowledge() {
+  const dir = getKnowledgeDir();
+  let entries = [];
+  try {
+    entries = import_fs2.default.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const results = [];
+  for (const file of entries) {
+    if (!file.endsWith(".md"))
+      continue;
+    const full = import_path3.default.join(dir, file);
+    try {
+      const stat = import_fs2.default.statSync(full);
+      const raw = import_fs2.default.readFileSync(full, "utf8");
+      const parsed = parseMarkdown(raw);
+      results.push({
+        domain: parsed?.domain ?? file.replace(/\.md$/, ""),
+        lastVerified: parsed?.lastVerified ?? new Date(stat.mtimeMs).toISOString(),
+        lastMode: parsed?.lastMode ?? "unknown",
+        sizeBytes: stat.size
+      });
+    } catch {}
+  }
+  results.sort((a, b) => a.lastVerified < b.lastVerified ? 1 : -1);
+  return results;
+}
+function clearKnowledge(domain) {
+  const dir = getKnowledgeDir();
+  if (domain) {
+    const p = getKnowledgePath(domain);
+    try {
+      import_fs2.default.unlinkSync(p);
+      return { removed: 1 };
+    } catch {
+      return { removed: 0 };
+    }
+  }
+  let removed = 0;
+  try {
+    const entries = import_fs2.default.readdirSync(dir);
+    for (const f of entries) {
+      if (f.endsWith(".md")) {
+        try {
+          import_fs2.default.unlinkSync(import_path3.default.join(dir, f));
+          removed++;
+        } catch {}
+      }
+    }
+  } catch {}
+  return { removed };
+}
+function mergeKnowledge(domain, updates) {
+  ensureDir();
+  const existing = parseKnowledge(domain);
+  const merged = {
+    domain: sanitizeDomain(domain),
+    lastVerified: updates.lastVerified ?? new Date().toISOString(),
+    lastMode: updates.lastMode ?? existing?.lastMode ?? "unknown",
+    browserRequired: updates.browserRequired ?? existing?.browserRequired ?? true,
+    auth: updates.auth ?? existing?.auth ?? { type: "unknown" },
+    endpoints: dedupeEndpoints([...existing?.endpoints ?? [], ...updates.endpoints ?? []]),
+    notes: dedupeNotes([...existing?.notes ?? [], ...updates.notes ?? []])
+  };
+  const md = renderMarkdown(merged);
+  import_fs2.default.writeFileSync(getKnowledgePath(domain), md, "utf8");
+  log3.info(`knowledge updated: ${merged.domain} (${merged.endpoints.length} endpoints)`);
+}
+function dedupeEndpoints(endpoints) {
+  const seen = new Map;
+  for (const ep of endpoints) {
+    const key = `${ep.method.toUpperCase()} ${ep.path}`;
+    const existing = seen.get(key);
+    if (!existing) {
+      seen.set(key, ep);
+    } else {
+      seen.set(key, {
+        ...existing,
+        description: ep.description || existing.description,
+        example: ep.example || existing.example,
+        firstSeen: existing.firstSeen || ep.firstSeen
+      });
+    }
+  }
+  return [...seen.values()].sort((a, b) => {
+    if (a.path !== b.path)
+      return a.path < b.path ? -1 : 1;
+    return a.method < b.method ? -1 : 1;
   });
 }
-function encrypt(plaintext, key) {
-  const iv = import_crypto.default.randomBytes(IV_LENGTH);
-  const cipher = import_crypto.default.createCipheriv("aes-256-gcm", key, iv);
-  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return Buffer.concat([iv, tag, encrypted]);
-}
-function decrypt(blob, key) {
-  const iv = blob.subarray(0, IV_LENGTH);
-  const tag = blob.subarray(IV_LENGTH, IV_LENGTH + TAG_LENGTH);
-  const ciphertext = blob.subarray(IV_LENGTH + TAG_LENGTH);
-  const decipher = import_crypto.default.createDecipheriv("aes-256-gcm", key, iv);
-  decipher.setAuthTag(tag);
-  return decipher.update(ciphertext, undefined, "utf8") + decipher.final("utf8");
-}
-function generateTOTP(secret, period = 30, digits = 6) {
-  const base32Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  const cleanSecret = secret.replace(/[\s=-]/g, "").toUpperCase();
-  let bits = "";
-  for (const c of cleanSecret) {
-    const val = base32Chars.indexOf(c);
-    if (val === -1)
-      continue;
-    bits += val.toString(2).padStart(5, "0");
+function dedupeNotes(notes) {
+  const seen = new Set;
+  const out = [];
+  for (const note of notes) {
+    const n = note.trim();
+    if (n && !seen.has(n)) {
+      seen.add(n);
+      out.push(n);
+    }
   }
-  const keyBytes = [];
-  for (let i = 0;i + 8 <= bits.length; i += 8) {
-    keyBytes.push(parseInt(bits.substring(i, i + 8), 2));
-  }
-  const key = Buffer.from(keyBytes);
-  const time = Math.floor(Date.now() / 1000 / period);
-  const timeBuffer = Buffer.alloc(8);
-  timeBuffer.writeUInt32BE(Math.floor(time / 4294967296), 0);
-  timeBuffer.writeUInt32BE(time & 4294967295, 4);
-  const hmac = import_crypto.default.createHmac("sha1", key).update(timeBuffer).digest();
-  const offset = hmac[hmac.length - 1] & 15;
-  const code = ((hmac[offset] & 127) << 24 | (hmac[offset + 1] & 255) << 16 | (hmac[offset + 2] & 255) << 8 | hmac[offset + 3] & 255) % Math.pow(10, digits);
-  return code.toString().padStart(digits, "0");
+  return out;
 }
-var import_crypto, SALT = "iframer-session", INFO = "encryption", KEY_LENGTH = 32, IV_LENGTH = 12, TAG_LENGTH = 16;
-var init_crypto = __esm(() => {
-  import_crypto = __toESM(require("crypto"));
+function renderMarkdown(data) {
+  const lines = [];
+  lines.push("---");
+  lines.push(`domain: ${data.domain}`);
+  lines.push(`lastVerified: ${data.lastVerified}`);
+  lines.push(`lastMode: ${data.lastMode}`);
+  lines.push(`browserRequired: ${data.browserRequired}`);
+  lines.push(`authType: ${data.auth.type}`);
+  lines.push("---");
+  lines.push("");
+  lines.push(`# ${data.domain}`);
+  lines.push("");
+  lines.push(`Last verified: **${data.lastVerified}** via \`${data.lastMode}\` mode.`);
+  lines.push("");
+  lines.push("## Auth material");
+  lines.push("");
+  lines.push(`**Type:** ${data.auth.type}`);
+  if (data.auth.cookieNames?.length) {
+    lines.push(`**Required cookies:** ${data.auth.cookieNames.map((n) => `\`${n}\``).join(", ")}`);
+  }
+  if (data.auth.localStorageKeys?.length) {
+    lines.push(`**localStorage keys:** ${data.auth.localStorageKeys.map((n) => `\`${n}\``).join(", ")}`);
+  }
+  if (data.auth.sessionStorageKeys?.length) {
+    lines.push(`**sessionStorage keys:** ${data.auth.sessionStorageKeys.map((n) => `\`${n}\``).join(", ")}`);
+  }
+  if (data.auth.headers?.length) {
+    lines.push(`**Request headers:** ${data.auth.headers.map((n) => `\`${n}\``).join(", ")}`);
+  }
+  lines.push("");
+  lines.push("> _Structure only — actual values are stored encrypted in the session store._");
+  lines.push("");
+  if (data.endpoints.length > 0) {
+    lines.push("## Known endpoints");
+    lines.push("");
+    lines.push("The agent can call these directly (with the auth material above) instead of launching a browser.");
+    lines.push("");
+    for (const ep of data.endpoints) {
+      lines.push(`### ${ep.method.toUpperCase()} ${ep.path}`);
+      if (ep.description)
+        lines.push("");
+      if (ep.description)
+        lines.push(ep.description);
+      if (ep.example) {
+        lines.push("");
+        lines.push("```");
+        lines.push(ep.example);
+        lines.push("```");
+      }
+      lines.push("");
+    }
+  } else {
+    lines.push("## Known endpoints");
+    lines.push("");
+    lines.push("_None captured yet. Enable `captureApi: true` on the next `execute` run to populate this section._");
+    lines.push("");
+  }
+  if (data.notes.length > 0) {
+    lines.push("## Notes");
+    lines.push("");
+    for (const n of data.notes)
+      lines.push(`- ${n}`);
+    lines.push("");
+  }
+  return lines.join(`
+`);
+}
+function parseMarkdown(raw) {
+  const frontmatterMatch = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n/);
+  if (!frontmatterMatch)
+    return null;
+  const fm = {};
+  for (const line of frontmatterMatch[1].split(`
+`)) {
+    const m = line.match(/^(\w+):\s*(.*)$/);
+    if (m)
+      fm[m[1]] = m[2].trim();
+  }
+  const body = raw.slice(frontmatterMatch[0].length);
+  const auth = { type: fm.authType ?? "unknown" };
+  const authSection = extractSection(body, "Auth material");
+  if (authSection) {
+    auth.cookieNames = extractBackticks(/\*\*Required cookies:\*\*\s+(.+)/, authSection);
+    auth.localStorageKeys = extractBackticks(/\*\*localStorage keys:\*\*\s+(.+)/, authSection);
+    auth.sessionStorageKeys = extractBackticks(/\*\*sessionStorage keys:\*\*\s+(.+)/, authSection);
+    auth.headers = extractBackticks(/\*\*Request headers:\*\*\s+(.+)/, authSection);
+  }
+  const endpoints = [];
+  const endpointSection = extractSection(body, "Known endpoints");
+  if (endpointSection) {
+    const endpointRegex = /^### (GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\S+)\s*$/gim;
+    let m;
+    while ((m = endpointRegex.exec(endpointSection)) !== null) {
+      endpoints.push({ method: m[1], path: m[2] });
+    }
+  }
+  const notes = [];
+  const notesSection = extractSection(body, "Notes");
+  if (notesSection) {
+    for (const line of notesSection.split(`
+`)) {
+      const m = line.match(/^-\s+(.+)$/);
+      if (m)
+        notes.push(m[1].trim());
+    }
+  }
+  return {
+    domain: fm.domain ?? "",
+    lastVerified: fm.lastVerified ?? "",
+    lastMode: fm.lastMode ?? "unknown",
+    browserRequired: fm.browserRequired !== "false",
+    auth,
+    endpoints,
+    notes
+  };
+}
+function extractSection(body, heading) {
+  const re = new RegExp(`^##\\s+${heading}\\s*$`, "m");
+  const match = body.match(re);
+  if (!match || match.index === undefined)
+    return null;
+  const start = match.index + match[0].length;
+  const nextSection = body.slice(start).match(/^##\s+/m);
+  const end = nextSection?.index != null ? start + nextSection.index : body.length;
+  return body.slice(start, end);
+}
+function extractBackticks(re, text) {
+  const m = text.match(re);
+  if (!m)
+    return;
+  const items = [...m[1].matchAll(/`([^`]+)`/g)].map((x) => x[1]);
+  return items.length > 0 ? items : undefined;
+}
+var import_fs2, import_path3, log3;
+var init_knowledge = __esm(() => {
+  init_logger();
+  init_paths();
+  import_fs2 = __toESM(require("fs"));
+  import_path3 = __toESM(require("path"));
+  log3 = createLogger("knowledge");
 });
 
 // src/lib/session/persistence.ts
@@ -1261,15 +1594,15 @@ async function injectStorage(page, sessionData) {
 
 // src/lib/screenshot.ts
 function saveScreenshot(buffer, filename, screenshotDir, publicUrl) {
-  import_fs.default.mkdirSync(screenshotDir, { recursive: true });
-  const filePath = import_path.default.join(screenshotDir, filename);
-  import_fs.default.writeFileSync(filePath, buffer);
+  import_fs3.default.mkdirSync(screenshotDir, { recursive: true });
+  const filePath = import_path4.default.join(screenshotDir, filename);
+  import_fs3.default.writeFileSync(filePath, buffer);
   return `${publicUrl}/screenshots/${filename}`;
 }
-var import_fs, import_path;
+var import_fs3, import_path4;
 var init_screenshot = __esm(() => {
-  import_fs = __toESM(require("fs"));
-  import_path = __toESM(require("path"));
+  import_fs3 = __toESM(require("fs"));
+  import_path4 = __toESM(require("path"));
 });
 
 // src/lib/snapshot.ts
@@ -1324,12 +1657,12 @@ async function takeSnapshot(page, ctx, options) {
       return true;
     }
     function buildSelector(el) {
-      const path2 = [];
+      const path5 = [];
       let current = el;
       while (current && current !== document.body && current !== document.documentElement) {
         let seg = current.tagName.toLowerCase();
         if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-          path2.unshift(`#${current.id}`);
+          path5.unshift(`#${current.id}`);
           break;
         }
         const parent = current.parentElement;
@@ -1341,10 +1674,10 @@ async function takeSnapshot(page, ctx, options) {
             seg += `:nth-of-type(${idx})`;
           }
         }
-        path2.unshift(seg);
+        path5.unshift(seg);
         current = parent;
       }
-      return path2.join(" > ");
+      return path5.join(" > ");
     }
     function getName(el) {
       const ariaLabel = el.getAttribute("aria-label");
@@ -1518,12 +1851,12 @@ async function annotatedScreenshot(page, ctx) {
       return true;
     }
     function buildSelector(el) {
-      const path2 = [];
+      const path5 = [];
       let current = el;
       while (current && current !== document.body && current !== document.documentElement) {
         let seg = current.tagName.toLowerCase();
         if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-          path2.unshift(`#${current.id}`);
+          path5.unshift(`#${current.id}`);
           break;
         }
         const parent = current.parentElement;
@@ -1535,10 +1868,10 @@ async function annotatedScreenshot(page, ctx) {
             seg += `:nth-of-type(${idx})`;
           }
         }
-        path2.unshift(seg);
+        path5.unshift(seg);
         current = parent;
       }
-      return path2.join(" > ");
+      return path5.join(" > ");
     }
     function getName(el) {
       const ariaLabel = el.getAttribute("aria-label");
@@ -1702,10 +2035,10 @@ async function handleSolveCaptcha(page, monitor) {
       return src.includes("hcaptcha.com") || title.includes("hcaptcha") || !!document.querySelector("[data-hcaptcha-widget-id]");
     });
   }).catch((err) => {
-    log3.warn(`captcha detection failed: ${err}`);
+    log4.warn(`captcha detection failed: ${err}`);
     return false;
   });
-  log3.info(`detected: ${isHCaptcha ? "hCaptcha" : "reCAPTCHA"}`);
+  log4.info(`detected: ${isHCaptcha ? "hCaptcha" : "reCAPTCHA"}`);
   return isHCaptcha ? await solveHCaptcha(page, monitor) : await solveRecaptcha(page, monitor);
 }
 async function handleFind(page, step, ctx) {
@@ -1738,12 +2071,12 @@ async function handleFind(page, step, ctx) {
   const elInfo = await element.evaluate((el) => {
     const tag = el.tagName.toLowerCase();
     const text = (el.textContent?.trim() || "").slice(0, 60);
-    const path2 = [];
+    const path5 = [];
     let current = el;
     while (current && current !== document.body && current !== document.documentElement) {
       let seg = current.tagName.toLowerCase();
       if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-        path2.unshift(`#${current.id}`);
+        path5.unshift(`#${current.id}`);
         break;
       }
       const parent = current.parentElement;
@@ -1755,10 +2088,10 @@ async function handleFind(page, step, ctx) {
           seg += `:nth-of-type(${idx})`;
         }
       }
-      path2.unshift(seg);
+      path5.unshift(seg);
       current = parent;
     }
-    return { tag, text, selector: path2.join(" > ") };
+    return { tag, text, selector: path5.join(" > ") };
   });
   const ref = `@e${ctx.nextRefId++}`;
   const displayRole = step.role || elInfo.tag;
@@ -1779,11 +2112,35 @@ async function handleFind(page, step, ctx) {
 }
 async function handleLogin(page, step, ctx) {
   const credKey = await deriveKey(ctx.token, "credentials");
-  const blob = await ctx.store.getCredential(ctx.userId, step.domain);
-  if (!blob || blob.length === 0) {
-    throw new Error(`No credentials stored for ${step.domain}`);
+  let blob = null;
+  let matchedDomain = "";
+  for (const candidate of domainLookupChain(step.domain)) {
+    const b = await ctx.store.getCredential(ctx.userId, candidate);
+    if (b && b.length > 0) {
+      blob = b;
+      matchedDomain = candidate;
+      break;
+    }
   }
-  const credential = JSON.parse(decrypt(blob, credKey));
+  if (!blob) {
+    const stored = await ctx.store.listCredentialDomains(ctx.userId);
+    const storedList = stored.length > 0 ? stored.join(", ") : "(none)";
+    throw new Error(`No credentials stored for ${normalizeDomain(step.domain)}. Stored domains: ${storedList}. ` + `If you stored credentials under a different domain name, retry the login step with that domain. ` + `If no credentials are stored at all, call the \`credentials\` tool with action=store first.`);
+  }
+  let credential;
+  try {
+    credential = JSON.parse(decrypt(blob, credKey));
+  } catch (decryptErr) {
+    const errMsg = decryptErr instanceof Error ? decryptErr.message : String(decryptErr);
+    throw new Error(`Credentials for ${matchedDomain} exist in the store but cannot be decrypted ` + `(${errMsg}). This usually means the encryption key (~/.iframer/secret or IFRAMER_SECRET) ` + `changed since the row was written, orphaning the old blob. ` + `Fix: ask the user to re-store the credentials by running in their terminal:
+
+` + `  iframer-toolkit credentials add ${normalizeDomain(step.domain)}
+
+` + `After they confirm it ran, retry the login step.`);
+  }
+  if (matchedDomain !== normalizeDomain(step.domain)) {
+    log4.info(`login: credentials for ${step.domain} resolved via parent domain ${matchedDomain}`);
+  }
   const beforeUrl = page.url();
   const reactFillSelector = async (selector, value) => {
     await page.click(selector);
@@ -1819,10 +2176,63 @@ async function handleLogin(page, step, ctx) {
       await page.waitForTimeout(TIMING.POST_TOTP_WAIT);
     }
   } else {
-    log3.info(`login: auto-detecting form on ${beforeUrl}`);
+    log4.info(`login: auto-detecting form on ${beforeUrl}`);
+    await page.waitForLoadState("domcontentloaded").catch(() => {});
+    await page.waitForTimeout(500);
+    const initialCheck = await page.evaluate(() => {
+      const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])');
+      const pwdVisible = !!(pwd && pwd.offsetParent !== null);
+      return { url: location.href, title: document.title, pwdVisible };
+    }).catch(() => ({ url: page.url(), title: "", pwdVisible: false }));
+    const urlLooksLikeLogin = /\b(login|signin|sign-in|auth|oauth)\b/i.test(initialCheck.url);
+    if (!initialCheck.pwdVisible && !urlLooksLikeLogin) {
+      log4.info(`login: already logged in (no password field, URL=${initialCheck.url})`);
+      return {
+        loggedIn: true,
+        alreadyLoggedIn: true,
+        url: initialCheck.url,
+        reason: "Session already authenticated — no login form detected"
+      };
+    }
     const passwordHandle = await page.waitForSelector('input[type="password"]:not([disabled]):not([readonly])', { state: "visible", timeout: TIMEOUTS.SELECTOR_WAIT }).catch(() => null);
     if (!passwordHandle) {
-      throw new Error(`login: no visible password field found on ${beforeUrl}. If the site uses a multi-step form, navigate to the actual password page first, or pass explicit selectors.`);
+      const currentUrl = page.url();
+      if (!/\b(login|signin|sign-in|auth|oauth)\b/i.test(currentUrl)) {
+        log4.info(`login: no password field and URL left login area (${currentUrl}) — treating as success`);
+        return {
+          loggedIn: true,
+          alreadyLoggedIn: true,
+          url: currentUrl,
+          reason: "No login form detected after wait — assumed already authenticated"
+        };
+      }
+      const pageDiag = await page.evaluate(() => {
+        const visibleText = (document.body?.innerText || "").slice(0, 500);
+        const inputCount = document.querySelectorAll("input").length;
+        const hiddenPassword = !!document.querySelector('input[type="password"]');
+        const hasCaptcha = !!document.querySelector('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], [class*="captcha" i], [id*="captcha" i]');
+        const hasCloudflare = !!document.querySelector('[class*="cf-" i], iframe[src*="challenges.cloudflare"]');
+        return {
+          title: document.title,
+          visibleText,
+          inputCount,
+          hiddenPassword,
+          hasCaptcha,
+          hasCloudflare
+        };
+      }).catch(() => ({ title: "", visibleText: "", inputCount: 0, hiddenPassword: false, hasCaptcha: false, hasCloudflare: false }));
+      log4.warn(`login: no visible password field on ${currentUrl} — title="${pageDiag.title}", inputs=${pageDiag.inputCount}, hiddenPwd=${pageDiag.hiddenPassword}, captcha=${pageDiag.hasCaptcha}, cloudflare=${pageDiag.hasCloudflare}`);
+      const indicators = [];
+      if (pageDiag.hasCaptcha)
+        indicators.push("CAPTCHA detected");
+      if (pageDiag.hasCloudflare)
+        indicators.push("Cloudflare challenge");
+      if (pageDiag.inputCount === 0)
+        indicators.push("no input elements at all");
+      if (pageDiag.hiddenPassword)
+        indicators.push("password field exists but is hidden/disabled");
+      const indicatorStr = indicators.length > 0 ? ` (${indicators.join(", ")})` : "";
+      throw new Error(`login: no visible password field on ${currentUrl} after ${TIMEOUTS.SELECTOR_WAIT}ms${indicatorStr}. ` + `Page title: "${pageDiag.title}". ` + `The site is likely showing a bot-detection wall or captcha instead of the normal login form. ` + `Retry with a stronger browser mode (binary-headful or docker-headful).`);
     }
     const usernameHandle = await page.evaluateHandle(() => {
       const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])');
@@ -1864,7 +2274,7 @@ async function handleLogin(page, step, ctx) {
     if (usernameEl && credential.username) {
       await fillHandle(usernameEl, credential.username);
     } else if (!usernameEl) {
-      log3.warn("login: no username field detected, proceeding with password only");
+      log4.warn("login: no username field detected, proceeding with password only");
     }
     if (credential.password) {
       await fillHandle(passwordHandle, credential.password);
@@ -1894,7 +2304,7 @@ async function handleLogin(page, step, ctx) {
         await submitEl.evaluate((el) => el.click());
       });
     } else {
-      log3.warn("login: no submit button detected, pressing Enter in password field");
+      log4.warn("login: no submit button detected, pressing Enter in password field");
       await passwordHandle.press("Enter").catch(() => {});
     }
     await page.waitForLoadState("domcontentloaded").catch(() => {});
@@ -1908,13 +2318,13 @@ async function handleLogin(page, step, ctx) {
       let code = null;
       if (credential.totp_secret) {
         code = generateTOTP(credential.totp_secret);
-        log3.info(`login: generated TOTP from stored secret for ${step.domain}`);
+        log4.info(`login: generated TOTP from stored secret for ${step.domain}`);
       } else if (ctx.elicitOtp) {
-        log3.info(`login: prompting user for OTP for ${step.domain}`);
+        log4.info(`login: prompting user for OTP for ${step.domain}`);
         try {
           code = await ctx.elicitOtp(step.domain);
         } catch (err) {
-          log3.warn(`login: OTP elicitation failed: ${err instanceof Error ? err.message : String(err)}`);
+          log4.warn(`login: OTP elicitation failed: ${err instanceof Error ? err.message : String(err)}`);
         }
         if (!code) {
           throw new Error(`login: OTP required but user did not provide one for ${step.domain}`);
@@ -1962,13 +2372,13 @@ async function executeAction(page, step, ctx, monitor) {
         try {
           await page.evaluate(stealthScript);
         } catch (err) {
-          log3.warn(`stealth injection failed: ${err}`);
+          log4.warn(`stealth injection failed: ${err}`);
         }
         if (ctx.sessionData) {
           try {
             await injectStorage(page, ctx.sessionData);
           } catch (err) {
-            log3.warn(`storage injection after navigate failed: ${err}`);
+            log4.warn(`storage injection after navigate failed: ${err}`);
           }
         }
         break;
@@ -2102,19 +2512,20 @@ async function executeAction(page, step, ctx, monitor) {
     };
   }
 }
-var log3;
+var log4;
 var init_actions = __esm(() => {
   init_stealth();
   init_humanize();
   init_recaptcha();
   init_hcaptcha();
   init_crypto();
+  init_knowledge();
   init_screenshot();
   init_snapshot();
   init_annotate();
   init_logger();
   init_constants();
-  log3 = createLogger("actions");
+  log4 = createLogger("actions");
 });
 
 // src/lib/stale-monitor.ts
@@ -2410,8 +2821,8 @@ function isAuthHeader(name) {
 function isLikelyId(segment) {
   return ID_PATTERNS.some((p) => p.test(segment));
 }
-function parameterizePath(path2) {
-  const parts = path2.split("/");
+function parameterizePath(path5) {
+  const parts = path5.split("/");
   let idCount = 0;
   const parameterized = parts.map((part) => {
     if (part && isLikelyId(part)) {
@@ -2708,6 +3119,9 @@ function classifyError(err, step) {
   if (err instanceof StaleStateError)
     return "stale-state";
   const msg = err.message.toLowerCase();
+  if (step.type === "login" && (msg.includes("no visible password field") || msg.includes("password field was not visible"))) {
+    return "bot-blocked";
+  }
   if (msg.includes("timeout") || msg.includes("timed out"))
     return "timeout";
   if (msg.includes("not found") || msg.includes("no element") || msg.includes("waiting for selector"))
@@ -2898,7 +3312,7 @@ var init_pipeline = __esm(() => {
 function findChromeExecutable() {
   if (process.env.CHROME_EXECUTABLE)
     return process.env.CHROME_EXECUTABLE;
-  if (import_fs2.default.existsSync("/usr/bin/google-chrome-stable"))
+  if (import_fs4.default.existsSync("/usr/bin/google-chrome-stable"))
     return "/usr/bin/google-chrome-stable";
   return;
 }
@@ -2916,7 +3330,7 @@ async function getBrowserWithFallback(_preferred) {
 }
 async function launchHeadful(displayNum) {
   const executablePath = findChromeExecutable();
-  const hasExtensions = import_fs2.default.existsSync(UBLOCK_PATH);
+  const hasExtensions = import_fs4.default.existsSync(UBLOCK_PATH);
   const args = [
     "--no-sandbox",
     "--disable-setuid-sandbox",
@@ -2938,16 +3352,16 @@ async function launchHeadful(displayNum) {
   };
   if (executablePath)
     launchOpts.executablePath = executablePath;
-  log4.debug(`headful: ${executablePath || "patchright chromium"}, extensions: ${hasExtensions}`);
+  log5.debug(`headful: ${executablePath || "patchright chromium"}, extensions: ${hasExtensions}`);
   return import_patchright.chromium.launch(launchOpts);
 }
-var import_fs2, import_patchright, log4, UBLOCK_PATH = "/extensions/uBlock0.chromium", cachedBrowser = null;
+var import_fs4, import_patchright, log5, UBLOCK_PATH = "/extensions/uBlock0.chromium", cachedBrowser = null;
 var init_launcher = __esm(() => {
   init_stealth();
   init_logger();
-  import_fs2 = __toESM(require("fs"));
+  import_fs4 = __toESM(require("fs"));
   import_patchright = require("patchright");
-  log4 = createLogger("launcher");
+  log5 = createLogger("launcher");
 });
 
 // src/lib/browser/fingerprint.ts
@@ -3003,7 +3417,7 @@ function waitForSocket(displayNum, timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
     const start = Date.now();
     const check = () => {
-      if (import_fs3.default.existsSync(socketPath))
+      if (import_fs5.default.existsSync(socketPath))
         return resolve();
       if (Date.now() - start > timeoutMs)
         return reject(new Error(`Xvfb socket not ready after ${timeoutMs}ms`));
@@ -3031,7 +3445,7 @@ async function startSession(userId) {
   });
   await waitForSocket(displayNum);
   const x11vnc = import_child_process.spawn("x11vnc", ["-display", `:${displayNum}`, "-nopw", "-listen", "localhost", "-rfbport", String(vncPort), "-shared", "-forever"], { stdio: "ignore" });
-  const noVncPath = import_fs3.default.existsSync("/usr/share/novnc") ? "/usr/share/novnc" : "/usr/share/noVNC";
+  const noVncPath = import_fs5.default.existsSync("/usr/share/novnc") ? "/usr/share/novnc" : "/usr/share/noVNC";
   const websockify = import_child_process.spawn("websockify", ["--web", noVncPath, String(wsPort), `localhost:${vncPort}`], {
     stdio: "ignore"
   });
@@ -3043,7 +3457,7 @@ async function startSession(userId) {
   const stealthScript = buildStealthScript(fingerprint);
   contextStealthScripts.set(context, stealthScript);
   const page = await context.newPage();
-  log5.debug(`fingerprint: ${fingerprint.userAgent.slice(0, 60)}... DPR=${fingerprint.deviceScaleFactor} screen=${fingerprint.screenWidth}x${fingerprint.screenHeight}`);
+  log6.debug(`fingerprint: ${fingerprint.userAgent.slice(0, 60)}... DPR=${fingerprint.deviceScaleFactor} screen=${fingerprint.screenWidth}x${fingerprint.screenHeight}`);
   const session = {
     displayNum,
     vncPort,
@@ -3093,7 +3507,7 @@ async function stopSession(userId) {
   killProcess(session.xvfb);
   await new Promise((r) => setTimeout(r, 1000));
   try {
-    import_fs3.default.unlinkSync(`/tmp/.X11-unix/X${session.displayNum}`);
+    import_fs5.default.unlinkSync(`/tmp/.X11-unix/X${session.displayNum}`);
   } catch {}
   freeDisplay(session.displayNum);
   sessions.delete(userId);
@@ -3103,299 +3517,20 @@ async function cleanupAllSessions() {
   const userIds = [...sessions.keys()];
   await Promise.all(userIds.map((id) => stopSession(id)));
 }
-var import_child_process, import_fs3, log5, BASE_DISPLAY, MAX_SESSIONS, SESSION_TIMEOUT, sessions, usedDisplays;
+var import_child_process, import_fs5, log6, BASE_DISPLAY, MAX_SESSIONS, SESSION_TIMEOUT, sessions, usedDisplays;
 var init_session_manager = __esm(() => {
   init_launcher();
   init_stealth();
   init_logger();
   init_fingerprint();
   import_child_process = require("child_process");
-  import_fs3 = __toESM(require("fs"));
-  log5 = createLogger("session");
+  import_fs5 = __toESM(require("fs"));
+  log6 = createLogger("session");
   BASE_DISPLAY = parseInt(process.env.VNC_BASE_DISPLAY || "99", 10);
   MAX_SESSIONS = parseInt(process.env.VNC_MAX_SESSIONS || "20", 10);
   SESSION_TIMEOUT = parseInt(process.env.VNC_SESSION_TIMEOUT_MS || "300000", 10);
   sessions = new Map;
   usedDisplays = new Set;
-});
-
-// src/lib/knowledge.ts
-function getKnowledgeDir() {
-  return import_path2.default.join(import_os.default.homedir(), ".iframer", "knowledge");
-}
-function getKnowledgePath(domain) {
-  const safe = sanitizeDomain(domain);
-  return import_path2.default.join(getKnowledgeDir(), `${safe}.md`);
-}
-function sanitizeDomain(input) {
-  let d = input.trim().toLowerCase();
-  try {
-    if (d.includes("://"))
-      d = new URL(d).hostname;
-  } catch {}
-  d = d.replace(/^www\./, "");
-  return d.replace(/[^a-z0-9.-]/g, "_");
-}
-function ensureDir() {
-  import_fs4.default.mkdirSync(getKnowledgeDir(), { recursive: true });
-}
-function readKnowledge(domain) {
-  const p = getKnowledgePath(domain);
-  try {
-    return import_fs4.default.readFileSync(p, "utf8");
-  } catch {
-    return null;
-  }
-}
-function parseKnowledge(domain) {
-  const raw = readKnowledge(domain);
-  if (!raw)
-    return null;
-  return parseMarkdown(raw);
-}
-function listKnowledge() {
-  const dir = getKnowledgeDir();
-  let entries = [];
-  try {
-    entries = import_fs4.default.readdirSync(dir);
-  } catch {
-    return [];
-  }
-  const results = [];
-  for (const file of entries) {
-    if (!file.endsWith(".md"))
-      continue;
-    const full = import_path2.default.join(dir, file);
-    try {
-      const stat = import_fs4.default.statSync(full);
-      const raw = import_fs4.default.readFileSync(full, "utf8");
-      const parsed = parseMarkdown(raw);
-      results.push({
-        domain: parsed?.domain ?? file.replace(/\.md$/, ""),
-        lastVerified: parsed?.lastVerified ?? new Date(stat.mtimeMs).toISOString(),
-        lastMode: parsed?.lastMode ?? "unknown",
-        sizeBytes: stat.size
-      });
-    } catch {}
-  }
-  results.sort((a, b) => a.lastVerified < b.lastVerified ? 1 : -1);
-  return results;
-}
-function clearKnowledge(domain) {
-  const dir = getKnowledgeDir();
-  if (domain) {
-    const p = getKnowledgePath(domain);
-    try {
-      import_fs4.default.unlinkSync(p);
-      return { removed: 1 };
-    } catch {
-      return { removed: 0 };
-    }
-  }
-  let removed = 0;
-  try {
-    const entries = import_fs4.default.readdirSync(dir);
-    for (const f of entries) {
-      if (f.endsWith(".md")) {
-        try {
-          import_fs4.default.unlinkSync(import_path2.default.join(dir, f));
-          removed++;
-        } catch {}
-      }
-    }
-  } catch {}
-  return { removed };
-}
-function mergeKnowledge(domain, updates) {
-  ensureDir();
-  const existing = parseKnowledge(domain);
-  const merged = {
-    domain: sanitizeDomain(domain),
-    lastVerified: updates.lastVerified ?? new Date().toISOString(),
-    lastMode: updates.lastMode ?? existing?.lastMode ?? "unknown",
-    browserRequired: updates.browserRequired ?? existing?.browserRequired ?? true,
-    auth: updates.auth ?? existing?.auth ?? { type: "unknown" },
-    endpoints: dedupeEndpoints([...existing?.endpoints ?? [], ...updates.endpoints ?? []]),
-    notes: dedupeNotes([...existing?.notes ?? [], ...updates.notes ?? []])
-  };
-  const md = renderMarkdown(merged);
-  import_fs4.default.writeFileSync(getKnowledgePath(domain), md, "utf8");
-  log6.info(`knowledge updated: ${merged.domain} (${merged.endpoints.length} endpoints)`);
-}
-function dedupeEndpoints(endpoints) {
-  const seen = new Map;
-  for (const ep of endpoints) {
-    const key = `${ep.method.toUpperCase()} ${ep.path}`;
-    const existing = seen.get(key);
-    if (!existing) {
-      seen.set(key, ep);
-    } else {
-      seen.set(key, {
-        ...existing,
-        description: ep.description || existing.description,
-        example: ep.example || existing.example,
-        firstSeen: existing.firstSeen || ep.firstSeen
-      });
-    }
-  }
-  return [...seen.values()].sort((a, b) => {
-    if (a.path !== b.path)
-      return a.path < b.path ? -1 : 1;
-    return a.method < b.method ? -1 : 1;
-  });
-}
-function dedupeNotes(notes) {
-  const seen = new Set;
-  const out = [];
-  for (const note of notes) {
-    const n = note.trim();
-    if (n && !seen.has(n)) {
-      seen.add(n);
-      out.push(n);
-    }
-  }
-  return out;
-}
-function renderMarkdown(data) {
-  const lines = [];
-  lines.push("---");
-  lines.push(`domain: ${data.domain}`);
-  lines.push(`lastVerified: ${data.lastVerified}`);
-  lines.push(`lastMode: ${data.lastMode}`);
-  lines.push(`browserRequired: ${data.browserRequired}`);
-  lines.push(`authType: ${data.auth.type}`);
-  lines.push("---");
-  lines.push("");
-  lines.push(`# ${data.domain}`);
-  lines.push("");
-  lines.push(`Last verified: **${data.lastVerified}** via \`${data.lastMode}\` mode.`);
-  lines.push("");
-  lines.push("## Auth material");
-  lines.push("");
-  lines.push(`**Type:** ${data.auth.type}`);
-  if (data.auth.cookieNames?.length) {
-    lines.push(`**Required cookies:** ${data.auth.cookieNames.map((n) => `\`${n}\``).join(", ")}`);
-  }
-  if (data.auth.localStorageKeys?.length) {
-    lines.push(`**localStorage keys:** ${data.auth.localStorageKeys.map((n) => `\`${n}\``).join(", ")}`);
-  }
-  if (data.auth.sessionStorageKeys?.length) {
-    lines.push(`**sessionStorage keys:** ${data.auth.sessionStorageKeys.map((n) => `\`${n}\``).join(", ")}`);
-  }
-  if (data.auth.headers?.length) {
-    lines.push(`**Request headers:** ${data.auth.headers.map((n) => `\`${n}\``).join(", ")}`);
-  }
-  lines.push("");
-  lines.push("> _Structure only — actual values are stored encrypted in the session store._");
-  lines.push("");
-  if (data.endpoints.length > 0) {
-    lines.push("## Known endpoints");
-    lines.push("");
-    lines.push("The agent can call these directly (with the auth material above) instead of launching a browser.");
-    lines.push("");
-    for (const ep of data.endpoints) {
-      lines.push(`### ${ep.method.toUpperCase()} ${ep.path}`);
-      if (ep.description)
-        lines.push("");
-      if (ep.description)
-        lines.push(ep.description);
-      if (ep.example) {
-        lines.push("");
-        lines.push("```");
-        lines.push(ep.example);
-        lines.push("```");
-      }
-      lines.push("");
-    }
-  } else {
-    lines.push("## Known endpoints");
-    lines.push("");
-    lines.push("_None captured yet. Enable `captureApi: true` on the next `execute` run to populate this section._");
-    lines.push("");
-  }
-  if (data.notes.length > 0) {
-    lines.push("## Notes");
-    lines.push("");
-    for (const n of data.notes)
-      lines.push(`- ${n}`);
-    lines.push("");
-  }
-  return lines.join(`
-`);
-}
-function parseMarkdown(raw) {
-  const frontmatterMatch = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n/);
-  if (!frontmatterMatch)
-    return null;
-  const fm = {};
-  for (const line of frontmatterMatch[1].split(`
-`)) {
-    const m = line.match(/^(\w+):\s*(.*)$/);
-    if (m)
-      fm[m[1]] = m[2].trim();
-  }
-  const body = raw.slice(frontmatterMatch[0].length);
-  const auth = { type: fm.authType ?? "unknown" };
-  const authSection = extractSection(body, "Auth material");
-  if (authSection) {
-    auth.cookieNames = extractBackticks(/\*\*Required cookies:\*\*\s+(.+)/, authSection);
-    auth.localStorageKeys = extractBackticks(/\*\*localStorage keys:\*\*\s+(.+)/, authSection);
-    auth.sessionStorageKeys = extractBackticks(/\*\*sessionStorage keys:\*\*\s+(.+)/, authSection);
-    auth.headers = extractBackticks(/\*\*Request headers:\*\*\s+(.+)/, authSection);
-  }
-  const endpoints = [];
-  const endpointSection = extractSection(body, "Known endpoints");
-  if (endpointSection) {
-    const endpointRegex = /^### (GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\S+)\s*$/gim;
-    let m;
-    while ((m = endpointRegex.exec(endpointSection)) !== null) {
-      endpoints.push({ method: m[1], path: m[2] });
-    }
-  }
-  const notes = [];
-  const notesSection = extractSection(body, "Notes");
-  if (notesSection) {
-    for (const line of notesSection.split(`
-`)) {
-      const m = line.match(/^-\s+(.+)$/);
-      if (m)
-        notes.push(m[1].trim());
-    }
-  }
-  return {
-    domain: fm.domain ?? "",
-    lastVerified: fm.lastVerified ?? "",
-    lastMode: fm.lastMode ?? "unknown",
-    browserRequired: fm.browserRequired !== "false",
-    auth,
-    endpoints,
-    notes
-  };
-}
-function extractSection(body, heading) {
-  const re = new RegExp(`^##\\s+${heading}\\s*$`, "m");
-  const match = body.match(re);
-  if (!match || match.index === undefined)
-    return null;
-  const start = match.index + match[0].length;
-  const nextSection = body.slice(start).match(/^##\s+/m);
-  const end = nextSection?.index != null ? start + nextSection.index : body.length;
-  return body.slice(start, end);
-}
-function extractBackticks(re, text) {
-  const m = text.match(re);
-  if (!m)
-    return;
-  const items = [...m[1].matchAll(/`([^`]+)`/g)].map((x) => x[1]);
-  return items.length > 0 ? items : undefined;
-}
-var import_fs4, import_path2, import_os, log6;
-var init_knowledge = __esm(() => {
-  init_logger();
-  import_fs4 = __toESM(require("fs"));
-  import_path2 = __toESM(require("path"));
-  import_os = __toESM(require("os"));
-  log6 = createLogger("knowledge");
 });
 
 // src/lib/session/sqlite-store.ts
@@ -3437,8 +3572,8 @@ function createNodeDb(dbPath) {
 class SqliteStore {
   db;
   constructor(dataDir) {
-    import_fs5.default.mkdirSync(dataDir, { recursive: true });
-    const dbPath = import_path3.default.join(dataDir, "iframer.db");
+    import_fs6.default.mkdirSync(dataDir, { recursive: true });
+    const dbPath = import_path5.default.join(dataDir, "iframer.db");
     this.db = IS_BUN ? createBunDb(dbPath) : createNodeDb(dbPath);
     this.db.run(`
       CREATE TABLE IF NOT EXISTS sessions (
@@ -3454,6 +3589,17 @@ class SqliteStore {
         PRIMARY KEY (user_id, domain)
       )
     `);
+    this.migrateLegacyUserIds();
+  }
+  migrateLegacyUserIds() {
+    const CANONICAL = "iframer-local";
+    const LEGACY = ["cli-user", "mcp-user"];
+    for (const legacy of LEGACY) {
+      this.db.run(`INSERT OR IGNORE INTO credentials (user_id, domain, blob)
+         SELECT ?, domain, blob FROM credentials WHERE user_id = ?`, CANONICAL, legacy);
+      this.db.run(`INSERT OR IGNORE INTO sessions (user_id, blob)
+         SELECT ?, blob FROM sessions WHERE user_id = ?`, CANONICAL, legacy);
+    }
   }
   async getSession(userId) {
     const row = this.db.queryGet("SELECT blob FROM sessions WHERE user_id = ?", userId);
@@ -3483,23 +3629,21 @@ class SqliteStore {
     this.db.close();
   }
 }
-var import_path3, import_fs5, IS_BUN;
+var import_path5, import_fs6, IS_BUN;
 var init_sqlite_store = __esm(() => {
-  import_path3 = __toESM(require("path"));
-  import_fs5 = __toESM(require("fs"));
+  import_path5 = __toESM(require("path"));
+  import_fs6 = __toESM(require("fs"));
   IS_BUN = typeof globalThis.Bun !== "undefined";
 });
 
 // src/lib/storage.ts
 function createStore(options = {}) {
-  const dataDir = options.dataDir || import_path4.default.join(import_os2.default.homedir(), ".iframer");
+  const dataDir = options.dataDir || getDataDir();
   return new SqliteStore(dataDir);
 }
-var import_path4, import_os2;
 var init_storage = __esm(() => {
   init_sqlite_store();
-  import_path4 = __toESM(require("path"));
-  import_os2 = __toESM(require("os"));
+  init_paths();
 });
 
 // src/lib/browser/chrome-downloader.ts
@@ -3525,19 +3669,19 @@ function getPlatform() {
 function getChromeExecutablePath(installDir) {
   const platform = process.platform;
   if (platform === "darwin") {
-    const entries = import_fs6.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
+    const entries = import_fs7.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
     const dir = entries[0] || "chrome-mac-arm64";
-    return import_path5.default.join(installDir, dir, "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing");
+    return import_path6.default.join(installDir, dir, "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing");
   }
   if (platform === "linux") {
-    const entries = import_fs6.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
+    const entries = import_fs7.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
     const dir = entries[0] || "chrome-linux64";
-    return import_path5.default.join(installDir, dir, "chrome");
+    return import_path6.default.join(installDir, dir, "chrome");
   }
   if (platform === "win32") {
-    const entries = import_fs6.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
+    const entries = import_fs7.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
     const dir = entries[0] || "chrome-win64";
-    return import_path5.default.join(installDir, dir, "chrome.exe");
+    return import_path6.default.join(installDir, dir, "chrome.exe");
   }
   throw new Error(`Unsupported platform: ${platform}`);
 }
@@ -3558,35 +3702,35 @@ async function downloadChrome(installDir = DEFAULT_INSTALL_DIR) {
   const version = channel.version;
   log7.debug(`Version ${version} for ${platform}`);
   log7.debug(`URL: ${url}`);
-  import_fs6.default.mkdirSync(installDir, { recursive: true });
-  const zipPath = import_path5.default.join(installDir, "chrome.zip");
+  import_fs7.default.mkdirSync(installDir, { recursive: true });
+  const zipPath = import_path6.default.join(installDir, "chrome.zip");
   const dlRes = await fetch(url);
   if (!dlRes.ok)
     throw new Error(`Download failed: ${dlRes.status}`);
   const buf = Buffer.from(await dlRes.arrayBuffer());
-  import_fs6.default.writeFileSync(zipPath, buf);
+  import_fs7.default.writeFileSync(zipPath, buf);
   log7.info(`Downloaded ${(buf.length / 1024 / 1024).toFixed(1)}MB`);
   import_child_process2.execSync(`unzip -o -q "${zipPath}" -d "${installDir}"`, { stdio: "inherit" });
-  import_fs6.default.unlinkSync(zipPath);
+  import_fs7.default.unlinkSync(zipPath);
   const execPath = getChromeExecutablePath(installDir);
-  if (!import_fs6.default.existsSync(execPath)) {
+  if (!import_fs7.default.existsSync(execPath)) {
     throw new Error(`Chrome executable not found after extraction: ${execPath}`);
   }
   if (process.platform !== "win32") {
-    import_fs6.default.chmodSync(execPath, 493);
+    import_fs7.default.chmodSync(execPath, 493);
   }
-  import_fs6.default.writeFileSync(import_path5.default.join(installDir, "version.json"), JSON.stringify({ version, platform, downloadedAt: new Date().toISOString() }));
+  import_fs7.default.writeFileSync(import_path6.default.join(installDir, "version.json"), JSON.stringify({ version, platform, downloadedAt: new Date().toISOString() }));
   log7.info(`Installed at: ${execPath}`);
   return execPath;
 }
 function findChromeForTesting() {
   if (process.env.CHROME_EXECUTABLE) {
-    if (import_fs6.default.existsSync(process.env.CHROME_EXECUTABLE))
+    if (import_fs7.default.existsSync(process.env.CHROME_EXECUTABLE))
       return process.env.CHROME_EXECUTABLE;
   }
   try {
     const execPath = getChromeExecutablePath(DEFAULT_INSTALL_DIR);
-    if (import_fs6.default.existsSync(execPath))
+    if (import_fs7.default.existsSync(execPath))
       return execPath;
   } catch {}
   return null;
@@ -3606,8 +3750,8 @@ function findChrome() {
     "/usr/bin/chromium",
     ...(() => {
       try {
-        const dirs = import_fs6.default.readdirSync("/ms-playwright").filter((d) => d.startsWith("chromium-")).sort().reverse();
-        return dirs.map((d) => import_path5.default.join("/ms-playwright", d, "chrome-linux", "chrome"));
+        const dirs = import_fs7.default.readdirSync("/ms-playwright").filter((d) => d.startsWith("chromium-")).sort().reverse();
+        return dirs.map((d) => import_path6.default.join("/ms-playwright", d, "chrome-linux", "chrome"));
       } catch {
         return [];
       }
@@ -3617,7 +3761,7 @@ function findChrome() {
     "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
   ];
   for (const p of systemPaths) {
-    if (import_fs6.default.existsSync(p))
+    if (import_fs7.default.existsSync(p))
       return p;
   }
   return null;
@@ -3641,15 +3785,15 @@ async function ensureChrome() {
     throw new Error("No Chrome found. Download failed and no system Chrome available.");
   }
 }
-var import_fs6, import_path5, import_os3, import_child_process2, log7, CHROME_VERSIONS_URL = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json", DEFAULT_INSTALL_DIR;
+var import_fs7, import_path6, import_os2, import_child_process2, log7, CHROME_VERSIONS_URL = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json", DEFAULT_INSTALL_DIR;
 var init_chrome_downloader = __esm(() => {
   init_logger();
-  import_fs6 = __toESM(require("fs"));
-  import_path5 = __toESM(require("path"));
-  import_os3 = __toESM(require("os"));
+  import_fs7 = __toESM(require("fs"));
+  import_path6 = __toESM(require("path"));
+  import_os2 = __toESM(require("os"));
   import_child_process2 = require("child_process");
   log7 = createLogger("chrome");
-  DEFAULT_INSTALL_DIR = import_path5.default.join(import_os3.default.homedir(), ".iframer", "chrome");
+  DEFAULT_INSTALL_DIR = import_path6.default.join(import_os2.default.homedir(), ".iframer", "chrome");
 });
 
 // src/lib/browser/daemon.ts
@@ -3700,8 +3844,8 @@ class BrowserDaemon {
     }
     const executablePath = await ensureChrome();
     log8.info(`Launching Chrome for Testing in ${mode} mode: ${executablePath}`);
-    const userDataDir = import_path6.default.join(import_os4.default.homedir(), ".iframer", "chrome-profile", mode);
-    import_fs7.default.mkdirSync(userDataDir, { recursive: true });
+    const userDataDir = import_path7.default.join(import_os3.default.homedir(), ".iframer", "chrome-profile", mode);
+    import_fs8.default.mkdirSync(userDataDir, { recursive: true });
     const browser = await import_patchright2.chromium.launch({
       executablePath,
       headless: mode === "headless",
@@ -3776,14 +3920,14 @@ class BrowserDaemon {
     }, this.idleTimeout));
   }
 }
-var import_patchright2, import_os4, import_path6, import_fs7, log8, DEFAULT_IDLE_TIMEOUT;
+var import_patchright2, import_os3, import_path7, import_fs8, log8, DEFAULT_IDLE_TIMEOUT;
 var init_daemon = __esm(() => {
   init_chrome_downloader();
   init_logger();
   import_patchright2 = require("patchright");
-  import_os4 = __toESM(require("os"));
-  import_path6 = __toESM(require("path"));
-  import_fs7 = __toESM(require("fs"));
+  import_os3 = __toESM(require("os"));
+  import_path7 = __toESM(require("path"));
+  import_fs8 = __toESM(require("fs"));
   log8 = createLogger("daemon");
   DEFAULT_IDLE_TIMEOUT = 5 * 60 * 1000;
 });
@@ -3793,11 +3937,14 @@ var exports_domain_modes = {};
 __export(exports_domain_modes, {
   DomainModeStore: () => DomainModeStore
 });
+function defaultFile() {
+  return import_path8.default.join(getDataDir(), "domain-modes.json");
+}
 
 class DomainModeStore {
   data = {};
   filePath;
-  constructor(filePath = DEFAULT_FILE) {
+  constructor(filePath = defaultFile()) {
     this.filePath = filePath;
     this.load();
   }
@@ -3870,8 +4017,8 @@ class DomainModeStore {
   }
   load() {
     try {
-      if (import_fs8.default.existsSync(this.filePath)) {
-        this.data = JSON.parse(import_fs8.default.readFileSync(this.filePath, "utf-8"));
+      if (import_fs9.default.existsSync(this.filePath)) {
+        this.data = JSON.parse(import_fs9.default.readFileSync(this.filePath, "utf-8"));
       }
     } catch {
       this.data = {};
@@ -3879,21 +4026,20 @@ class DomainModeStore {
   }
   save() {
     try {
-      import_fs8.default.mkdirSync(import_path7.default.dirname(this.filePath), { recursive: true });
-      import_fs8.default.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2));
+      import_fs9.default.mkdirSync(import_path8.default.dirname(this.filePath), { recursive: true });
+      import_fs9.default.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2));
     } catch (err) {
       log9.error("Failed to save:", err);
     }
   }
 }
-var import_fs8, import_path7, import_os5, log9, DEFAULT_FILE, TTL_DAYS = 14, ESCALATION_LADDER;
+var import_fs9, import_path8, log9, TTL_DAYS = 14, ESCALATION_LADDER;
 var init_domain_modes = __esm(() => {
   init_logger();
-  import_fs8 = __toESM(require("fs"));
-  import_path7 = __toESM(require("path"));
-  import_os5 = __toESM(require("os"));
+  init_paths();
+  import_fs9 = __toESM(require("fs"));
+  import_path8 = __toESM(require("path"));
   log9 = createLogger("domain-modes");
-  DEFAULT_FILE = import_path7.default.join(import_os5.default.homedir(), ".iframer", "domain-modes.json");
   ESCALATION_LADDER = ["headless", "docker-headful", "binary-headful"];
 });
 
@@ -4001,9 +4147,7 @@ class Iframer {
     this.screenshotDir = config.screenshotDir || DEFAULT_SCREENSHOT_DIR;
     this.publicUrl = config.publicUrl || DEFAULT_PUBLIC_URL;
     this.staleTimeoutMs = config.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS3;
-    this.store = createStore({
-      dataDir: config.dataDir || import_path8.default.join(import_os6.default.homedir(), ".iframer")
-    });
+    this.store = createStore({ dataDir: config.dataDir });
     this.daemon = new BrowserDaemon(config.sessionTimeoutMs);
     this.domainModes = new DomainModeStore;
     this.operatingMode = config.mode || "local";
@@ -4482,35 +4626,52 @@ class Iframer {
   }
   async storeCredential(userId, token, credential) {
     const credKey = await deriveKey(token, "credentials");
+    const normalizedDomain = normalizeDomain(credential.domain);
     const data = {
       ...credential,
+      domain: normalizedDomain,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
     const encrypted = encrypt(JSON.stringify(data), credKey);
-    await this.store.setCredential(userId, credential.domain, encrypted);
+    await this.store.setCredential(userId, normalizedDomain, encrypted);
   }
   async getCredential(userId, token, domain) {
     const credKey = await deriveKey(token, "credentials");
-    const blob = await this.store.getCredential(userId, domain);
-    if (!blob || blob.length === 0)
-      return null;
-    return JSON.parse(decrypt(blob, credKey));
+    for (const candidate of domainLookupChain(domain)) {
+      const blob = await this.store.getCredential(userId, candidate);
+      if (blob && blob.length > 0) {
+        try {
+          return JSON.parse(decrypt(blob, credKey));
+        } catch (err) {
+          throw new Error(`Credentials for ${candidate} exist but cannot be decrypted. ` + `The encryption key has changed. Re-store with: ` + `iframer-toolkit credentials add ${candidate}`);
+        }
+      }
+    }
+    return null;
   }
   async listCredentials(userId) {
     return this.store.listCredentialDomains(userId);
   }
   async deleteCredential(userId, domain) {
-    await this.store.deleteCredential(userId, domain);
+    await this.store.deleteCredential(userId, normalizeDomain(domain));
   }
   async loginWithCredentials(userId, token, domain, selectors) {
     const session = getSession(userId);
     if (!session)
       return { ok: false, url: "", title: "", error: "No active interactive session. Start one first." };
     const credKey = await deriveKey(token, "credentials");
-    const blob = await this.store.getCredential(userId, domain);
-    if (!blob || blob.length === 0) {
-      return { ok: false, url: "", title: "", error: `No credentials stored for ${domain}` };
+    let blob = null;
+    for (const candidate of domainLookupChain(domain)) {
+      const b = await this.store.getCredential(userId, candidate);
+      if (b && b.length > 0) {
+        blob = b;
+        break;
+      }
+    }
+    if (!blob) {
+      const stored = await this.store.listCredentialDomains(userId);
+      return { ok: false, url: "", title: "", error: `No credentials stored for ${normalizeDomain(domain)}. Stored: ${stored.join(", ") || "(none)"}` };
     }
     const credential = JSON.parse(decrypt(blob, credKey));
     const page = session.page;
@@ -4549,7 +4710,7 @@ class Iframer {
     }
   }
 }
-var import_path8, import_os6, log12, DEFAULT_SCREENSHOT_DIR, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3 = 20000;
+var import_path9, log12, DEFAULT_SCREENSHOT_DIR, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3 = 20000;
 var init_iframer = __esm(() => {
   init_pipeline();
   init_session_manager();
@@ -4566,10 +4727,9 @@ var init_iframer = __esm(() => {
   init_cdp_launcher();
   init_constants();
   init_logger();
-  import_path8 = __toESM(require("path"));
-  import_os6 = __toESM(require("os"));
+  import_path9 = __toESM(require("path"));
   log12 = createLogger("iframer");
-  DEFAULT_SCREENSHOT_DIR = import_path8.default.join("/Users/eduardoverona/tools/iframer-toolkit/src/lib", "../../.screenshots");
+  DEFAULT_SCREENSHOT_DIR = import_path9.default.join("/Users/eduardoverona/tools/iframer-toolkit/src/lib", "../../.screenshots");
   DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
 });
 
@@ -4579,19 +4739,20 @@ var import_stdio = require("@modelcontextprotocol/sdk/server/stdio.js");
 
 // src/mcp/helpers.ts
 init_logger();
-var import_path9 = __toESM(require("path"));
-var import_os7 = __toESM(require("os"));
+init_crypto();
+var import_path10 = __toESM(require("path"));
+var import_os4 = __toESM(require("os"));
 var log13 = createLogger("mcp");
 var BASE_URL = process.env.IFRAMER_URL || "http://localhost:3021";
 var IFRAMER_SECRET = process.env.IFRAMER_SECRET;
 var IFRAMER_MODE = process.env.IFRAMER_MODE;
-var LOCAL_USER = "mcp-user";
-var LOCAL_TOKEN = IFRAMER_SECRET || "iframer-local-default-token";
+var LOCAL_USER = "iframer-local";
+var LOCAL_TOKEN = getLocalToken();
 var _iframer = null;
 async function getIframer() {
   if (!_iframer) {
     const { Iframer: Iframer2 } = await Promise.resolve().then(() => (init_iframer(), exports_iframer));
-    const screenshotDir = import_path9.default.join(import_os7.default.tmpdir(), "iframer-screenshots");
+    const screenshotDir = import_path10.default.join(import_os4.default.tmpdir(), "iframer-screenshots");
     _iframer = new Iframer2({
       screenshotDir,
       publicUrl: `file://${screenshotDir}`,
@@ -4617,10 +4778,6 @@ async function apiPost(endpoint, body) {
 }
 async function apiGet(endpoint) {
   const res = await fetch(`${BASE_URL}${endpoint}`, { headers: authHeaders() });
-  return res.json();
-}
-async function apiDelete(endpoint) {
-  const res = await fetch(`${BASE_URL}${endpoint}`, { method: "DELETE", headers: authHeaders() });
   return res.json();
 }
 async function isDockerRunning() {
@@ -4708,14 +4865,8 @@ function registerStatusTool(server) {
         } catch {}
       }
       try {
-        if (status.api) {
-          const credData = await apiGet("/credentials");
-          if (credData.ok)
-            status.credentials = credData.domains || [];
-        } else {
-          const iframer = await getIframer();
-          status.credentials = await iframer.listCredentials(LOCAL_USER);
-        }
+        const iframer = await getIframer();
+        status.credentials = await iframer.listCredentials(LOCAL_USER);
       } catch {}
       try {
         const { DomainModeStore: DomainModeStore2 } = await Promise.resolve().then(() => (init_domain_modes(), exports_domain_modes));
@@ -4732,7 +4883,7 @@ function registerStatusTool(server) {
 // src/mcp/tools/browse.ts
 var import_zod = require("zod");
 function registerBrowseTool(server) {
-  server.tool("browse", `Fetch a web page with a headless browser. Use for pages that need JavaScript rendering but don't have bot detection walls. Session cookies persist across calls.
+  server.tool("browse", `Fetch a web page with a headless browser. Use for pages that need JavaScript rendering but don't have bot detection walls. Session cookies and stored credentials persist across calls via the single local SQLite store.
 
 PRE-FLIGHT: Call \`knowledge get <domain>\` first. If the cache shows a direct-API path for the data you need, skip this tool and hit the endpoints directly — it's orders of magnitude faster.`, {
     url: import_zod.z.string().describe("URL to navigate to"),
@@ -4748,15 +4899,8 @@ PRE-FLIGHT: Call \`knowledge get <domain>\` first. If the cache shows a direct-A
     sessionless: import_zod.z.boolean().optional().describe("Skip session persistence")
   }, async (params) => {
     try {
-      const dockerRunning = await isDockerRunning();
-      const useLocal = IFRAMER_MODE === "docker" ? false : !dockerRunning;
-      let fetchResult;
-      if (useLocal) {
-        const iframer = await getIframer();
-        fetchResult = await iframer.fetch(LOCAL_USER, LOCAL_TOKEN, params);
-      } else {
-        fetchResult = await apiPost("/fetch", params);
-      }
+      const iframer = await getIframer();
+      const fetchResult = await iframer.fetch(LOCAL_USER, LOCAL_TOKEN, params);
       if (!fetchResult.ok)
         return err(`Error: ${fetchResult.error}`);
       const { html, ...rest } = fetchResult;
@@ -4861,14 +5005,6 @@ IMPORTANT — Do NOT specify options.mode unless the user explicitly asks for a 
         }
       };
       async function runWithMode(mode) {
-        if (mode === "binary-headful") {
-          await ensureLocalChrome();
-          const iframer2 = await getIframer();
-          return iframer2.execute(LOCAL_USER, LOCAL_TOKEN, {
-            steps: params.steps,
-            options: { ...params.options, mode: "binary-headful", autoEscalate: false }
-          }, { elicitOtp });
-        }
         if (mode === "docker-headful") {
           if (!dockerRunning) {
             return {
@@ -4894,12 +5030,6 @@ IMPORTANT — Do NOT specify options.mode unless the user explicitly asks for a 
           return apiPost("/execute", {
             steps: params.steps,
             options: { ...params.options, mode: "docker-headful", autoEscalate: false }
-          });
-        }
-        if (dockerRunning) {
-          return apiPost("/execute", {
-            steps: params.steps,
-            options: { ...params.options, mode: mode || undefined }
           });
         }
         await ensureLocalChrome();
@@ -5039,31 +5169,18 @@ The capturedApi field contains full endpoint data including auth, headers, reque
 // src/mcp/tools/session.ts
 var import_zod4 = require("zod");
 function registerSessionTool(server) {
-  server.tool("session", `Manage the browser session lifecycle. Use action=stop when done to save cookies/localStorage for future use. Use action=clear to wipe all stored session data.`, {
+  server.tool("session", `Manage the browser session lifecycle. Use action=stop when done to save cookies/localStorage for future use. Use action=clear to wipe all stored session data.
+
+Sessions live in the single local SQLite database (~/.iframer/iframer.db) and are shared across every browser mode (headless, binary-headful, docker-headful). There is no separate Docker-side session store.`, {
     action: import_zod4.z.enum(["stop", "clear"]).describe("stop: end session and save state | clear: delete all stored session data")
   }, async ({ action }) => {
     try {
-      const dockerRunning = await isDockerRunning();
-      const useLocal = IFRAMER_MODE === "docker" ? false : !dockerRunning;
+      const iframer = await getIframer();
       if (action === "stop") {
-        if (useLocal) {
-          const iframer = await getIframer();
-          const stopResult2 = await iframer.stopSession(LOCAL_USER, LOCAL_TOKEN);
-          return { content: [{ type: "text", text: `Session stopped. State saved: ${stopResult2.sessionSaved}` }] };
-        }
-        const stopResult = await apiPost("/interactive/stop");
-        if (!stopResult.ok)
-          return err(`Error: ${stopResult.error}`);
+        const stopResult = await iframer.stopSession(LOCAL_USER, LOCAL_TOKEN);
         return { content: [{ type: "text", text: `Session stopped. State saved: ${stopResult.sessionSaved}` }] };
       } else {
-        if (useLocal) {
-          const iframer = await getIframer();
-          await iframer.clearSession(LOCAL_USER);
-          return { content: [{ type: "text", text: "Session data cleared." }] };
-        }
-        const clearResult = await apiDelete("/session");
-        if (!clearResult.ok)
-          return err(`Error: ${clearResult.error}`);
+        await iframer.clearSession(LOCAL_USER);
         return { content: [{ type: "text", text: "Session data cleared." }] };
       }
     } catch (e) {
@@ -5074,18 +5191,50 @@ function registerSessionTool(server) {
 
 // src/mcp/tools/credentials.ts
 var import_zod5 = require("zod");
+var import_fs10 = __toESM(require("fs"));
+var import_path11 = __toESM(require("path"));
+init_paths();
+function mcpLog(event, data) {
+  try {
+    const dir = getDataDir();
+    import_fs10.default.mkdirSync(dir, { recursive: true });
+    const line = JSON.stringify({ ts: new Date().toISOString(), event, ...data }) + `
+`;
+    import_fs10.default.appendFileSync(import_path11.default.join(dir, "mcp.log"), line);
+  } catch {}
+}
 function registerCredentialsTool(server) {
-  server.tool("credentials", `Manage login credentials securely. When login is needed: FIRST call action=list to check if credentials exist. If they do, proceed with login. If not, call action=store — this prompts the user with a secure form (you never see passwords). NEVER ask the user "do you have credentials?" — just check and act.`, {
-    action: import_zod5.z.enum(["store", "login", "list"]).describe("store: prompt user for credentials | login: log in with stored credentials | list: show stored domains"),
-    domain: import_zod5.z.string().optional().describe("Domain (required for store and login)"),
-    usernameSelector: import_zod5.z.string().optional().describe("CSS selector for username field (for login)"),
-    passwordSelector: import_zod5.z.string().optional().describe("CSS selector for password field (for login)"),
-    submitSelector: import_zod5.z.string().optional().describe("CSS selector for submit button (for login)"),
-    totpSelector: import_zod5.z.string().optional().describe("CSS selector for 2FA code field (for login)")
-  }, async ({ action, domain, usernameSelector, passwordSelector, submitSelector, totpSelector }) => {
+  server.tool("credentials", `Manage stored login credentials. This tool ONLY stores and lists credentials — it does NOT log you into anything. Actual logins happen via the \`execute\` tool with a \`login\` step. Credentials are stored in a single local SQLite database shared by ALL browser modes (headless, binary-headful, docker-headful) — store once, login anywhere.
+
+CORRECT WORKFLOW when the user needs to be logged into a site:
+1. Call \`credentials\` with \`action=list\`. READ THE RESPONSE LITERALLY. If it says "No credentials stored" then NO credentials exist. If it lists domains, those are the only ones stored.
+2. If the target domain IS in the list → skip to step 4. Credentials exist and are valid. Move on.
+3. If the target domain is NOT in the list → call \`credentials\` with \`action=store, domain=<site>\`. This attempts to pop a secure form in the user's UI. The response is either \`Credentials stored for <site>.\` (success) OR a loud error telling you the client doesn't support form elicitation, with instructions for the user to run a CLI command. Relay the error verbatim and STOP — do not proceed with login until the user confirms they ran the command.
+4. Call \`execute\` with \`[{type:"navigate", url:"https://<site>/login"}, {type:"login", domain:"<site>"}]\`. The login step auto-detects the form, fills stored credentials, handles 2FA, submits, and auto-escalates browser modes if blocked.
+
+Domain matching is flexible: \`figma.com\` in the store matches \`www.figma.com\`, \`auth.figma.com\`, etc. via parent-domain fallback. Store the bare registrable domain (e.g. \`figma.com\`, not \`www.figma.com\`).
+
+═══════════════════════════════════════════════════════════════════════
+CRITICAL RULES — violating these is a bug, not creative problem solving
+═══════════════════════════════════════════════════════════════════════
+
+1. **NEVER re-store credentials as a recovery from a failed login.** If credentials already exist for a domain, the store call will be REJECTED by this tool. A login step failure is ALMOST NEVER a credential problem — it is browser-mode / bot-detection / site-structure. The correct recovery is to retry the \`execute\` call with a stronger \`options.mode\` (binary-headful or docker-headful), NOT to re-ask the user for their password.
+
+2. **NEVER ask the user "do you have credentials?"** — call action=list and read the response.
+
+3. **NEVER confabulate.** If action=list returns "No credentials stored", the database is empty. Do not claim anything is stored.
+
+4. **NEVER pretend a store call succeeded if the response was an error.** Read the error text and relay it verbatim to the user.
+
+5. **NEVER ask the user to paste their password in chat.** Always use action=store (which pops a secure form), or the CLI fallback from the error message.
+
+6. **\`force: true\` on store is ONLY for explicit password changes.** If the user says "my password changed" or "update my credentials for X", use force. Otherwise never.`, {
+    action: import_zod5.z.enum(["store", "list"]).describe("store: prompt the user for credentials via a secure form (NEVER use this as a recovery from a login failure — if credentials already exist, this call will be rejected) | list: show which domains already have stored credentials"),
+    domain: import_zod5.z.string().optional().describe('Domain (required for store). Use the bare registrable domain, e.g. "figma.com" not "www.figma.com".'),
+    force: import_zod5.z.boolean().optional().describe("Overwrite existing credentials. Only use this when the user EXPLICITLY asks to change their stored credentials. Never use `force` to recover from a login failure.")
+  }, async ({ action, domain, force }) => {
     try {
-      const dockerRunning = await isDockerRunning();
-      const useLocal = IFRAMER_MODE === "docker" ? false : !dockerRunning;
+      const useLocal = true;
       if (action === "list") {
         let domains;
         if (useLocal) {
@@ -5107,49 +5256,77 @@ ${domains.map((d) => `  - ${d}`).join(`
       if (action === "store") {
         if (!domain)
           return err("domain is required for action=store");
-        const result = await server.server.elicitInput({
-          mode: "form",
-          message: `Enter your login credentials for ${domain}. These are encrypted and stored locally — Claude never sees them.`,
-          requestedSchema: {
-            type: "object",
-            properties: {
-              username: { type: "string", title: "Username / Email" },
-              password: { type: "string", title: "Password" },
-              totp_secret: { type: "string", title: "TOTP Secret (leave empty if no 2FA)" }
-            },
-            required: ["username", "password"]
-          }
-        });
-        if (result.action === "decline" || !result.content) {
-          return { content: [{ type: "text", text: "Cancelled." }] };
+        const iframer = await getIframer();
+        const normalizedDomain = domain.toLowerCase().replace(/^www\./, "").replace(/^https?:\/\//, "").split("/")[0];
+        const existing = await iframer.listCredentials(LOCAL_USER);
+        const alreadyExists = existing.some((d) => d === normalizedDomain || normalizedDomain.endsWith("." + d) || d.endsWith("." + normalizedDomain));
+        if (alreadyExists && !force) {
+          mcpLog("credentials.store.rejected_already_exists", { domain: normalizedDomain });
+          return err(`REFUSING TO RE-STORE: credentials for "${normalizedDomain}" already exist in the store. ` + `If a login using these credentials just failed, the problem is NOT the credentials — it is almost always browser-mode / bot-detection / page-structure. ` + `DO NOT ask the user to re-enter their password. INSTEAD:
+
+` + `  1. Retry the \`execute\` call with \`options.mode: "binary-headful"\` (or "docker-headful" if Docker is running).
+` + `  2. If you already tried stronger modes and they also failed, take a \`snapshot\` of the login page to see what the site is actually rendering.
+` + `  3. ONLY if the user EXPLICITLY says "my password changed" or "I want to update my credentials" should you call this tool again with \`force: true\`.
+
+` + `NEVER use this tool as a reflexive "recovery" from a failed login.`);
+        }
+        mcpLog("credentials.store.attempt", { domain, useLocal, force: !!force, alreadyExists });
+        const ELICIT_TIMEOUT_MS = 45000;
+        let result;
+        try {
+          const elicitPromise = server.server.elicitInput({
+            mode: "form",
+            message: `Enter your login credentials for ${domain}. These are encrypted and stored locally — the agent never sees them.`,
+            requestedSchema: {
+              type: "object",
+              properties: {
+                username: { type: "string", title: "Username / Email" },
+                password: { type: "string", title: "Password" },
+                totp_secret: { type: "string", title: "TOTP Secret (leave empty if no 2FA)" }
+              },
+              required: ["username", "password"]
+            }
+          });
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error(`elicitation timed out after ${ELICIT_TIMEOUT_MS}ms — the client did not respond`)), ELICIT_TIMEOUT_MS));
+          result = await Promise.race([elicitPromise, timeoutPromise]);
+        } catch (elicitErr) {
+          const msg = elicitErr instanceof Error ? elicitErr.message : String(elicitErr);
+          mcpLog("credentials.store.elicit_failed", { domain, error: msg });
+          return err(`FAILED TO STORE CREDENTIALS for ${domain}: ${msg}
+
+` + `This MCP client cannot collect credentials via the secure form flow. The user MUST run this command in their terminal:
+
+` + `  iframer-toolkit credentials add ${domain}
+
+` + `(or, for dev: \`node dist/cli.cjs credentials add ${domain}\`)
+
+` + `After they run it, retry the login. ` + `DO NOT pretend credentials were stored. ` + `DO NOT call \`credentials list\` and assume success from its output. ` + `DO NOT proceed with login until the user explicitly confirms they ran the CLI command.`);
+        }
+        mcpLog("credentials.store.elicit_result", { domain, action: result.action, hasContent: !!result.content });
+        if (result.action !== "accept" || !result.content) {
+          return err(`Credential form was ${result.action || "dismissed"}. No credentials were saved for ${domain}. ` + `Ask the user to retry or store credentials via CLI: \`iframer-toolkit credentials add ${domain}\`.`);
         }
         const { username, password, totp_secret } = result.content;
-        if (useLocal) {
-          const iframer = await getIframer();
-          await iframer.storeCredential(LOCAL_USER, LOCAL_TOKEN, { domain, username, password, totp_secret: totp_secret || undefined });
-        } else {
-          const storeResult = await apiPost("/credentials", { domain, username, password, totp_secret: totp_secret || undefined });
-          if (!storeResult.ok)
-            return err(`Error: ${storeResult.error}`);
+        if (!username || !password) {
+          mcpLog("credentials.store.incomplete", { domain, hasUsername: !!username, hasPassword: !!password });
+          return err(`Credential form was submitted but username or password was empty. No credentials were saved for ${domain}.`);
         }
-        return { content: [{ type: "text", text: `Credentials stored for ${domain}.` }] };
-      }
-      if (action === "login") {
-        if (!domain)
-          return err("domain is required for action=login");
-        if (useLocal) {
-          return { content: [{ type: "text", text: `Use a login step in "execute" to log in with stored credentials for ${domain}. Example: { "type": "login", "domain": "${domain}" }` }] };
+        try {
+          if (useLocal) {
+            const iframer2 = await getIframer();
+            await iframer2.storeCredential(LOCAL_USER, LOCAL_TOKEN, { domain, username, password, totp_secret: totp_secret || undefined });
+          } else {
+            const storeResult = await apiPost("/credentials", { domain, username, password, totp_secret: totp_secret || undefined });
+            if (!storeResult.ok)
+              return err(`Error: ${storeResult.error}`);
+          }
+        } catch (storeErr) {
+          const msg = storeErr instanceof Error ? storeErr.message : String(storeErr);
+          mcpLog("credentials.store.write_failed", { domain, error: msg });
+          return err(`Failed to write credentials to store: ${msg}`);
         }
-        const loginResult = await apiPost("/credentials/login", { domain, usernameSelector, passwordSelector, submitSelector, totpSelector });
-        if (!loginResult.ok)
-          return err(`Error: ${loginResult.error}`);
-        const lines = [`Login attempted for ${domain}`, `URL: ${loginResult.url}`, `Title: ${loginResult.title}`];
-        if (loginResult.totpGenerated)
-          lines.push("TOTP code generated and entered automatically.");
-        if (loginResult.screenshotUrl)
-          lines.push(`Screenshot: ${loginResult.screenshotUrl}`);
-        return { content: [{ type: "text", text: lines.join(`
-`) }] };
+        mcpLog("credentials.store.success", { domain });
+        return { content: [{ type: "text", text: `Credentials stored for ${domain}. These are shared across all browser modes (headless, binary-headful, docker-headful).` }] };
       }
       return err("Unknown action");
     } catch (e) {

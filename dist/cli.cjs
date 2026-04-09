@@ -1148,6 +1148,16 @@ var init_hcaptcha = __esm(() => {
   log2 = createLogger("hcaptcha-solver");
 });
 
+// src/lib/paths.ts
+function getDataDir() {
+  return process.env.IFRAMER_DATA_DIR || import_path.default.join(import_os.default.homedir(), ".iframer");
+}
+var import_path, import_os;
+var init_paths = __esm(() => {
+  import_path = __toESM(require("path"));
+  import_os = __toESM(require("os"));
+});
+
 // src/lib/auth/crypto.ts
 function deriveKey(token, purpose = INFO) {
   return new Promise((resolve, reject) => {
@@ -1199,7 +1209,322 @@ function generateTOTP(secret, period = 30, digits = 6) {
 }
 var import_crypto, SALT = "iframer-session", INFO = "encryption", KEY_LENGTH = 32, IV_LENGTH = 12, TAG_LENGTH = 16;
 var init_crypto = __esm(() => {
+  init_paths();
   import_crypto = __toESM(require("crypto"));
+});
+
+// src/lib/knowledge.ts
+var exports_knowledge = {};
+__export(exports_knowledge, {
+  sanitizeDomain: () => sanitizeDomain,
+  readKnowledge: () => readKnowledge,
+  parseKnowledge: () => parseKnowledge,
+  normalizeDomain: () => normalizeDomain,
+  mergeKnowledge: () => mergeKnowledge,
+  listKnowledge: () => listKnowledge,
+  getKnowledgePath: () => getKnowledgePath,
+  getKnowledgeDir: () => getKnowledgeDir,
+  domainLookupChain: () => domainLookupChain,
+  clearKnowledge: () => clearKnowledge
+});
+function getKnowledgeDir() {
+  return import_path2.default.join(getDataDir(), "knowledge");
+}
+function getKnowledgePath(domain) {
+  const safe = sanitizeDomain(domain);
+  return import_path2.default.join(getKnowledgeDir(), `${safe}.md`);
+}
+function normalizeDomain(input) {
+  let d = (input || "").trim().toLowerCase();
+  if (!d)
+    return "";
+  try {
+    if (d.includes("://")) {
+      d = new URL(d).hostname;
+    } else if (d.includes("/")) {
+      d = new URL(`https://${d}`).hostname;
+    }
+  } catch {}
+  d = d.replace(/:\d+$/, "");
+  d = d.replace(/^www\./, "");
+  return d;
+}
+function domainLookupChain(input) {
+  const normalized = normalizeDomain(input);
+  if (!normalized)
+    return [];
+  const chain = [normalized];
+  const parts = normalized.split(".");
+  while (parts.length > 2) {
+    parts.shift();
+    chain.push(parts.join("."));
+  }
+  return chain;
+}
+function sanitizeDomain(input) {
+  const normalized = normalizeDomain(input);
+  return normalized.replace(/[^a-z0-9.-]/g, "_");
+}
+function ensureDir() {
+  import_fs.default.mkdirSync(getKnowledgeDir(), { recursive: true });
+}
+function readKnowledge(domain) {
+  const p = getKnowledgePath(domain);
+  try {
+    return import_fs.default.readFileSync(p, "utf8");
+  } catch {
+    return null;
+  }
+}
+function parseKnowledge(domain) {
+  const raw = readKnowledge(domain);
+  if (!raw)
+    return null;
+  return parseMarkdown(raw);
+}
+function listKnowledge() {
+  const dir = getKnowledgeDir();
+  let entries = [];
+  try {
+    entries = import_fs.default.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const results = [];
+  for (const file of entries) {
+    if (!file.endsWith(".md"))
+      continue;
+    const full = import_path2.default.join(dir, file);
+    try {
+      const stat = import_fs.default.statSync(full);
+      const raw = import_fs.default.readFileSync(full, "utf8");
+      const parsed = parseMarkdown(raw);
+      results.push({
+        domain: parsed?.domain ?? file.replace(/\.md$/, ""),
+        lastVerified: parsed?.lastVerified ?? new Date(stat.mtimeMs).toISOString(),
+        lastMode: parsed?.lastMode ?? "unknown",
+        sizeBytes: stat.size
+      });
+    } catch {}
+  }
+  results.sort((a, b) => a.lastVerified < b.lastVerified ? 1 : -1);
+  return results;
+}
+function clearKnowledge(domain) {
+  const dir = getKnowledgeDir();
+  if (domain) {
+    const p = getKnowledgePath(domain);
+    try {
+      import_fs.default.unlinkSync(p);
+      return { removed: 1 };
+    } catch {
+      return { removed: 0 };
+    }
+  }
+  let removed = 0;
+  try {
+    const entries = import_fs.default.readdirSync(dir);
+    for (const f of entries) {
+      if (f.endsWith(".md")) {
+        try {
+          import_fs.default.unlinkSync(import_path2.default.join(dir, f));
+          removed++;
+        } catch {}
+      }
+    }
+  } catch {}
+  return { removed };
+}
+function mergeKnowledge(domain, updates) {
+  ensureDir();
+  const existing = parseKnowledge(domain);
+  const merged = {
+    domain: sanitizeDomain(domain),
+    lastVerified: updates.lastVerified ?? new Date().toISOString(),
+    lastMode: updates.lastMode ?? existing?.lastMode ?? "unknown",
+    browserRequired: updates.browserRequired ?? existing?.browserRequired ?? true,
+    auth: updates.auth ?? existing?.auth ?? { type: "unknown" },
+    endpoints: dedupeEndpoints([...existing?.endpoints ?? [], ...updates.endpoints ?? []]),
+    notes: dedupeNotes([...existing?.notes ?? [], ...updates.notes ?? []])
+  };
+  const md = renderMarkdown(merged);
+  import_fs.default.writeFileSync(getKnowledgePath(domain), md, "utf8");
+  log3.info(`knowledge updated: ${merged.domain} (${merged.endpoints.length} endpoints)`);
+}
+function dedupeEndpoints(endpoints) {
+  const seen = new Map;
+  for (const ep of endpoints) {
+    const key = `${ep.method.toUpperCase()} ${ep.path}`;
+    const existing = seen.get(key);
+    if (!existing) {
+      seen.set(key, ep);
+    } else {
+      seen.set(key, {
+        ...existing,
+        description: ep.description || existing.description,
+        example: ep.example || existing.example,
+        firstSeen: existing.firstSeen || ep.firstSeen
+      });
+    }
+  }
+  return [...seen.values()].sort((a, b) => {
+    if (a.path !== b.path)
+      return a.path < b.path ? -1 : 1;
+    return a.method < b.method ? -1 : 1;
+  });
+}
+function dedupeNotes(notes) {
+  const seen = new Set;
+  const out = [];
+  for (const note of notes) {
+    const n = note.trim();
+    if (n && !seen.has(n)) {
+      seen.add(n);
+      out.push(n);
+    }
+  }
+  return out;
+}
+function renderMarkdown(data) {
+  const lines = [];
+  lines.push("---");
+  lines.push(`domain: ${data.domain}`);
+  lines.push(`lastVerified: ${data.lastVerified}`);
+  lines.push(`lastMode: ${data.lastMode}`);
+  lines.push(`browserRequired: ${data.browserRequired}`);
+  lines.push(`authType: ${data.auth.type}`);
+  lines.push("---");
+  lines.push("");
+  lines.push(`# ${data.domain}`);
+  lines.push("");
+  lines.push(`Last verified: **${data.lastVerified}** via \`${data.lastMode}\` mode.`);
+  lines.push("");
+  lines.push("## Auth material");
+  lines.push("");
+  lines.push(`**Type:** ${data.auth.type}`);
+  if (data.auth.cookieNames?.length) {
+    lines.push(`**Required cookies:** ${data.auth.cookieNames.map((n) => `\`${n}\``).join(", ")}`);
+  }
+  if (data.auth.localStorageKeys?.length) {
+    lines.push(`**localStorage keys:** ${data.auth.localStorageKeys.map((n) => `\`${n}\``).join(", ")}`);
+  }
+  if (data.auth.sessionStorageKeys?.length) {
+    lines.push(`**sessionStorage keys:** ${data.auth.sessionStorageKeys.map((n) => `\`${n}\``).join(", ")}`);
+  }
+  if (data.auth.headers?.length) {
+    lines.push(`**Request headers:** ${data.auth.headers.map((n) => `\`${n}\``).join(", ")}`);
+  }
+  lines.push("");
+  lines.push("> _Structure only — actual values are stored encrypted in the session store._");
+  lines.push("");
+  if (data.endpoints.length > 0) {
+    lines.push("## Known endpoints");
+    lines.push("");
+    lines.push("The agent can call these directly (with the auth material above) instead of launching a browser.");
+    lines.push("");
+    for (const ep of data.endpoints) {
+      lines.push(`### ${ep.method.toUpperCase()} ${ep.path}`);
+      if (ep.description)
+        lines.push("");
+      if (ep.description)
+        lines.push(ep.description);
+      if (ep.example) {
+        lines.push("");
+        lines.push("```");
+        lines.push(ep.example);
+        lines.push("```");
+      }
+      lines.push("");
+    }
+  } else {
+    lines.push("## Known endpoints");
+    lines.push("");
+    lines.push("_None captured yet. Enable `captureApi: true` on the next `execute` run to populate this section._");
+    lines.push("");
+  }
+  if (data.notes.length > 0) {
+    lines.push("## Notes");
+    lines.push("");
+    for (const n of data.notes)
+      lines.push(`- ${n}`);
+    lines.push("");
+  }
+  return lines.join(`
+`);
+}
+function parseMarkdown(raw) {
+  const frontmatterMatch = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n/);
+  if (!frontmatterMatch)
+    return null;
+  const fm = {};
+  for (const line of frontmatterMatch[1].split(`
+`)) {
+    const m = line.match(/^(\w+):\s*(.*)$/);
+    if (m)
+      fm[m[1]] = m[2].trim();
+  }
+  const body = raw.slice(frontmatterMatch[0].length);
+  const auth = { type: fm.authType ?? "unknown" };
+  const authSection = extractSection(body, "Auth material");
+  if (authSection) {
+    auth.cookieNames = extractBackticks(/\*\*Required cookies:\*\*\s+(.+)/, authSection);
+    auth.localStorageKeys = extractBackticks(/\*\*localStorage keys:\*\*\s+(.+)/, authSection);
+    auth.sessionStorageKeys = extractBackticks(/\*\*sessionStorage keys:\*\*\s+(.+)/, authSection);
+    auth.headers = extractBackticks(/\*\*Request headers:\*\*\s+(.+)/, authSection);
+  }
+  const endpoints = [];
+  const endpointSection = extractSection(body, "Known endpoints");
+  if (endpointSection) {
+    const endpointRegex = /^### (GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\S+)\s*$/gim;
+    let m;
+    while ((m = endpointRegex.exec(endpointSection)) !== null) {
+      endpoints.push({ method: m[1], path: m[2] });
+    }
+  }
+  const notes = [];
+  const notesSection = extractSection(body, "Notes");
+  if (notesSection) {
+    for (const line of notesSection.split(`
+`)) {
+      const m = line.match(/^-\s+(.+)$/);
+      if (m)
+        notes.push(m[1].trim());
+    }
+  }
+  return {
+    domain: fm.domain ?? "",
+    lastVerified: fm.lastVerified ?? "",
+    lastMode: fm.lastMode ?? "unknown",
+    browserRequired: fm.browserRequired !== "false",
+    auth,
+    endpoints,
+    notes
+  };
+}
+function extractSection(body, heading) {
+  const re = new RegExp(`^##\\s+${heading}\\s*$`, "m");
+  const match = body.match(re);
+  if (!match || match.index === undefined)
+    return null;
+  const start = match.index + match[0].length;
+  const nextSection = body.slice(start).match(/^##\s+/m);
+  const end = nextSection?.index != null ? start + nextSection.index : body.length;
+  return body.slice(start, end);
+}
+function extractBackticks(re, text) {
+  const m = text.match(re);
+  if (!m)
+    return;
+  const items = [...m[1].matchAll(/`([^`]+)`/g)].map((x) => x[1]);
+  return items.length > 0 ? items : undefined;
+}
+var import_fs, import_path2, log3;
+var init_knowledge = __esm(() => {
+  init_logger();
+  init_paths();
+  import_fs = __toESM(require("fs"));
+  import_path2 = __toESM(require("path"));
+  log3 = createLogger("knowledge");
 });
 
 // src/lib/session/persistence.ts
@@ -1261,15 +1586,15 @@ async function injectStorage(page, sessionData) {
 
 // src/lib/screenshot.ts
 function saveScreenshot(buffer, filename, screenshotDir, publicUrl) {
-  import_fs.default.mkdirSync(screenshotDir, { recursive: true });
-  const filePath = import_path.default.join(screenshotDir, filename);
-  import_fs.default.writeFileSync(filePath, buffer);
+  import_fs2.default.mkdirSync(screenshotDir, { recursive: true });
+  const filePath = import_path3.default.join(screenshotDir, filename);
+  import_fs2.default.writeFileSync(filePath, buffer);
   return `${publicUrl}/screenshots/${filename}`;
 }
-var import_fs, import_path;
+var import_fs2, import_path3;
 var init_screenshot = __esm(() => {
-  import_fs = __toESM(require("fs"));
-  import_path = __toESM(require("path"));
+  import_fs2 = __toESM(require("fs"));
+  import_path3 = __toESM(require("path"));
 });
 
 // src/lib/snapshot.ts
@@ -1324,12 +1649,12 @@ async function takeSnapshot(page, ctx, options) {
       return true;
     }
     function buildSelector(el) {
-      const path2 = [];
+      const path4 = [];
       let current = el;
       while (current && current !== document.body && current !== document.documentElement) {
         let seg = current.tagName.toLowerCase();
         if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-          path2.unshift(`#${current.id}`);
+          path4.unshift(`#${current.id}`);
           break;
         }
         const parent = current.parentElement;
@@ -1341,10 +1666,10 @@ async function takeSnapshot(page, ctx, options) {
             seg += `:nth-of-type(${idx})`;
           }
         }
-        path2.unshift(seg);
+        path4.unshift(seg);
         current = parent;
       }
-      return path2.join(" > ");
+      return path4.join(" > ");
     }
     function getName(el) {
       const ariaLabel = el.getAttribute("aria-label");
@@ -1518,12 +1843,12 @@ async function annotatedScreenshot(page, ctx) {
       return true;
     }
     function buildSelector(el) {
-      const path2 = [];
+      const path4 = [];
       let current = el;
       while (current && current !== document.body && current !== document.documentElement) {
         let seg = current.tagName.toLowerCase();
         if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-          path2.unshift(`#${current.id}`);
+          path4.unshift(`#${current.id}`);
           break;
         }
         const parent = current.parentElement;
@@ -1535,10 +1860,10 @@ async function annotatedScreenshot(page, ctx) {
             seg += `:nth-of-type(${idx})`;
           }
         }
-        path2.unshift(seg);
+        path4.unshift(seg);
         current = parent;
       }
-      return path2.join(" > ");
+      return path4.join(" > ");
     }
     function getName(el) {
       const ariaLabel = el.getAttribute("aria-label");
@@ -1702,10 +2027,10 @@ async function handleSolveCaptcha(page, monitor) {
       return src.includes("hcaptcha.com") || title.includes("hcaptcha") || !!document.querySelector("[data-hcaptcha-widget-id]");
     });
   }).catch((err) => {
-    log3.warn(`captcha detection failed: ${err}`);
+    log4.warn(`captcha detection failed: ${err}`);
     return false;
   });
-  log3.info(`detected: ${isHCaptcha ? "hCaptcha" : "reCAPTCHA"}`);
+  log4.info(`detected: ${isHCaptcha ? "hCaptcha" : "reCAPTCHA"}`);
   return isHCaptcha ? await solveHCaptcha(page, monitor) : await solveRecaptcha(page, monitor);
 }
 async function handleFind(page, step, ctx) {
@@ -1738,12 +2063,12 @@ async function handleFind(page, step, ctx) {
   const elInfo = await element.evaluate((el) => {
     const tag = el.tagName.toLowerCase();
     const text = (el.textContent?.trim() || "").slice(0, 60);
-    const path2 = [];
+    const path4 = [];
     let current = el;
     while (current && current !== document.body && current !== document.documentElement) {
       let seg = current.tagName.toLowerCase();
       if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-        path2.unshift(`#${current.id}`);
+        path4.unshift(`#${current.id}`);
         break;
       }
       const parent = current.parentElement;
@@ -1755,10 +2080,10 @@ async function handleFind(page, step, ctx) {
           seg += `:nth-of-type(${idx})`;
         }
       }
-      path2.unshift(seg);
+      path4.unshift(seg);
       current = parent;
     }
-    return { tag, text, selector: path2.join(" > ") };
+    return { tag, text, selector: path4.join(" > ") };
   });
   const ref = `@e${ctx.nextRefId++}`;
   const displayRole = step.role || elInfo.tag;
@@ -1779,11 +2104,35 @@ async function handleFind(page, step, ctx) {
 }
 async function handleLogin(page, step, ctx) {
   const credKey = await deriveKey(ctx.token, "credentials");
-  const blob = await ctx.store.getCredential(ctx.userId, step.domain);
-  if (!blob || blob.length === 0) {
-    throw new Error(`No credentials stored for ${step.domain}`);
+  let blob = null;
+  let matchedDomain = "";
+  for (const candidate of domainLookupChain(step.domain)) {
+    const b = await ctx.store.getCredential(ctx.userId, candidate);
+    if (b && b.length > 0) {
+      blob = b;
+      matchedDomain = candidate;
+      break;
+    }
   }
-  const credential = JSON.parse(decrypt(blob, credKey));
+  if (!blob) {
+    const stored = await ctx.store.listCredentialDomains(ctx.userId);
+    const storedList = stored.length > 0 ? stored.join(", ") : "(none)";
+    throw new Error(`No credentials stored for ${normalizeDomain(step.domain)}. Stored domains: ${storedList}. ` + `If you stored credentials under a different domain name, retry the login step with that domain. ` + `If no credentials are stored at all, call the \`credentials\` tool with action=store first.`);
+  }
+  let credential;
+  try {
+    credential = JSON.parse(decrypt(blob, credKey));
+  } catch (decryptErr) {
+    const errMsg = decryptErr instanceof Error ? decryptErr.message : String(decryptErr);
+    throw new Error(`Credentials for ${matchedDomain} exist in the store but cannot be decrypted ` + `(${errMsg}). This usually means the encryption key (~/.iframer/secret or IFRAMER_SECRET) ` + `changed since the row was written, orphaning the old blob. ` + `Fix: ask the user to re-store the credentials by running in their terminal:
+
+` + `  iframer-toolkit credentials add ${normalizeDomain(step.domain)}
+
+` + `After they confirm it ran, retry the login step.`);
+  }
+  if (matchedDomain !== normalizeDomain(step.domain)) {
+    log4.info(`login: credentials for ${step.domain} resolved via parent domain ${matchedDomain}`);
+  }
   const beforeUrl = page.url();
   const reactFillSelector = async (selector, value) => {
     await page.click(selector);
@@ -1819,10 +2168,63 @@ async function handleLogin(page, step, ctx) {
       await page.waitForTimeout(TIMING.POST_TOTP_WAIT);
     }
   } else {
-    log3.info(`login: auto-detecting form on ${beforeUrl}`);
+    log4.info(`login: auto-detecting form on ${beforeUrl}`);
+    await page.waitForLoadState("domcontentloaded").catch(() => {});
+    await page.waitForTimeout(500);
+    const initialCheck = await page.evaluate(() => {
+      const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])');
+      const pwdVisible = !!(pwd && pwd.offsetParent !== null);
+      return { url: location.href, title: document.title, pwdVisible };
+    }).catch(() => ({ url: page.url(), title: "", pwdVisible: false }));
+    const urlLooksLikeLogin = /\b(login|signin|sign-in|auth|oauth)\b/i.test(initialCheck.url);
+    if (!initialCheck.pwdVisible && !urlLooksLikeLogin) {
+      log4.info(`login: already logged in (no password field, URL=${initialCheck.url})`);
+      return {
+        loggedIn: true,
+        alreadyLoggedIn: true,
+        url: initialCheck.url,
+        reason: "Session already authenticated — no login form detected"
+      };
+    }
     const passwordHandle = await page.waitForSelector('input[type="password"]:not([disabled]):not([readonly])', { state: "visible", timeout: TIMEOUTS.SELECTOR_WAIT }).catch(() => null);
     if (!passwordHandle) {
-      throw new Error(`login: no visible password field found on ${beforeUrl}. If the site uses a multi-step form, navigate to the actual password page first, or pass explicit selectors.`);
+      const currentUrl = page.url();
+      if (!/\b(login|signin|sign-in|auth|oauth)\b/i.test(currentUrl)) {
+        log4.info(`login: no password field and URL left login area (${currentUrl}) — treating as success`);
+        return {
+          loggedIn: true,
+          alreadyLoggedIn: true,
+          url: currentUrl,
+          reason: "No login form detected after wait — assumed already authenticated"
+        };
+      }
+      const pageDiag = await page.evaluate(() => {
+        const visibleText = (document.body?.innerText || "").slice(0, 500);
+        const inputCount = document.querySelectorAll("input").length;
+        const hiddenPassword = !!document.querySelector('input[type="password"]');
+        const hasCaptcha = !!document.querySelector('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], [class*="captcha" i], [id*="captcha" i]');
+        const hasCloudflare = !!document.querySelector('[class*="cf-" i], iframe[src*="challenges.cloudflare"]');
+        return {
+          title: document.title,
+          visibleText,
+          inputCount,
+          hiddenPassword,
+          hasCaptcha,
+          hasCloudflare
+        };
+      }).catch(() => ({ title: "", visibleText: "", inputCount: 0, hiddenPassword: false, hasCaptcha: false, hasCloudflare: false }));
+      log4.warn(`login: no visible password field on ${currentUrl} — title="${pageDiag.title}", inputs=${pageDiag.inputCount}, hiddenPwd=${pageDiag.hiddenPassword}, captcha=${pageDiag.hasCaptcha}, cloudflare=${pageDiag.hasCloudflare}`);
+      const indicators = [];
+      if (pageDiag.hasCaptcha)
+        indicators.push("CAPTCHA detected");
+      if (pageDiag.hasCloudflare)
+        indicators.push("Cloudflare challenge");
+      if (pageDiag.inputCount === 0)
+        indicators.push("no input elements at all");
+      if (pageDiag.hiddenPassword)
+        indicators.push("password field exists but is hidden/disabled");
+      const indicatorStr = indicators.length > 0 ? ` (${indicators.join(", ")})` : "";
+      throw new Error(`login: no visible password field on ${currentUrl} after ${TIMEOUTS.SELECTOR_WAIT}ms${indicatorStr}. ` + `Page title: "${pageDiag.title}". ` + `The site is likely showing a bot-detection wall or captcha instead of the normal login form. ` + `Retry with a stronger browser mode (binary-headful or docker-headful).`);
     }
     const usernameHandle = await page.evaluateHandle(() => {
       const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])');
@@ -1864,7 +2266,7 @@ async function handleLogin(page, step, ctx) {
     if (usernameEl && credential.username) {
       await fillHandle(usernameEl, credential.username);
     } else if (!usernameEl) {
-      log3.warn("login: no username field detected, proceeding with password only");
+      log4.warn("login: no username field detected, proceeding with password only");
     }
     if (credential.password) {
       await fillHandle(passwordHandle, credential.password);
@@ -1894,7 +2296,7 @@ async function handleLogin(page, step, ctx) {
         await submitEl.evaluate((el) => el.click());
       });
     } else {
-      log3.warn("login: no submit button detected, pressing Enter in password field");
+      log4.warn("login: no submit button detected, pressing Enter in password field");
       await passwordHandle.press("Enter").catch(() => {});
     }
     await page.waitForLoadState("domcontentloaded").catch(() => {});
@@ -1908,13 +2310,13 @@ async function handleLogin(page, step, ctx) {
       let code = null;
       if (credential.totp_secret) {
         code = generateTOTP(credential.totp_secret);
-        log3.info(`login: generated TOTP from stored secret for ${step.domain}`);
+        log4.info(`login: generated TOTP from stored secret for ${step.domain}`);
       } else if (ctx.elicitOtp) {
-        log3.info(`login: prompting user for OTP for ${step.domain}`);
+        log4.info(`login: prompting user for OTP for ${step.domain}`);
         try {
           code = await ctx.elicitOtp(step.domain);
         } catch (err) {
-          log3.warn(`login: OTP elicitation failed: ${err instanceof Error ? err.message : String(err)}`);
+          log4.warn(`login: OTP elicitation failed: ${err instanceof Error ? err.message : String(err)}`);
         }
         if (!code) {
           throw new Error(`login: OTP required but user did not provide one for ${step.domain}`);
@@ -1962,13 +2364,13 @@ async function executeAction(page, step, ctx, monitor) {
         try {
           await page.evaluate(stealthScript);
         } catch (err) {
-          log3.warn(`stealth injection failed: ${err}`);
+          log4.warn(`stealth injection failed: ${err}`);
         }
         if (ctx.sessionData) {
           try {
             await injectStorage(page, ctx.sessionData);
           } catch (err) {
-            log3.warn(`storage injection after navigate failed: ${err}`);
+            log4.warn(`storage injection after navigate failed: ${err}`);
           }
         }
         break;
@@ -2102,19 +2504,20 @@ async function executeAction(page, step, ctx, monitor) {
     };
   }
 }
-var log3;
+var log4;
 var init_actions = __esm(() => {
   init_stealth();
   init_humanize();
   init_recaptcha();
   init_hcaptcha();
   init_crypto();
+  init_knowledge();
   init_screenshot();
   init_snapshot();
   init_annotate();
   init_logger();
   init_constants();
-  log3 = createLogger("actions");
+  log4 = createLogger("actions");
 });
 
 // src/lib/stale-monitor.ts
@@ -2410,8 +2813,8 @@ function isAuthHeader(name) {
 function isLikelyId(segment) {
   return ID_PATTERNS.some((p) => p.test(segment));
 }
-function parameterizePath(path2) {
-  const parts = path2.split("/");
+function parameterizePath(path4) {
+  const parts = path4.split("/");
   let idCount = 0;
   const parameterized = parts.map((part) => {
     if (part && isLikelyId(part)) {
@@ -2708,6 +3111,9 @@ function classifyError(err, step) {
   if (err instanceof StaleStateError)
     return "stale-state";
   const msg = err.message.toLowerCase();
+  if (step.type === "login" && (msg.includes("no visible password field") || msg.includes("password field was not visible"))) {
+    return "bot-blocked";
+  }
   if (msg.includes("timeout") || msg.includes("timed out"))
     return "timeout";
   if (msg.includes("not found") || msg.includes("no element") || msg.includes("waiting for selector"))
@@ -2898,7 +3304,7 @@ var init_pipeline = __esm(() => {
 function findChromeExecutable() {
   if (process.env.CHROME_EXECUTABLE)
     return process.env.CHROME_EXECUTABLE;
-  if (import_fs2.default.existsSync("/usr/bin/google-chrome-stable"))
+  if (import_fs3.default.existsSync("/usr/bin/google-chrome-stable"))
     return "/usr/bin/google-chrome-stable";
   return;
 }
@@ -2916,7 +3322,7 @@ async function getBrowserWithFallback(_preferred) {
 }
 async function launchHeadful(displayNum) {
   const executablePath = findChromeExecutable();
-  const hasExtensions = import_fs2.default.existsSync(UBLOCK_PATH);
+  const hasExtensions = import_fs3.default.existsSync(UBLOCK_PATH);
   const args = [
     "--no-sandbox",
     "--disable-setuid-sandbox",
@@ -2938,16 +3344,16 @@ async function launchHeadful(displayNum) {
   };
   if (executablePath)
     launchOpts.executablePath = executablePath;
-  log4.debug(`headful: ${executablePath || "patchright chromium"}, extensions: ${hasExtensions}`);
+  log5.debug(`headful: ${executablePath || "patchright chromium"}, extensions: ${hasExtensions}`);
   return import_patchright.chromium.launch(launchOpts);
 }
-var import_fs2, import_patchright, log4, UBLOCK_PATH = "/extensions/uBlock0.chromium", cachedBrowser = null;
+var import_fs3, import_patchright, log5, UBLOCK_PATH = "/extensions/uBlock0.chromium", cachedBrowser = null;
 var init_launcher = __esm(() => {
   init_stealth();
   init_logger();
-  import_fs2 = __toESM(require("fs"));
+  import_fs3 = __toESM(require("fs"));
   import_patchright = require("patchright");
-  log4 = createLogger("launcher");
+  log5 = createLogger("launcher");
 });
 
 // src/lib/browser/fingerprint.ts
@@ -3003,7 +3409,7 @@ function waitForSocket(displayNum, timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
     const start = Date.now();
     const check = () => {
-      if (import_fs3.default.existsSync(socketPath))
+      if (import_fs4.default.existsSync(socketPath))
         return resolve();
       if (Date.now() - start > timeoutMs)
         return reject(new Error(`Xvfb socket not ready after ${timeoutMs}ms`));
@@ -3031,7 +3437,7 @@ async function startSession(userId) {
   });
   await waitForSocket(displayNum);
   const x11vnc = import_child_process.spawn("x11vnc", ["-display", `:${displayNum}`, "-nopw", "-listen", "localhost", "-rfbport", String(vncPort), "-shared", "-forever"], { stdio: "ignore" });
-  const noVncPath = import_fs3.default.existsSync("/usr/share/novnc") ? "/usr/share/novnc" : "/usr/share/noVNC";
+  const noVncPath = import_fs4.default.existsSync("/usr/share/novnc") ? "/usr/share/novnc" : "/usr/share/noVNC";
   const websockify = import_child_process.spawn("websockify", ["--web", noVncPath, String(wsPort), `localhost:${vncPort}`], {
     stdio: "ignore"
   });
@@ -3043,7 +3449,7 @@ async function startSession(userId) {
   const stealthScript = buildStealthScript(fingerprint);
   contextStealthScripts.set(context, stealthScript);
   const page = await context.newPage();
-  log5.debug(`fingerprint: ${fingerprint.userAgent.slice(0, 60)}... DPR=${fingerprint.deviceScaleFactor} screen=${fingerprint.screenWidth}x${fingerprint.screenHeight}`);
+  log6.debug(`fingerprint: ${fingerprint.userAgent.slice(0, 60)}... DPR=${fingerprint.deviceScaleFactor} screen=${fingerprint.screenWidth}x${fingerprint.screenHeight}`);
   const session = {
     displayNum,
     vncPort,
@@ -3093,7 +3499,7 @@ async function stopSession(userId) {
   killProcess(session.xvfb);
   await new Promise((r) => setTimeout(r, 1000));
   try {
-    import_fs3.default.unlinkSync(`/tmp/.X11-unix/X${session.displayNum}`);
+    import_fs4.default.unlinkSync(`/tmp/.X11-unix/X${session.displayNum}`);
   } catch {}
   freeDisplay(session.displayNum);
   sessions.delete(userId);
@@ -3103,310 +3509,20 @@ async function cleanupAllSessions() {
   const userIds = [...sessions.keys()];
   await Promise.all(userIds.map((id) => stopSession(id)));
 }
-var import_child_process, import_fs3, log5, BASE_DISPLAY, MAX_SESSIONS, SESSION_TIMEOUT, sessions, usedDisplays;
+var import_child_process, import_fs4, log6, BASE_DISPLAY, MAX_SESSIONS, SESSION_TIMEOUT, sessions, usedDisplays;
 var init_session_manager = __esm(() => {
   init_launcher();
   init_stealth();
   init_logger();
   init_fingerprint();
   import_child_process = require("child_process");
-  import_fs3 = __toESM(require("fs"));
-  log5 = createLogger("session");
+  import_fs4 = __toESM(require("fs"));
+  log6 = createLogger("session");
   BASE_DISPLAY = parseInt(process.env.VNC_BASE_DISPLAY || "99", 10);
   MAX_SESSIONS = parseInt(process.env.VNC_MAX_SESSIONS || "20", 10);
   SESSION_TIMEOUT = parseInt(process.env.VNC_SESSION_TIMEOUT_MS || "300000", 10);
   sessions = new Map;
   usedDisplays = new Set;
-});
-
-// src/lib/knowledge.ts
-var exports_knowledge = {};
-__export(exports_knowledge, {
-  sanitizeDomain: () => sanitizeDomain,
-  readKnowledge: () => readKnowledge,
-  parseKnowledge: () => parseKnowledge,
-  mergeKnowledge: () => mergeKnowledge,
-  listKnowledge: () => listKnowledge,
-  getKnowledgePath: () => getKnowledgePath,
-  getKnowledgeDir: () => getKnowledgeDir,
-  clearKnowledge: () => clearKnowledge
-});
-function getKnowledgeDir() {
-  return import_path2.default.join(import_os.default.homedir(), ".iframer", "knowledge");
-}
-function getKnowledgePath(domain) {
-  const safe = sanitizeDomain(domain);
-  return import_path2.default.join(getKnowledgeDir(), `${safe}.md`);
-}
-function sanitizeDomain(input) {
-  let d = input.trim().toLowerCase();
-  try {
-    if (d.includes("://"))
-      d = new URL(d).hostname;
-  } catch {}
-  d = d.replace(/^www\./, "");
-  return d.replace(/[^a-z0-9.-]/g, "_");
-}
-function ensureDir() {
-  import_fs4.default.mkdirSync(getKnowledgeDir(), { recursive: true });
-}
-function readKnowledge(domain) {
-  const p = getKnowledgePath(domain);
-  try {
-    return import_fs4.default.readFileSync(p, "utf8");
-  } catch {
-    return null;
-  }
-}
-function parseKnowledge(domain) {
-  const raw = readKnowledge(domain);
-  if (!raw)
-    return null;
-  return parseMarkdown(raw);
-}
-function listKnowledge() {
-  const dir = getKnowledgeDir();
-  let entries = [];
-  try {
-    entries = import_fs4.default.readdirSync(dir);
-  } catch {
-    return [];
-  }
-  const results = [];
-  for (const file of entries) {
-    if (!file.endsWith(".md"))
-      continue;
-    const full = import_path2.default.join(dir, file);
-    try {
-      const stat = import_fs4.default.statSync(full);
-      const raw = import_fs4.default.readFileSync(full, "utf8");
-      const parsed = parseMarkdown(raw);
-      results.push({
-        domain: parsed?.domain ?? file.replace(/\.md$/, ""),
-        lastVerified: parsed?.lastVerified ?? new Date(stat.mtimeMs).toISOString(),
-        lastMode: parsed?.lastMode ?? "unknown",
-        sizeBytes: stat.size
-      });
-    } catch {}
-  }
-  results.sort((a, b) => a.lastVerified < b.lastVerified ? 1 : -1);
-  return results;
-}
-function clearKnowledge(domain) {
-  const dir = getKnowledgeDir();
-  if (domain) {
-    const p = getKnowledgePath(domain);
-    try {
-      import_fs4.default.unlinkSync(p);
-      return { removed: 1 };
-    } catch {
-      return { removed: 0 };
-    }
-  }
-  let removed = 0;
-  try {
-    const entries = import_fs4.default.readdirSync(dir);
-    for (const f of entries) {
-      if (f.endsWith(".md")) {
-        try {
-          import_fs4.default.unlinkSync(import_path2.default.join(dir, f));
-          removed++;
-        } catch {}
-      }
-    }
-  } catch {}
-  return { removed };
-}
-function mergeKnowledge(domain, updates) {
-  ensureDir();
-  const existing = parseKnowledge(domain);
-  const merged = {
-    domain: sanitizeDomain(domain),
-    lastVerified: updates.lastVerified ?? new Date().toISOString(),
-    lastMode: updates.lastMode ?? existing?.lastMode ?? "unknown",
-    browserRequired: updates.browserRequired ?? existing?.browserRequired ?? true,
-    auth: updates.auth ?? existing?.auth ?? { type: "unknown" },
-    endpoints: dedupeEndpoints([...existing?.endpoints ?? [], ...updates.endpoints ?? []]),
-    notes: dedupeNotes([...existing?.notes ?? [], ...updates.notes ?? []])
-  };
-  const md = renderMarkdown(merged);
-  import_fs4.default.writeFileSync(getKnowledgePath(domain), md, "utf8");
-  log6.info(`knowledge updated: ${merged.domain} (${merged.endpoints.length} endpoints)`);
-}
-function dedupeEndpoints(endpoints) {
-  const seen = new Map;
-  for (const ep of endpoints) {
-    const key = `${ep.method.toUpperCase()} ${ep.path}`;
-    const existing = seen.get(key);
-    if (!existing) {
-      seen.set(key, ep);
-    } else {
-      seen.set(key, {
-        ...existing,
-        description: ep.description || existing.description,
-        example: ep.example || existing.example,
-        firstSeen: existing.firstSeen || ep.firstSeen
-      });
-    }
-  }
-  return [...seen.values()].sort((a, b) => {
-    if (a.path !== b.path)
-      return a.path < b.path ? -1 : 1;
-    return a.method < b.method ? -1 : 1;
-  });
-}
-function dedupeNotes(notes) {
-  const seen = new Set;
-  const out = [];
-  for (const note of notes) {
-    const n = note.trim();
-    if (n && !seen.has(n)) {
-      seen.add(n);
-      out.push(n);
-    }
-  }
-  return out;
-}
-function renderMarkdown(data) {
-  const lines = [];
-  lines.push("---");
-  lines.push(`domain: ${data.domain}`);
-  lines.push(`lastVerified: ${data.lastVerified}`);
-  lines.push(`lastMode: ${data.lastMode}`);
-  lines.push(`browserRequired: ${data.browserRequired}`);
-  lines.push(`authType: ${data.auth.type}`);
-  lines.push("---");
-  lines.push("");
-  lines.push(`# ${data.domain}`);
-  lines.push("");
-  lines.push(`Last verified: **${data.lastVerified}** via \`${data.lastMode}\` mode.`);
-  lines.push("");
-  lines.push("## Auth material");
-  lines.push("");
-  lines.push(`**Type:** ${data.auth.type}`);
-  if (data.auth.cookieNames?.length) {
-    lines.push(`**Required cookies:** ${data.auth.cookieNames.map((n) => `\`${n}\``).join(", ")}`);
-  }
-  if (data.auth.localStorageKeys?.length) {
-    lines.push(`**localStorage keys:** ${data.auth.localStorageKeys.map((n) => `\`${n}\``).join(", ")}`);
-  }
-  if (data.auth.sessionStorageKeys?.length) {
-    lines.push(`**sessionStorage keys:** ${data.auth.sessionStorageKeys.map((n) => `\`${n}\``).join(", ")}`);
-  }
-  if (data.auth.headers?.length) {
-    lines.push(`**Request headers:** ${data.auth.headers.map((n) => `\`${n}\``).join(", ")}`);
-  }
-  lines.push("");
-  lines.push("> _Structure only — actual values are stored encrypted in the session store._");
-  lines.push("");
-  if (data.endpoints.length > 0) {
-    lines.push("## Known endpoints");
-    lines.push("");
-    lines.push("The agent can call these directly (with the auth material above) instead of launching a browser.");
-    lines.push("");
-    for (const ep of data.endpoints) {
-      lines.push(`### ${ep.method.toUpperCase()} ${ep.path}`);
-      if (ep.description)
-        lines.push("");
-      if (ep.description)
-        lines.push(ep.description);
-      if (ep.example) {
-        lines.push("");
-        lines.push("```");
-        lines.push(ep.example);
-        lines.push("```");
-      }
-      lines.push("");
-    }
-  } else {
-    lines.push("## Known endpoints");
-    lines.push("");
-    lines.push("_None captured yet. Enable `captureApi: true` on the next `execute` run to populate this section._");
-    lines.push("");
-  }
-  if (data.notes.length > 0) {
-    lines.push("## Notes");
-    lines.push("");
-    for (const n of data.notes)
-      lines.push(`- ${n}`);
-    lines.push("");
-  }
-  return lines.join(`
-`);
-}
-function parseMarkdown(raw) {
-  const frontmatterMatch = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n/);
-  if (!frontmatterMatch)
-    return null;
-  const fm = {};
-  for (const line of frontmatterMatch[1].split(`
-`)) {
-    const m = line.match(/^(\w+):\s*(.*)$/);
-    if (m)
-      fm[m[1]] = m[2].trim();
-  }
-  const body = raw.slice(frontmatterMatch[0].length);
-  const auth = { type: fm.authType ?? "unknown" };
-  const authSection = extractSection(body, "Auth material");
-  if (authSection) {
-    auth.cookieNames = extractBackticks(/\*\*Required cookies:\*\*\s+(.+)/, authSection);
-    auth.localStorageKeys = extractBackticks(/\*\*localStorage keys:\*\*\s+(.+)/, authSection);
-    auth.sessionStorageKeys = extractBackticks(/\*\*sessionStorage keys:\*\*\s+(.+)/, authSection);
-    auth.headers = extractBackticks(/\*\*Request headers:\*\*\s+(.+)/, authSection);
-  }
-  const endpoints = [];
-  const endpointSection = extractSection(body, "Known endpoints");
-  if (endpointSection) {
-    const endpointRegex = /^### (GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\S+)\s*$/gim;
-    let m;
-    while ((m = endpointRegex.exec(endpointSection)) !== null) {
-      endpoints.push({ method: m[1], path: m[2] });
-    }
-  }
-  const notes = [];
-  const notesSection = extractSection(body, "Notes");
-  if (notesSection) {
-    for (const line of notesSection.split(`
-`)) {
-      const m = line.match(/^-\s+(.+)$/);
-      if (m)
-        notes.push(m[1].trim());
-    }
-  }
-  return {
-    domain: fm.domain ?? "",
-    lastVerified: fm.lastVerified ?? "",
-    lastMode: fm.lastMode ?? "unknown",
-    browserRequired: fm.browserRequired !== "false",
-    auth,
-    endpoints,
-    notes
-  };
-}
-function extractSection(body, heading) {
-  const re = new RegExp(`^##\\s+${heading}\\s*$`, "m");
-  const match = body.match(re);
-  if (!match || match.index === undefined)
-    return null;
-  const start = match.index + match[0].length;
-  const nextSection = body.slice(start).match(/^##\s+/m);
-  const end = nextSection?.index != null ? start + nextSection.index : body.length;
-  return body.slice(start, end);
-}
-function extractBackticks(re, text) {
-  const m = text.match(re);
-  if (!m)
-    return;
-  const items = [...m[1].matchAll(/`([^`]+)`/g)].map((x) => x[1]);
-  return items.length > 0 ? items : undefined;
-}
-var import_fs4, import_path2, import_os, log6;
-var init_knowledge = __esm(() => {
-  init_logger();
-  import_fs4 = __toESM(require("fs"));
-  import_path2 = __toESM(require("path"));
-  import_os = __toESM(require("os"));
-  log6 = createLogger("knowledge");
 });
 
 // src/lib/session/sqlite-store.ts
@@ -3449,7 +3565,7 @@ class SqliteStore {
   db;
   constructor(dataDir) {
     import_fs5.default.mkdirSync(dataDir, { recursive: true });
-    const dbPath = import_path3.default.join(dataDir, "iframer.db");
+    const dbPath = import_path4.default.join(dataDir, "iframer.db");
     this.db = IS_BUN ? createBunDb(dbPath) : createNodeDb(dbPath);
     this.db.run(`
       CREATE TABLE IF NOT EXISTS sessions (
@@ -3465,6 +3581,17 @@ class SqliteStore {
         PRIMARY KEY (user_id, domain)
       )
     `);
+    this.migrateLegacyUserIds();
+  }
+  migrateLegacyUserIds() {
+    const CANONICAL = "iframer-local";
+    const LEGACY = ["cli-user", "mcp-user"];
+    for (const legacy of LEGACY) {
+      this.db.run(`INSERT OR IGNORE INTO credentials (user_id, domain, blob)
+         SELECT ?, domain, blob FROM credentials WHERE user_id = ?`, CANONICAL, legacy);
+      this.db.run(`INSERT OR IGNORE INTO sessions (user_id, blob)
+         SELECT ?, blob FROM sessions WHERE user_id = ?`, CANONICAL, legacy);
+    }
   }
   async getSession(userId) {
     const row = this.db.queryGet("SELECT blob FROM sessions WHERE user_id = ?", userId);
@@ -3494,23 +3621,21 @@ class SqliteStore {
     this.db.close();
   }
 }
-var import_path3, import_fs5, IS_BUN;
+var import_path4, import_fs5, IS_BUN;
 var init_sqlite_store = __esm(() => {
-  import_path3 = __toESM(require("path"));
+  import_path4 = __toESM(require("path"));
   import_fs5 = __toESM(require("fs"));
   IS_BUN = typeof globalThis.Bun !== "undefined";
 });
 
 // src/lib/storage.ts
 function createStore(options = {}) {
-  const dataDir = options.dataDir || import_path4.default.join(import_os2.default.homedir(), ".iframer");
+  const dataDir = options.dataDir || getDataDir();
   return new SqliteStore(dataDir);
 }
-var import_path4, import_os2;
 var init_storage = __esm(() => {
   init_sqlite_store();
-  import_path4 = __toESM(require("path"));
-  import_os2 = __toESM(require("os"));
+  init_paths();
 });
 
 // src/lib/browser/chrome-downloader.ts
@@ -3652,15 +3777,15 @@ async function ensureChrome() {
     throw new Error("No Chrome found. Download failed and no system Chrome available.");
   }
 }
-var import_fs6, import_path5, import_os3, import_child_process2, log7, CHROME_VERSIONS_URL = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json", DEFAULT_INSTALL_DIR;
+var import_fs6, import_path5, import_os2, import_child_process2, log7, CHROME_VERSIONS_URL = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json", DEFAULT_INSTALL_DIR;
 var init_chrome_downloader = __esm(() => {
   init_logger();
   import_fs6 = __toESM(require("fs"));
   import_path5 = __toESM(require("path"));
-  import_os3 = __toESM(require("os"));
+  import_os2 = __toESM(require("os"));
   import_child_process2 = require("child_process");
   log7 = createLogger("chrome");
-  DEFAULT_INSTALL_DIR = import_path5.default.join(import_os3.default.homedir(), ".iframer", "chrome");
+  DEFAULT_INSTALL_DIR = import_path5.default.join(import_os2.default.homedir(), ".iframer", "chrome");
 });
 
 // src/lib/browser/daemon.ts
@@ -3711,7 +3836,7 @@ class BrowserDaemon {
     }
     const executablePath = await ensureChrome();
     log8.info(`Launching Chrome for Testing in ${mode} mode: ${executablePath}`);
-    const userDataDir = import_path6.default.join(import_os4.default.homedir(), ".iframer", "chrome-profile", mode);
+    const userDataDir = import_path6.default.join(import_os3.default.homedir(), ".iframer", "chrome-profile", mode);
     import_fs7.default.mkdirSync(userDataDir, { recursive: true });
     const browser = await import_patchright2.chromium.launch({
       executablePath,
@@ -3787,12 +3912,12 @@ class BrowserDaemon {
     }, this.idleTimeout));
   }
 }
-var import_patchright2, import_os4, import_path6, import_fs7, log8, DEFAULT_IDLE_TIMEOUT;
+var import_patchright2, import_os3, import_path6, import_fs7, log8, DEFAULT_IDLE_TIMEOUT;
 var init_daemon = __esm(() => {
   init_chrome_downloader();
   init_logger();
   import_patchright2 = require("patchright");
-  import_os4 = __toESM(require("os"));
+  import_os3 = __toESM(require("os"));
   import_path6 = __toESM(require("path"));
   import_fs7 = __toESM(require("fs"));
   log8 = createLogger("daemon");
@@ -3800,10 +3925,14 @@ var init_daemon = __esm(() => {
 });
 
 // src/lib/domain-modes.ts
+function defaultFile() {
+  return import_path7.default.join(getDataDir(), "domain-modes.json");
+}
+
 class DomainModeStore {
   data = {};
   filePath;
-  constructor(filePath = DEFAULT_FILE) {
+  constructor(filePath = defaultFile()) {
     this.filePath = filePath;
     this.load();
   }
@@ -3892,14 +4021,13 @@ class DomainModeStore {
     }
   }
 }
-var import_fs8, import_path7, import_os5, log9, DEFAULT_FILE, TTL_DAYS = 14, ESCALATION_LADDER;
+var import_fs8, import_path7, log9, TTL_DAYS = 14, ESCALATION_LADDER;
 var init_domain_modes = __esm(() => {
   init_logger();
+  init_paths();
   import_fs8 = __toESM(require("fs"));
   import_path7 = __toESM(require("path"));
-  import_os5 = __toESM(require("os"));
   log9 = createLogger("domain-modes");
-  DEFAULT_FILE = import_path7.default.join(import_os5.default.homedir(), ".iframer", "domain-modes.json");
   ESCALATION_LADDER = ["headless", "docker-headful", "binary-headful"];
 });
 
@@ -4007,9 +4135,7 @@ class Iframer {
     this.screenshotDir = config.screenshotDir || DEFAULT_SCREENSHOT_DIR;
     this.publicUrl = config.publicUrl || DEFAULT_PUBLIC_URL;
     this.staleTimeoutMs = config.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS3;
-    this.store = createStore({
-      dataDir: config.dataDir || import_path8.default.join(import_os6.default.homedir(), ".iframer")
-    });
+    this.store = createStore({ dataDir: config.dataDir });
     this.daemon = new BrowserDaemon(config.sessionTimeoutMs);
     this.domainModes = new DomainModeStore;
     this.operatingMode = config.mode || "local";
@@ -4488,35 +4614,52 @@ class Iframer {
   }
   async storeCredential(userId, token, credential) {
     const credKey = await deriveKey(token, "credentials");
+    const normalizedDomain = normalizeDomain(credential.domain);
     const data = {
       ...credential,
+      domain: normalizedDomain,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
     const encrypted = encrypt(JSON.stringify(data), credKey);
-    await this.store.setCredential(userId, credential.domain, encrypted);
+    await this.store.setCredential(userId, normalizedDomain, encrypted);
   }
   async getCredential(userId, token, domain) {
     const credKey = await deriveKey(token, "credentials");
-    const blob = await this.store.getCredential(userId, domain);
-    if (!blob || blob.length === 0)
-      return null;
-    return JSON.parse(decrypt(blob, credKey));
+    for (const candidate of domainLookupChain(domain)) {
+      const blob = await this.store.getCredential(userId, candidate);
+      if (blob && blob.length > 0) {
+        try {
+          return JSON.parse(decrypt(blob, credKey));
+        } catch (err) {
+          throw new Error(`Credentials for ${candidate} exist but cannot be decrypted. ` + `The encryption key has changed. Re-store with: ` + `iframer-toolkit credentials add ${candidate}`);
+        }
+      }
+    }
+    return null;
   }
   async listCredentials(userId) {
     return this.store.listCredentialDomains(userId);
   }
   async deleteCredential(userId, domain) {
-    await this.store.deleteCredential(userId, domain);
+    await this.store.deleteCredential(userId, normalizeDomain(domain));
   }
   async loginWithCredentials(userId, token, domain, selectors) {
     const session = getSession(userId);
     if (!session)
       return { ok: false, url: "", title: "", error: "No active interactive session. Start one first." };
     const credKey = await deriveKey(token, "credentials");
-    const blob = await this.store.getCredential(userId, domain);
-    if (!blob || blob.length === 0) {
-      return { ok: false, url: "", title: "", error: `No credentials stored for ${domain}` };
+    let blob = null;
+    for (const candidate of domainLookupChain(domain)) {
+      const b = await this.store.getCredential(userId, candidate);
+      if (b && b.length > 0) {
+        blob = b;
+        break;
+      }
+    }
+    if (!blob) {
+      const stored = await this.store.listCredentialDomains(userId);
+      return { ok: false, url: "", title: "", error: `No credentials stored for ${normalizeDomain(domain)}. Stored: ${stored.join(", ") || "(none)"}` };
     }
     const credential = JSON.parse(decrypt(blob, credKey));
     const page = session.page;
@@ -4555,7 +4698,7 @@ class Iframer {
     }
   }
 }
-var import_path8, import_os6, log12, DEFAULT_SCREENSHOT_DIR, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3 = 20000;
+var import_path8, log12, DEFAULT_SCREENSHOT_DIR, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3 = 20000;
 var init_iframer = __esm(() => {
   init_pipeline();
   init_session_manager();
@@ -4573,7 +4716,6 @@ var init_iframer = __esm(() => {
   init_constants();
   init_logger();
   import_path8 = __toESM(require("path"));
-  import_os6 = __toESM(require("os"));
   log12 = createLogger("iframer");
   DEFAULT_SCREENSHOT_DIR = import_path8.default.join("/Users/eduardoverona/tools/iframer-toolkit/src/lib", "../../.screenshots");
   DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
@@ -4582,17 +4724,37 @@ var init_iframer = __esm(() => {
 // bin/cli.js
 var __dirname = "/Users/eduardoverona/tools/iframer-toolkit/bin";
 var fs9 = require("fs");
-var os7 = require("os");
+var os4 = require("os");
 var path9 = require("path");
 var { execSync: execSync2 } = require("child_process");
 var readline = require("readline");
-var HOME_DIR = os7.homedir();
-var CONFIG_DIR = path9.join(HOME_DIR, ".iframer");
+var HOME_DIR = os4.homedir();
+var CONFIG_DIR = process.env.IFRAMER_DATA_DIR || path9.join(HOME_DIR, ".iframer");
 var CLAUDE_CONFIG_PATH = path9.join(HOME_DIR, ".claude.json");
 var CODEX_CONFIG_PATH = path9.join(HOME_DIR, ".codex", "config.toml");
 var DEFAULT_SERVER = process.env.IFRAMER_URL || "http://localhost:3021";
 var API_KEY = process.env.IFRAMER_SECRET;
 var USE_LOCAL = process.env.IFRAMER_MODE === "local" || !process.env.IFRAMER_URL;
+var LOCAL_USER_ID = "iframer-local";
+function resolveLocalToken() {
+  if (process.env.IFRAMER_SECRET)
+    return process.env.IFRAMER_SECRET;
+  const file = path9.join(CONFIG_DIR, "secret");
+  try {
+    const existing = fs9.readFileSync(file, "utf8").trim();
+    if (existing)
+      return existing;
+  } catch {}
+  try {
+    fs9.mkdirSync(CONFIG_DIR, { recursive: true });
+    const secret = require("crypto").randomBytes(32).toString("hex");
+    fs9.writeFileSync(file, secret, { mode: 384 });
+    return secret;
+  } catch {
+    return "iframer-local-default-token";
+  }
+}
+var LOCAL_TOKEN = resolveLocalToken();
 function openBrowser(url) {
   try {
     if (process.platform === "darwin")
@@ -4709,6 +4871,16 @@ function resolveIframerSecret() {
       secret = match[1].trim();
   } catch {}
   return secret;
+}
+function writeMachineSecret(secret) {
+  try {
+    fs9.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs9.writeFileSync(path9.join(CONFIG_DIR, "secret"), secret, { mode: 384 });
+    return true;
+  } catch (err) {
+    console.error(`  Warning: could not write ~/.iframer/secret: ${err.message}`);
+    return false;
+  }
 }
 function loadClaudeConfig() {
   try {
@@ -4832,7 +5004,7 @@ async function getLocalIframer() {
     return _iframer;
   try {
     const { Iframer: Iframer2 } = await Promise.resolve().then(() => (init_iframer(), exports_iframer));
-    const screenshotDir = path9.join(os7.tmpdir(), "iframer-screenshots");
+    const screenshotDir = path9.join(os4.tmpdir(), "iframer-screenshots");
     fs9.mkdirSync(screenshotDir, { recursive: true });
     _iframer = new Iframer2({
       screenshotDir,
@@ -5077,7 +5249,7 @@ async function main() {
         result = await apiPost("/execute", { steps, options });
       } else if (USE_LOCAL || !docker) {
         const iframer = await getLocalIframer();
-        result = await iframer.execute("cli-user", API_KEY || "cli-local", { steps, options });
+        result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options });
       } else {
         result = await apiPost("/execute", { steps, options });
       }
@@ -5110,7 +5282,7 @@ async function main() {
       let result;
       if (USE_LOCAL || !docker) {
         const iframer = await getLocalIframer();
-        result = await iframer.fetch("cli-user", API_KEY || "cli-local", options);
+        result = await iframer.fetch(LOCAL_USER_ID, LOCAL_TOKEN, options);
       } else {
         result = await apiPost("/fetch", options);
       }
@@ -5132,7 +5304,7 @@ async function main() {
         let result;
         if (USE_LOCAL || !docker) {
           const iframer = await getLocalIframer();
-          result = await iframer.execute("cli-user", API_KEY || "cli-local", { steps, options: { mode } });
+          result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options: { mode } });
         } else {
           result = await apiPost("/execute", { steps, options: { mode } });
         }
@@ -5177,7 +5349,7 @@ async function main() {
           console.log(`  Session stopped. State saved: ${data.sessionSaved}`);
         } else {
           const iframer = await getLocalIframer();
-          const result = await iframer.stopSession("cli-user", API_KEY || "cli-local");
+          const result = await iframer.stopSession(LOCAL_USER_ID, LOCAL_TOKEN);
           console.log(`  Session stopped. State saved: ${result.sessionSaved}`);
         }
       } else if (sub === "clear") {
@@ -5190,7 +5362,7 @@ async function main() {
           }
         } else {
           const iframer = await getLocalIframer();
-          await iframer.clearSession("cli-user");
+          await iframer.clearSession(LOCAL_USER_ID);
         }
         console.log("  Session data cleared.");
       } else if (sub === "status") {
@@ -5255,7 +5427,7 @@ async function main() {
         const docker = await isDockerRunning();
         if (USE_LOCAL || !docker) {
           const iframer = await getLocalIframer();
-          await iframer.storeCredential("cli-user", API_KEY || "cli-local", body);
+          await iframer.storeCredential(LOCAL_USER_ID, LOCAL_TOKEN, body);
         } else {
           const data = await apiPost("/credentials", body);
           if (!data.ok) {
@@ -5270,7 +5442,7 @@ async function main() {
         let domains;
         if (USE_LOCAL || !docker) {
           const iframer = await getLocalIframer();
-          domains = await iframer.listCredentials("cli-user");
+          domains = await iframer.listCredentials(LOCAL_USER_ID);
         } else {
           const data = await apiGet("/credentials");
           if (!data.ok) {
@@ -5295,7 +5467,7 @@ async function main() {
         const docker = await isDockerRunning();
         if (USE_LOCAL || !docker) {
           const iframer = await getLocalIframer();
-          await iframer.deleteCredential("cli-user", domain);
+          await iframer.deleteCredential(LOCAL_USER_ID, domain);
         } else {
           const data = await apiDelete(`/credentials/${encodeURIComponent(domain)}`);
           if (!data.ok) {
@@ -5343,7 +5515,7 @@ async function main() {
       let result;
       if (USE_LOCAL || !docker) {
         const iframer = await getLocalIframer();
-        result = await iframer.execute("cli-user", API_KEY || "cli-local", { steps, options });
+        result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options });
       } else {
         result = await apiPost("/execute", { steps, options });
       }
@@ -5528,21 +5700,29 @@ async function main() {
       console.log(runtime.message);
       const isDev = args.includes("--dev");
       const mcpName = isDev ? "iframer-dev" : "iframer";
-      const secret = resolveIframerSecret();
-      const mcpEntry = { command: runtime.command, args: runtime.args };
-      if (secret)
-        mcpEntry.env = { IFRAMER_SECRET: secret };
-      if (!isDev) {
-        if (!mcpEntry.env)
-          mcpEntry.env = {};
-        mcpEntry.env.IFRAMER_MODE = "local";
+      let secret = resolveIframerSecret();
+      let secretSource = secret ? "env/.env" : null;
+      if (!secret) {
+        try {
+          secret = fs9.readFileSync(path9.join(CONFIG_DIR, "secret"), "utf8").trim();
+          if (secret)
+            secretSource = "~/.iframer/secret";
+        } catch {}
       }
+      if (!secret) {
+        secret = require("crypto").randomBytes(32).toString("hex");
+        secretSource = "generated";
+      }
+      writeMachineSecret(secret);
+      const mcpEntry = { command: runtime.command, args: runtime.args };
+      mcpEntry.env = { IFRAMER_SECRET: secret };
+      if (!isDev)
+        mcpEntry.env.IFRAMER_MODE = "local";
       const claudeConfigPath = installClaudeMcp(mcpName, mcpEntry);
       const codexConfigPath = installCodexMcp(mcpName, mcpEntry);
       console.log(`
   ${mcpName} MCP installed!`);
-      if (secret)
-        console.log("  IFRAMER_SECRET loaded from .env");
+      console.log(`  Encryption key: ${secretSource} → ~/.iframer/secret`);
       if (!isDev)
         console.log("  Mode: local (headless + binary-headful, no Docker needed)");
       else

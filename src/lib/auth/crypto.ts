@@ -1,10 +1,51 @@
 import crypto from "crypto";
+import fs from "fs";
+import path from "path";
+import { getDataDir } from "../paths";
 
 const SALT = "iframer-session";
 const INFO = "encryption";
 const KEY_LENGTH = 32;
 const IV_LENGTH = 12;
 const TAG_LENGTH = 16;
+
+/**
+ * Resolve the machine-local encryption token used by both the CLI and the MCP
+ * server. Precedence:
+ *
+ *   1. `IFRAMER_SECRET` env var — user-supplied override (must match between
+ *      the MCP server config and any shell running the CLI)
+ *   2. `~/.iframer/secret` — persisted on first write, readable by both
+ *      processes without requiring env-var setup
+ *
+ * Returns the same token from both CLI and MCP so credentials stored by one
+ * can be decrypted by the other.
+ */
+export function getLocalToken(): string {
+  if (process.env.IFRAMER_SECRET) return process.env.IFRAMER_SECRET;
+
+  const dir = getDataDir();
+  const file = path.join(dir, "secret");
+
+  try {
+    const existing = fs.readFileSync(file, "utf8").trim();
+    if (existing) return existing;
+  } catch {
+    // file doesn't exist or unreadable — fall through to creation
+  }
+
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const secret = crypto.randomBytes(32).toString("hex");
+    fs.writeFileSync(file, secret, { mode: 0o600 });
+    return secret;
+  } catch {
+    // Couldn't create — fall back to a fixed default (means encryption is
+    // effectively unauthenticated, but keeps things functional on read-only
+    // home directories)
+    return "iframer-local-default-token";
+  }
+}
 
 export function deriveKey(token: string, purpose: string = INFO): Promise<Buffer> {
   return new Promise((resolve, reject) => {

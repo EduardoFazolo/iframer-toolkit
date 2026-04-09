@@ -69,23 +69,13 @@ IMPORTANT — Do NOT specify options.mode unless the user explicitly asks for a 
         };
 
         async function runWithMode(mode?: string): Promise<any> {
-          if (mode === "binary-headful") {
-            await ensureLocalChrome();
-            const iframer = await getIframer();
-            return iframer.execute(
-              LOCAL_USER,
-              LOCAL_TOKEN,
-              {
-                steps: params.steps,
-                options: { ...params.options, mode: "binary-headful", autoEscalate: false },
-              },
-              { elicitOtp }
-            );
-          }
+          // docker-headful is the ONLY mode that goes through the Docker API.
+          // headless and binary-headful ALWAYS run on the host so they share
+          // the host's credential / session / knowledge stores. Docker having
+        //   its own isolated SQLite file at /root/.iframer was the source of
+          // every "credentials stored but login can't find them" bug.
           if (mode === "docker-headful") {
             if (!dockerRunning) {
-              // Explicit request for docker-headful but Docker isn't reachable.
-              // Don't silently degrade — return a clear error so the caller knows.
               return {
                 ok: false,
                 completedSteps: 0,
@@ -111,12 +101,16 @@ IMPORTANT — Do NOT specify options.mode unless the user explicitly asks for a 
               options: { ...params.options, mode: "docker-headful", autoEscalate: false },
             });
           }
-          if (dockerRunning) {
-            return apiPost("/execute", {
-              steps: params.steps,
-              options: { ...params.options, mode: mode || undefined },
-            });
-          }
+
+          // Everything else (headless, binary-headful, or undefined for auto)
+          // runs on the host via the local iframer instance. This guarantees
+          // credentials stored on the host are visible to every non-docker mode.
+          //
+          // Auto-escalation stays enabled even when the caller requests a
+          // specific mode. A "mode" hint is preferred STARTING point, not a
+          // hard ceiling — if the agent asks for headless and headless gets
+          // bot-blocked, we still want iframer to transparently escalate to
+          // binary-headful so the user's task just works.
           await ensureLocalChrome();
           const iframer = await getIframer();
           return iframer.execute(
