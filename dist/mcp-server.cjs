@@ -5194,14 +5194,18 @@ var import_zod5 = require("zod");
 var import_fs10 = __toESM(require("fs"));
 var import_path11 = __toESM(require("path"));
 init_paths();
+init_knowledge();
+var ELICIT_TIMEOUT_MS = 45000;
 function mcpLog(event, data) {
   try {
     const dir = getDataDir();
     import_fs10.default.mkdirSync(dir, { recursive: true });
-    const line = JSON.stringify({ ts: new Date().toISOString(), event, ...data }) + `
-`;
-    import_fs10.default.appendFileSync(import_path11.default.join(dir, "mcp.log"), line);
+    import_fs10.default.appendFileSync(import_path11.default.join(dir, "mcp.log"), JSON.stringify({ ts: new Date().toISOString(), event, ...data }) + `
+`);
   } catch {}
+}
+function domainMatches(normalized, stored) {
+  return stored.some((d) => d === normalized || normalized.endsWith("." + d) || d.endsWith("." + normalized));
 }
 function registerCredentialsTool(server) {
   server.tool("credentials", `Manage stored login credentials. This tool ONLY stores and lists credentials — it does NOT log you into anything. Actual logins happen via the \`execute\` tool with a \`login\` step. Credentials are stored in a single local SQLite database shared by ALL browser modes (headless, binary-headful, docker-headful) — store once, login anywhere.
@@ -5234,18 +5238,9 @@ CRITICAL RULES — violating these is a bug, not creative problem solving
     force: import_zod5.z.boolean().optional().describe("Overwrite existing credentials. Only use this when the user EXPLICITLY asks to change their stored credentials. Never use `force` to recover from a login failure.")
   }, async ({ action, domain, force }) => {
     try {
-      const useLocal = true;
+      const iframer = await getIframer();
       if (action === "list") {
-        let domains;
-        if (useLocal) {
-          const iframer = await getIframer();
-          domains = await iframer.listCredentials(LOCAL_USER);
-        } else {
-          const credList = await apiGet("/credentials");
-          if (!credList.ok)
-            return err(`Error: ${credList.error}`);
-          domains = credList.domains || [];
-        }
+        const domains = await iframer.listCredentials(LOCAL_USER);
         if (!domains.length) {
           return { content: [{ type: "text", text: "No credentials stored. Call this tool again with action=store and the domain to prompt the user for credentials now." }] };
         }
@@ -5253,88 +5248,76 @@ CRITICAL RULES — violating these is a bug, not creative problem solving
 ${domains.map((d) => `  - ${d}`).join(`
 `)}` }] };
       }
-      if (action === "store") {
-        if (!domain)
-          return err("domain is required for action=store");
-        const iframer = await getIframer();
-        const normalizedDomain = domain.toLowerCase().replace(/^www\./, "").replace(/^https?:\/\//, "").split("/")[0];
-        const existing = await iframer.listCredentials(LOCAL_USER);
-        const alreadyExists = existing.some((d) => d === normalizedDomain || normalizedDomain.endsWith("." + d) || d.endsWith("." + normalizedDomain));
-        if (alreadyExists && !force) {
-          mcpLog("credentials.store.rejected_already_exists", { domain: normalizedDomain });
-          return err(`REFUSING TO RE-STORE: credentials for "${normalizedDomain}" already exist in the store. ` + `If a login using these credentials just failed, the problem is NOT the credentials — it is almost always browser-mode / bot-detection / page-structure. ` + `DO NOT ask the user to re-enter their password. INSTEAD:
+      if (action !== "store")
+        return err("Unknown action");
+      if (!domain)
+        return err("domain is required for action=store");
+      const normalized = normalizeDomain(domain);
+      const stored = await iframer.listCredentials(LOCAL_USER);
+      const alreadyExists = domainMatches(normalized, stored);
+      if (alreadyExists && !force) {
+        mcpLog("credentials.store.rejected_already_exists", { domain: normalized });
+        return err(`REFUSING TO RE-STORE: credentials for "${normalized}" already exist in the store. ` + `If a login using these credentials just failed, the problem is NOT the credentials — it is almost always browser-mode / bot-detection / page-structure. ` + `DO NOT ask the user to re-enter their password. INSTEAD:
 
 ` + `  1. Retry the \`execute\` call with \`options.mode: "binary-headful"\` (or "docker-headful" if Docker is running).
 ` + `  2. If you already tried stronger modes and they also failed, take a \`snapshot\` of the login page to see what the site is actually rendering.
 ` + `  3. ONLY if the user EXPLICITLY says "my password changed" or "I want to update my credentials" should you call this tool again with \`force: true\`.
 
 ` + `NEVER use this tool as a reflexive "recovery" from a failed login.`);
-        }
-        mcpLog("credentials.store.attempt", { domain, useLocal, force: !!force, alreadyExists });
-        const ELICIT_TIMEOUT_MS = 45000;
-        let result;
-        try {
-          const elicitPromise = server.server.elicitInput({
-            mode: "form",
-            message: `Enter your login credentials for ${domain}. These are encrypted and stored locally — the agent never sees them.`,
-            requestedSchema: {
-              type: "object",
-              properties: {
-                username: { type: "string", title: "Username / Email" },
-                password: { type: "string", title: "Password" },
-                totp_secret: { type: "string", title: "TOTP Secret (leave empty if no 2FA)" }
-              },
-              required: ["username", "password"]
-            }
-          });
-          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error(`elicitation timed out after ${ELICIT_TIMEOUT_MS}ms — the client did not respond`)), ELICIT_TIMEOUT_MS));
-          result = await Promise.race([elicitPromise, timeoutPromise]);
-        } catch (elicitErr) {
-          const msg = elicitErr instanceof Error ? elicitErr.message : String(elicitErr);
-          mcpLog("credentials.store.elicit_failed", { domain, error: msg });
-          return err(`FAILED TO STORE CREDENTIALS for ${domain}: ${msg}
+      }
+      mcpLog("credentials.store.attempt", { domain: normalized, force: !!force, alreadyExists });
+      let result;
+      try {
+        const elicitPromise = server.server.elicitInput({
+          mode: "form",
+          message: `Enter your login credentials for ${normalized}. These are encrypted and stored locally — the agent never sees them.`,
+          requestedSchema: {
+            type: "object",
+            properties: {
+              username: { type: "string", title: "Username / Email" },
+              password: { type: "string", title: "Password" },
+              totp_secret: { type: "string", title: "TOTP Secret (leave empty if no 2FA)" }
+            },
+            required: ["username", "password"]
+          }
+        });
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error(`elicitation timed out after ${ELICIT_TIMEOUT_MS}ms — the client did not respond`)), ELICIT_TIMEOUT_MS));
+        result = await Promise.race([elicitPromise, timeoutPromise]);
+      } catch (elicitErr) {
+        const msg = elicitErr instanceof Error ? elicitErr.message : String(elicitErr);
+        mcpLog("credentials.store.elicit_failed", { domain: normalized, error: msg });
+        return err(`FAILED TO STORE CREDENTIALS for ${normalized}: ${msg}
 
 ` + `This MCP client cannot collect credentials via the secure form flow. The user MUST run this command in their terminal:
 
-` + `  iframer-toolkit credentials add ${domain}
-
-` + `(or, for dev: \`node dist/cli.cjs credentials add ${domain}\`)
+` + `  iframer-toolkit credentials add ${normalized}
 
 ` + `After they run it, retry the login. ` + `DO NOT pretend credentials were stored. ` + `DO NOT call \`credentials list\` and assume success from its output. ` + `DO NOT proceed with login until the user explicitly confirms they ran the CLI command.`);
-        }
-        mcpLog("credentials.store.elicit_result", { domain, action: result.action, hasContent: !!result.content });
-        if (result.action !== "accept" || !result.content) {
-          return err(`Credential form was ${result.action || "dismissed"}. No credentials were saved for ${domain}. ` + `Ask the user to retry or store credentials via CLI: \`iframer-toolkit credentials add ${domain}\`.`);
-        }
-        const { username, password, totp_secret } = result.content;
-        if (!username || !password) {
-          mcpLog("credentials.store.incomplete", { domain, hasUsername: !!username, hasPassword: !!password });
-          return err(`Credential form was submitted but username or password was empty. No credentials were saved for ${domain}.`);
-        }
-        try {
-          if (useLocal) {
-            const iframer2 = await getIframer();
-            await iframer2.storeCredential(LOCAL_USER, LOCAL_TOKEN, { domain, username, password, totp_secret: totp_secret || undefined });
-          } else {
-            const storeResult = await apiPost("/credentials", { domain, username, password, totp_secret: totp_secret || undefined });
-            if (!storeResult.ok)
-              return err(`Error: ${storeResult.error}`);
-          }
-        } catch (storeErr) {
-          const msg = storeErr instanceof Error ? storeErr.message : String(storeErr);
-          mcpLog("credentials.store.write_failed", { domain, error: msg });
-          return err(`Failed to write credentials to store: ${msg}`);
-        }
-        mcpLog("credentials.store.success", { domain });
-        return { content: [{ type: "text", text: `Credentials stored for ${domain}. These are shared across all browser modes (headless, binary-headful, docker-headful).` }] };
       }
-      return err("Unknown action");
+      mcpLog("credentials.store.elicit_result", { domain: normalized, action: result.action, hasContent: !!result.content });
+      if (result.action !== "accept" || !result.content) {
+        return err(`Credential form was ${result.action || "dismissed"}. No credentials were saved for ${normalized}. ` + `Ask the user to retry or store credentials via CLI: \`iframer-toolkit credentials add ${normalized}\`.`);
+      }
+      const { username, password, totp_secret } = result.content;
+      if (!username || !password) {
+        mcpLog("credentials.store.incomplete", { domain: normalized, hasUsername: !!username, hasPassword: !!password });
+        return err(`Credential form was submitted but username or password was empty. No credentials were saved for ${normalized}.`);
+      }
+      try {
+        await iframer.storeCredential(LOCAL_USER, LOCAL_TOKEN, {
+          domain: normalized,
+          username,
+          password,
+          totp_secret: totp_secret || undefined
+        });
+      } catch (storeErr) {
+        const msg = storeErr instanceof Error ? storeErr.message : String(storeErr);
+        mcpLog("credentials.store.write_failed", { domain: normalized, error: msg });
+        return err(`Failed to write credentials to store: ${msg}`);
+      }
+      mcpLog("credentials.store.success", { domain: normalized });
+      return { content: [{ type: "text", text: `Credentials stored for ${normalized}. These are shared across all browser modes (headless, binary-headful, docker-headful).` }] };
     } catch (e) {
-      if (e instanceof Error && e.message?.includes("does not support")) {
-        return err(`This client doesn't support secure input prompts. Store credentials via CLI:
-
-iframer credentials add ${domain}`);
-      }
       return err(`Error: ${getErrorMessage3(e)}`);
     }
   });

@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import type { BrowserMode, DomainModeEntry, DomainAttempt } from "./types";
+import type { BrowserMode, DomainModeEntry } from "./types";
 import { createLogger } from "./logger";
 import { getDataDir } from "./paths";
 

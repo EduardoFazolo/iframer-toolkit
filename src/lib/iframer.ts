@@ -1,5 +1,4 @@
 import path from "path";
-import os from "os";
 import type { Browser, Page } from "patchright";
 import type {
   IframerConfig,
@@ -18,11 +17,12 @@ import type {
 } from "./types";
 import { PipelineRunner } from "./pipeline";
 import * as sessionManager from "./browser/session-manager";
-import { getBrowserWithFallback, BROWSER_ORDER } from "./browser/launcher";
+import { getBrowserWithFallback } from "./browser/launcher";
 import { stealthContextOptions, applyStealthToPage } from "./browser/stealth";
 import { humanClick, humanType, clickRecaptchaCheckbox, clickChallengeTiles, clickChallengeVerify } from "./browser/humanize";
 import { deriveKey, encrypt, decrypt, generateTOTP } from "./auth/crypto";
 import { extractSession, injectCookies, injectStorage } from "./session/persistence";
+import type { SessionData } from "./session/persistence";
 import { mergeKnowledge, normalizeDomain, domainLookupChain, type KnowledgeAuth, type KnowledgeEndpoint } from "./knowledge";
 import { saveScreenshot } from "./screenshot";
 import { createStore, type StorageBackend } from "./storage";
@@ -31,7 +31,7 @@ import { DomainModeStore } from "./domain-modes";
 import { detectBlock } from "./block-detection";
 import { checkModeAvailability } from "./browser/cdp-launcher";
 import { TIMEOUTS, TIMING } from "./constants";
-import { createLogger } from "./logger";import type { SessionData } from "./session/persistence";
+import { createLogger } from "./logger";
 
 const log = createLogger("iframer");
 function getErrorMessage(err: unknown): string {
