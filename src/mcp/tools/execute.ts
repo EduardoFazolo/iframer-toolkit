@@ -69,11 +69,9 @@ IMPORTANT — Do NOT specify options.mode unless the user explicitly asks for a 
         };
 
         async function runWithMode(mode?: string): Promise<any> {
-          // docker-headful is the ONLY mode that goes through the Docker API.
-          // headless and binary-headful ALWAYS run on the host so they share
-          // the host's credential / session / knowledge stores. Docker having
-        //   its own isolated SQLite file at /root/.iframer was the source of
-          // every "credentials stored but login can't find them" bug.
+          // docker-headful is the only mode that goes through the Docker API.
+          // Every other mode runs on the host so CLI, MCP, and all browser
+          // modes share one credential / session / knowledge store.
           if (mode === "docker-headful") {
             if (!dockerRunning) {
               return {
@@ -102,15 +100,10 @@ IMPORTANT — Do NOT specify options.mode unless the user explicitly asks for a 
             });
           }
 
-          // Everything else (headless, binary-headful, or undefined for auto)
-          // runs on the host via the local iframer instance. This guarantees
-          // credentials stored on the host are visible to every non-docker mode.
-          //
-          // Auto-escalation stays enabled even when the caller requests a
-          // specific mode. A "mode" hint is preferred STARTING point, not a
-          // hard ceiling — if the agent asks for headless and headless gets
-          // bot-blocked, we still want iframer to transparently escalate to
-          // binary-headful so the user's task just works.
+          // headless, binary-headful, and the auto-select path all run on
+          // the host. A mode hint is a preferred STARTING point, not a hard
+          // ceiling — auto-escalation stays enabled so a headless bot-block
+          // transparently retries in binary-headful.
           await ensureLocalChrome();
           const iframer = await getIframer();
           return iframer.execute(
