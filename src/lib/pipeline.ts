@@ -37,6 +37,13 @@ async function getPageState(page: Page, ctx: ExecutionContext, withScreenshot = 
 function classifyError(err: Error, step: PipelineStep): ErrorContext["errorType"] {
   if (err instanceof StaleStateError) return "stale-state";
   const msg = err.message.toLowerCase();
+  // A login step that can't find a password field in a headless-type context
+  // almost always means the site detected the headless browser and is
+  // showing a wall/captcha/different page. Classify as bot-blocked so the
+  // execute auto-escalation ladder kicks in (headless → binary-headful).
+  if (step.type === "login" && (msg.includes("no visible password field") || msg.includes("password field was not visible"))) {
+    return "bot-blocked";
+  }
   if (msg.includes("timeout") || msg.includes("timed out")) return "timeout";
   if (msg.includes("not found") || msg.includes("no element") || msg.includes("waiting for selector")) return "element-not-found";
   if (msg.includes("navigation") || msg.includes("net::err")) return "navigation-failed";

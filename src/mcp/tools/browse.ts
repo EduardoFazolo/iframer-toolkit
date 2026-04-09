@@ -1,11 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { apiPost, getIframer, isDockerRunning, err, getErrorMessage, IFRAMER_MODE, LOCAL_USER, LOCAL_TOKEN } from "../helpers";
+import { getIframer, err, getErrorMessage, LOCAL_USER, LOCAL_TOKEN } from "../helpers";
 
 export function registerBrowseTool(server: McpServer) {
   server.tool(
     "browse",
-    `Fetch a web page with a headless browser. Use for pages that need JavaScript rendering but don't have bot detection walls. Session cookies persist across calls.
+    `Fetch a web page with a headless browser. Use for pages that need JavaScript rendering but don't have bot detection walls. Session cookies and stored credentials persist across calls via the single local SQLite store.
 
 PRE-FLIGHT: Call \`knowledge get <domain>\` first. If the cache shows a direct-API path for the data you need, skip this tool and hit the endpoints directly — it's orders of magnitude faster.`,
     {
@@ -23,16 +23,11 @@ PRE-FLIGHT: Call \`knowledge get <domain>\` first. If the cache shows a direct-A
     },
     async (params) => {
       try {
-        const dockerRunning = await isDockerRunning();
-        const useLocal = IFRAMER_MODE === "docker" ? false : !dockerRunning;
-
-        let fetchResult: any;
-        if (useLocal) {
-          const iframer = await getIframer();
-          fetchResult = await iframer.fetch(LOCAL_USER, LOCAL_TOKEN, params as any);
-        } else {
-          fetchResult = await apiPost("/fetch", params);
-        }
+        // Always run through the local iframer instance. The Docker API path
+        // maintained a separate session/credential store that created
+        // split-brain bugs with the rest of the toolkit.
+        const iframer = await getIframer();
+        const fetchResult: any = await iframer.fetch(LOCAL_USER, LOCAL_TOKEN, params as any);
 
         if (!fetchResult.ok) return err(`Error: ${fetchResult.error}`);
         const { html, ...rest } = fetchResult;
