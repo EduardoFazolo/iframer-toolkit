@@ -15,8 +15,14 @@ services:
       - VNC_BASE_DISPLAY=99
       - VNC_MAX_SESSIONS=20
       - VNC_SESSION_TIMEOUT_MS=300000
+      # Tell the iframer code running inside the container that its data
+      # directory is the mounted host path. IFRAMER_DATA_DIR overrides the
+      # default `path.join(os.homedir(), ".iframer")` so the container and the
+      # host CLI / MCP all read and write the same SQLite file.
+      - IFRAMER_DATA_DIR=/iframer-data
     volumes:
-      - iframer-data:/root/.iframer
-
-volumes:
-  iframer-data:
+      # Bind-mount the HOST's ~/.iframer directory into the container so
+      # the Docker server and the host-side CLI / MCP share ONE source of
+      # truth for credentials, sessions, knowledge cache, and secret key.
+      # No more split-brain between container storage and host storage.
+      - ${HOME}/.iframer:/iframer-data

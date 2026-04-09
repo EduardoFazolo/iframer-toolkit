@@ -29,14 +29,14 @@ export function registerStatusTool(server: McpServer) {
           } catch {}
         }
 
+        // Credentials live in the single local SQLite database — NEVER read from
+        // the Docker container. The Docker API has its own stale credential store
+        // that doesn't reflect reality. Credentials are host-local, shared across
+        // every browser mode (headless, binary-headful, docker-headful) via the
+        // login step which always reads from ~/.iframer/iframer.db.
         try {
-          if (status.api) {
-            const credData = await apiGet<{ ok?: boolean; domains?: string[] }>("/credentials");
-            if (credData.ok) status.credentials = credData.domains || [];
-          } else {
-            const iframer = await getIframer();
-            status.credentials = await iframer.listCredentials(LOCAL_USER);
-          }
+          const iframer = await getIframer();
+          status.credentials = await iframer.listCredentials(LOCAL_USER);
         } catch {}
 
         try {

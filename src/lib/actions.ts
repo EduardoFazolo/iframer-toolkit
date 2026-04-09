@@ -13,6 +13,7 @@ import {
 import { solveRecaptcha } from "./captcha/recaptcha";
 import { solveHCaptcha } from "./captcha/hcaptcha";
 import { deriveKey, decrypt, generateTOTP } from "./auth/crypto";
+import { domainLookupChain, normalizeDomain } from "./knowledge";
 import { injectStorage } from "./session/persistence";
 import { saveScreenshot } from "./screenshot";
 import { takeSnapshot } from "./snapshot";
@@ -187,11 +188,54 @@ async function handleFind(page: Page, step: Extract<PipelineStep, { type: "find"
 
 async function handleLogin(page: Page, step: Extract<PipelineStep, { type: "login" }>, ctx: ExecutionContext): Promise<unknown> {
   const credKey = await deriveKey(ctx.token, "credentials");
-  const blob = await ctx.store.getCredential(ctx.userId, step.domain);
-  if (!blob || blob.length === 0) {
-    throw new Error(`No credentials stored for ${step.domain}`);
+
+  // Look up credentials with a parent-domain fallback chain so "auth.figma.com"
+  // finds creds stored under "figma.com", and "www.figma.com" matches "figma.com".
+  let blob: Buffer | null = null;
+  let matchedDomain = "";
+  for (const candidate of domainLookupChain(step.domain)) {
+    const b = await ctx.store.getCredential(ctx.userId, candidate);
+    if (b && b.length > 0) {
+      blob = b;
+      matchedDomain = candidate;
+      break;
+    }
   }
-  const credential = JSON.parse(decrypt(blob, credKey));
+
+  if (!blob) {
+    // Tell the agent what IS stored so it can retry with the right domain.
+    const stored = await ctx.store.listCredentialDomains(ctx.userId);
+    const storedList = stored.length > 0 ? stored.join(", ") : "(none)";
+    throw new Error(
+      `No credentials stored for ${normalizeDomain(step.domain)}. Stored domains: ${storedList}. ` +
+      `If you stored credentials under a different domain name, retry the login step with that domain. ` +
+      `If no credentials are stored at all, call the \`credentials\` tool with action=store first.`
+    );
+  }
+
+  // Decrypt the stored blob. If the encryption key has changed since the row
+  // was written (e.g. ~/.iframer/secret was regenerated, IFRAMER_SECRET env
+  // var changed, or the blob was written by an older code version with a
+  // different key derivation), the AES-GCM tag will fail to authenticate.
+  // Translate that into an actionable error instead of leaking the raw
+  // "Unsupported state or unable to authenticate data" cryptic message.
+  let credential: { username?: string; password?: string; totp_secret?: string };
+  try {
+    credential = JSON.parse(decrypt(blob, credKey));
+  } catch (decryptErr) {
+    const errMsg = decryptErr instanceof Error ? decryptErr.message : String(decryptErr);
+    throw new Error(
+      `Credentials for ${matchedDomain} exist in the store but cannot be decrypted ` +
+      `(${errMsg}). This usually means the encryption key (~/.iframer/secret or IFRAMER_SECRET) ` +
+      `changed since the row was written, orphaning the old blob. ` +
+      `Fix: ask the user to re-store the credentials by running in their terminal:\n\n` +
+      `  iframer-toolkit credentials add ${normalizeDomain(step.domain)}\n\n` +
+      `After they confirm it ran, retry the login step.`
+    );
+  }
+  if (matchedDomain !== normalizeDomain(step.domain)) {
+    log.info(`login: credentials for ${step.domain} resolved via parent domain ${matchedDomain}`);
+  }
 
   const beforeUrl = page.url();
 
@@ -235,6 +279,32 @@ async function handleLogin(page: Page, step: Extract<PipelineStep, { type: "logi
     // ─── Auto-detect path ───────────────────────────────────────────
     log.info(`login: auto-detecting form on ${beforeUrl}`);
 
+    // First: give the page a moment to settle, then check if we're ALREADY logged in.
+    // Session persistence (cookies + localStorage) across modes often means the login
+    // page redirects away or hides the form. In that case the correct behavior is
+    // "success, nothing to do" — NOT "throw because there's no password field".
+    await page.waitForLoadState("domcontentloaded").catch(() => {});
+    await page.waitForTimeout(500);
+
+    const initialCheck = await page.evaluate(() => {
+      const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])') as HTMLInputElement | null;
+      const pwdVisible = !!(pwd && pwd.offsetParent !== null);
+      return { url: location.href, title: document.title, pwdVisible };
+    }).catch(() => ({ url: page.url(), title: "", pwdVisible: false }));
+
+    const urlLooksLikeLogin = /\b(login|signin|sign-in|auth|oauth)\b/i.test(initialCheck.url);
+
+    if (!initialCheck.pwdVisible && !urlLooksLikeLogin) {
+      // Already logged in via persisted session — nothing to do.
+      log.info(`login: already logged in (no password field, URL=${initialCheck.url})`);
+      return {
+        loggedIn: true,
+        alreadyLoggedIn: true,
+        url: initialCheck.url,
+        reason: "Session already authenticated — no login form detected",
+      };
+    }
+
     // Wait for a visible password field to appear (login forms often render after hydration)
     const passwordHandle = await page.waitForSelector(
       'input[type="password"]:not([disabled]):not([readonly])',
@@ -242,7 +312,58 @@ async function handleLogin(page: Page, step: Extract<PipelineStep, { type: "logi
     ).catch(() => null);
 
     if (!passwordHandle) {
-      throw new Error(`login: no visible password field found on ${beforeUrl}. If the site uses a multi-step form, navigate to the actual password page first, or pass explicit selectors.`);
+      // Still no password field after the wait. If the URL no longer looks like a
+      // login page, treat it as already-logged-in. Otherwise it's a real failure.
+      const currentUrl = page.url();
+      if (!/\b(login|signin|sign-in|auth|oauth)\b/i.test(currentUrl)) {
+        log.info(`login: no password field and URL left login area (${currentUrl}) — treating as success`);
+        return {
+          loggedIn: true,
+          alreadyLoggedIn: true,
+          url: currentUrl,
+          reason: "No login form detected after wait — assumed already authenticated",
+        };
+      }
+
+      // Gather diagnostics about what the page actually shows. This error
+      // message will be classified as "bot-blocked" by the pipeline so mode
+      // auto-escalation kicks in (headless → binary-headful → docker-headful).
+      const pageDiag = await page.evaluate(() => {
+        const visibleText = (document.body?.innerText || "").slice(0, 500);
+        const inputCount = document.querySelectorAll("input").length;
+        const hiddenPassword = !!document.querySelector('input[type="password"]');
+        const hasCaptcha = !!document.querySelector(
+          'iframe[src*="recaptcha"], iframe[src*="hcaptcha"], [class*="captcha" i], [id*="captcha" i]'
+        );
+        const hasCloudflare = !!document.querySelector(
+          '[class*="cf-" i], iframe[src*="challenges.cloudflare"]'
+        );
+        return {
+          title: document.title,
+          visibleText,
+          inputCount,
+          hiddenPassword,
+          hasCaptcha,
+          hasCloudflare,
+        };
+      }).catch(() => ({ title: "", visibleText: "", inputCount: 0, hiddenPassword: false, hasCaptcha: false, hasCloudflare: false }));
+
+      log.warn(`login: no visible password field on ${currentUrl} — title="${pageDiag.title}", inputs=${pageDiag.inputCount}, hiddenPwd=${pageDiag.hiddenPassword}, captcha=${pageDiag.hasCaptcha}, cloudflare=${pageDiag.hasCloudflare}`);
+
+      const indicators: string[] = [];
+      if (pageDiag.hasCaptcha) indicators.push("CAPTCHA detected");
+      if (pageDiag.hasCloudflare) indicators.push("Cloudflare challenge");
+      if (pageDiag.inputCount === 0) indicators.push("no input elements at all");
+      if (pageDiag.hiddenPassword) indicators.push("password field exists but is hidden/disabled");
+
+      const indicatorStr = indicators.length > 0 ? ` (${indicators.join(", ")})` : "";
+
+      throw new Error(
+        `login: no visible password field on ${currentUrl} after ${TIMEOUTS.SELECTOR_WAIT}ms${indicatorStr}. ` +
+        `Page title: "${pageDiag.title}". ` +
+        `The site is likely showing a bot-detection wall or captcha instead of the normal login form. ` +
+        `Retry with a stronger browser mode (binary-headful or docker-headful).`
+      );
     }
 
     // Find the username field — prefer a sibling in the same <form>, then globally

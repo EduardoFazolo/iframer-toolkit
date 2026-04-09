@@ -1,6 +1,5 @@
-import path from "path";
-import os from "os";
 import { SqliteStore } from "./session/sqlite-store";
+import { getDataDir } from "./paths";
 
 export interface StorageBackend {
   getSession(userId: string): Promise<Buffer | null>;
@@ -13,6 +12,6 @@ export interface StorageBackend {
 }
 
 export function createStore(options: { dataDir?: string } = {}): StorageBackend {
-  const dataDir = options.dataDir || path.join(os.homedir(), ".iframer");
+  const dataDir = options.dataDir || getDataDir();
   return new SqliteStore(dataDir);
 }

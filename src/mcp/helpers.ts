@@ -2,6 +2,7 @@ import path from "path";
 import os from "os";
 import type { Iframer } from "../lib/iframer";
 import { createLogger } from "../lib/logger";
+import { getLocalToken } from "../lib/auth/crypto";
 
 export const log = createLogger("mcp");
 
@@ -9,8 +10,12 @@ export const BASE_URL = process.env.IFRAMER_URL || "http://localhost:3021";
 export const IFRAMER_SECRET = process.env.IFRAMER_SECRET;
 export const IFRAMER_MODE = process.env.IFRAMER_MODE; // "docker" | "local" | undefined (auto)
 
-export const LOCAL_USER = "mcp-user";
-export const LOCAL_TOKEN = IFRAMER_SECRET || "iframer-local-default-token";
+// Shared user identity — MUST match the CLI's hard-coded user id in bin/cli.js.
+// Any new value here requires updating bin/cli.js AND the migration list in
+// src/lib/session/sqlite-store.ts so existing users don't lose their stored credentials.
+export const LOCAL_USER = "iframer-local";
+// Machine-local encryption token — shared with the CLI via ~/.iframer/secret.
+export const LOCAL_TOKEN = getLocalToken();
 
 let _iframer: Iframer | null = null;
 

@@ -23,7 +23,7 @@ import { stealthContextOptions, applyStealthToPage } from "./browser/stealth";
 import { humanClick, humanType, clickRecaptchaCheckbox, clickChallengeTiles, clickChallengeVerify } from "./browser/humanize";
 import { deriveKey, encrypt, decrypt, generateTOTP } from "./auth/crypto";
 import { extractSession, injectCookies, injectStorage } from "./session/persistence";
-import { mergeKnowledge, type KnowledgeAuth, type KnowledgeEndpoint } from "./knowledge";
+import { mergeKnowledge, normalizeDomain, domainLookupChain, type KnowledgeAuth, type KnowledgeEndpoint } from "./knowledge";
 import { saveScreenshot } from "./screenshot";
 import { createStore, type StorageBackend } from "./storage";
 import { BrowserDaemon } from "./browser/daemon";
@@ -57,10 +57,8 @@ export class Iframer {
     this.publicUrl = config.publicUrl || DEFAULT_PUBLIC_URL;
     this.staleTimeoutMs = config.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS;
 
-    // Storage: SQLite in data directory
-    this.store = createStore({
-      dataDir: config.dataDir || path.join(os.homedir(), ".iframer"),
-    });
+    // Storage: SQLite in data directory (honors IFRAMER_DATA_DIR for Docker bind-mount)
+    this.store = createStore({ dataDir: config.dataDir });
 
     // Browser daemon for local modes (headless + binary-headful)
     this.daemon = new BrowserDaemon(config.sessionTimeoutMs);
@@ -638,20 +636,39 @@ export class Iframer {
 
   async storeCredential(userId: string, token: string, credential: CredentialInput): Promise<void> {
     const credKey = await deriveKey(token, "credentials");
+    const normalizedDomain = normalizeDomain(credential.domain);
     const data = {
       ...credential,
+      domain: normalizedDomain,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
     const encrypted = encrypt(JSON.stringify(data), credKey);
-    await this.store.setCredential(userId, credential.domain, encrypted);
+    await this.store.setCredential(userId, normalizedDomain, encrypted);
   }
 
   async getCredential(userId: string, token: string, domain: string): Promise<Credential | null> {
     const credKey = await deriveKey(token, "credentials");
-    const blob = await this.store.getCredential(userId, domain);
-    if (!blob || blob.length === 0) return null;
-    return JSON.parse(decrypt(blob, credKey));
+    // Try the full hostname first, then walk up the parent domains so
+    // `auth.figma.com` resolves to credentials stored under `figma.com`.
+    for (const candidate of domainLookupChain(domain)) {
+      const blob = await this.store.getCredential(userId, candidate);
+      if (blob && blob.length > 0) {
+        try {
+          return JSON.parse(decrypt(blob, credKey));
+        } catch (err) {
+          // Row exists but decrypt failed — encryption key changed since
+          // the blob was written. Surface an actionable error rather than
+          // the raw AES-GCM complaint.
+          throw new Error(
+            `Credentials for ${candidate} exist but cannot be decrypted. ` +
+            `The encryption key has changed. Re-store with: ` +
+            `iframer-toolkit credentials add ${candidate}`
+          );
+        }
+      }
+    }
+    return null;
   }
 
   async listCredentials(userId: string): Promise<string[]> {
@@ -659,7 +676,7 @@ export class Iframer {
   }
 
   async deleteCredential(userId: string, domain: string): Promise<void> {
-    await this.store.deleteCredential(userId, domain);
+    await this.store.deleteCredential(userId, normalizeDomain(domain));
   }
 
   async loginWithCredentials(
@@ -672,9 +689,15 @@ export class Iframer {
     if (!session) return { ok: false, url: "", title: "", error: "No active interactive session. Start one first." };
 
     const credKey = await deriveKey(token, "credentials");
-    const blob = await this.store.getCredential(userId, domain);
-    if (!blob || blob.length === 0) {
-      return { ok: false, url: "", title: "", error: `No credentials stored for ${domain}` };
+    // Walk the parent-domain chain so "auth.figma.com" finds creds stored under "figma.com"
+    let blob: Buffer | null = null;
+    for (const candidate of domainLookupChain(domain)) {
+      const b = await this.store.getCredential(userId, candidate);
+      if (b && b.length > 0) { blob = b; break; }
+    }
+    if (!blob) {
+      const stored = await this.store.listCredentialDomains(userId);
+      return { ok: false, url: "", title: "", error: `No credentials stored for ${normalizeDomain(domain)}. Stored: ${stored.join(", ") || "(none)"}` };
     }
 
     const credential = JSON.parse(decrypt(blob, credKey));

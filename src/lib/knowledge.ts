@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
-import os from "os";
 import { createLogger } from "./logger";
+import { getDataDir } from "./paths";
 
 const log = createLogger("knowledge");
 
@@ -53,7 +53,7 @@ export interface KnowledgeData {
 // ─── Paths ──────────────────────────────────────────────────────────
 
 export function getKnowledgeDir(): string {
-  return path.join(os.homedir(), ".iframer", "knowledge");
+  return path.join(getDataDir(), "knowledge");
 }
 
 export function getKnowledgePath(domain: string): string {
@@ -61,19 +61,57 @@ export function getKnowledgePath(domain: string): string {
   return path.join(getKnowledgeDir(), `${safe}.md`);
 }
 
-/** Strip protocol, paths, and unsafe filename chars from a domain. */
-export function sanitizeDomain(input: string): string {
-  let d = input.trim().toLowerCase();
+/**
+ * Normalize a domain for storage and lookup. Accepts full URLs, hostnames with
+ * or without `www.`, ports, and paths. Returns a lowercase hostname with
+ * `www.` stripped.
+ *
+ *   normalizeDomain("https://www.Figma.com/login?x=1")  // "figma.com"
+ *   normalizeDomain("Figma.com")                         // "figma.com"
+ *   normalizeDomain("auth.figma.com")                    // "auth.figma.com"
+ */
+export function normalizeDomain(input: string): string {
+  let d = (input || "").trim().toLowerCase();
+  if (!d) return "";
   try {
-    // Accept full URLs
-    if (d.includes("://")) d = new URL(d).hostname;
+    // Accept full URLs and bare URLs without protocol
+    if (d.includes("://")) {
+      d = new URL(d).hostname;
+    } else if (d.includes("/")) {
+      d = new URL(`https://${d}`).hostname;
+    }
   } catch {
-    // Not a URL, use as-is
+    // Not parseable as URL — fall through and treat as bare hostname
   }
-  // Strip leading www. for consistency
+  // Strip port if any
+  d = d.replace(/:\d+$/, "");
+  // Strip leading www. for canonical form
   d = d.replace(/^www\./, "");
-  // Replace anything that isn't safe for a filename
-  return d.replace(/[^a-z0-9.-]/g, "_");
+  return d;
+}
+
+/**
+ * Return the parent-domain fallback chain for credential lookup.
+ * `auth.figma.com` → `["auth.figma.com", "figma.com"]`
+ * `figma.com`      → `["figma.com"]`
+ * Stops at two-label TLDs (doesn't go below `figma.com` → `com`).
+ */
+export function domainLookupChain(input: string): string[] {
+  const normalized = normalizeDomain(input);
+  if (!normalized) return [];
+  const chain = [normalized];
+  const parts = normalized.split(".");
+  while (parts.length > 2) {
+    parts.shift();
+    chain.push(parts.join("."));
+  }
+  return chain;
+}
+
+/** Filename-safe form of a normalized domain (used for knowledge cache files). */
+export function sanitizeDomain(input: string): string {
+  const normalized = normalizeDomain(input);
+  return normalized.replace(/[^a-z0-9.-]/g, "_");
 }
 
 function ensureDir(): void {

@@ -71,6 +71,32 @@ export class SqliteStore implements StorageBackend {
         PRIMARY KEY (user_id, domain)
       )
     `);
+
+    // Migrate legacy user IDs into the canonical shared identity so CLI and MCP
+    // see the same rows. Historical releases used "cli-user" (CLI) and
+    // "mcp-user" (MCP); both are now unified under "iframer-local".
+    this.migrateLegacyUserIds();
+  }
+
+  private migrateLegacyUserIds(): void {
+    const CANONICAL = "iframer-local";
+    const LEGACY = ["cli-user", "mcp-user"];
+    for (const legacy of LEGACY) {
+      // Credentials — copy rows that don't already exist under the canonical id
+      this.db.run(
+        `INSERT OR IGNORE INTO credentials (user_id, domain, blob)
+         SELECT ?, domain, blob FROM credentials WHERE user_id = ?`,
+        CANONICAL,
+        legacy
+      );
+      // Sessions — same migration
+      this.db.run(
+        `INSERT OR IGNORE INTO sessions (user_id, blob)
+         SELECT ?, blob FROM sessions WHERE user_id = ?`,
+        CANONICAL,
+        legacy
+      );
+    }
   }
 
   // ─── Sessions ───────────────────────────────────────────────────────

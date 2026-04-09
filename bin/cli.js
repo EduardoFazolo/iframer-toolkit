@@ -7,12 +7,45 @@ const { execSync } = require("child_process");
 const readline = require("readline");
 
 const HOME_DIR = os.homedir();
-const CONFIG_DIR = path.join(HOME_DIR, ".iframer");
+// Data directory — honors IFRAMER_DATA_DIR env var so the CLI and the
+// Docker container can share one source of truth via bind-mount.
+const CONFIG_DIR = process.env.IFRAMER_DATA_DIR || path.join(HOME_DIR, ".iframer");
 const CLAUDE_CONFIG_PATH = path.join(HOME_DIR, ".claude.json");
 const CODEX_CONFIG_PATH = path.join(HOME_DIR, ".codex", "config.toml");
 const DEFAULT_SERVER = process.env.IFRAMER_URL || "http://localhost:3021";
 const API_KEY = process.env.IFRAMER_SECRET;
 const USE_LOCAL = process.env.IFRAMER_MODE === "local" || !process.env.IFRAMER_URL;
+
+// Shared user identity — MUST match src/mcp/helpers.ts LOCAL_USER so CLI and
+// MCP share the same credential store rows.
+const LOCAL_USER_ID = "iframer-local";
+
+/**
+ * Resolve the machine-local encryption token used by both CLI and MCP.
+ * Precedence:
+ *   1. IFRAMER_SECRET env var (user override)
+ *   2. ~/.iframer/secret — persisted on first run, shared across processes
+ *
+ * Must behave identically to getLocalToken() in src/lib/auth/crypto.ts.
+ */
+function resolveLocalToken() {
+  if (process.env.IFRAMER_SECRET) return process.env.IFRAMER_SECRET;
+  const file = path.join(CONFIG_DIR, "secret");
+  try {
+    const existing = fs.readFileSync(file, "utf8").trim();
+    if (existing) return existing;
+  } catch {}
+  try {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    const secret = require("crypto").randomBytes(32).toString("hex");
+    fs.writeFileSync(file, secret, { mode: 0o600 });
+    return secret;
+  } catch {
+    return "iframer-local-default-token";
+  }
+}
+
+const LOCAL_TOKEN = resolveLocalToken();
 
 // ─── Utilities ──────────────────────────────────────────────────────
 
@@ -129,6 +162,7 @@ function resolveIframerSecret() {
   let secret = process.env.IFRAMER_SECRET;
   if (secret) return secret;
 
+  // Dev-mode fallback: read from repo's .env file
   try {
     const envPath = path.join(__dirname, "..", ".env");
     const envContent = fs.readFileSync(envPath, "utf8");
@@ -137,6 +171,21 @@ function resolveIframerSecret() {
   } catch {}
 
   return secret;
+}
+
+/**
+ * Ensure ~/.iframer/secret contains the given token (overwriting any prior
+ * value). Called during install-mcp to unify CLI and MCP encryption keys.
+ */
+function writeMachineSecret(secret) {
+  try {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(path.join(CONFIG_DIR, "secret"), secret, { mode: 0o600 });
+    return true;
+  } catch (err) {
+    console.error(`  Warning: could not write ~/.iframer/secret: ${err.message}`);
+    return false;
+  }
 }
 
 function loadClaudeConfig() {
@@ -556,7 +605,7 @@ async function main() {
         result = await apiPost("/execute", { steps, options });
       } else if (USE_LOCAL || !docker) {
         const iframer = await getLocalIframer();
-        result = await iframer.execute("cli-user", API_KEY || "cli-local", { steps, options });
+        result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options });
       } else {
         result = await apiPost("/execute", { steps, options });
       }
@@ -590,7 +639,7 @@ async function main() {
       let result;
       if (USE_LOCAL || !docker) {
         const iframer = await getLocalIframer();
-        result = await iframer.fetch("cli-user", API_KEY || "cli-local", options);
+        result = await iframer.fetch(LOCAL_USER_ID, LOCAL_TOKEN, options);
       } else {
         result = await apiPost("/fetch", options);
       }
@@ -620,7 +669,7 @@ async function main() {
         let result;
         if (USE_LOCAL || !docker) {
           const iframer = await getLocalIframer();
-          result = await iframer.execute("cli-user", API_KEY || "cli-local", { steps, options: { mode } });
+          result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options: { mode } });
         } else {
           result = await apiPost("/execute", { steps, options: { mode } });
         }
@@ -667,7 +716,7 @@ async function main() {
           console.log(`  Session stopped. State saved: ${data.sessionSaved}`);
         } else {
           const iframer = await getLocalIframer();
-          const result = await iframer.stopSession("cli-user", API_KEY || "cli-local");
+          const result = await iframer.stopSession(LOCAL_USER_ID, LOCAL_TOKEN);
           console.log(`  Session stopped. State saved: ${result.sessionSaved}`);
         }
 
@@ -678,7 +727,7 @@ async function main() {
           if (!data.ok) { console.error(`  Error: ${data.error}`); process.exit(1); }
         } else {
           const iframer = await getLocalIframer();
-          await iframer.clearSession("cli-user");
+          await iframer.clearSession(LOCAL_USER_ID);
         }
         console.log("  Session data cleared.");
 
@@ -746,7 +795,7 @@ async function main() {
         const docker = await isDockerRunning();
         if (USE_LOCAL || !docker) {
           const iframer = await getLocalIframer();
-          await iframer.storeCredential("cli-user", API_KEY || "cli-local", body);
+          await iframer.storeCredential(LOCAL_USER_ID, LOCAL_TOKEN, body);
         } else {
           const data = await apiPost("/credentials", body);
           if (!data.ok) { console.error(`  Error: ${data.error}`); process.exit(1); }
@@ -758,7 +807,7 @@ async function main() {
         let domains;
         if (USE_LOCAL || !docker) {
           const iframer = await getLocalIframer();
-          domains = await iframer.listCredentials("cli-user");
+          domains = await iframer.listCredentials(LOCAL_USER_ID);
         } else {
           const data = await apiGet("/credentials");
           if (!data.ok) { console.error(`  Error: ${data.error}`); process.exit(1); }
@@ -777,7 +826,7 @@ async function main() {
         const docker = await isDockerRunning();
         if (USE_LOCAL || !docker) {
           const iframer = await getLocalIframer();
-          await iframer.deleteCredential("cli-user", domain);
+          await iframer.deleteCredential(LOCAL_USER_ID, domain);
         } else {
           const data = await apiDelete(`/credentials/${encodeURIComponent(domain)}`);
           if (!data.ok) { console.error(`  Error: ${data.error}`); process.exit(1); }
@@ -828,7 +877,7 @@ async function main() {
       let result;
       if (USE_LOCAL || !docker) {
         const iframer = await getLocalIframer();
-        result = await iframer.execute("cli-user", API_KEY || "cli-local", { steps, options });
+        result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options });
       } else {
         result = await apiPost("/execute", { steps, options });
       }
@@ -1011,17 +1060,40 @@ async function main() {
       console.log(runtime.message);
       const isDev = args.includes("--dev");
       const mcpName = isDev ? "iframer-dev" : "iframer";
-      const secret = resolveIframerSecret();
-      const mcpEntry = { command: runtime.command, args: runtime.args };
-      if (secret) mcpEntry.env = { IFRAMER_SECRET: secret };
-      if (!isDev) {
-        if (!mcpEntry.env) mcpEntry.env = {};
-        mcpEntry.env.IFRAMER_MODE = "local";
+
+      // Resolve the encryption token. Precedence:
+      //   1. IFRAMER_SECRET env var or repo .env (dev override)
+      //   2. Already-existing ~/.iframer/secret (previous install)
+      //   3. Freshly generated random 32-byte hex (first-time install)
+      let secret = resolveIframerSecret();
+      let secretSource = secret ? "env/.env" : null;
+      if (!secret) {
+        try {
+          secret = fs.readFileSync(path.join(CONFIG_DIR, "secret"), "utf8").trim();
+          if (secret) secretSource = "~/.iframer/secret";
+        } catch {}
       }
+      if (!secret) {
+        secret = require("crypto").randomBytes(32).toString("hex");
+        secretSource = "generated";
+      }
+
+      // Persist to ~/.iframer/secret so the CLI (run from any shell) uses the
+      // same encryption key as the MCP server. This unifies the credential
+      // store across both entry points.
+      writeMachineSecret(secret);
+
+      const mcpEntry = { command: runtime.command, args: runtime.args };
+      // Bake the token into the MCP config env so the server has it at spawn
+      // time without needing to read the file. Both paths (env var + file)
+      // resolve to the same value.
+      mcpEntry.env = { IFRAMER_SECRET: secret };
+      if (!isDev) mcpEntry.env.IFRAMER_MODE = "local";
+
       const claudeConfigPath = installClaudeMcp(mcpName, mcpEntry);
       const codexConfigPath = installCodexMcp(mcpName, mcpEntry);
       console.log(`\n  ${mcpName} MCP installed!`);
-      if (secret) console.log("  IFRAMER_SECRET loaded from .env");
+      console.log(`  Encryption key: ${secretSource} → ~/.iframer/secret`);
       if (!isDev) console.log("  Mode: local (headless + binary-headful, no Docker needed)");
       else console.log("  Mode: docker (connects to Docker container)");
       console.log(`  Claude Code config written to: ${claudeConfigPath}`);

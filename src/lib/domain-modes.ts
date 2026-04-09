@@ -1,11 +1,13 @@
 import fs from "fs";
 import path from "path";
-import os from "os";
 import type { BrowserMode, DomainModeEntry, DomainAttempt } from "./types";
 import { createLogger } from "./logger";
+import { getDataDir } from "./paths";
 
 const log = createLogger("domain-modes");
-const DEFAULT_FILE = path.join(os.homedir(), ".iframer", "domain-modes.json");
+function defaultFile(): string {
+  return path.join(getDataDir(), "domain-modes.json");
+}
 const TTL_DAYS = 14;
 const ESCALATION_LADDER: BrowserMode[] = ["headless", "docker-headful", "binary-headful"];
 
@@ -13,7 +15,7 @@ export class DomainModeStore {
   private data: Record<string, DomainModeEntry> = {};
   private filePath: string;
 
-  constructor(filePath: string = DEFAULT_FILE) {
+  constructor(filePath: string = defaultFile()) {
     this.filePath = filePath;
     this.load();
   }
