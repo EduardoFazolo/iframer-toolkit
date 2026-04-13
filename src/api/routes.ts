@@ -10,7 +10,9 @@ function auth(req: Request): AuthRequest {
   return req as AuthRequest;
 }
 
-const iframer = new Iframer();
+const iframer = new Iframer({
+  mode: (process.env.IFRAMER_MODE as "local" | "docker") || "local",
+});
 
 export function registerRoutes(app: Express): void {
   app.get("/health", (_req, res) => res.json({ ok: true }));

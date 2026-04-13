@@ -4,24 +4,42 @@ var __getProtoOf = Object.getPrototypeOf;
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+function __accessProp(key) {
+  return this[key];
+}
+var __toESMCache_node;
+var __toESMCache_esm;
 var __toESM = (mod, isNodeMode, target) => {
+  var canCache = mod != null && typeof mod === "object";
+  if (canCache) {
+    var cache = isNodeMode ? __toESMCache_node ??= new WeakMap : __toESMCache_esm ??= new WeakMap;
+    var cached = cache.get(mod);
+    if (cached)
+      return cached;
+  }
   target = mod != null ? __create(__getProtoOf(mod)) : {};
   const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
   for (let key of __getOwnPropNames(mod))
     if (!__hasOwnProp.call(to, key))
       __defProp(to, key, {
-        get: () => mod[key],
+        get: __accessProp.bind(mod, key),
         enumerable: true
       });
+  if (canCache)
+    cache.set(mod, to);
   return to;
 };
+var __returnValue = (v) => v;
+function __exportSetter(name, newValue) {
+  this[name] = __returnValue.bind(null, newValue);
+}
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, {
       get: all[name],
       enumerable: true,
       configurable: true,
-      set: (newValue) => all[name] = () => newValue
+      set: __exportSetter.bind(all, name)
     });
 };
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
@@ -2194,71 +2212,19 @@ async function handleLogin(page, step, ctx) {
         reason: "Session already authenticated — no login form detected"
       };
     }
-    const passwordHandle = await page.waitForSelector('input[type="password"]:not([disabled]):not([readonly])', { state: "visible", timeout: TIMEOUTS.SELECTOR_WAIT }).catch(() => null);
-    if (!passwordHandle) {
-      const currentUrl = page.url();
-      if (!/\b(login|signin|sign-in|auth|oauth)\b/i.test(currentUrl)) {
-        log4.info(`login: no password field and URL left login area (${currentUrl}) — treating as success`);
-        return {
-          loggedIn: true,
-          alreadyLoggedIn: true,
-          url: currentUrl,
-          reason: "No login form detected after wait — assumed already authenticated"
-        };
-      }
-      const pageDiag = await page.evaluate(() => {
-        const visibleText = (document.body?.innerText || "").slice(0, 500);
-        const inputCount = document.querySelectorAll("input").length;
-        const hiddenPassword = !!document.querySelector('input[type="password"]');
-        const hasCaptcha = !!document.querySelector('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], [class*="captcha" i], [id*="captcha" i]');
-        const hasCloudflare = !!document.querySelector('[class*="cf-" i], iframe[src*="challenges.cloudflare"]');
-        return {
-          title: document.title,
-          visibleText,
-          inputCount,
-          hiddenPassword,
-          hasCaptcha,
-          hasCloudflare
-        };
-      }).catch(() => ({ title: "", visibleText: "", inputCount: 0, hiddenPassword: false, hasCaptcha: false, hasCloudflare: false }));
-      log4.warn(`login: no visible password field on ${currentUrl} — title="${pageDiag.title}", inputs=${pageDiag.inputCount}, hiddenPwd=${pageDiag.hiddenPassword}, captcha=${pageDiag.hasCaptcha}, cloudflare=${pageDiag.hasCloudflare}`);
-      const indicators = [];
-      if (pageDiag.hasCaptcha)
-        indicators.push("CAPTCHA detected");
-      if (pageDiag.hasCloudflare)
-        indicators.push("Cloudflare challenge");
-      if (pageDiag.inputCount === 0)
-        indicators.push("no input elements at all");
-      if (pageDiag.hiddenPassword)
-        indicators.push("password field exists but is hidden/disabled");
-      const indicatorStr = indicators.length > 0 ? ` (${indicators.join(", ")})` : "";
-      throw new Error(`login: no visible password field on ${currentUrl} after ${TIMEOUTS.SELECTOR_WAIT}ms${indicatorStr}. ` + `Page title: "${pageDiag.title}". ` + `The site is likely showing a bot-detection wall or captcha instead of the normal login form. ` + `Retry with a stronger browser mode (binary-headful or docker-headful).`);
-    }
-    const usernameHandle = await page.evaluateHandle(() => {
-      const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])');
-      if (!pwd)
-        return null;
-      const scope = pwd.closest("form") || document;
-      const candidates = [
-        'input[type="email"]:not([disabled]):not([readonly])',
-        'input[autocomplete="username"]:not([disabled]):not([readonly])',
-        'input[autocomplete="email"]:not([disabled]):not([readonly])',
-        'input[name*="email" i]:not([disabled]):not([readonly])',
-        'input[name*="user" i]:not([disabled]):not([readonly])',
-        'input[name*="login" i]:not([disabled]):not([readonly])',
-        'input[id*="email" i]:not([disabled]):not([readonly])',
-        'input[id*="user" i]:not([disabled]):not([readonly])',
-        'input[type="text"]:not([disabled]):not([readonly])',
-        "input:not([type]):not([disabled]):not([readonly])"
-      ];
-      for (const sel of candidates) {
-        const el = scope.querySelector(sel);
-        if (el && el.offsetParent !== null)
-          return el;
-      }
-      return null;
-    });
-    const usernameEl = usernameHandle.asElement();
+    const passwordHandle = await page.waitForSelector('input[type="password"]:not([disabled]):not([readonly])', { state: "visible", timeout: 5000 }).catch(() => null);
+    const emailCandidates = [
+      'input[type="email"]:not([disabled]):not([readonly])',
+      'input[autocomplete="username"]:not([disabled]):not([readonly])',
+      'input[autocomplete="email"]:not([disabled]):not([readonly])',
+      'input[name*="email" i]:not([disabled]):not([readonly])',
+      'input[name*="user" i]:not([disabled]):not([readonly])',
+      'input[name*="login" i]:not([disabled]):not([readonly])',
+      'input[id*="email" i]:not([disabled]):not([readonly])',
+      'input[id*="user" i]:not([disabled]):not([readonly])',
+      'input[type="text"]:not([disabled]):not([readonly])',
+      "input:not([type]):not([disabled]):not([readonly])"
+    ];
     const fillHandle = async (handle, value) => {
       await handle.scrollIntoViewIfNeeded().catch(() => {});
       await handle.click({ delay: 40 }).catch(() => {});
@@ -2271,6 +2237,118 @@ async function handleLogin(page, step, ctx) {
       }, value);
       await page.waitForTimeout(TIMING.PRE_NAVIGATE[0] + Math.random() * (TIMING.PRE_NAVIGATE[1] - TIMING.PRE_NAVIGATE[0]));
     };
+    if (!passwordHandle) {
+      const currentUrl = page.url();
+      if (!/\b(login|signin|sign-in|auth|oauth)\b/i.test(currentUrl)) {
+        log4.info(`login: no password field and URL left login area (${currentUrl}) — treating as success`);
+        return {
+          loggedIn: true,
+          alreadyLoggedIn: true,
+          url: currentUrl,
+          reason: "No login form detected after wait — assumed already authenticated"
+        };
+      }
+      const emailOnlyHandle = await page.evaluateHandle((candidates) => {
+        for (const sel of candidates) {
+          const el = document.querySelector(sel);
+          if (el && el.offsetParent !== null)
+            return el;
+        }
+        return null;
+      }, emailCandidates);
+      const emailOnlyEl = emailOnlyHandle.asElement();
+      if (emailOnlyEl && credential.username) {
+        log4.info(`login: no password field but found email input — running email-first flow on ${currentUrl}`);
+        await fillHandle(emailOnlyEl, credential.username);
+        const submitHandle2 = await page.evaluateHandle(() => {
+          const loginRe = /\b(log\s*in|sign\s*in|continue|submit|enter|next|send.*code|email.*me)\b/i;
+          const pick = (scope) => {
+            const typed = scope.querySelector('button[type="submit"]:not([disabled]), input[type="submit"]:not([disabled])');
+            if (typed)
+              return typed;
+            const buttons = Array.from(scope.querySelectorAll('button:not([disabled]), [role="button"]:not([disabled])'));
+            return buttons.find((b) => loginRe.test(b.textContent || "") && b.offsetParent !== null) || null;
+          };
+          const form = document.querySelector('input[type="email"], input[name*="email" i], input[type="text"]')?.closest("form");
+          if (form) {
+            const found = pick(form);
+            if (found)
+              return found;
+          }
+          return pick(document);
+        });
+        const submitEl2 = submitHandle2.asElement();
+        if (submitEl2) {
+          await submitEl2.scrollIntoViewIfNeeded().catch(() => {});
+          await submitEl2.click({ delay: 40 }).catch(async () => {
+            await submitEl2.evaluate((el) => el.click());
+          });
+        } else {
+          log4.warn("login: email-first flow, no submit button found — pressing Enter");
+          await emailOnlyEl.press("Enter").catch(() => {});
+        }
+        await page.waitForLoadState("domcontentloaded").catch(() => {});
+        await Promise.race([
+          page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {}),
+          page.waitForSelector('input[type="password"]:not([disabled])', { state: "visible", timeout: TIMEOUTS.NAVIGATION }).catch(() => null),
+          page.waitForSelector('input[inputmode="numeric"]:not([disabled]), input[autocomplete="one-time-code"]:not([disabled])', { state: "visible", timeout: TIMEOUTS.NAVIGATION }).catch(() => null)
+        ]);
+        const laterPasswordHandle = await page.$('input[type="password"]:not([disabled]):not([readonly])');
+        if (laterPasswordHandle && credential.password) {
+          log4.info("login: password field appeared after email submit — filling it");
+          await fillHandle(laterPasswordHandle, credential.password);
+          const laterSubmit = await page.$('button[type="submit"]:not([disabled])');
+          if (laterSubmit) {
+            await laterSubmit.click({ delay: 40 }).catch(() => {});
+          } else {
+            await laterPasswordHandle.press("Enter").catch(() => {});
+          }
+          await page.waitForLoadState("domcontentloaded").catch(() => {});
+          await page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {});
+        }
+        const afterUrl2 = page.url();
+        const emailFlowDone = afterUrl2 !== beforeUrl;
+        return {
+          loggedIn: emailFlowDone,
+          emailSubmitted: true,
+          url: afterUrl2,
+          reason: emailFlowDone ? "Email-first flow completed — check for code/OTP prompt if login isn't complete." : "Email submitted, waiting for next step (code entry, password page, or redirect)."
+        };
+      }
+      const pageDiag = await page.evaluate(() => {
+        const visibleText = (document.body?.innerText || "").slice(0, 500);
+        const inputCount = document.querySelectorAll("input").length;
+        const hiddenPassword = !!document.querySelector('input[type="password"]');
+        const hasCaptcha = !!document.querySelector('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], [class*="captcha" i], [id*="captcha" i]');
+        const hasCloudflare = !!document.querySelector('[class*="cf-" i], iframe[src*="challenges.cloudflare"]');
+        return { title: document.title, visibleText, inputCount, hiddenPassword, hasCaptcha, hasCloudflare };
+      }).catch(() => ({ title: "", visibleText: "", inputCount: 0, hiddenPassword: false, hasCaptcha: false, hasCloudflare: false }));
+      log4.warn(`login: no visible password or email field on ${currentUrl} — title="${pageDiag.title}", inputs=${pageDiag.inputCount}`);
+      const indicators = [];
+      if (pageDiag.hasCaptcha)
+        indicators.push("CAPTCHA detected");
+      if (pageDiag.hasCloudflare)
+        indicators.push("Cloudflare challenge");
+      if (pageDiag.inputCount === 0)
+        indicators.push("no input elements at all");
+      if (pageDiag.hiddenPassword)
+        indicators.push("password field exists but is hidden/disabled");
+      const indicatorStr = indicators.length > 0 ? ` (${indicators.join(", ")})` : "";
+      throw new Error(`login: no visible password or email field on ${currentUrl} after 5000ms${indicatorStr}. ` + `Page title: "${pageDiag.title}". ` + `The site may be showing a bot-detection wall, captcha, or an unsupported login flow. ` + `Retry with a stronger browser mode (binary-headful or docker-headful).`);
+    }
+    const usernameHandle = await page.evaluateHandle((candidates) => {
+      const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])');
+      if (!pwd)
+        return null;
+      const scope = pwd.closest("form") || document;
+      for (const sel of candidates) {
+        const el = scope.querySelector(sel);
+        if (el && el.offsetParent !== null)
+          return el;
+      }
+      return null;
+    }, emailCandidates);
+    const usernameEl = usernameHandle.asElement();
     if (usernameEl && credential.username) {
       await fillHandle(usernameEl, credential.username);
     } else if (!usernameEl) {
@@ -3593,7 +3671,7 @@ class SqliteStore {
   }
   migrateLegacyUserIds() {
     const CANONICAL = "iframer-local";
-    const LEGACY = ["cli-user", "mcp-user"];
+    const LEGACY = ["cli-user", "mcp-user", "default"];
     for (const legacy of LEGACY) {
       this.db.run(`INSERT OR IGNORE INTO credentials (user_id, domain, blob)
          SELECT ?, domain, blob FROM credentials WHERE user_id = ?`, CANONICAL, legacy);

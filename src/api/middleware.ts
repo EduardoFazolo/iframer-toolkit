@@ -1,12 +1,17 @@
 import type { Request, Response, NextFunction } from "express";
+import { getLocalToken } from "../lib/auth/crypto";
 
 export interface AuthRequest extends Request {
   userId: string;
   token: string;
 }
 
+// Canonical user identity — MUST match LOCAL_USER in src/mcp/helpers.ts and
+// LOCAL_USER_ID in bin/cli.js so the Docker API, CLI, and MCP all read and
+// write the same credential / session rows in the shared SQLite file.
+const CANONICAL_USER = "iframer-local";
+
 export function tokenAuth(req: Request, res: Response, next: NextFunction): void {
-  // Single-user self-hosted: always "default". IFRAMER_SECRET optionally restricts access.
   const secret = process.env.IFRAMER_SECRET;
   if (secret && req.path !== "/health") {
     const header = req.headers["x-api-key"] ?? req.headers.authorization?.replace("Bearer ", "");
@@ -15,7 +20,7 @@ export function tokenAuth(req: Request, res: Response, next: NextFunction): void
       return;
     }
   }
-  (req as AuthRequest).userId = "default";
-  (req as AuthRequest).token = process.env.IFRAMER_SECRET || "iframer-local";
+  (req as AuthRequest).userId = CANONICAL_USER;
+  (req as AuthRequest).token = getLocalToken();
   next();
 }
