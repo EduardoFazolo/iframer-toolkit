@@ -80,7 +80,7 @@ export class SqliteStore implements StorageBackend {
 
   private migrateLegacyUserIds(): void {
     const CANONICAL = "iframer-local";
-    const LEGACY = ["cli-user", "mcp-user"];
+    const LEGACY = ["cli-user", "mcp-user", "default"];
     for (const legacy of LEGACY) {
       // Credentials — copy rows that don't already exist under the canonical id
       this.db.run(

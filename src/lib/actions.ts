@@ -305,91 +305,30 @@ async function handleLogin(page: Page, step: Extract<PipelineStep, { type: "logi
       };
     }
 
-    // Wait for a visible password field to appear (login forms often render after hydration)
+    // Wait for a visible password field OR email-only field to appear.
+    // Many modern sites (Slack, Microsoft, Google) use a multi-step flow:
+    //   Step 1: email only → submit → redirect
+    //   Step 2: password/code on a separate page
+    // So we check for password first, but if not found, look for an email
+    // field to handle the email-first case.
     const passwordHandle = await page.waitForSelector(
       'input[type="password"]:not([disabled]):not([readonly])',
-      { state: "visible", timeout: TIMEOUTS.SELECTOR_WAIT }
+      { state: "visible", timeout: 5000 }
     ).catch(() => null);
 
-    if (!passwordHandle) {
-      // Still no password field after the wait. If the URL no longer looks like a
-      // login page, treat it as already-logged-in. Otherwise it's a real failure.
-      const currentUrl = page.url();
-      if (!/\b(login|signin|sign-in|auth|oauth)\b/i.test(currentUrl)) {
-        log.info(`login: no password field and URL left login area (${currentUrl}) — treating as success`);
-        return {
-          loggedIn: true,
-          alreadyLoggedIn: true,
-          url: currentUrl,
-          reason: "No login form detected after wait — assumed already authenticated",
-        };
-      }
-
-      // Gather diagnostics about what the page actually shows. This error
-      // message will be classified as "bot-blocked" by the pipeline so mode
-      // auto-escalation kicks in (headless → binary-headful → docker-headful).
-      const pageDiag = await page.evaluate(() => {
-        const visibleText = (document.body?.innerText || "").slice(0, 500);
-        const inputCount = document.querySelectorAll("input").length;
-        const hiddenPassword = !!document.querySelector('input[type="password"]');
-        const hasCaptcha = !!document.querySelector(
-          'iframe[src*="recaptcha"], iframe[src*="hcaptcha"], [class*="captcha" i], [id*="captcha" i]'
-        );
-        const hasCloudflare = !!document.querySelector(
-          '[class*="cf-" i], iframe[src*="challenges.cloudflare"]'
-        );
-        return {
-          title: document.title,
-          visibleText,
-          inputCount,
-          hiddenPassword,
-          hasCaptcha,
-          hasCloudflare,
-        };
-      }).catch(() => ({ title: "", visibleText: "", inputCount: 0, hiddenPassword: false, hasCaptcha: false, hasCloudflare: false }));
-
-      log.warn(`login: no visible password field on ${currentUrl} — title="${pageDiag.title}", inputs=${pageDiag.inputCount}, hiddenPwd=${pageDiag.hiddenPassword}, captcha=${pageDiag.hasCaptcha}, cloudflare=${pageDiag.hasCloudflare}`);
-
-      const indicators: string[] = [];
-      if (pageDiag.hasCaptcha) indicators.push("CAPTCHA detected");
-      if (pageDiag.hasCloudflare) indicators.push("Cloudflare challenge");
-      if (pageDiag.inputCount === 0) indicators.push("no input elements at all");
-      if (pageDiag.hiddenPassword) indicators.push("password field exists but is hidden/disabled");
-
-      const indicatorStr = indicators.length > 0 ? ` (${indicators.join(", ")})` : "";
-
-      throw new Error(
-        `login: no visible password field on ${currentUrl} after ${TIMEOUTS.SELECTOR_WAIT}ms${indicatorStr}. ` +
-        `Page title: "${pageDiag.title}". ` +
-        `The site is likely showing a bot-detection wall or captcha instead of the normal login form. ` +
-        `Retry with a stronger browser mode (binary-headful or docker-headful).`
-      );
-    }
-
-    // Find the username field — prefer a sibling in the same <form>, then globally
-    const usernameHandle = await page.evaluateHandle(() => {
-      const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])') as HTMLInputElement | null;
-      if (!pwd) return null;
-      const scope: ParentNode = pwd.closest('form') || document;
-      const candidates = [
-        'input[type="email"]:not([disabled]):not([readonly])',
-        'input[autocomplete="username"]:not([disabled]):not([readonly])',
-        'input[autocomplete="email"]:not([disabled]):not([readonly])',
-        'input[name*="email" i]:not([disabled]):not([readonly])',
-        'input[name*="user" i]:not([disabled]):not([readonly])',
-        'input[name*="login" i]:not([disabled]):not([readonly])',
-        'input[id*="email" i]:not([disabled]):not([readonly])',
-        'input[id*="user" i]:not([disabled]):not([readonly])',
-        'input[type="text"]:not([disabled]):not([readonly])',
-        'input:not([type]):not([disabled]):not([readonly])',
-      ];
-      for (const sel of candidates) {
-        const el = scope.querySelector(sel) as HTMLInputElement | null;
-        if (el && el.offsetParent !== null) return el;
-      }
-      return null;
-    });
-    const usernameEl = usernameHandle.asElement();
+    // Email-field candidates (used for both password-present and email-only flows)
+    const emailCandidates = [
+      'input[type="email"]:not([disabled]):not([readonly])',
+      'input[autocomplete="username"]:not([disabled]):not([readonly])',
+      'input[autocomplete="email"]:not([disabled]):not([readonly])',
+      'input[name*="email" i]:not([disabled]):not([readonly])',
+      'input[name*="user" i]:not([disabled]):not([readonly])',
+      'input[name*="login" i]:not([disabled]):not([readonly])',
+      'input[id*="email" i]:not([disabled]):not([readonly])',
+      'input[id*="user" i]:not([disabled]):not([readonly])',
+      'input[type="text"]:not([disabled]):not([readonly])',
+      'input:not([type]):not([disabled]):not([readonly])',
+    ];
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const fillHandle = async (handle: any, value: string) => {
@@ -404,6 +343,149 @@ async function handleLogin(page: Page, step: Extract<PipelineStep, { type: "logi
       }, value);
       await page.waitForTimeout(TIMING.PRE_NAVIGATE[0] + Math.random() * (TIMING.PRE_NAVIGATE[1] - TIMING.PRE_NAVIGATE[0]));
     };
+
+    if (!passwordHandle) {
+      // No password field. Three scenarios:
+      //   1. Already logged in (URL left the login area) → return success
+      //   2. Email-first flow (Slack, Microsoft, Google): email field exists,
+      //      no password field. Fill email, click submit, let the next pipeline
+      //      step or OTP elicitation handle the code page.
+      //   3. Bot-blocked / captcha → throw with diagnostics
+      const currentUrl = page.url();
+      if (!/\b(login|signin|sign-in|auth|oauth)\b/i.test(currentUrl)) {
+        log.info(`login: no password field and URL left login area (${currentUrl}) — treating as success`);
+        return {
+          loggedIn: true,
+          alreadyLoggedIn: true,
+          url: currentUrl,
+          reason: "No login form detected after wait — assumed already authenticated",
+        };
+      }
+
+      // Check for an email-only form (multi-step login flow)
+      const emailOnlyHandle = await page.evaluateHandle((candidates: string[]) => {
+        for (const sel of candidates) {
+          const el = document.querySelector(sel) as HTMLInputElement | null;
+          if (el && el.offsetParent !== null) return el;
+        }
+        return null;
+      }, emailCandidates);
+      const emailOnlyEl = emailOnlyHandle.asElement();
+
+      if (emailOnlyEl && credential.username) {
+        // ─── Email-first flow (e.g. Slack, Microsoft, Google) ───────
+        log.info(`login: no password field but found email input — running email-first flow on ${currentUrl}`);
+
+        await fillHandle(emailOnlyEl, credential.username);
+
+        // Find and click the submit button
+        const submitHandle = await page.evaluateHandle(() => {
+          const loginRe = /\b(log\s*in|sign\s*in|continue|submit|enter|next|send.*code|email.*me)\b/i;
+          const pick = (scope: ParentNode): HTMLElement | null => {
+            const typed = scope.querySelector('button[type="submit"]:not([disabled]), input[type="submit"]:not([disabled])') as HTMLElement | null;
+            if (typed) return typed;
+            const buttons = Array.from(scope.querySelectorAll('button:not([disabled]), [role="button"]:not([disabled])')) as HTMLElement[];
+            return buttons.find((b) => loginRe.test(b.textContent || "") && b.offsetParent !== null) || null;
+          };
+          const form = document.querySelector('input[type="email"], input[name*="email" i], input[type="text"]')?.closest('form');
+          if (form) { const found = pick(form); if (found) return found; }
+          return pick(document);
+        });
+        const submitEl = submitHandle.asElement();
+
+        if (submitEl) {
+          await submitEl.scrollIntoViewIfNeeded().catch(() => {});
+          await submitEl.click({ delay: 40 }).catch(async () => {
+            await submitEl.evaluate((el: Element) => (el as HTMLElement).click());
+          });
+        } else {
+          log.warn("login: email-first flow, no submit button found — pressing Enter");
+          await emailOnlyEl.press("Enter").catch(() => {});
+        }
+
+        await page.waitForLoadState("domcontentloaded").catch(() => {});
+
+        // Wait for either a navigation, a code input, or a password field to appear
+        await Promise.race([
+          page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {}),
+          page.waitForSelector('input[type="password"]:not([disabled])', { state: "visible", timeout: TIMEOUTS.NAVIGATION }).catch(() => null),
+          page.waitForSelector('input[inputmode="numeric"]:not([disabled]), input[autocomplete="one-time-code"]:not([disabled])', { state: "visible", timeout: TIMEOUTS.NAVIGATION }).catch(() => null),
+        ]);
+
+        // If a password field appeared (multi-step: email → password), fill it
+        const laterPasswordHandle = await page.$('input[type="password"]:not([disabled]):not([readonly])');
+        if (laterPasswordHandle && credential.password) {
+          log.info("login: password field appeared after email submit — filling it");
+          await fillHandle(laterPasswordHandle, credential.password);
+          // Click submit again
+          const laterSubmit = await page.$('button[type="submit"]:not([disabled])');
+          if (laterSubmit) {
+            await laterSubmit.click({ delay: 40 }).catch(() => {});
+          } else {
+            await laterPasswordHandle.press("Enter").catch(() => {});
+          }
+          await page.waitForLoadState("domcontentloaded").catch(() => {});
+          await page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {});
+        }
+
+        // Return partial success — the calling pipeline should handle
+        // any OTP/code step that follows via elicitation or explicit steps.
+        const afterUrl = page.url();
+        const emailFlowDone = afterUrl !== beforeUrl;
+        return {
+          loggedIn: emailFlowDone,
+          emailSubmitted: true,
+          url: afterUrl,
+          reason: emailFlowDone
+            ? "Email-first flow completed — check for code/OTP prompt if login isn't complete."
+            : "Email submitted, waiting for next step (code entry, password page, or redirect).",
+        };
+      }
+
+      // No email field either — gather diagnostics and throw (bot-blocked).
+      const pageDiag = await page.evaluate(() => {
+        const visibleText = (document.body?.innerText || "").slice(0, 500);
+        const inputCount = document.querySelectorAll("input").length;
+        const hiddenPassword = !!document.querySelector('input[type="password"]');
+        const hasCaptcha = !!document.querySelector(
+          'iframe[src*="recaptcha"], iframe[src*="hcaptcha"], [class*="captcha" i], [id*="captcha" i]'
+        );
+        const hasCloudflare = !!document.querySelector(
+          '[class*="cf-" i], iframe[src*="challenges.cloudflare"]'
+        );
+        return { title: document.title, visibleText, inputCount, hiddenPassword, hasCaptcha, hasCloudflare };
+      }).catch(() => ({ title: "", visibleText: "", inputCount: 0, hiddenPassword: false, hasCaptcha: false, hasCloudflare: false }));
+
+      log.warn(`login: no visible password or email field on ${currentUrl} — title="${pageDiag.title}", inputs=${pageDiag.inputCount}`);
+
+      const indicators: string[] = [];
+      if (pageDiag.hasCaptcha) indicators.push("CAPTCHA detected");
+      if (pageDiag.hasCloudflare) indicators.push("Cloudflare challenge");
+      if (pageDiag.inputCount === 0) indicators.push("no input elements at all");
+      if (pageDiag.hiddenPassword) indicators.push("password field exists but is hidden/disabled");
+      const indicatorStr = indicators.length > 0 ? ` (${indicators.join(", ")})` : "";
+
+      throw new Error(
+        `login: no visible password or email field on ${currentUrl} after 5000ms${indicatorStr}. ` +
+        `Page title: "${pageDiag.title}". ` +
+        `The site may be showing a bot-detection wall, captcha, or an unsupported login flow. ` +
+        `Retry with a stronger browser mode (binary-headful or docker-headful).`
+      );
+    }
+
+    // ─── Standard password flow (password field found) ──────────
+    // Find the username field — prefer a sibling in the same <form>, then globally
+    const usernameHandle = await page.evaluateHandle((candidates: string[]) => {
+      const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])') as HTMLInputElement | null;
+      if (!pwd) return null;
+      const scope: ParentNode = pwd.closest('form') || document;
+      for (const sel of candidates) {
+        const el = scope.querySelector(sel) as HTMLInputElement | null;
+        if (el && el.offsetParent !== null) return el;
+      }
+      return null;
+    }, emailCandidates);
+    const usernameEl = usernameHandle.asElement();
 
     if (usernameEl && credential.username) {
       await fillHandle(usernameEl, credential.username);

@@ -20,6 +20,7 @@ services:
       # default `path.join(os.homedir(), ".iframer")` so the container and the
       # host CLI / MCP all read and write the same SQLite file.
       - IFRAMER_DATA_DIR=/iframer-data
+      - IFRAMER_MODE=docker
     volumes:
       # Bind-mount the HOST's ~/.iframer directory into the container so
       # the Docker server and the host-side CLI / MCP share ONE source of
