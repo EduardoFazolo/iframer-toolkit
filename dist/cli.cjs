@@ -4677,6 +4677,23 @@ class Iframer {
       return { url: "", title: "" };
     }
   }
+  browserHealth() {
+    const modes = [];
+    for (const m of ["headless", "binary-headful"]) {
+      if (this.daemon.isRunning(m))
+        modes.push(m);
+    }
+    return { alive: modes.length > 0, modes };
+  }
+  async restartBrowser() {
+    const health = this.browserHealth();
+    await this.daemon.stopAll();
+    await cleanupAllSessions();
+    return {
+      killed: health.modes,
+      message: health.modes.length > 0 ? `Killed browser(s): ${health.modes.join(", ")}. Next execute call will launch a fresh instance.` : "No browsers were running. Next execute call will launch fresh."
+    };
+  }
   async screenshot(userId) {
     const session = getSession(userId);
     if (!session)

@@ -1,49 +1,40 @@
 import path from "path";
 import os from "os";
-import type { Iframer } from "../lib/iframer";
 import { createLogger } from "../lib/logger";
 import { getLocalToken } from "../lib/auth/crypto";
+import { LocalServerManager } from "./local-server";
 
 export const log = createLogger("mcp");
 
 export const BASE_URL = process.env.IFRAMER_URL || "http://localhost:3021";
 export const IFRAMER_SECRET = process.env.IFRAMER_SECRET;
-export const IFRAMER_MODE = process.env.IFRAMER_MODE; // "docker" | "local" | undefined (auto)
+export const IFRAMER_MODE = process.env.IFRAMER_MODE;
 
-// Shared user identity — MUST match the CLI's hard-coded user id in bin/cli.js.
-// Any new value here requires updating bin/cli.js AND the migration list in
-// src/lib/session/sqlite-store.ts so existing users don't lose their stored credentials.
+// Shared user identity — MUST match LOCAL_USER_ID in bin/cli.js and
+// CANONICAL_USER in src/api/middleware.ts.
 export const LOCAL_USER = "iframer-local";
-// Machine-local encryption token — shared with the CLI via ~/.iframer/secret.
 export const LOCAL_TOKEN = getLocalToken();
 
-let _iframer: Iframer | null = null;
+// ─── Local server lifecycle ─────────────────────────────────────────
 
-export async function getIframer(): Promise<Iframer> {
-  if (!_iframer) {
-    const { Iframer } = await import("../lib/iframer");
-    // `saveScreenshot` returns URLs of the form `${publicUrl}/screenshots/${file}`
-    // to match the Docker API's `/screenshots` static mount. In local mode we
-    // have no web server, so we mirror that layout on disk: write the file into
-    // a `screenshots` subdirectory and point `publicUrl` at the parent, so the
-    // returned `file://` URL resolves to a real path.
-    const baseDir = path.join(os.tmpdir(), "iframer-screenshots");
-    const screenshotDir = path.join(baseDir, "screenshots");
-    _iframer = new Iframer({
-      screenshotDir,
-      publicUrl: `file://${baseDir}`,
-      mode: "local",
-    });
-  }
-  return _iframer;
+export const localServer = new LocalServerManager();
+
+/** Ensure the local background server is running. Call this before any
+ *  localApiPost/localApiGet. */
+export async function ensureLocalServer(): Promise<void> {
+  await localServer.ensureRunning();
 }
 
-function authHeaders(): Record<string, string> {
+// ─── HTTP helpers ───────────────────────────────────────────────────
+
+function authHeaders(secret?: string): Record<string, string> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (IFRAMER_SECRET) headers["x-api-key"] = IFRAMER_SECRET;
+  const key = secret || IFRAMER_SECRET;
+  if (key) headers["x-api-key"] = key;
   return headers;
 }
 
+/** POST to the Docker server at BASE_URL (:3021). */
 export async function apiPost<T = Record<string, unknown>>(endpoint: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE_URL}${endpoint}`, {
     method: "POST",
@@ -54,15 +45,48 @@ export async function apiPost<T = Record<string, unknown>>(endpoint: string, bod
   return res.json() as Promise<T>;
 }
 
+/** GET from the Docker server at BASE_URL (:3021). */
 export async function apiGet<T = Record<string, unknown>>(endpoint: string): Promise<T> {
   const res = await fetch(`${BASE_URL}${endpoint}`, { headers: authHeaders() });
   return res.json() as Promise<T>;
 }
 
+/** DELETE on the Docker server at BASE_URL (:3021). */
 export async function apiDelete<T = Record<string, unknown>>(endpoint: string): Promise<T> {
   const res = await fetch(`${BASE_URL}${endpoint}`, { method: "DELETE", headers: authHeaders() });
   return res.json() as Promise<T>;
 }
+
+/** POST to the local background server (:3022). */
+export async function localApiPost<T = Record<string, unknown>>(endpoint: string, body?: unknown): Promise<T> {
+  await ensureLocalServer();
+  const url = localServer.getBaseUrl();
+  const res = await fetch(`${url}${endpoint}`, {
+    method: "POST",
+    headers: authHeaders(LOCAL_TOKEN),
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(180_000),
+  });
+  return res.json() as Promise<T>;
+}
+
+/** GET from the local background server (:3022). */
+export async function localApiGet<T = Record<string, unknown>>(endpoint: string): Promise<T> {
+  await ensureLocalServer();
+  const url = localServer.getBaseUrl();
+  const res = await fetch(`${url}${endpoint}`, { headers: authHeaders(LOCAL_TOKEN) });
+  return res.json() as Promise<T>;
+}
+
+/** DELETE on the local background server (:3022). */
+export async function localApiDelete<T = Record<string, unknown>>(endpoint: string): Promise<T> {
+  await ensureLocalServer();
+  const url = localServer.getBaseUrl();
+  const res = await fetch(`${url}${endpoint}`, { method: "DELETE", headers: authHeaders(LOCAL_TOKEN) });
+  return res.json() as Promise<T>;
+}
+
+// ─── Docker detection ───────────────────────────────────────────────
 
 export async function isDockerRunning(): Promise<boolean> {
   try {
@@ -74,75 +98,40 @@ export async function isDockerRunning(): Promise<boolean> {
   }
 }
 
-export function hasDisplay(): boolean {
-  if (process.platform === "darwin" || process.platform === "win32") return true;
-  return !!process.env.DISPLAY;
-}
+// ─── Screenshot resolution ──────────────────────────────────────────
 
-export async function detectAvailableModes(): Promise<Record<string, Record<string, unknown>>> {
-  const dockerAvailable = await isDockerRunning();
-
-  let chromeInstalled = false;
+/**
+ * Resolve a screenshot URL to a local file path that the agent can read
+ * natively via its Read tool. NEVER return base64.
+ */
+export async function resolveScreenshotPath(url: string): Promise<string | null> {
   try {
-    const { findChromeForTesting } = await import("../lib/browser/chrome-downloader");
-    chromeInstalled = !!findChromeForTesting();
-  } catch {}
-
-  const display = hasDisplay();
-
-  return {
-    headless: {
-      available: chromeInstalled,
-      reason: chromeInstalled ? undefined : "Chrome for Testing not installed. Run: bun tests/test-modes.ts (or the agent can auto-download it on first execute)",
-    },
-    "binary-headful": {
-      available: chromeInstalled && display,
-      reason: !chromeInstalled
-        ? "Chrome for Testing not installed"
-        : !display
-          ? "No display available ($DISPLAY not set)"
-          : undefined,
-    },
-    "docker-headful": {
-      available: dockerAvailable,
-      reason: dockerAvailable ? undefined : `Docker container not running at ${BASE_URL}`,
-    },
-    chromeForTesting: {
-      installed: chromeInstalled,
-      ...(!chromeInstalled ? { action: "Run this command to install: bun -e \"require('./src/lib/browser/chrome-downloader').downloadChrome()\"" } : {}),
-    },
-  };
-}
-
-export async function fetchScreenshot(url: string): Promise<{ type: "image"; data: string; mimeType: string } | null> {
-  try {
-    // Node's fetch() doesn't support file:// URLs, so handle that scheme
-    // directly. Local mode writes screenshots to disk and returns file:// URLs.
     if (url.startsWith("file://")) {
-      const fs = await import("fs");
       const { fileURLToPath } = await import("url");
       const filePath = fileURLToPath(url);
-      const buf = fs.readFileSync(filePath);
-      return { type: "image", data: buf.toString("base64"), mimeType: "image/jpeg" };
+      const fs = await import("fs");
+      if (fs.existsSync(filePath)) return filePath;
+      return null;
     }
+    // Docker/HTTP URL: download to temp file
     const res = await fetch(url);
     if (!res.ok) return null;
-    const buf = await res.arrayBuffer();
-    return { type: "image", data: Buffer.from(buf).toString("base64"), mimeType: "image/jpeg" };
+    const buf = Buffer.from(await res.arrayBuffer());
+    const fs = await import("fs");
+    const dir = path.join(os.tmpdir(), "iframer-screenshots", "screenshots");
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, `docker-${Date.now()}.jpg`);
+    fs.writeFileSync(filePath, buf);
+    return filePath;
   } catch {
     return null;
   }
 }
 
+// ─── Utility ────────────────────────────────────────────────────────
+
 export function err(message: string) {
   return { content: [{ type: "text" as const, text: message }], isError: true };
-}
-
-export async function ensureLocalChrome(): Promise<void> {
-  const { findChromeForTesting, downloadChrome } = await import("../lib/browser/chrome-downloader");
-  if (!findChromeForTesting()) {
-    await downloadChrome();
-  }
 }
 
 export function getErrorMessage(err: unknown): string {
