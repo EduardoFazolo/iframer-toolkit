@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { BASE_URL } from "./helpers";
+import { BASE_URL, localServer } from "./helpers";
 import { registerStatusTool } from "./tools/status";
 import { registerBrowseTool } from "./tools/browse";
 import { registerExecuteTool } from "./tools/execute";
@@ -17,71 +17,36 @@ const IS_DEV = process.env.IFRAMER_URL?.includes("localhost") || process.env.IFR
 const INSTRUCTIONS = IS_DEV
   ? `iframer-dev — local development instance of iframer (connects to ${BASE_URL}).
 
-This is the LOCAL dev server running in Docker on localhost. Use this MCP when developing or testing iframer itself.
+CRITICAL RULES:
+1. NEVER ask the user "do you have credentials?". Call credentials action=list and read the response.
+2. NEVER ask the user for passwords in chat. Use credentials action=store (secure form) or the CLI fallback.
+3. DO NOT present options when you can just act. Check credentials, execute, show results.
+4. If execute fails, read the error. It tells you exactly what happened and where.
+5. Call "session" action=stop when done to save session state.
 
-CRITICAL RULES — NEVER VIOLATE THESE:
-1. NEVER ask the user "do you have credentials?" or "do you want to log in manually?". If credentials are missing, immediately call "credentials" action=store — it prompts the user with a secure form. Just do it.
-2. NEVER suggest manual browser login as a first option. Automate first, manual only as last resort after multiple failures.
-3. NEVER ask the user for passwords or credentials in the chat.
-4. DO NOT present options or ask questions when you can just act. Check credentials, execute. Show results, not questions.
-
-CREDENTIAL FLOW (follow exactly):
-1. Call "credentials" action=list to check if credentials exist.
-2. If they exist → proceed with login step in execute.
-3. If missing → immediately call "credentials" action=store. Do NOT tell the user and ask what to do.
-4. After stored → proceed with login step in execute.
-
-BROWSER MODES: NEVER pass options.mode to execute. iframer auto-selects the best mode (headless → docker-headful → binary-headful) and escalates automatically. binary-headful opens a visible browser window on the user's screen — only use it as an absolute last resort.
-
-WORKFLOW:
-1. Use "execute" with a pipeline of steps — the session starts automatically inside Docker
-2. iframer handles obstacles (captcha, cookie banners) automatically
-3. If execute fails, read the error — it tells you exactly what went wrong and where
-4. Call "session" action=stop when done to save session state
-
-TIMEOUTS: Each step has a 20-second stale-state timeout. If nothing changes for 20s, iframer aborts with a detailed error.
-
-CAPTCHA: ALWAYS use the "solve-captcha" step — auto-detects and solves reCAPTCHA/hCaptcha using vision AI. NEVER manually select tiles.
-
-REVERSE ENGINEERING: When the user asks to "reverse engineer", "map the API", "capture endpoints", or "save the endpoints" — use the "reverse-engineer" tool.`
+CAPTCHA: Use the "solve-captcha" step — auto-detects reCAPTCHA/hCaptcha and solves with vision AI.
+REVERSE ENGINEERING: Use the "reverse-engineer" tool when the user asks to capture/map APIs.`
   : `iframer — browser access for AI agents when normal methods fail.
 
-CRITICAL RULES — NEVER VIOLATE THESE:
-1. NEVER ask the user "do you have credentials?" or "do you want to log in manually?". If credentials are missing, immediately call "credentials" action=store — it prompts the user with a secure form. Just do it, don't ask.
-2. NEVER suggest "opening the page so you can log in manually" as a first option. Manual login is ONLY acceptable after automated login has failed multiple times.
-3. NEVER mention that a browser window will pop up or warn about disruption. iframer handles mode selection and escalation automatically in code.
-4. NEVER ask the user for passwords or credentials in the chat.
-5. DO NOT present options or ask questions when you can just act. Check status, check credentials, execute. The user should see results, not questions.
-6. NEVER fall back to Wayback Machine, web search, or other external tools after a single iframer failure. iframer auto-escalates through all browser modes in one call. Only consider alternatives if execute returns a final failure after exhausting all modes.
+CRITICAL RULES:
+1. NEVER ask "do you have credentials?". Call credentials action=list and read the response.
+2. NEVER ask for passwords in chat. Use credentials action=store or the CLI fallback.
+3. DO NOT present options when you can just act. Check status, credentials, execute.
+4. NEVER re-store credentials when login fails. Login failures are browser-mode problems, not credential problems.
+5. ALWAYS check "knowledge get <domain>" before launching a browser. Skip the browser if the cache has what you need.
+6. If execute fails, read the FULL error. It tells you the step, error type, and suggestion.
+7. If the browser crashes, call "session restart" and retry. Don't panic.
 
-CREDENTIAL FLOW (follow this exactly, no exceptions):
-1. Call "credentials" action=list to check if credentials exist for the domain.
-2. If credentials exist → proceed directly with the login step in execute.
-3. If credentials are missing → immediately call "credentials" action=store with the domain. Do NOT tell the user credentials are missing and ask what to do. Just trigger the secure prompt.
-4. After credentials are stored → proceed with the login step in execute.
+BROWSER MODES: Don't specify options.mode — iframer auto-selects and auto-escalates (headless → binary-headful). Only set a mode if the user explicitly asks.
 
-PHILOSOPHY: You are a capable agent. Do your work locally first. Only call iframer when you hit a wall: captcha, login-gated content, heavy bot detection, or content that requires a real browser to render.
+CAPTCHA: In binary-headful mode, ask the user to solve it in the visible window. In docker-headful mode, use the "solve-captcha" step.
 
-WORKFLOW:
-1. Call "status" first — know what's available before doing anything
-2. For simple blocked pages: use "browse" (headless, fast)
-3. For captchas/logins/complex flows: use "execute" with a pipeline of steps
-4. iframer handles obstacles (captcha, cookie banners) automatically during execute
-5. If execute can't finish, it returns exactly where it stopped and why — you decide what to do next
-6. Call "session" action=stop when done to save session state
-
-BROWSER MODES: NEVER specify options.mode — iframer auto-selects the best mode and auto-escalates if blocked (headless → docker-headful → binary-headful) in a single execute call. You do NOT need to pick a mode or retry with different modes. Just call execute without mode and let it work. The only exception: if the user explicitly asks for a specific mode.
-
-TIMEOUTS: Each step has a 20-second stale-state timeout. If nothing changes on the page for 20s, iframer aborts and returns a detailed error.
-
-CAPTCHA: ALWAYS use the "solve-captcha" step — it auto-detects reCAPTCHA vs hCaptcha and solves with vision AI. NEVER manually select tiles with recaptcha-select.
-
-REVERSE ENGINEERING: When the user asks to "reverse engineer", "map the API", "capture endpoints", or "figure out how this site works" — use the "reverse-engineer" tool.`;
+REVERSE ENGINEERING: Use the "reverse-engineer" tool when the user asks to capture/map/save API endpoints.`;
 
 // ─── MCP Server ──────────────────────────────────────────────────────
 
 const server = new McpServer(
-  { name: "iframer", version: "2.1.5" },
+  { name: "iframer", version: "3.0.0" },
   { instructions: INSTRUCTIONS }
 );
 
@@ -92,6 +57,28 @@ registerSessionTool(server);
 registerCredentialsTool(server);
 registerReverseEngineerTool(server);
 registerKnowledgeTool(server);
+
+// ─── Lifecycle ───────────────────────────────────────────────────────
+
+// Kill the local background server when the MCP server exits.
+// The MCP server itself NEVER runs Chrome — Chrome lives in the local
+// background server (a separate process). If that process crashes, the
+// MCP server survives and can respawn it on the next tool call.
+function cleanup() {
+  localServer.shutdown();
+}
+process.on("exit", cleanup);
+process.on("SIGTERM", () => { cleanup(); process.exit(0); });
+process.on("SIGINT", () => { cleanup(); process.exit(0); });
+
+// Safety net for any JS-level errors that somehow slip through. The MCP
+// server should never crash — it's just an HTTP client + stdio JSON-RPC.
+process.on("uncaughtException", (err) => {
+  try { console.error(`[mcp] uncaughtException: ${err?.message}`); } catch {}
+});
+process.on("unhandledRejection", (reason) => {
+  try { console.error(`[mcp] unhandledRejection: ${reason}`); } catch {}
+});
 
 // ─── Start ───────────────────────────────────────────────────────────
 

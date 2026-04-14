@@ -29,22 +29,18 @@ var __toESM = (mod, isNodeMode, target) => {
     cache.set(mod, to);
   return to;
 };
-var __returnValue = (v) => v;
-function __exportSetter(name, newValue) {
-  this[name] = __returnValue.bind(null, newValue);
-}
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, {
-      get: all[name],
-      enumerable: true,
-      configurable: true,
-      set: __exportSetter.bind(all, name)
-    });
-};
-var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
+
+// src/mcp/server.ts
+var import_mcp = require("@modelcontextprotocol/sdk/server/mcp.js");
+var import_stdio = require("@modelcontextprotocol/sdk/server/stdio.js");
+
+// src/mcp/helpers.ts
+var import_path4 = __toESM(require("path"));
+var import_os2 = __toESM(require("os"));
 
 // src/lib/logger.ts
+var LEVELS = { debug: 0, info: 1, warn: 2, error: 3, silent: 4 };
+var currentLevel = process.env.LOG_LEVEL || "info";
 function createLogger(tag) {
   const prefix = `[${tag}]`;
   return {
@@ -66,21 +62,18 @@ function createLogger(tag) {
     }
   };
 }
-var LEVELS, currentLevel;
-var init_logger = __esm(() => {
-  LEVELS = { debug: 0, info: 1, warn: 2, error: 3, silent: 4 };
-  currentLevel = process.env.LOG_LEVEL || "info";
-});
+
+// src/lib/auth/crypto.ts
+var import_crypto = __toESM(require("crypto"));
+var import_fs = __toESM(require("fs"));
+var import_path2 = __toESM(require("path"));
 
 // src/lib/paths.ts
+var import_path = __toESM(require("path"));
+var import_os = __toESM(require("os"));
 function getDataDir() {
   return process.env.IFRAMER_DATA_DIR || import_path.default.join(import_os.default.homedir(), ".iframer");
 }
-var import_path, import_os;
-var init_paths = __esm(() => {
-  import_path = __toESM(require("path"));
-  import_os = __toESM(require("os"));
-});
 
 // src/lib/auth/crypto.ts
 function getLocalToken() {
@@ -102,3922 +95,263 @@ function getLocalToken() {
     return "iframer-local-default-token";
   }
 }
-function deriveKey(token, purpose = INFO) {
-  return new Promise((resolve, reject) => {
-    import_crypto.default.hkdf("sha256", token, SALT, purpose, KEY_LENGTH, (err, key) => {
-      if (err)
-        return reject(err);
-      resolve(Buffer.from(key));
+
+// src/mcp/local-server.ts
+var import_child_process = require("child_process");
+var import_fs2 = __toESM(require("fs"));
+var import_path3 = __toESM(require("path"));
+var __dirname = "/Users/eduardoverona/tools/iframer-toolkit/src/mcp";
+var PORT = parseInt(process.env.IFRAMER_LOCAL_PORT || "3022", 10);
+var STARTUP_TIMEOUT_MS = 15000;
+var HEALTH_POLL_MS = 300;
+
+class LocalServerManager {
+  child = null;
+  startingPromise = null;
+  baseUrl;
+  logPath;
+  constructor() {
+    this.baseUrl = `http://127.0.0.1:${PORT}`;
+    this.logPath = import_path3.default.join(getDataDir(), "local-server.log");
+  }
+  getBaseUrl() {
+    return this.baseUrl;
+  }
+  async ensureRunning() {
+    if (this.child && !this.child.killed && await this.healthCheck())
+      return;
+    if (this.startingPromise)
+      return this.startingPromise;
+    this.startingPromise = this.doStart().finally(() => {
+      this.startingPromise = null;
     });
-  });
-}
-function encrypt(plaintext, key) {
-  const iv = import_crypto.default.randomBytes(IV_LENGTH);
-  const cipher = import_crypto.default.createCipheriv("aes-256-gcm", key, iv);
-  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return Buffer.concat([iv, tag, encrypted]);
-}
-function decrypt(blob, key) {
-  const iv = blob.subarray(0, IV_LENGTH);
-  const tag = blob.subarray(IV_LENGTH, IV_LENGTH + TAG_LENGTH);
-  const ciphertext = blob.subarray(IV_LENGTH + TAG_LENGTH);
-  const decipher = import_crypto.default.createDecipheriv("aes-256-gcm", key, iv);
-  decipher.setAuthTag(tag);
-  return decipher.update(ciphertext, undefined, "utf8") + decipher.final("utf8");
-}
-function generateTOTP(secret, period = 30, digits = 6) {
-  const base32Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  const cleanSecret = secret.replace(/[\s=-]/g, "").toUpperCase();
-  let bits = "";
-  for (const c of cleanSecret) {
-    const val = base32Chars.indexOf(c);
-    if (val === -1)
-      continue;
-    bits += val.toString(2).padStart(5, "0");
+    return this.startingPromise;
   }
-  const keyBytes = [];
-  for (let i = 0;i + 8 <= bits.length; i += 8) {
-    keyBytes.push(parseInt(bits.substring(i, i + 8), 2));
-  }
-  const key = Buffer.from(keyBytes);
-  const time = Math.floor(Date.now() / 1000 / period);
-  const timeBuffer = Buffer.alloc(8);
-  timeBuffer.writeUInt32BE(Math.floor(time / 4294967296), 0);
-  timeBuffer.writeUInt32BE(time & 4294967295, 4);
-  const hmac = import_crypto.default.createHmac("sha1", key).update(timeBuffer).digest();
-  const offset = hmac[hmac.length - 1] & 15;
-  const code = ((hmac[offset] & 127) << 24 | (hmac[offset + 1] & 255) << 16 | (hmac[offset + 2] & 255) << 8 | hmac[offset + 3] & 255) % Math.pow(10, digits);
-  return code.toString().padStart(digits, "0");
-}
-var import_crypto, import_fs, import_path2, SALT = "iframer-session", INFO = "encryption", KEY_LENGTH = 32, IV_LENGTH = 12, TAG_LENGTH = 16;
-var init_crypto = __esm(() => {
-  init_paths();
-  import_crypto = __toESM(require("crypto"));
-  import_fs = __toESM(require("fs"));
-  import_path2 = __toESM(require("path"));
-});
-
-// src/lib/browser/stealth.ts
-function buildStealthScript(fp) {
-  const ua = fp?.userAgent ?? USER_AGENT;
-  const platform = fp?.platform ?? "Win32";
-  const hw = fp?.hardwareConcurrency ?? 8;
-  const mem = fp?.deviceMemory ?? 8;
-  const dpr = fp?.deviceScaleFactor ?? 1.25;
-  const sw = fp?.screenWidth ?? 1920;
-  const sh = fp?.screenHeight ?? 1080;
-  const sah = fp?.screenAvailHeight ?? 1040;
-  const langs = JSON.stringify(fp?.languages ?? ["en-US", "en"]);
-  const uaData = fp?.uaData;
-  const brands = uaData?.brands ?? [
-    { brand: "Chromium", version: "136" },
-    { brand: "Google Chrome", version: "136" },
-    { brand: "Not.A/Brand", version: "99" }
-  ];
-  const fullVersionList = uaData?.fullVersionList ?? [
-    { brand: "Chromium", version: "136.0.7103.93" },
-    { brand: "Google Chrome", version: "136.0.7103.93" },
-    { brand: "Not.A/Brand", version: "99.0.0.0" }
-  ];
-  const platformVersion = uaData?.platformVersion ?? "15.0.0";
-  const uaFullVersion = uaData?.uaFullVersion ?? "136.0.7103.93";
-  return buildStealthScriptInner({
-    ua,
-    platform,
-    hw,
-    mem,
-    dpr,
-    sw,
-    sh,
-    sah,
-    langs,
-    brands,
-    fullVersionList,
-    platformVersion,
-    uaFullVersion
-  });
-}
-function buildStealthScriptInner(p) {
-  return `
-  window._stealthApplied = true;
-  ${NATIVE_TOSTRING_HELPER}
-
-  delete Navigator.prototype.webdriver;
-  Object.defineProperty(Navigator.prototype, "webdriver", {
-    get: () => false,
-    configurable: true,
-  });
-
-  if (!window.chrome) window.chrome = {};
-  window.chrome.app = {
-    isInstalled: false,
-    InstallState: { DISABLED: "disabled", INSTALLED: "installed", NOT_INSTALLED: "not_installed" },
-    RunningState: { CANNOT_RUN: "cannot_run", READY_TO_RUN: "ready_to_run", RUNNING: "running" },
-    getDetails: function() { return null; },
-    getIsInstalled: function() { return false; },
-    installState: function(cb) { if (cb) cb("not_installed"); },
-  };
-
-  window.chrome.csi = function() {
-    return { onloadT: Date.now(), startE: Date.now(), pageT: Math.random() * 1000 + 500, tran: 15 };
-  };
-  _makeNative(window.chrome.csi, 'csi');
-
-  window.chrome.loadTimes = function() {
-    return {
-      commitLoadTime: Date.now() / 1000, connectionInfo: "h2",
-      finishDocumentLoadTime: Date.now() / 1000 + 0.1, finishLoadTime: Date.now() / 1000 + 0.2,
-      firstPaintAfterLoadTime: 0, firstPaintTime: Date.now() / 1000 + 0.05,
-      navigationType: "Other", npnNegotiatedProtocol: "h2",
-      requestTime: Date.now() / 1000 - 0.3, startLoadTime: Date.now() / 1000 - 0.2,
-      wasAlternateProtocolAvailable: false, wasFetchedViaSpdy: true, wasNpnNegotiated: true,
+  async doStart() {
+    await this.killExisting();
+    const dataDir = getDataDir();
+    import_fs2.default.mkdirSync(dataDir, { recursive: true });
+    const { command, args } = this.resolveRuntime();
+    const logFd = import_fs2.default.openSync(this.logPath, "a");
+    const env = {
+      ...process.env,
+      PORT: String(PORT),
+      IFRAMER_MODE: "local",
+      IFRAMER_DATA_DIR: dataDir
     };
-  };
-  _makeNative(window.chrome.loadTimes, 'loadTimes');
-
-  if (!window.chrome.runtime) {
-    window.chrome.runtime = {
-      connect: function() {}, sendMessage: function() {},
-      onMessage: { addListener: function() {}, removeListener: function() {} },
-      onConnect: { addListener: function() {}, removeListener: function() {} },
-      id: undefined,
-    };
-  }
-
-  // Safely patch Navigator.prototype — delete first to handle non-configurable properties
-  (function() {
-    function safeProp(obj, prop, descriptor) {
-      try { delete obj[prop]; } catch(e) {}
-      try { Object.defineProperty(obj, prop, { configurable: true, ...descriptor }); } catch(e) {}
-    }
-
-    safeProp(Navigator.prototype, "vendor", { get: () => "Google Inc." });
-    safeProp(Navigator.prototype, "platform", { get: () => "${p.platform}" });
-    safeProp(Navigator.prototype, "languages", { get: () => Object.freeze(${p.langs}) });
-    safeProp(Navigator.prototype, "hardwareConcurrency", { get: () => ${p.hw} });
-    safeProp(Navigator.prototype, "deviceMemory", { get: () => ${p.mem} });
-
-    safeProp(Navigator.prototype, "plugins", {
-      get: () => {
-        const pluginData = [
-          { name: "Chrome PDF Plugin", filename: "internal-pdf-viewer", description: "Portable Document Format", mimeTypes: [{ type: "application/x-google-chrome-pdf", suffixes: "pdf", description: "Portable Document Format" }] },
-          { name: "Chrome PDF Viewer", filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai", description: "", mimeTypes: [{ type: "application/pdf", suffixes: "pdf", description: "" }] },
-          { name: "Native Client", filename: "internal-nacl-plugin", description: "", mimeTypes: [{ type: "application/x-nacl", suffixes: "", description: "Native Client Executable" }] },
-        ];
-        const plugins = Object.create(PluginArray.prototype);
-        for (let i = 0; i < pluginData.length; i++) {
-          const p = Object.create(Plugin.prototype);
-          Object.defineProperties(p, {
-            name: { value: pluginData[i].name }, filename: { value: pluginData[i].filename },
-            description: { value: pluginData[i].description }, length: { value: pluginData[i].mimeTypes.length },
-          });
-          plugins[i] = p;
-          plugins[pluginData[i].name] = p;
-        }
-        Object.defineProperty(plugins, "length", { value: pluginData.length });
-        return plugins;
-      },
-    });
-
-    safeProp(Navigator.prototype, "mimeTypes", {
-      get: () => {
-        const mimes = Object.create(MimeTypeArray.prototype);
-        Object.defineProperty(mimes, "length", { value: 4 });
-        return mimes;
-      },
-    });
-  })();
-
-  if (navigator.permissions) {
-    const _origQuery = navigator.permissions.query.bind(navigator.permissions);
-    const _patchedQuery = function(params) {
-      if (params.name === "notifications") return Promise.resolve({ state: Notification.permission });
-      return _origQuery(params);
-    };
-    _makeNative(_patchedQuery, 'query');
-    navigator.permissions.query = _patchedQuery;
-  }
-
-  const _origGetParam = WebGLRenderingContext.prototype.getParameter;
-  WebGLRenderingContext.prototype.getParameter = function(param) {
-    if (param === 37445) return "Intel Inc.";
-    if (param === 37446) return "Intel Iris OpenGL Engine";
-    return _origGetParam.call(this, param);
-  };
-  _makeNative(WebGLRenderingContext.prototype.getParameter, 'getParameter');
-
-  if (typeof WebGL2RenderingContext !== "undefined") {
-    const _origGetParam2 = WebGL2RenderingContext.prototype.getParameter;
-    WebGL2RenderingContext.prototype.getParameter = function(param) {
-      if (param === 37445) return "Intel Inc.";
-      if (param === 37446) return "Intel Iris OpenGL Engine";
-      return _origGetParam2.call(this, param);
-    };
-    _makeNative(WebGL2RenderingContext.prototype.getParameter, 'getParameter');
-  }
-
-  if (window.outerWidth === 0) Object.defineProperty(window, "outerWidth", { get: () => window.innerWidth });
-  if (window.outerHeight === 0) Object.defineProperty(window, "outerHeight", { get: () => window.innerHeight + 85 });
-
-  const _origHTMLIFrameElement_contentWindow = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "contentWindow");
-  if (_origHTMLIFrameElement_contentWindow) {
-    Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", {
-      get: function() {
-        const w = _origHTMLIFrameElement_contentWindow.get.call(this);
-        if (w) { try { w.self; } catch(e) {} }
-        return w;
-      },
-    });
-  }
-
-  if (typeof MediaSource !== "undefined") {
-    const _origIsTypeSupported = MediaSource.isTypeSupported.bind(MediaSource);
-    MediaSource.isTypeSupported = function(type) {
-      const alwaysSupported = [
-        'video/mp4; codecs="avc1.42E01E"', 'video/mp4; codecs="avc1.4D401E"', 'video/mp4; codecs="avc1.64001E"',
-        'video/webm; codecs="vp8"', 'video/webm; codecs="vp9"',
-        'audio/mp4; codecs="mp4a.40.2"', 'audio/webm; codecs="opus"', 'audio/webm; codecs="vorbis"',
-      ];
-      if (alwaysSupported.some(s => type.includes(s.split(';')[0]))) return true;
-      return _origIsTypeSupported(type);
-    };
-    _makeNative(MediaSource.isTypeSupported, 'isTypeSupported');
-  }
-
-  if (navigator.connection) {
-    Object.defineProperty(navigator.connection, "rtt", { get: () => 50 });
-    Object.defineProperty(navigator.connection, "downlink", { get: () => 10 });
-    Object.defineProperty(navigator.connection, "effectiveType", { get: () => "4g" });
-  }
-
-  // Screen fingerprint
-  try { Object.defineProperty(screen, "width",       { get: () => ${p.sw}, configurable: true }); } catch(e) {}
-  try { Object.defineProperty(screen, "height",      { get: () => ${p.sh}, configurable: true }); } catch(e) {}
-  try { Object.defineProperty(screen, "availWidth",  { get: () => ${p.sw}, configurable: true }); } catch(e) {}
-  try { Object.defineProperty(screen, "availHeight", { get: () => ${p.sah}, configurable: true }); } catch(e) {}
-  try { Object.defineProperty(screen, "colorDepth",  { get: () => 24, configurable: true }); } catch(e) {}
-  try { Object.defineProperty(screen, "pixelDepth",  { get: () => 24, configurable: true }); } catch(e) {}
-  // devicePixelRatio
-  try { Object.defineProperty(window, "devicePixelRatio", { get: () => ${p.dpr}, configurable: true }); } catch(e) {}
-
-  // WebRTC IP leak prevention — filter private/container IP candidates
-  (function() {
-    const _RTC = window.RTCPeerConnection;
-    if (!_RTC) return;
-
-    function isPrivateIP(ip) {
-      return /^10./.test(ip) ||
-        /^172.(1[6-9]|2d|3[01])./.test(ip) ||
-        /^192.168./.test(ip) ||
-        /^127./.test(ip) ||
-        /^169.254./.test(ip) ||
-        /^::1$/.test(ip) ||
-        /^fc|^fd/.test(ip);
-    }
-
-    function extractIP(candidateStr) {
-      const m = candidateStr.match(/(d{1,3}.d{1,3}.d{1,3}.d{1,3}|[a-f0-9:]{3,})/);
-      return m ? m[1] : null;
-    }
-
-    function filterCandidate(event) {
-      if (!event || !event.candidate || !event.candidate.candidate) return false;
-      const ip = extractIP(event.candidate.candidate);
-      return ip ? isPrivateIP(ip) : false;
-    }
-
-    const PatchedRTC = function(config, constraints) {
-      const pc = new _RTC(config, constraints);
-
-      const origAEL = pc.addEventListener.bind(pc);
-      pc.addEventListener = function(type, handler, ...rest) {
-        if (type === 'icecandidate' && handler) {
-          return origAEL(type, (e) => { if (!filterCandidate(e)) handler(e); }, ...rest);
-        }
-        return origAEL(type, handler, ...rest);
-      };
-
-      Object.defineProperty(pc, 'onicecandidate', {
-        set(handler) {
-          if (!handler) return;
-          origAEL('icecandidate', (e) => { if (!filterCandidate(e)) handler.call(pc, e); });
-        },
-        get() { return null; },
-        configurable: true,
-      });
-
-      return pc;
-    };
-
-    PatchedRTC.prototype = _RTC.prototype;
-    Object.defineProperty(window, 'RTCPeerConnection', {
-      value: PatchedRTC, writable: true, configurable: true,
-    });
-  })();
-
-  // Fix WebGL_debug_renderer_info extension so getParameter(37445/37446) works
-  const _origGetExt = WebGLRenderingContext.prototype.getExtension;
-  WebGLRenderingContext.prototype.getExtension = function(name) {
-    if (name === 'WEBGL_debug_renderer_info') {
-      return { UNMASKED_VENDOR_WEBGL: 37445, UNMASKED_RENDERER_WEBGL: 37446 };
-    }
-    return _origGetExt.call(this, name);
-  };
-  _makeNative(WebGLRenderingContext.prototype.getExtension, 'getExtension');
-
-  if (typeof WebGL2RenderingContext !== "undefined") {
-    const _origGetExt2 = WebGL2RenderingContext.prototype.getExtension;
-    WebGL2RenderingContext.prototype.getExtension = function(name) {
-      if (name === 'WEBGL_debug_renderer_info') {
-        return { UNMASKED_VENDOR_WEBGL: 37445, UNMASKED_RENDERER_WEBGL: 37446 };
-      }
-      return _origGetExt2.call(this, name);
-    };
-    _makeNative(WebGL2RenderingContext.prototype.getExtension, 'getExtension');
-  }
-
-  // Patch Worker constructor to inject navigator overrides into Web Workers
-  // Workers have their own WorkerNavigator global — page.addInitScript doesn't reach them
-  (function() {
-    const _OrigWorker = window.Worker;
-    if (!_OrigWorker) return;
-
-    const WORKER_PATCH = \`
-      Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => ${p.hw}, configurable: true });
-      Object.defineProperty(navigator, 'deviceMemory', { get: () => ${p.mem}, configurable: true });
-      Object.defineProperty(navigator, 'platform', { get: () => '${p.platform}', configurable: true });
-      Object.defineProperty(navigator, 'languages', { get: () => Object.freeze(${p.langs}), configurable: true });
-      Object.defineProperty(navigator, 'userAgent', { get: () => '${p.ua.replace(/'/g, "\\'")}', configurable: true });
-    \`;
-
-    function PatchedWorker(url, opts) {
-      // Skip wrapping module workers — importScripts doesn't exist in ES module scope
-      if (opts && opts.type === 'module') {
-        return new _OrigWorker(url, opts);
-      }
-      let workerUrl;
+    if (process.env.IFRAMER_SECRET) {
+      env.IFRAMER_SECRET = process.env.IFRAMER_SECRET;
+    } else {
       try {
-        const originalUrl = url instanceof URL ? url.href : String(url);
-        const blob = new Blob(
-          [WORKER_PATCH, '\\nimportScripts(' + JSON.stringify(originalUrl) + ')'],
-          { type: 'application/javascript' }
-        );
-        workerUrl = URL.createObjectURL(blob);
-      } catch(e) {
-        workerUrl = url;
-      }
-      return new _OrigWorker(workerUrl, opts);
-    }
-    PatchedWorker.prototype = _OrigWorker.prototype;
-    Object.defineProperty(window, 'Worker', { value: PatchedWorker, writable: true, configurable: true });
-  })();
-
-  if (navigator.userAgentData) {
-    const _brands = ${JSON.stringify(p.brands)};
-    const _fullVersionBrands = ${JSON.stringify(p.fullVersionList)};
-    Object.defineProperty(Navigator.prototype, "userAgentData", {
-      configurable: true,
-      get: () => ({
-        brands: _brands, mobile: false, platform: "Windows",
-        getHighEntropyValues: (hints) => Promise.resolve({
-          brands: _brands, fullVersionList: _fullVersionBrands, mobile: false, model: "",
-          platform: "Windows", platformVersion: "${p.platformVersion}", architecture: "x86", bitness: "64", uaFullVersion: "${p.uaFullVersion}",
-        }),
-        toJSON: () => ({ brands: _brands, mobile: false, platform: "Windows" }),
-      }),
-    });
-  }
-  `;
-}
-function stealthContextOptions(overrides = {}, _sessionId, fp) {
-  const uaVersion = fp?.uaData?.brands?.find((b) => b.brand === "Google Chrome")?.version ?? "136";
-  return {
-    userAgent: fp?.userAgent ?? USER_AGENT,
-    locale: overrides.locale || "en-US",
-    timezoneId: overrides.timezoneId || "America/New_York",
-    deviceScaleFactor: fp?.deviceScaleFactor ?? 1.25,
-    viewport: {
-      width: fp?.screenWidth ?? 1920,
-      height: fp?.screenHeight ?? 1080
-    },
-    extraHTTPHeaders: {
-      "accept-language": "en-US,en;q=0.9",
-      "sec-ch-ua": `"Chromium";v="${uaVersion}", "Google Chrome";v="${uaVersion}", "Not:A-Brand";v="99"`,
-      "sec-ch-ua-mobile": "?0",
-      "sec-ch-ua-platform": `"Windows"`,
-      ...overrides.extraHTTPHeaders
-    },
-    ...overrides
-  };
-}
-async function applyStealthToPage(page) {
-  await page.context().addInitScript(STEALTH_SCRIPT);
-}
-var contextStealthScripts, CHROME_VERSION = "136.0.7103.93", USER_AGENT, NATIVE_TOSTRING_HELPER = `
-  const _nativeToStr = Function.prototype.toString;
-  const _patchedFns = new Set();
-  function _makeNative(fn, name) {
-    _patchedFns.add(fn);
-    fn.toString = () => 'function ' + (name || fn.name || '') + '() { [native code] }';
-  }
-  const _origToString = Function.prototype.toString;
-  Function.prototype.toString = function() {
-    if (_patchedFns.has(this)) return this.toString();
-    return _origToString.call(this);
-  };
-  _makeNative(Function.prototype.toString, 'toString');
-`, STEALTH_SCRIPT, STEALTH_ARGS;
-var init_stealth = __esm(() => {
-  contextStealthScripts = new Map;
-  USER_AGENT = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME_VERSION} Safari/537.36`;
-  STEALTH_SCRIPT = buildStealthScript();
-  STEALTH_ARGS = [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-blink-features=AutomationControlled",
-    "--disable-features=IsolateOrigins,site-per-process",
-    "--disable-infobars",
-    "--window-size=1920,1080",
-    "--enable-features=NetworkService,NetworkServiceInProcess",
-    "--use-gl=angle",
-    "--use-angle=swiftshader"
-  ];
-});
-
-// src/lib/constants.ts
-var TIMING, CAPTCHA_GRID, SCREEN_DEFAULTS, THRESHOLDS, TIMEOUTS, CHROME_MIN_VERSION = 130;
-var init_constants = __esm(() => {
-  TIMING = {
-    MOUSE_MOVE: [50, 200],
-    CLICK_HOLD: [30, 90],
-    POST_CLICK: [100, 300],
-    CHAR_DELAY: [30, 150],
-    WORD_PAUSE: [200, 500],
-    IDLE_MOUSE_X: [100, 400],
-    IDLE_MOUSE_Y: [100, 300],
-    PRE_CHECKBOX_X: [200, 600],
-    PRE_CHECKBOX_Y: [150, 400],
-    PRE_CHECKBOX_WAIT: [300, 800],
-    POST_CHECKBOX_WAIT: 2500,
-    POST_VERIFY_WAIT: 2000,
-    TILE_CLICK_DELAY: [200, 500],
-    TILE_SETTLE: 800,
-    CAPTCHA_DETECT_WAIT: 1500,
-    POST_LOGIN_WAIT: 1500,
-    POST_SUBMIT_WAIT: 500,
-    POST_SUBMIT_EXTENDED: 2000,
-    PRE_NAVIGATE: [300, 700],
-    DIGIT_DELAY_BASE: 80,
-    DIGIT_DELAY_RANGE: 120,
-    POST_FORM_CLICK: 200,
-    POST_TOTP_WAIT: 300,
-    POST_COOKIES_WAIT: 300,
-    SCROLL_DELAY: 150,
-    STALE_CHECK_INTERVAL: 2000
-  };
-  CAPTCHA_GRID = {
-    RECAPTCHA_HEADER_HEIGHT: 112,
-    HCAPTCHA_HEADER_HEIGHT: 110,
-    DEFAULT_TILE_SIZE: 125,
-    GRID_PADDING: 24,
-    GRID_MARGIN: 12,
-    VERIFY_BTN_BOTTOM_OFFSET: 35,
-    VERIFY_BTN_RIGHT_OFFSET: 60
-  };
-  SCREEN_DEFAULTS = {
-    WIDTH: 1920,
-    HEIGHT: 1080,
-    AVAIL_HEIGHT: 1040,
-    DPR: 1.25
-  };
-  THRESHOLDS = {
-    STALE_CHAR_CHANGE: 100,
-    STALE_PERCENT_CHANGE: 0.05,
-    MIN_BODY_TEXT: 200,
-    MAX_RESPONSE_TEXT: 1e5
-  };
-  TIMEOUTS = {
-    DEFAULT_STALE: 20000,
-    NAVIGATION: 60000,
-    SELECTOR_WAIT: 1e4,
-    TOTP_INPUT: 5000,
-    API_REQUEST: 180000,
-    HEALTH_CHECK: 3000,
-    CHALLENGE_FRAME_WAIT: 5000
-  };
-});
-
-// src/lib/browser/humanize.ts
-function rand(min, max) {
-  return Math.random() * (max - min) + min;
-}
-function randRange(range) {
-  return rand(range[0], range[1]);
-}
-function bezierPoint(t, p0, p1, p2, p3) {
-  const u = 1 - t;
-  return u * u * u * p0 + 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t * p3;
-}
-function generatePath(fromX, fromY, toX, toY) {
-  const steps = Math.floor(rand(25, 55));
-  const points = [];
-  const cx1 = fromX + (toX - fromX) * rand(0.1, 0.4) + rand(-50, 50);
-  const cy1 = fromY + (toY - fromY) * rand(-0.2, 0.5) + rand(-50, 50);
-  const cx2 = fromX + (toX - fromX) * rand(0.6, 0.9) + rand(-30, 30);
-  const cy2 = fromY + (toY - fromY) * rand(0.5, 1.2) + rand(-30, 30);
-  for (let i = 0;i <= steps; i++) {
-    const t = i / steps;
-    const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-    let x = bezierPoint(eased, fromX, cx1, cx2, toX);
-    let y = bezierPoint(eased, fromY, cy1, cy2, toY);
-    const jitterScale = Math.sin(t * Math.PI) * 2;
-    x += rand(-jitterScale, jitterScale);
-    y += rand(-jitterScale, jitterScale);
-    points.push({ x: Math.round(x), y: Math.round(y) });
-  }
-  points[points.length - 1] = { x: Math.round(toX), y: Math.round(toY) };
-  return points;
-}
-async function humanMove(page, toX, toY) {
-  const mouse = page.mouse;
-  const lastPos = mousePositions.get(page);
-  const fromX = lastPos?.x ?? randRange(TIMING.IDLE_MOUSE_X);
-  const fromY = lastPos?.y ?? randRange(TIMING.IDLE_MOUSE_Y);
-  const path3 = generatePath(fromX, fromY, toX, toY);
-  for (const point of path3) {
-    await mouse.move(point.x, point.y);
-    await sleep(rand(2, 12));
-  }
-  mousePositions.set(page, { x: toX, y: toY });
-}
-async function humanClick(page, selector) {
-  const element = await page.waitForSelector(selector, { timeout: TIMEOUTS.SELECTOR_WAIT });
-  if (!element)
-    throw new Error(`Element not found: ${selector}`);
-  const box = await element.boundingBox();
-  if (!box)
-    throw new Error(`Element not visible: ${selector}`);
-  const targetX = box.x + box.width * rand(0.3, 0.7);
-  const targetY = box.y + box.height * rand(0.3, 0.7);
-  await humanMove(page, targetX, targetY);
-  await sleep(randRange(TIMING.MOUSE_MOVE));
-  await page.mouse.down();
-  await sleep(randRange(TIMING.CLICK_HOLD));
-  await page.mouse.up();
-  await sleep(randRange(TIMING.POST_CLICK));
-}
-async function humanClickXY(page, x, y) {
-  await humanMove(page, x, y);
-  await sleep(randRange(TIMING.MOUSE_MOVE));
-  await page.mouse.down();
-  await sleep(randRange(TIMING.CLICK_HOLD));
-  await page.mouse.up();
-  await sleep(randRange(TIMING.POST_CLICK));
-}
-async function humanType(page, selector, text) {
-  await humanClick(page, selector);
-  await sleep(randRange(TIMING.POST_CLICK));
-  for (const char of text) {
-    await page.keyboard.type(char);
-    await sleep(randRange(TIMING.CHAR_DELAY));
-    if (Math.random() < 0.05) {
-      await sleep(randRange(TIMING.WORD_PAUSE));
-    }
-  }
-}
-async function clickRecaptchaCheckbox(page) {
-  const recaptchaFrame = await page.waitForSelector('iframe[title*="reCAPTCHA"], iframe[src*="recaptcha/api2/anchor"]', { timeout: TIMEOUTS.SELECTOR_WAIT });
-  if (!recaptchaFrame)
-    throw new Error("reCAPTCHA iframe not found");
-  const frame = await recaptchaFrame.contentFrame();
-  if (!frame)
-    throw new Error("Could not access reCAPTCHA iframe");
-  await frame.waitForSelector(".recaptcha-checkbox-border, #recaptcha-anchor", { timeout: TIMEOUTS.SELECTOR_WAIT });
-  const recaptchaBox = await recaptchaFrame.boundingBox();
-  if (!recaptchaBox)
-    throw new Error("reCAPTCHA iframe not visible");
-  const checkboxX = recaptchaBox.x + rand(20, 35);
-  const checkboxY = recaptchaBox.y + recaptchaBox.height * rand(0.35, 0.65);
-  await humanMove(page, randRange(TIMING.PRE_CHECKBOX_X), randRange(TIMING.PRE_CHECKBOX_Y));
-  await sleep(randRange(TIMING.PRE_CHECKBOX_WAIT));
-  await humanClickXY(page, checkboxX, checkboxY);
-  await sleep(TIMING.POST_CHECKBOX_WAIT);
-  try {
-    const checked = await frame.evaluate(() => {
-      const anchor = document.querySelector("#recaptcha-anchor");
-      return anchor && anchor.getAttribute("aria-checked") === "true";
-    });
-    if (checked)
-      return { solved: true, challenge: false };
-  } catch {}
-  const challengeInfo = await getChallengeInfo(page);
-  return { solved: false, challenge: true, challengeInfo };
-}
-async function getChallengeInfo(page) {
-  const bframe = await page.waitForSelector('iframe[title*="desafio reCAPTCHA"], iframe[title*="recaptcha challenge"], iframe[src*="recaptcha/api2/bframe"]', { timeout: TIMEOUTS.CHALLENGE_FRAME_WAIT }).catch(() => null);
-  if (!bframe)
-    return null;
-  const bframeBox = await bframe.boundingBox();
-  if (!bframeBox)
-    return null;
-  const frame = await bframe.contentFrame();
-  if (!frame)
-    return null;
-  const info = await frame.evaluate(() => {
-    const promptEl = document.querySelector(".rc-imageselect-desc-wrapper, .rc-imageselect-instructions");
-    const prompt = promptEl ? promptEl.innerText.trim() : "";
-    const table = document.querySelector("table.rc-imageselect-table, table.rc-imageselect-table-33, table.rc-imageselect-table-44");
-    let rows = 0, cols = 0;
-    if (table) {
-      const trs = table.querySelectorAll("tr");
-      rows = trs.length;
-      cols = trs[0] ? trs[0].querySelectorAll("td").length : 0;
-    }
-    const verifyBtn = document.querySelector("#recaptcha-verify-button");
-    const verifyText = verifyBtn ? verifyBtn.innerText.trim() : "";
-    return { prompt, rows, cols, verifyText };
-  }).catch(() => ({ prompt: "", rows: 0, cols: 0, verifyText: "" }));
-  const gridStartX = bframeBox.x + CAPTCHA_GRID.GRID_MARGIN;
-  const gridStartY = bframeBox.y + CAPTCHA_GRID.HCAPTCHA_HEADER_HEIGHT;
-  const gridWidth = bframeBox.width - CAPTCHA_GRID.GRID_PADDING;
-  const gridHeight = bframeBox.width - CAPTCHA_GRID.GRID_PADDING;
-  const tileWidth = info.cols > 0 ? gridWidth / info.cols : 0;
-  const tileHeight = info.rows > 0 ? gridHeight / info.rows : 0;
-  const tiles = [];
-  for (let r = 0;r < info.rows; r++) {
-    for (let c = 0;c < info.cols; c++) {
-      tiles.push({
-        row: r,
-        col: c,
-        index: r * info.cols + c,
-        centerX: Math.round(gridStartX + c * tileWidth + tileWidth / 2),
-        centerY: Math.round(gridStartY + r * tileHeight + tileHeight / 2)
-      });
-    }
-  }
-  const verifyBtnY = bframeBox.y + bframeBox.height - CAPTCHA_GRID.VERIFY_BTN_BOTTOM_OFFSET;
-  const verifyBtnX = bframeBox.x + bframeBox.width - CAPTCHA_GRID.VERIFY_BTN_RIGHT_OFFSET;
-  return {
-    prompt: info.prompt,
-    rows: info.rows,
-    cols: info.cols,
-    tiles,
-    verifyButton: { x: Math.round(verifyBtnX), y: Math.round(verifyBtnY) },
-    bframeBox
-  };
-}
-async function clickChallengeTiles(page, tileIndices) {
-  const challengeInfo = await getChallengeInfo(page);
-  if (!challengeInfo || !challengeInfo.tiles.length) {
-    throw new Error("No active reCAPTCHA challenge found");
-  }
-  const clicked = [];
-  for (const idx of tileIndices) {
-    const tile = challengeInfo.tiles.find((t) => t.index === idx);
-    if (!tile)
-      continue;
-    await humanClickXY(page, tile.centerX, tile.centerY);
-    await sleep(randRange(TIMING.TILE_CLICK_DELAY));
-    clicked.push(idx);
-  }
-  return { clicked, challengeInfo };
-}
-async function clickChallengeVerify(page) {
-  const challengeInfo = await getChallengeInfo(page);
-  if (!challengeInfo)
-    throw new Error("No active reCAPTCHA challenge found");
-  await humanClickXY(page, challengeInfo.verifyButton.x, challengeInfo.verifyButton.y);
-  await sleep(TIMING.POST_VERIFY_WAIT);
-  const anchorFrame = await page.waitForSelector('iframe[title*="reCAPTCHA"], iframe[src*="recaptcha/api2/anchor"]', { timeout: TIMEOUTS.CHALLENGE_FRAME_WAIT }).catch(() => null);
-  if (anchorFrame) {
-    const frame = await anchorFrame.contentFrame();
-    if (frame) {
-      try {
-        const checked = await frame.evaluate(() => {
-          const anchor = document.querySelector("#recaptcha-anchor");
-          return anchor && anchor.getAttribute("aria-checked") === "true";
-        });
-        if (checked)
-          return { solved: true };
+        const secret = import_fs2.default.readFileSync(import_path3.default.join(dataDir, "secret"), "utf8").trim();
+        if (secret)
+          env.IFRAMER_SECRET = secret;
       } catch {}
     }
+    this.child = import_child_process.spawn(command, args, {
+      env,
+      stdio: ["ignore", logFd, logFd],
+      detached: false
+    });
+    import_fs2.default.closeSync(logFd);
+    this.child.on("exit", (code) => {
+      this.child = null;
+    });
+    const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      if (await this.healthCheck())
+        return;
+      await sleep(HEALTH_POLL_MS);
+    }
+    this.kill();
+    const logTail = this.readLogTail();
+    throw new Error(`Local iframer server failed to start on port ${PORT} within ${STARTUP_TIMEOUT_MS}ms.
+` + `Last log lines:
+${logTail}`);
   }
-  const newInfo = await getChallengeInfo(page);
-  return { solved: false, challengeInfo: newInfo };
+  resolveRuntime() {
+    try {
+      const bunPath = require("child_process").execSync("which bun", { encoding: "utf8" }).trim();
+      const serverTs2 = import_path3.default.join(__dirname, "..", "..", "index.ts");
+      if (import_fs2.default.existsSync(serverTs2)) {
+        return { command: bunPath, args: ["run", serverTs2] };
+      }
+    } catch {}
+    const serverCjs = import_path3.default.join(__dirname, "..", "..", "dist", "local-server.cjs");
+    if (import_fs2.default.existsSync(serverCjs)) {
+      return { command: "node", args: [serverCjs] };
+    }
+    const serverTs = import_path3.default.join(__dirname, "..", "..", "index.ts");
+    return { command: "node", args: ["--import", "tsx", serverTs] };
+  }
+  async restart() {
+    this.kill();
+    await sleep(500);
+    await this.ensureRunning();
+  }
+  shutdown() {
+    this.kill();
+  }
+  kill() {
+    if (this.child && !this.child.killed) {
+      try {
+        this.child.kill("SIGTERM");
+      } catch {}
+      const c = this.child;
+      setTimeout(() => {
+        try {
+          if (!c.killed)
+            c.kill("SIGKILL");
+        } catch {}
+      }, 2000);
+    }
+    this.child = null;
+  }
+  async killExisting() {
+    try {
+      const res = await fetch(`${this.baseUrl}/health`, {
+        signal: AbortSignal.timeout(2000)
+      });
+      if (res.ok) {
+        try {
+          await fetch(`${this.baseUrl}/shutdown`, {
+            method: "POST",
+            signal: AbortSignal.timeout(2000)
+          });
+        } catch {}
+        await sleep(500);
+      }
+    } catch {}
+  }
+  async healthCheck() {
+    try {
+      const res = await fetch(`${this.baseUrl}/health`, {
+        signal: AbortSignal.timeout(2000)
+      });
+      const data = await res.json();
+      return data.ok === true;
+    } catch {
+      return false;
+    }
+  }
+  readLogTail() {
+    try {
+      const content = import_fs2.default.readFileSync(this.logPath, "utf8");
+      const lines = content.trim().split(`
+`);
+      return lines.slice(-10).join(`
+`);
+    } catch {
+      return "(no log file)";
+    }
+  }
 }
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
-var mousePositions;
-var init_humanize = __esm(() => {
-  init_constants();
-  mousePositions = new WeakMap;
-});
 
-// src/lib/captcha/recaptcha.ts
-function getClient() {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey)
-    throw new Error("ANTHROPIC_API_KEY not set — required for captcha auto-solve");
-  return new import_sdk.default({ apiKey });
+// src/mcp/helpers.ts
+var log = createLogger("mcp");
+var BASE_URL = process.env.IFRAMER_URL || "http://localhost:3021";
+var IFRAMER_SECRET = process.env.IFRAMER_SECRET;
+var IFRAMER_MODE = process.env.IFRAMER_MODE;
+var LOCAL_TOKEN = getLocalToken();
+var localServer = new LocalServerManager;
+async function ensureLocalServer() {
+  await localServer.ensureRunning();
 }
-function extractTarget(prompt) {
-  const lines = prompt.split(`
-`).map((l) => l.trim()).filter(Boolean);
-  for (let i = 0;i < lines.length; i++) {
-    if (/select all (images|squares) with/i.test(lines[i])) {
-      const afterWith = lines[i].replace(/.*with\s*/i, "").trim();
-      if (afterWith && afterWith.length > 1 && !/click/i.test(afterWith)) {
-        return afterWith.replace(/^a\s+/i, "").trim();
-      }
-      if (i + 1 < lines.length && !/click/i.test(lines[i + 1])) {
-        return lines[i + 1].replace(/^a\s+/i, "").trim();
-      }
-    }
-  }
-  return lines[1] || prompt;
+function authHeaders(secret) {
+  const headers = { "Content-Type": "application/json" };
+  const key = secret || IFRAMER_SECRET;
+  if (key)
+    headers["x-api-key"] = key;
+  return headers;
 }
-async function screenshotFullGrid(page, challengeInfo) {
-  const { bframeBox, rows, cols } = challengeInfo;
-  if (!bframeBox || rows === 0 || cols === 0)
-    return null;
-  const gridClip = {
-    x: bframeBox.x + 14,
-    y: bframeBox.y + 112,
-    width: bframeBox.width - 28,
-    height: bframeBox.width - 28
-  };
+async function apiPost(endpoint, body) {
+  const res = await fetch(`${BASE_URL}${endpoint}`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(180000)
+  });
+  return res.json();
+}
+async function apiGet(endpoint) {
+  const res = await fetch(`${BASE_URL}${endpoint}`, { headers: authHeaders() });
+  return res.json();
+}
+async function localApiPost(endpoint, body) {
+  await ensureLocalServer();
+  const url = localServer.getBaseUrl();
+  const res = await fetch(`${url}${endpoint}`, {
+    method: "POST",
+    headers: authHeaders(LOCAL_TOKEN),
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(180000)
+  });
+  return res.json();
+}
+async function localApiGet(endpoint) {
+  await ensureLocalServer();
+  const url = localServer.getBaseUrl();
+  const res = await fetch(`${url}${endpoint}`, { headers: authHeaders(LOCAL_TOKEN) });
+  return res.json();
+}
+async function localApiDelete(endpoint) {
+  await ensureLocalServer();
+  const url = localServer.getBaseUrl();
+  const res = await fetch(`${url}${endpoint}`, { method: "DELETE", headers: authHeaders(LOCAL_TOKEN) });
+  return res.json();
+}
+async function isDockerRunning() {
   try {
-    const buf = await page.screenshot({ type: "jpeg", quality: 85, clip: gridClip });
-    return buf.toString("base64");
-  } catch (err) {
-    log.error(`full grid screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
-    return null;
-  }
-}
-async function screenshotTiles(page, challengeInfo) {
-  const { bframeBox, rows, cols } = challengeInfo;
-  if (!bframeBox)
-    return [];
-  const gridX = bframeBox.x + 14;
-  const gridY = bframeBox.y + 112;
-  const gridSize = bframeBox.width - 28;
-  const tileW = gridSize / cols;
-  const tileH = gridSize / rows;
-  const tiles = [];
-  for (let r = 0;r < rows; r++) {
-    for (let c = 0;c < cols; c++) {
-      const clip = {
-        x: gridX + c * tileW + 2,
-        y: gridY + r * tileH + 2,
-        width: tileW - 4,
-        height: tileH - 4
-      };
-      try {
-        const buf = await page.screenshot({ type: "jpeg", quality: 85, clip });
-        tiles.push({ index: r * cols + c, imageBase64: buf.toString("base64") });
-      } catch {}
-    }
-  }
-  return tiles;
-}
-async function classifyTiles(client, fullGridBase64, tiles, target, rows, cols) {
-  const results = await Promise.all(tiles.map(async (tile) => {
-    const tileRow = Math.floor(tile.index / cols) + 1;
-    const tileCol = tile.index % cols + 1;
-    try {
-      const response = await client.messages.create({
-        model: MODEL,
-        max_tokens: 10,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "image",
-                source: { type: "base64", media_type: "image/jpeg", data: fullGridBase64 }
-              },
-              {
-                type: "image",
-                source: { type: "base64", media_type: "image/jpeg", data: tile.imageBase64 }
-              },
-              {
-                type: "text",
-                text: `Image 1 is a full picture divided into a ${rows}x${cols} grid. Image 2 is the tile at row ${tileRow}, column ${tileCol} of that grid.
-
-Does this tile contain a ${target}? Reply ONLY "yes" or "no".`
-              }
-            ]
-          }
-        ]
-      });
-      const answer = (response.content[0].text ?? "").toLowerCase().trim();
-      const match = answer.startsWith("yes");
-      if (match)
-        log.debug(`tile ${tile.index} (r${tileRow}c${tileCol}): YES`);
-      return { index: tile.index, match };
-    } catch (err) {
-      log.error(`tile ${tile.index} classification failed: ${err instanceof Error ? err.message : String(err)}`);
-      return { index: tile.index, match: false };
-    }
-  }));
-  return results.filter((r) => r.match).map((r) => r.index);
-}
-async function submitForm(page) {
-  const selectors = [
-    'form:has([data-sitekey]) [type="submit"]',
-    'form:has(.g-recaptcha) [type="submit"]',
-    'form:has(iframe[src*="recaptcha"]) [type="submit"]',
-    'form [type="submit"]',
-    'form button:not([type="button"]):not([type="reset"])',
-    'input[type="submit"]',
-    'button[type="submit"]'
-  ];
-  for (const selector of selectors) {
-    try {
-      const el = await page.$(selector);
-      if (el) {
-        const visible = await el.isVisible();
-        if (visible) {
-          log.info(`Submitting form via: ${selector}`);
-          await new Promise((r) => setTimeout(r, 500));
-          await humanClick(page, selector);
-          await new Promise((r) => setTimeout(r, 2000));
-          return true;
-        }
-      }
-    } catch {}
-  }
-  log.info("No submit button found — skipping form submission");
-  return false;
-}
-async function solveRecaptcha(page, monitor) {
-  const startTime = Date.now();
-  const client = getClient();
-  let rounds = 0;
-  const checkboxResult = await clickRecaptchaCheckbox(page);
-  if (checkboxResult.solved) {
-    const submitted = await submitForm(page);
-    return { solved: true, rounds: 0, durationMs: Date.now() - startTime, submitted };
-  }
-  if (!checkboxResult.challengeInfo) {
-    return { solved: false, rounds: 0, durationMs: Date.now() - startTime, reason: "No challenge appeared after clicking checkbox" };
-  }
-  let challengeInfo = checkboxResult.challengeInfo;
-  while (rounds < MAX_ROUNDS) {
-    if (Date.now() - startTime > MAX_DURATION_MS) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Timeout exceeded" };
-    }
-    rounds++;
-    monitor?.reportActivity();
-    if (!challengeInfo) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge info lost" };
-    }
-    const target = extractTarget(challengeInfo.prompt);
-    log.info(`Round ${rounds}: looking for "${target}" in ${challengeInfo.rows}x${challengeInfo.cols} grid`);
-    const [fullGridImage, tileImages] = await Promise.all([
-      screenshotFullGrid(page, challengeInfo),
-      screenshotTiles(page, challengeInfo)
-    ]);
-    if (!fullGridImage || tileImages.length === 0) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Failed to screenshot challenge" };
-    }
-    monitor?.reportActivity();
-    const matchingIndices = await classifyTiles(client, fullGridImage, tileImages, target, challengeInfo.rows, challengeInfo.cols);
-    log.info(`Round ${rounds}: matched tiles [${matchingIndices.join(", ")}]`);
-    monitor?.reportActivity();
-    if (matchingIndices.length > 0) {
-      await clickChallengeTiles(page, matchingIndices);
-      const isDynamic = challengeInfo.prompt.toLowerCase().includes("none left");
-      if (isDynamic) {
-        await new Promise((r) => setTimeout(r, TILE_SETTLE_MS));
-        const newInfo = await getChallengeInfo(page);
-        if (newInfo) {
-          const [newFullGrid, newTiles] = await Promise.all([
-            screenshotFullGrid(page, newInfo),
-            screenshotTiles(page, newInfo)
-          ]);
-          if (newFullGrid && newTiles.length > 0) {
-            const replacedTiles = newTiles.filter((t) => matchingIndices.includes(t.index));
-            if (replacedTiles.length > 0) {
-              monitor?.reportActivity();
-              const newMatches = await classifyTiles(client, newFullGrid, replacedTiles, target, newInfo.rows, newInfo.cols);
-              if (newMatches.length > 0) {
-                log.info(`Round ${rounds}: dynamic tiles matched [${newMatches.join(", ")}]`);
-                await clickChallengeTiles(page, newMatches);
-                await new Promise((r) => setTimeout(r, TILE_SETTLE_MS));
-              }
-            }
-          }
-        }
-      }
-    }
-    const verifyResult = await clickChallengeVerify(page);
-    monitor?.reportActivity();
-    if (verifyResult.solved) {
-      log.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
-      const submitted = await submitForm(page);
-      return { solved: true, rounds, durationMs: Date.now() - startTime, submitted };
-    }
-    challengeInfo = verifyResult.challengeInfo || null;
-    if (!challengeInfo) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge disappeared after verify" };
-    }
-    log.info(`Round ${rounds}: not solved, new challenge appeared`);
-  }
-  return { solved: false, rounds, durationMs: Date.now() - startTime, reason: `Max rounds (${MAX_ROUNDS}) exceeded` };
-}
-var import_sdk, log, MAX_ROUNDS = 8, MAX_DURATION_MS = 45000, TILE_SETTLE_MS, MODEL = "claude-haiku-4-5-20251001";
-var init_recaptcha = __esm(() => {
-  init_humanize();
-  init_constants();
-  init_logger();
-  import_sdk = __toESM(require("@anthropic-ai/sdk"));
-  log = createLogger("captcha-solver");
-  TILE_SETTLE_MS = TIMING.TILE_SETTLE;
-});
-
-// src/lib/captcha/hcaptcha.ts
-function getClient2() {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey)
-    throw new Error("ANTHROPIC_API_KEY not set — required for captcha auto-solve");
-  return new import_sdk2.default({ apiKey });
-}
-function rand2(min, max) {
-  return Math.random() * (max - min) + min;
-}
-function sleep2(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-async function clickCheckbox(page) {
-  const checkboxFrame = await page.waitForSelector('iframe[src*="hcaptcha.com"], iframe[data-hcaptcha-widget-id], iframe[title*="hCaptcha"]', { timeout: 1e4 }).catch(() => null);
-  if (!checkboxFrame)
-    throw new Error("hCaptcha checkbox iframe not found");
-  const box = await checkboxFrame.boundingBox();
-  if (!box)
-    throw new Error("hCaptcha iframe not visible");
-  await humanMove(page, rand2(200, 500), rand2(150, 400));
-  await sleep2(rand2(300, 700));
-  const cx = box.x + box.width * rand2(0.15, 0.35);
-  const cy = box.y + box.height * rand2(0.3, 0.7);
-  await humanClickXY(page, cx, cy);
-  await sleep2(2500);
-  const frame = await checkboxFrame.contentFrame();
-  if (frame) {
-    try {
-      const checked = await frame.evaluate(() => {
-        const cb = document.querySelector("#checkbox");
-        return cb?.getAttribute("aria-checked") === "true";
-      });
-      if (checked)
-        return true;
-    } catch {}
-  }
-  return false;
-}
-async function getChallengeInfo2(page) {
-  const challengeFrame = await page.waitForSelector('iframe[title="hCaptcha challenge"], iframe[title*="hcaptcha challenge" i]', { timeout: 8000 }).catch(() => null);
-  if (!challengeFrame)
-    return null;
-  const frameBox = await challengeFrame.boundingBox();
-  if (!frameBox)
-    return null;
-  const frame = await challengeFrame.contentFrame();
-  if (!frame)
-    return null;
-  const info = await frame.evaluate(() => {
-    const promptEl = document.querySelector(".prompt-text, .task-instructions, [class*='prompt'], [class*='task-description']");
-    const prompt = promptEl ? promptEl.innerText.trim() : "";
-    const tileEls = document.querySelectorAll(".task-image, [class*='task-grid'] > *, [class*='challenge-container'] .image-wrapper, .image-wrapper");
-    const count = tileEls.length;
-    let rows = 3, cols = 3;
-    if (count === 16) {
-      rows = 4;
-      cols = 4;
-    } else if (count === 9) {
-      rows = 3;
-      cols = 3;
-    } else if (count === 6) {
-      rows = 2;
-      cols = 3;
-    }
-    return { prompt, count, rows, cols };
-  }).catch(() => ({ prompt: "", count: 0, rows: 3, cols: 3 }));
-  if (!info.prompt && info.count === 0)
-    return null;
-  const gridPadTop = 150;
-  const gridPadLeft = 20;
-  const gridPadRight = 20;
-  const gridPadBottom = 80;
-  const gridWidth = frameBox.width - gridPadLeft - gridPadRight;
-  const gridHeight = frameBox.height - gridPadTop - gridPadBottom;
-  const tileW = gridWidth / info.cols;
-  const tileH = gridHeight / info.rows;
-  const tiles = [];
-  for (let r = 0;r < info.rows; r++) {
-    for (let c = 0;c < info.cols; c++) {
-      tiles.push({
-        index: r * info.cols + c,
-        centerX: Math.round(frameBox.x + gridPadLeft + c * tileW + tileW / 2),
-        centerY: Math.round(frameBox.y + gridPadTop + r * tileH + tileH / 2)
-      });
-    }
-  }
-  const verifyBtnBox = await frame.evaluate(() => {
-    const btn = document.querySelector('.button-submit.button, [aria-label="Verify"], [aria-label="Skip Challenge"]');
-    if (!btn)
-      return null;
-    const r = btn.getBoundingClientRect();
-    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-  }).catch(() => null);
-  const verifyButton = verifyBtnBox ? { x: Math.round(frameBox.x + verifyBtnBox.x), y: Math.round(frameBox.y + verifyBtnBox.y) } : { x: Math.round(frameBox.x + frameBox.width - 55), y: Math.round(frameBox.y + frameBox.height - 30) };
-  log2.info(`Round challenge: "${info.prompt}" (${info.rows}x${info.cols})`);
-  return { prompt: info.prompt, rows: info.rows, cols: info.cols, tiles, verifyButton, frameBox };
-}
-async function screenshotChallenge(page, challenge) {
-  const { frameBox } = challenge;
-  try {
-    await sleep2(1000);
-    const challengeEl = await page.$('iframe[title="hCaptcha challenge"], iframe[title*="hcaptcha challenge" i]').catch(() => null);
-    let buf;
-    if (challengeEl) {
-      buf = Buffer.from(await challengeEl.screenshot({ type: "jpeg", quality: 85 }));
-    } else {
-      buf = await page.screenshot({ type: "jpeg", quality: 85, clip: frameBox });
-    }
-    return buf.toString("base64");
-  } catch (err) {
-    log2.error(`screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
-    return null;
-  }
-}
-async function classifyTiles2(client, screenshotBase64, challenge) {
-  const { prompt, rows, cols } = challenge;
-  const total = rows * cols;
-  try {
-    const response = await client.messages.create({
-      model: MODEL2,
-      max_tokens: 30,
-      system: `Output ONLY a comma-separated list of tile numbers or "none". Valid examples: "0,3,5" or "2" or "none". Output nothing else.`,
-      messages: [{
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: screenshotBase64 } },
-          { type: "text", text: `Task: "${prompt}". Tiles 0-${total - 1} left-to-right top-to-bottom in a ${rows}×${cols} grid. Which tiles match? Reply ONLY with numbers or "none".` }
-        ]
-      }]
-    });
-    const text = (response.content[0].text ?? "").trim();
-    log2.debug(`classify response: "${text}"`);
-    if (text.toLowerCase().startsWith("none"))
-      return [];
-    return text.split(/[,\s]+/).map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n) && n >= 0 && n < total);
-  } catch (err) {
-    log2.error(`classification failed: ${err instanceof Error ? err.message : String(err)}`);
-    return [];
-  }
-}
-async function isSolved(page) {
-  const el = await page.$('iframe[title="hCaptcha challenge"], iframe[title*="hcaptcha challenge" i]').catch(() => null);
-  if (!el)
-    return true;
-  const visible = await el.isVisible().catch(() => false);
-  return !visible;
-}
-async function clickVerify(page, challenge) {
-  await humanClickXY(page, challenge.verifyButton.x, challenge.verifyButton.y);
-  await sleep2(2500);
-  return isSolved(page);
-}
-async function solveHCaptcha(page, monitor) {
-  const startTime = Date.now();
-  const client = getClient2();
-  let rounds = 0;
-  let solvedOnCheckbox = false;
-  try {
-    solvedOnCheckbox = await clickCheckbox(page);
-  } catch (err) {
-    return { solved: false, rounds: 0, durationMs: Date.now() - startTime, reason: err instanceof Error ? err.message : String(err) };
-  }
-  if (solvedOnCheckbox) {
-    log2.info("Solved on checkbox click (no challenge)");
-    return { solved: true, rounds: 0, durationMs: Date.now() - startTime };
-  }
-  while (rounds < MAX_ROUNDS2) {
-    if (Date.now() - startTime > MAX_DURATION_MS2) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Timeout exceeded" };
-    }
-    rounds++;
-    monitor?.reportActivity();
-    const challenge = await getChallengeInfo2(page);
-    if (!challenge) {
-      log2.info("Challenge frame gone — assuming solved");
-      return { solved: true, rounds, durationMs: Date.now() - startTime };
-    }
-    const screenshotBase64 = await screenshotChallenge(page, challenge);
-    if (!screenshotBase64) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Failed to screenshot challenge" };
-    }
-    monitor?.reportActivity();
-    const matchingIndices = await classifyTiles2(client, screenshotBase64, challenge);
-    log2.info(`Round ${rounds}: clicking tiles [${matchingIndices.join(", ")}]`);
-    monitor?.reportActivity();
-    for (const idx of matchingIndices) {
-      const tile = challenge.tiles[idx];
-      if (!tile)
-        continue;
-      await humanClickXY(page, tile.centerX + rand2(-5, 5), tile.centerY + rand2(-5, 5));
-      await sleep2(rand2(150, 400));
-    }
-    await sleep2(rand2(500, 1000));
-    const solved = await clickVerify(page, challenge);
-    monitor?.reportActivity();
-    if (solved) {
-      log2.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
-      return { solved: true, rounds, durationMs: Date.now() - startTime };
-    }
-    log2.info(`Round ${rounds}: not solved, retrying`);
-    await sleep2(rand2(500, 1000));
-  }
-  return { solved: false, rounds, durationMs: Date.now() - startTime, reason: `Max rounds (${MAX_ROUNDS2}) exceeded` };
-}
-var import_sdk2, log2, MAX_ROUNDS2 = 8, MAX_DURATION_MS2 = 60000, MODEL2 = "claude-haiku-4-5-20251001";
-var init_hcaptcha = __esm(() => {
-  init_humanize();
-  init_logger();
-  import_sdk2 = __toESM(require("@anthropic-ai/sdk"));
-  log2 = createLogger("hcaptcha-solver");
-});
-
-// src/lib/knowledge.ts
-function getKnowledgeDir() {
-  return import_path3.default.join(getDataDir(), "knowledge");
-}
-function getKnowledgePath(domain) {
-  const safe = sanitizeDomain(domain);
-  return import_path3.default.join(getKnowledgeDir(), `${safe}.md`);
-}
-function normalizeDomain(input) {
-  let d = (input || "").trim().toLowerCase();
-  if (!d)
-    return "";
-  try {
-    if (d.includes("://")) {
-      d = new URL(d).hostname;
-    } else if (d.includes("/")) {
-      d = new URL(`https://${d}`).hostname;
-    }
-  } catch {}
-  d = d.replace(/:\d+$/, "");
-  d = d.replace(/^www\./, "");
-  return d;
-}
-function domainLookupChain(input) {
-  const normalized = normalizeDomain(input);
-  if (!normalized)
-    return [];
-  const chain = [normalized];
-  const parts = normalized.split(".");
-  while (parts.length > 2) {
-    parts.shift();
-    chain.push(parts.join("."));
-  }
-  return chain;
-}
-function sanitizeDomain(input) {
-  const normalized = normalizeDomain(input);
-  return normalized.replace(/[^a-z0-9.-]/g, "_");
-}
-function ensureDir() {
-  import_fs2.default.mkdirSync(getKnowledgeDir(), { recursive: true });
-}
-function readKnowledge(domain) {
-  const p = getKnowledgePath(domain);
-  try {
-    return import_fs2.default.readFileSync(p, "utf8");
+    const res = await fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3000) });
+    const data = await res.json();
+    return data.ok === true;
   } catch {
-    return null;
-  }
-}
-function parseKnowledge(domain) {
-  const raw = readKnowledge(domain);
-  if (!raw)
-    return null;
-  return parseMarkdown(raw);
-}
-function listKnowledge() {
-  const dir = getKnowledgeDir();
-  let entries = [];
-  try {
-    entries = import_fs2.default.readdirSync(dir);
-  } catch {
-    return [];
-  }
-  const results = [];
-  for (const file of entries) {
-    if (!file.endsWith(".md"))
-      continue;
-    const full = import_path3.default.join(dir, file);
-    try {
-      const stat = import_fs2.default.statSync(full);
-      const raw = import_fs2.default.readFileSync(full, "utf8");
-      const parsed = parseMarkdown(raw);
-      results.push({
-        domain: parsed?.domain ?? file.replace(/\.md$/, ""),
-        lastVerified: parsed?.lastVerified ?? new Date(stat.mtimeMs).toISOString(),
-        lastMode: parsed?.lastMode ?? "unknown",
-        sizeBytes: stat.size
-      });
-    } catch {}
-  }
-  results.sort((a, b) => a.lastVerified < b.lastVerified ? 1 : -1);
-  return results;
-}
-function clearKnowledge(domain) {
-  const dir = getKnowledgeDir();
-  if (domain) {
-    const p = getKnowledgePath(domain);
-    try {
-      import_fs2.default.unlinkSync(p);
-      return { removed: 1 };
-    } catch {
-      return { removed: 0 };
-    }
-  }
-  let removed = 0;
-  try {
-    const entries = import_fs2.default.readdirSync(dir);
-    for (const f of entries) {
-      if (f.endsWith(".md")) {
-        try {
-          import_fs2.default.unlinkSync(import_path3.default.join(dir, f));
-          removed++;
-        } catch {}
-      }
-    }
-  } catch {}
-  return { removed };
-}
-function mergeKnowledge(domain, updates) {
-  ensureDir();
-  const existing = parseKnowledge(domain);
-  const merged = {
-    domain: sanitizeDomain(domain),
-    lastVerified: updates.lastVerified ?? new Date().toISOString(),
-    lastMode: updates.lastMode ?? existing?.lastMode ?? "unknown",
-    browserRequired: updates.browserRequired ?? existing?.browserRequired ?? true,
-    auth: updates.auth ?? existing?.auth ?? { type: "unknown" },
-    endpoints: dedupeEndpoints([...existing?.endpoints ?? [], ...updates.endpoints ?? []]),
-    notes: dedupeNotes([...existing?.notes ?? [], ...updates.notes ?? []])
-  };
-  const md = renderMarkdown(merged);
-  import_fs2.default.writeFileSync(getKnowledgePath(domain), md, "utf8");
-  log3.info(`knowledge updated: ${merged.domain} (${merged.endpoints.length} endpoints)`);
-}
-function dedupeEndpoints(endpoints) {
-  const seen = new Map;
-  for (const ep of endpoints) {
-    const key = `${ep.method.toUpperCase()} ${ep.path}`;
-    const existing = seen.get(key);
-    if (!existing) {
-      seen.set(key, ep);
-    } else {
-      seen.set(key, {
-        ...existing,
-        description: ep.description || existing.description,
-        example: ep.example || existing.example,
-        firstSeen: existing.firstSeen || ep.firstSeen
-      });
-    }
-  }
-  return [...seen.values()].sort((a, b) => {
-    if (a.path !== b.path)
-      return a.path < b.path ? -1 : 1;
-    return a.method < b.method ? -1 : 1;
-  });
-}
-function dedupeNotes(notes) {
-  const seen = new Set;
-  const out = [];
-  for (const note of notes) {
-    const n = note.trim();
-    if (n && !seen.has(n)) {
-      seen.add(n);
-      out.push(n);
-    }
-  }
-  return out;
-}
-function renderMarkdown(data) {
-  const lines = [];
-  lines.push("---");
-  lines.push(`domain: ${data.domain}`);
-  lines.push(`lastVerified: ${data.lastVerified}`);
-  lines.push(`lastMode: ${data.lastMode}`);
-  lines.push(`browserRequired: ${data.browserRequired}`);
-  lines.push(`authType: ${data.auth.type}`);
-  lines.push("---");
-  lines.push("");
-  lines.push(`# ${data.domain}`);
-  lines.push("");
-  lines.push(`Last verified: **${data.lastVerified}** via \`${data.lastMode}\` mode.`);
-  lines.push("");
-  lines.push("## Auth material");
-  lines.push("");
-  lines.push(`**Type:** ${data.auth.type}`);
-  if (data.auth.cookieNames?.length) {
-    lines.push(`**Required cookies:** ${data.auth.cookieNames.map((n) => `\`${n}\``).join(", ")}`);
-  }
-  if (data.auth.localStorageKeys?.length) {
-    lines.push(`**localStorage keys:** ${data.auth.localStorageKeys.map((n) => `\`${n}\``).join(", ")}`);
-  }
-  if (data.auth.sessionStorageKeys?.length) {
-    lines.push(`**sessionStorage keys:** ${data.auth.sessionStorageKeys.map((n) => `\`${n}\``).join(", ")}`);
-  }
-  if (data.auth.headers?.length) {
-    lines.push(`**Request headers:** ${data.auth.headers.map((n) => `\`${n}\``).join(", ")}`);
-  }
-  lines.push("");
-  lines.push("> _Structure only — actual values are stored encrypted in the session store._");
-  lines.push("");
-  if (data.endpoints.length > 0) {
-    lines.push("## Known endpoints");
-    lines.push("");
-    lines.push("The agent can call these directly (with the auth material above) instead of launching a browser.");
-    lines.push("");
-    for (const ep of data.endpoints) {
-      lines.push(`### ${ep.method.toUpperCase()} ${ep.path}`);
-      if (ep.description)
-        lines.push("");
-      if (ep.description)
-        lines.push(ep.description);
-      if (ep.example) {
-        lines.push("");
-        lines.push("```");
-        lines.push(ep.example);
-        lines.push("```");
-      }
-      lines.push("");
-    }
-  } else {
-    lines.push("## Known endpoints");
-    lines.push("");
-    lines.push("_None captured yet. Enable `captureApi: true` on the next `execute` run to populate this section._");
-    lines.push("");
-  }
-  if (data.notes.length > 0) {
-    lines.push("## Notes");
-    lines.push("");
-    for (const n of data.notes)
-      lines.push(`- ${n}`);
-    lines.push("");
-  }
-  return lines.join(`
-`);
-}
-function parseMarkdown(raw) {
-  const frontmatterMatch = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n/);
-  if (!frontmatterMatch)
-    return null;
-  const fm = {};
-  for (const line of frontmatterMatch[1].split(`
-`)) {
-    const m = line.match(/^(\w+):\s*(.*)$/);
-    if (m)
-      fm[m[1]] = m[2].trim();
-  }
-  const body = raw.slice(frontmatterMatch[0].length);
-  const auth = { type: fm.authType ?? "unknown" };
-  const authSection = extractSection(body, "Auth material");
-  if (authSection) {
-    auth.cookieNames = extractBackticks(/\*\*Required cookies:\*\*\s+(.+)/, authSection);
-    auth.localStorageKeys = extractBackticks(/\*\*localStorage keys:\*\*\s+(.+)/, authSection);
-    auth.sessionStorageKeys = extractBackticks(/\*\*sessionStorage keys:\*\*\s+(.+)/, authSection);
-    auth.headers = extractBackticks(/\*\*Request headers:\*\*\s+(.+)/, authSection);
-  }
-  const endpoints = [];
-  const endpointSection = extractSection(body, "Known endpoints");
-  if (endpointSection) {
-    const endpointRegex = /^### (GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\S+)\s*$/gim;
-    let m;
-    while ((m = endpointRegex.exec(endpointSection)) !== null) {
-      endpoints.push({ method: m[1], path: m[2] });
-    }
-  }
-  const notes = [];
-  const notesSection = extractSection(body, "Notes");
-  if (notesSection) {
-    for (const line of notesSection.split(`
-`)) {
-      const m = line.match(/^-\s+(.+)$/);
-      if (m)
-        notes.push(m[1].trim());
-    }
-  }
-  return {
-    domain: fm.domain ?? "",
-    lastVerified: fm.lastVerified ?? "",
-    lastMode: fm.lastMode ?? "unknown",
-    browserRequired: fm.browserRequired !== "false",
-    auth,
-    endpoints,
-    notes
-  };
-}
-function extractSection(body, heading) {
-  const re = new RegExp(`^##\\s+${heading}\\s*$`, "m");
-  const match = body.match(re);
-  if (!match || match.index === undefined)
-    return null;
-  const start = match.index + match[0].length;
-  const nextSection = body.slice(start).match(/^##\s+/m);
-  const end = nextSection?.index != null ? start + nextSection.index : body.length;
-  return body.slice(start, end);
-}
-function extractBackticks(re, text) {
-  const m = text.match(re);
-  if (!m)
-    return;
-  const items = [...m[1].matchAll(/`([^`]+)`/g)].map((x) => x[1]);
-  return items.length > 0 ? items : undefined;
-}
-var import_fs2, import_path3, log3;
-var init_knowledge = __esm(() => {
-  init_logger();
-  init_paths();
-  import_fs2 = __toESM(require("fs"));
-  import_path3 = __toESM(require("path"));
-  log3 = createLogger("knowledge");
-});
-
-// src/lib/session/persistence.ts
-var exports_persistence = {};
-__export(exports_persistence, {
-  injectStorage: () => injectStorage,
-  injectCookies: () => injectCookies,
-  extractSession: () => extractSession
-});
-async function extractSession(context, page) {
-  const cookies = await context.cookies();
-  const { localStorage, sessionStorage } = await page.evaluate(() => {
-    const ls = {};
-    const ss = {};
-    for (let i = 0;i < window.localStorage.length; i++) {
-      const key = window.localStorage.key(i);
-      ls[key] = window.localStorage.getItem(key);
-    }
-    for (let i = 0;i < window.sessionStorage.length; i++) {
-      const key = window.sessionStorage.key(i);
-      ss[key] = window.sessionStorage.getItem(key);
-    }
-    return { localStorage: ls, sessionStorage: ss };
-  });
-  const origin = new URL(page.url()).origin;
-  return {
-    cookies,
-    localStorage: { [origin]: localStorage },
-    sessionStorage: { [origin]: sessionStorage },
-    extractedAt: new Date().toISOString()
-  };
-}
-async function injectCookies(context, sessionData) {
-  if (sessionData?.cookies?.length > 0) {
-    await context.addCookies(sessionData.cookies);
-  }
-}
-async function injectStorage(page, sessionData) {
-  if (!sessionData)
-    return;
-  const origin = new URL(page.url()).origin;
-  const ls = sessionData.localStorage?.[origin];
-  const ss = sessionData.sessionStorage?.[origin];
-  if (ls && Object.keys(ls).length > 0) {
-    await page.evaluate((data) => {
-      for (const [key, value] of Object.entries(data)) {
-        window.localStorage.setItem(key, value);
-      }
-    }, ls);
-  }
-  if (ss && Object.keys(ss).length > 0) {
-    await page.evaluate((data) => {
-      for (const [key, value] of Object.entries(data)) {
-        window.sessionStorage.setItem(key, value);
-      }
-    }, ss);
-  }
-}
-
-// src/lib/screenshot.ts
-function saveScreenshot(buffer, filename, screenshotDir, publicUrl) {
-  import_fs3.default.mkdirSync(screenshotDir, { recursive: true });
-  const filePath = import_path4.default.join(screenshotDir, filename);
-  import_fs3.default.writeFileSync(filePath, buffer);
-  return `${publicUrl}/screenshots/${filename}`;
-}
-var import_fs3, import_path4;
-var init_screenshot = __esm(() => {
-  import_fs3 = __toESM(require("fs"));
-  import_path4 = __toESM(require("path"));
-});
-
-// src/lib/snapshot.ts
-async function takeSnapshot(page, ctx, options) {
-  const interactiveOnly = options?.interactiveOnly ?? true;
-  const maxElements = options?.maxElements ?? 80;
-  ctx.refMap.clear();
-  ctx.nextRefId = 1;
-  const elements = await page.evaluate(({ interactiveOnly: interactiveOnly2, maxElements: maxElements2 }) => {
-    const results = [];
-    const interactiveTags = new Set(["INPUT", "TEXTAREA", "SELECT", "BUTTON", "A"]);
-    const interactiveRoles = new Set([
-      "button",
-      "link",
-      "textbox",
-      "checkbox",
-      "radio",
-      "combobox",
-      "listbox",
-      "menuitem",
-      "menuitemcheckbox",
-      "menuitemradio",
-      "option",
-      "searchbox",
-      "slider",
-      "spinbutton",
-      "switch",
-      "tab",
-      "treeitem"
-    ]);
-    function isInteractive(el) {
-      if (interactiveTags.has(el.tagName))
-        return true;
-      const role = el.getAttribute("role");
-      if (role && interactiveRoles.has(role))
-        return true;
-      if (el.hasAttribute("contenteditable"))
-        return true;
-      if (el.hasAttribute("tabindex") && el.getAttribute("tabindex") !== "-1")
-        return true;
-      return false;
-    }
-    function isVisible(el) {
-      const rect = el.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0)
-        return false;
-      const style = getComputedStyle(el);
-      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0")
-        return false;
-      if (rect.bottom < 0 || rect.top > window.innerHeight + 200)
-        return false;
-      return true;
-    }
-    function buildSelector(el) {
-      const path5 = [];
-      let current = el;
-      while (current && current !== document.body && current !== document.documentElement) {
-        let seg = current.tagName.toLowerCase();
-        if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-          path5.unshift(`#${current.id}`);
-          break;
-        }
-        const parent = current.parentElement;
-        if (parent) {
-          const currentTag = current.tagName;
-          const siblings = Array.from(parent.children).filter((c) => c.tagName === currentTag);
-          if (siblings.length > 1) {
-            const idx = siblings.indexOf(current) + 1;
-            seg += `:nth-of-type(${idx})`;
-          }
-        }
-        path5.unshift(seg);
-        current = parent;
-      }
-      return path5.join(" > ");
-    }
-    function getName(el) {
-      const ariaLabel = el.getAttribute("aria-label");
-      if (ariaLabel)
-        return ariaLabel.trim();
-      const id = el.id;
-      if (id) {
-        const label = document.querySelector(`label[for="${id}"]`);
-        if (label)
-          return label.textContent?.trim() || "";
-      }
-      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-        if (el.placeholder)
-          return el.placeholder.trim();
-      }
-      const text2 = el.textContent?.trim() || "";
-      return text2.slice(0, 60);
-    }
-    const allElements = document.querySelectorAll("*");
-    for (const el of allElements) {
-      if (results.length >= maxElements2)
-        break;
-      if (interactiveOnly2 && !isInteractive(el))
-        continue;
-      if (!isVisible(el))
-        continue;
-      const tag = el.tagName.toLowerCase();
-      const role = el.getAttribute("role") || "";
-      const type = el.type || "";
-      results.push({
-        tag,
-        role,
-        name: getName(el),
-        type,
-        placeholder: el.placeholder || "",
-        checked: el.checked || false,
-        disabled: el.disabled || false,
-        selector: buildSelector(el),
-        isVisible: true
-      });
-    }
-    return results;
-  }, { interactiveOnly, maxElements });
-  const nodes = [];
-  for (const el of elements) {
-    const ref = `@e${ctx.nextRefId++}`;
-    let displayRole = el.role || el.tag;
-    if (el.tag === "input") {
-      displayRole = el.type === "password" ? "password" : el.type === "checkbox" ? "checkbox" : el.type === "radio" ? "radio" : "input";
-    } else if (el.tag === "textarea") {
-      displayRole = "textarea";
-    } else if (el.tag === "select") {
-      displayRole = "select";
-    } else if (el.tag === "a") {
-      displayRole = "link";
-    }
-    const state = [];
-    if (el.disabled)
-      state.push("disabled");
-    if (el.checked)
-      state.push("checked");
-    let description = "";
-    if (el.placeholder && el.name !== el.placeholder)
-      description = `placeholder="${el.placeholder}"`;
-    if (el.type && !["text", "submit", "button", ""].includes(el.type)) {
-      description = description ? `${description} type=${el.type}` : `type=${el.type}`;
-    }
-    const node = {
-      ref,
-      role: displayRole,
-      name: el.name,
-      tag: el.tag,
-      selector: el.selector,
-      state,
-      description
-    };
-    nodes.push(node);
-    ctx.refMap.set(ref, {
-      ref,
-      role: displayRole,
-      name: el.name,
-      selector: el.selector,
-      description
-    });
-  }
-  const lines = [];
-  for (const node of nodes) {
-    let line = `${node.ref} ${node.role}`;
-    if (node.name)
-      line += ` "${node.name}"`;
-    if (node.state.length > 0)
-      line += ` [${node.state.join(", ")}]`;
-    if (node.description)
-      line += ` (${node.description})`;
-    lines.push(line);
-  }
-  const text = lines.join(`
-`);
-  return { nodes, text };
-}
-var INTERACTIVE_ROLES, INTERACTIVE_TAGS;
-var init_snapshot = __esm(() => {
-  INTERACTIVE_ROLES = new Set([
-    "button",
-    "link",
-    "textbox",
-    "checkbox",
-    "radio",
-    "combobox",
-    "listbox",
-    "menuitem",
-    "menuitemcheckbox",
-    "menuitemradio",
-    "option",
-    "searchbox",
-    "slider",
-    "spinbutton",
-    "switch",
-    "tab",
-    "treeitem"
-  ]);
-  INTERACTIVE_TAGS = new Set([
-    "input",
-    "textarea",
-    "select",
-    "button",
-    "a"
-  ]);
-});
-
-// src/lib/annotate.ts
-async function annotatedScreenshot(page, ctx) {
-  ctx.refMap.clear();
-  ctx.nextRefId = 1;
-  const elements = await page.evaluate(() => {
-    const interactiveTags = new Set(["INPUT", "TEXTAREA", "SELECT", "BUTTON", "A"]);
-    const interactiveRoles = new Set([
-      "button",
-      "link",
-      "textbox",
-      "checkbox",
-      "radio",
-      "combobox",
-      "menuitem",
-      "option",
-      "searchbox",
-      "switch",
-      "tab"
-    ]);
-    function isInteractive(el) {
-      if (interactiveTags.has(el.tagName))
-        return true;
-      const role = el.getAttribute("role");
-      if (role && interactiveRoles.has(role))
-        return true;
-      if (el.hasAttribute("contenteditable"))
-        return true;
-      if (el.hasAttribute("tabindex") && el.getAttribute("tabindex") !== "-1")
-        return true;
-      return false;
-    }
-    function isVisible(el) {
-      const rect = el.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0)
-        return false;
-      const style = getComputedStyle(el);
-      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0")
-        return false;
-      if (rect.bottom < 0 || rect.top > window.innerHeight)
-        return false;
-      return true;
-    }
-    function buildSelector(el) {
-      const path5 = [];
-      let current = el;
-      while (current && current !== document.body && current !== document.documentElement) {
-        let seg = current.tagName.toLowerCase();
-        if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-          path5.unshift(`#${current.id}`);
-          break;
-        }
-        const parent = current.parentElement;
-        if (parent) {
-          const currentTag = current.tagName;
-          const siblings = Array.from(parent.children).filter((c) => c.tagName === currentTag);
-          if (siblings.length > 1) {
-            const idx = siblings.indexOf(current) + 1;
-            seg += `:nth-of-type(${idx})`;
-          }
-        }
-        path5.unshift(seg);
-        current = parent;
-      }
-      return path5.join(" > ");
-    }
-    function getName(el) {
-      const ariaLabel = el.getAttribute("aria-label");
-      if (ariaLabel)
-        return ariaLabel.trim();
-      const id = el.id;
-      if (id) {
-        const label = document.querySelector(`label[for="${id}"]`);
-        if (label)
-          return label.textContent?.trim() || "";
-      }
-      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-        if (el.placeholder)
-          return el.placeholder.trim();
-      }
-      return (el.textContent?.trim() || "").slice(0, 60);
-    }
-    const results = [];
-    const allElements = document.querySelectorAll("*");
-    for (const el of allElements) {
-      if (results.length >= 50)
-        break;
-      if (!isInteractive(el))
-        continue;
-      if (!isVisible(el))
-        continue;
-      const rect = el.getBoundingClientRect();
-      const tag = el.tagName.toLowerCase();
-      const role = el.getAttribute("role") || "";
-      results.push({
-        tag,
-        role: role || tag,
-        name: getName(el),
-        x: Math.round(rect.left),
-        y: Math.round(rect.top),
-        selector: buildSelector(el)
-      });
-    }
-    return results;
-  });
-  const refs = [];
-  for (const el of elements) {
-    const ref = `@e${ctx.nextRefId++}`;
-    const num = ctx.nextRefId - 1;
-    let displayRole = el.role;
-    if (el.tag === "a")
-      displayRole = "link";
-    if (el.tag === "input")
-      displayRole = "input";
-    if (el.tag === "textarea")
-      displayRole = "textarea";
-    if (el.tag === "select")
-      displayRole = "select";
-    refs.push({ ref, role: displayRole, name: el.name, x: el.x, y: el.y });
-    ctx.refMap.set(ref, {
-      ref,
-      role: displayRole,
-      name: el.name,
-      selector: el.selector
-    });
-  }
-  await page.evaluate((annotations) => {
-    const container = document.createElement("div");
-    container.id = "__iframer_annotations__";
-    container.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;z-index:2147483647;pointer-events:none;";
-    for (const { num, x, y } of annotations) {
-      const badge = document.createElement("div");
-      badge.style.cssText = `
-        position:absolute;
-        left:${x - 10}px;
-        top:${y - 10}px;
-        width:20px;
-        height:20px;
-        border-radius:50%;
-        background:#ff6d00;
-        color:#fff;
-        font:bold 11px/20px sans-serif;
-        text-align:center;
-        box-shadow:0 1px 3px rgba(0,0,0,0.5);
-      `;
-      badge.textContent = String(num);
-      container.appendChild(badge);
-    }
-    document.body.appendChild(container);
-  }, refs.map((r, i) => ({ num: i + 1, x: r.x, y: r.y })));
-  const buf = await page.screenshot({ type: "jpeg", quality: 70, fullPage: false });
-  const screenshotUrl = saveScreenshot(buf, `annotated-${Date.now()}.jpg`, ctx.screenshotDir, ctx.publicUrl);
-  await page.evaluate(() => {
-    const el = document.getElementById("__iframer_annotations__");
-    if (el)
-      el.remove();
-  });
-  return { screenshotUrl, refs };
-}
-var init_annotate = __esm(() => {
-  init_screenshot();
-});
-
-// src/lib/actions.ts
-function getErrorMessage(err) {
-  return err instanceof Error ? err.message : String(err);
-}
-function resolveSelector(selector, ctx) {
-  if (selector.startsWith("@e")) {
-    const ref = ctx.refMap.get(selector);
-    if (!ref) {
-      const available = Array.from(ctx.refMap.keys()).join(", ");
-      throw new Error(`Unknown ref: ${selector}. ${available ? `Available refs: ${available}` : "No refs available — run a snapshot or annotated screenshot step first."}`);
-    }
-    return ref.selector;
-  }
-  return selector;
-}
-async function handleRecaptchaSolve(page) {
-  const solveResult = await clickRecaptchaCheckbox(page);
-  if (solveResult.solved)
-    return { solved: true };
-  const ci = solveResult.challengeInfo;
-  if (ci && ci.tiles && ci.tiles.length > 0) {
-    return { solved: false, prompt: ci.prompt, rows: ci.rows, cols: ci.cols, tiles: await screenshotTiles2(page, ci) };
-  }
-  return { solved: false, prompt: "", tiles: [] };
-}
-async function handleRecaptchaAnswer(page, tiles) {
-  await clickChallengeTiles(page, tiles);
-  const verifyResult = await clickChallengeVerify(page);
-  if (verifyResult.solved)
-    return { solved: true };
-  const ci = verifyResult.challengeInfo;
-  if (ci && ci.tiles && ci.tiles.length > 0) {
-    return { solved: false, prompt: ci.prompt, rows: ci.rows, cols: ci.cols, tiles: await screenshotTiles2(page, ci) };
-  }
-  return { solved: false, tiles: [] };
-}
-async function screenshotTiles2(page, ci) {
-  const tileSize = ci.bframeBox ? Math.round((ci.bframeBox.width - CAPTCHA_GRID.GRID_PADDING) / ci.cols) : CAPTCHA_GRID.DEFAULT_TILE_SIZE;
-  const tiles = [];
-  for (const tile of ci.tiles) {
-    const clip = {
-      x: tile.centerX - tileSize / 2,
-      y: tile.centerY - tileSize / 2,
-      width: tileSize,
-      height: tileSize
-    };
-    try {
-      const tileBuf = await page.screenshot({ type: "jpeg", quality: 60, clip });
-      tiles.push({ index: tile.index, image: tileBuf.toString("base64") });
-    } catch {
-      tiles.push({ index: tile.index, image: null });
-    }
-  }
-  return tiles;
-}
-async function handleSolveCaptcha(page, monitor) {
-  await page.waitForTimeout(TIMING.CAPTCHA_DETECT_WAIT);
-  const isHCaptcha = await page.evaluate(() => {
-    const iframes = Array.from(document.querySelectorAll("iframe"));
-    return iframes.some((f) => {
-      const src = f.src || "";
-      const title = (f.title || "").toLowerCase();
-      return src.includes("hcaptcha.com") || title.includes("hcaptcha") || !!document.querySelector("[data-hcaptcha-widget-id]");
-    });
-  }).catch((err) => {
-    log4.warn(`captcha detection failed: ${err}`);
-    return false;
-  });
-  log4.info(`detected: ${isHCaptcha ? "hCaptcha" : "reCAPTCHA"}`);
-  return isHCaptcha ? await solveHCaptcha(page, monitor) : await solveRecaptcha(page, monitor);
-}
-async function handleFind(page, step, ctx) {
-  if (!step.role && !step.name && !step.text && !step.placeholder && !step.label) {
-    throw new Error("find requires at least one of: role, name, text, placeholder, label");
-  }
-  let locator;
-  if (step.role) {
-    const opts = {};
-    if (step.name)
-      opts.name = step.exact ? step.name : new RegExp(step.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-    if (step.exact !== undefined)
-      opts.exact = step.exact;
-    locator = page.getByRole(step.role, opts);
-  } else if (step.label) {
-    locator = page.getByLabel(step.label, { exact: step.exact });
-  } else if (step.placeholder) {
-    locator = page.getByPlaceholder(step.placeholder, { exact: step.exact });
-  } else if (step.text) {
-    locator = page.getByText(step.text, { exact: step.exact });
-  } else {
-    locator = page.locator(`[aria-label="${step.name}"], [title="${step.name}"]`);
-  }
-  const count = await locator.count();
-  if (count === 0) {
-    throw new Error(`No element found matching: ${JSON.stringify({ role: step.role, name: step.name, text: step.text, placeholder: step.placeholder, label: step.label })}`);
-  }
-  const element = locator.first();
-  const box = await element.boundingBox();
-  const elInfo = await element.evaluate((el) => {
-    const tag = el.tagName.toLowerCase();
-    const text = (el.textContent?.trim() || "").slice(0, 60);
-    const path5 = [];
-    let current = el;
-    while (current && current !== document.body && current !== document.documentElement) {
-      let seg = current.tagName.toLowerCase();
-      if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-        path5.unshift(`#${current.id}`);
-        break;
-      }
-      const parent = current.parentElement;
-      if (parent && current) {
-        const currentTag = current.tagName;
-        const siblings = Array.from(parent.children).filter((c) => c.tagName === currentTag);
-        if (siblings.length > 1) {
-          const idx = siblings.indexOf(current) + 1;
-          seg += `:nth-of-type(${idx})`;
-        }
-      }
-      path5.unshift(seg);
-      current = parent;
-    }
-    return { tag, text, selector: path5.join(" > ") };
-  });
-  const ref = `@e${ctx.nextRefId++}`;
-  const displayRole = step.role || elInfo.tag;
-  ctx.refMap.set(ref, {
-    ref,
-    role: displayRole,
-    name: elInfo.text,
-    selector: elInfo.selector
-  });
-  return {
-    ref,
-    role: displayRole,
-    name: elInfo.text,
-    tag: elInfo.tag,
-    boundingBox: box,
-    matchCount: count
-  };
-}
-async function handleLogin(page, step, ctx) {
-  const credKey = await deriveKey(ctx.token, "credentials");
-  let blob = null;
-  let matchedDomain = "";
-  for (const candidate of domainLookupChain(step.domain)) {
-    const b = await ctx.store.getCredential(ctx.userId, candidate);
-    if (b && b.length > 0) {
-      blob = b;
-      matchedDomain = candidate;
-      break;
-    }
-  }
-  if (!blob) {
-    const stored = await ctx.store.listCredentialDomains(ctx.userId);
-    const storedList = stored.length > 0 ? stored.join(", ") : "(none)";
-    throw new Error(`No credentials stored for ${normalizeDomain(step.domain)}. Stored domains: ${storedList}. ` + `If you stored credentials under a different domain name, retry the login step with that domain. ` + `If no credentials are stored at all, call the \`credentials\` tool with action=store first.`);
-  }
-  let credential;
-  try {
-    credential = JSON.parse(decrypt(blob, credKey));
-  } catch (decryptErr) {
-    const errMsg = decryptErr instanceof Error ? decryptErr.message : String(decryptErr);
-    throw new Error(`Credentials for ${matchedDomain} exist in the store but cannot be decrypted ` + `(${errMsg}). This usually means the encryption key (~/.iframer/secret or IFRAMER_SECRET) ` + `changed since the row was written, orphaning the old blob. ` + `Fix: ask the user to re-store the credentials by running in their terminal:
-
-` + `  iframer-toolkit credentials add ${normalizeDomain(step.domain)}
-
-` + `After they confirm it ran, retry the login step.`);
-  }
-  if (matchedDomain !== normalizeDomain(step.domain)) {
-    log4.info(`login: credentials for ${step.domain} resolved via parent domain ${matchedDomain}`);
-  }
-  const beforeUrl = page.url();
-  const reactFillSelector = async (selector, value) => {
-    await page.click(selector);
-    await page.waitForTimeout(TIMING.SCROLL_DELAY);
-    await page.evaluate(([sel, val]) => {
-      const el = document.querySelector(sel);
-      if (!el)
-        return;
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setter?.call(el, val);
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-    }, [selector, value]);
-    await page.waitForTimeout(TIMING.PRE_NAVIGATE[0] + Math.random() * (TIMING.PRE_NAVIGATE[1] - TIMING.PRE_NAVIGATE[0]));
-  };
-  const hasExplicitSelectors = !!(step.usernameSelector || step.passwordSelector || step.submitSelector);
-  if (hasExplicitSelectors) {
-    if (step.usernameSelector && credential.username) {
-      await reactFillSelector(resolveSelector(step.usernameSelector, ctx), credential.username);
-    }
-    if (step.passwordSelector && credential.password) {
-      await reactFillSelector(resolveSelector(step.passwordSelector, ctx), credential.password);
-    }
-    if (step.submitSelector) {
-      await humanClick(page, resolveSelector(step.submitSelector, ctx));
-      await page.waitForLoadState("domcontentloaded").catch(() => {});
-      await page.waitForTimeout(TIMING.POST_LOGIN_WAIT);
-    }
-    if (step.totpSelector && credential.totp_secret) {
-      const totp = generateTOTP(credential.totp_secret);
-      await page.click(resolveSelector(step.totpSelector, ctx));
-      await page.keyboard.type(totp, { delay: 50 });
-      await page.waitForTimeout(TIMING.POST_TOTP_WAIT);
-    }
-  } else {
-    log4.info(`login: auto-detecting form on ${beforeUrl}`);
-    await page.waitForLoadState("domcontentloaded").catch(() => {});
-    await page.waitForTimeout(500);
-    const initialCheck = await page.evaluate(() => {
-      const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])');
-      const pwdVisible = !!(pwd && pwd.offsetParent !== null);
-      return { url: location.href, title: document.title, pwdVisible };
-    }).catch(() => ({ url: page.url(), title: "", pwdVisible: false }));
-    const urlLooksLikeLogin = /\b(login|signin|sign-in|auth|oauth)\b/i.test(initialCheck.url);
-    if (!initialCheck.pwdVisible && !urlLooksLikeLogin) {
-      log4.info(`login: already logged in (no password field, URL=${initialCheck.url})`);
-      return {
-        loggedIn: true,
-        alreadyLoggedIn: true,
-        url: initialCheck.url,
-        reason: "Session already authenticated — no login form detected"
-      };
-    }
-    const passwordHandle = await page.waitForSelector('input[type="password"]:not([disabled]):not([readonly])', { state: "visible", timeout: 5000 }).catch(() => null);
-    const emailCandidates = [
-      'input[type="email"]:not([disabled]):not([readonly])',
-      'input[autocomplete="username"]:not([disabled]):not([readonly])',
-      'input[autocomplete="email"]:not([disabled]):not([readonly])',
-      'input[name*="email" i]:not([disabled]):not([readonly])',
-      'input[name*="user" i]:not([disabled]):not([readonly])',
-      'input[name*="login" i]:not([disabled]):not([readonly])',
-      'input[id*="email" i]:not([disabled]):not([readonly])',
-      'input[id*="user" i]:not([disabled]):not([readonly])',
-      'input[type="text"]:not([disabled]):not([readonly])',
-      "input:not([type]):not([disabled]):not([readonly])"
-    ];
-    const fillHandle = async (handle, value) => {
-      await handle.scrollIntoViewIfNeeded().catch(() => {});
-      await handle.click({ delay: 40 }).catch(() => {});
-      await handle.evaluate((el, val) => {
-        const input = el;
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-        setter?.call(input, val);
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-      }, value);
-      await page.waitForTimeout(TIMING.PRE_NAVIGATE[0] + Math.random() * (TIMING.PRE_NAVIGATE[1] - TIMING.PRE_NAVIGATE[0]));
-    };
-    if (!passwordHandle) {
-      const currentUrl = page.url();
-      if (!/\b(login|signin|sign-in|auth|oauth)\b/i.test(currentUrl)) {
-        log4.info(`login: no password field and URL left login area (${currentUrl}) — treating as success`);
-        return {
-          loggedIn: true,
-          alreadyLoggedIn: true,
-          url: currentUrl,
-          reason: "No login form detected after wait — assumed already authenticated"
-        };
-      }
-      const emailOnlyHandle = await page.evaluateHandle((candidates) => {
-        for (const sel of candidates) {
-          const el = document.querySelector(sel);
-          if (el && el.offsetParent !== null)
-            return el;
-        }
-        return null;
-      }, emailCandidates);
-      const emailOnlyEl = emailOnlyHandle.asElement();
-      if (emailOnlyEl && credential.username) {
-        log4.info(`login: no password field but found email input — running email-first flow on ${currentUrl}`);
-        await fillHandle(emailOnlyEl, credential.username);
-        const submitHandle2 = await page.evaluateHandle(() => {
-          const loginRe = /\b(log\s*in|sign\s*in|continue|submit|enter|next|send.*code|email.*me)\b/i;
-          const pick = (scope) => {
-            const typed = scope.querySelector('button[type="submit"]:not([disabled]), input[type="submit"]:not([disabled])');
-            if (typed)
-              return typed;
-            const buttons = Array.from(scope.querySelectorAll('button:not([disabled]), [role="button"]:not([disabled])'));
-            return buttons.find((b) => loginRe.test(b.textContent || "") && b.offsetParent !== null) || null;
-          };
-          const form = document.querySelector('input[type="email"], input[name*="email" i], input[type="text"]')?.closest("form");
-          if (form) {
-            const found = pick(form);
-            if (found)
-              return found;
-          }
-          return pick(document);
-        });
-        const submitEl2 = submitHandle2.asElement();
-        if (submitEl2) {
-          await submitEl2.scrollIntoViewIfNeeded().catch(() => {});
-          await submitEl2.click({ delay: 40 }).catch(async () => {
-            await submitEl2.evaluate((el) => el.click());
-          });
-        } else {
-          log4.warn("login: email-first flow, no submit button found — pressing Enter");
-          await emailOnlyEl.press("Enter").catch(() => {});
-        }
-        await page.waitForLoadState("domcontentloaded").catch(() => {});
-        await Promise.race([
-          page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {}),
-          page.waitForSelector('input[type="password"]:not([disabled])', { state: "visible", timeout: TIMEOUTS.NAVIGATION }).catch(() => null),
-          page.waitForSelector('input[inputmode="numeric"]:not([disabled]), input[autocomplete="one-time-code"]:not([disabled])', { state: "visible", timeout: TIMEOUTS.NAVIGATION }).catch(() => null)
-        ]);
-        const laterPasswordHandle = await page.$('input[type="password"]:not([disabled]):not([readonly])');
-        if (laterPasswordHandle && credential.password) {
-          log4.info("login: password field appeared after email submit — filling it");
-          await fillHandle(laterPasswordHandle, credential.password);
-          const laterSubmit = await page.$('button[type="submit"]:not([disabled])');
-          if (laterSubmit) {
-            await laterSubmit.click({ delay: 40 }).catch(() => {});
-          } else {
-            await laterPasswordHandle.press("Enter").catch(() => {});
-          }
-          await page.waitForLoadState("domcontentloaded").catch(() => {});
-          await page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {});
-        }
-        const afterUrl2 = page.url();
-        const emailFlowDone = afterUrl2 !== beforeUrl;
-        return {
-          loggedIn: emailFlowDone,
-          emailSubmitted: true,
-          url: afterUrl2,
-          reason: emailFlowDone ? "Email-first flow completed — check for code/OTP prompt if login isn't complete." : "Email submitted, waiting for next step (code entry, password page, or redirect)."
-        };
-      }
-      const pageDiag = await page.evaluate(() => {
-        const visibleText = (document.body?.innerText || "").slice(0, 500);
-        const inputCount = document.querySelectorAll("input").length;
-        const hiddenPassword = !!document.querySelector('input[type="password"]');
-        const hasCaptcha = !!document.querySelector('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], [class*="captcha" i], [id*="captcha" i]');
-        const hasCloudflare = !!document.querySelector('[class*="cf-" i], iframe[src*="challenges.cloudflare"]');
-        return { title: document.title, visibleText, inputCount, hiddenPassword, hasCaptcha, hasCloudflare };
-      }).catch(() => ({ title: "", visibleText: "", inputCount: 0, hiddenPassword: false, hasCaptcha: false, hasCloudflare: false }));
-      log4.warn(`login: no visible password or email field on ${currentUrl} — title="${pageDiag.title}", inputs=${pageDiag.inputCount}`);
-      const indicators = [];
-      if (pageDiag.hasCaptcha)
-        indicators.push("CAPTCHA detected");
-      if (pageDiag.hasCloudflare)
-        indicators.push("Cloudflare challenge");
-      if (pageDiag.inputCount === 0)
-        indicators.push("no input elements at all");
-      if (pageDiag.hiddenPassword)
-        indicators.push("password field exists but is hidden/disabled");
-      const indicatorStr = indicators.length > 0 ? ` (${indicators.join(", ")})` : "";
-      throw new Error(`login: no visible password or email field on ${currentUrl} after 5000ms${indicatorStr}. ` + `Page title: "${pageDiag.title}". ` + `The site may be showing a bot-detection wall, captcha, or an unsupported login flow. ` + `Retry with a stronger browser mode (binary-headful or docker-headful).`);
-    }
-    const usernameHandle = await page.evaluateHandle((candidates) => {
-      const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])');
-      if (!pwd)
-        return null;
-      const scope = pwd.closest("form") || document;
-      for (const sel of candidates) {
-        const el = scope.querySelector(sel);
-        if (el && el.offsetParent !== null)
-          return el;
-      }
-      return null;
-    }, emailCandidates);
-    const usernameEl = usernameHandle.asElement();
-    if (usernameEl && credential.username) {
-      await fillHandle(usernameEl, credential.username);
-    } else if (!usernameEl) {
-      log4.warn("login: no username field detected, proceeding with password only");
-    }
-    if (credential.password) {
-      await fillHandle(passwordHandle, credential.password);
-    }
-    const submitHandle = await page.evaluateHandle(() => {
-      const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])');
-      const form = pwd?.closest("form");
-      const loginRe = /\b(log\s*in|sign\s*in|continue|submit|enter|next)\b/i;
-      const pick = (scope) => {
-        const typed = scope.querySelector('button[type="submit"]:not([disabled]), input[type="submit"]:not([disabled])');
-        if (typed)
-          return typed;
-        const buttons = Array.from(scope.querySelectorAll('button:not([disabled]), [role="button"]:not([disabled])'));
-        return buttons.find((b) => loginRe.test(b.textContent || "") && b.offsetParent !== null) || null;
-      };
-      if (form) {
-        const found = pick(form);
-        if (found)
-          return found;
-      }
-      return pick(document);
-    });
-    const submitEl = submitHandle.asElement();
-    if (submitEl) {
-      await submitEl.scrollIntoViewIfNeeded().catch(() => {});
-      await submitEl.click({ delay: 40 }).catch(async () => {
-        await submitEl.evaluate((el) => el.click());
-      });
-    } else {
-      log4.warn("login: no submit button detected, pressing Enter in password field");
-      await passwordHandle.press("Enter").catch(() => {});
-    }
-    await page.waitForLoadState("domcontentloaded").catch(() => {});
-    await Promise.race([
-      page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {}),
-      page.waitForSelector('input[autocomplete="one-time-code"]:not([disabled]), input[inputmode="numeric"]:not([disabled]), input[name*="otp" i]:not([disabled]), input[name*="code" i]:not([disabled]), input[aria-label*="code" i]:not([disabled])', { state: "visible", timeout: TIMEOUTS.NAVIGATION }).catch(() => null)
-    ]);
-    const otpSelector = 'input[autocomplete="one-time-code"]:not([disabled]), input[inputmode="numeric"]:not([disabled]), input[name*="otp" i]:not([disabled]), input[name*="code" i]:not([disabled]), input[aria-label*="code" i]:not([disabled])';
-    const totpHandle = await page.$(otpSelector);
-    if (totpHandle) {
-      let code = null;
-      if (credential.totp_secret) {
-        code = generateTOTP(credential.totp_secret);
-        log4.info(`login: generated TOTP from stored secret for ${step.domain}`);
-      } else if (ctx.elicitOtp) {
-        log4.info(`login: prompting user for OTP for ${step.domain}`);
-        try {
-          code = await ctx.elicitOtp(step.domain);
-        } catch (err) {
-          log4.warn(`login: OTP elicitation failed: ${err instanceof Error ? err.message : String(err)}`);
-        }
-        if (!code) {
-          throw new Error(`login: OTP required but user did not provide one for ${step.domain}`);
-        }
-      } else {
-        throw new Error(`login: OTP field present but no TOTP secret stored and no elicitation callback available. Store a secret with \`credentials add ${step.domain} --totp-secret <secret>\` or use the MCP execute tool (which supports OTP elicitation).`);
-      }
-      await totpHandle.evaluate((el, val) => {
-        const input = el;
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-        setter?.call(input, val);
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-      }, code);
-      const totpSubmit = await page.$('button[type="submit"]:not([disabled])');
-      if (totpSubmit) {
-        await totpSubmit.click().catch(async () => {
-          await totpSubmit.evaluate((el) => el.click());
-        });
-      }
-      await page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {});
-    }
-    await page.waitForTimeout(TIMING.POST_LOGIN_WAIT);
-  }
-  const afterUrl = page.url();
-  const stillHasPasswordField = await page.evaluate(() => {
-    const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])');
-    return !!(pwd && pwd.offsetParent !== null);
-  }).catch(() => false);
-  const loggedIn = afterUrl !== beforeUrl && !stillHasPasswordField;
-  return { loggedIn, url: afterUrl, changedUrl: afterUrl !== beforeUrl, passwordFieldRemains: stillHasPasswordField };
-}
-async function executeAction(page, step, ctx, monitor) {
-  const start = Date.now();
-  const stepIndex = -1;
-  try {
-    let result = null;
-    switch (step.type) {
-      case "navigate":
-        await page.goto(step.url, {
-          waitUntil: step.waitUntil || "domcontentloaded",
-          timeout: TIMEOUTS.NAVIGATION
-        });
-        const stealthScript = contextStealthScripts.get(page.context()) ?? STEALTH_SCRIPT;
-        try {
-          await page.evaluate(stealthScript);
-        } catch (err) {
-          log4.warn(`stealth injection failed: ${err}`);
-        }
-        if (ctx.sessionData) {
-          try {
-            await injectStorage(page, ctx.sessionData);
-          } catch (err) {
-            log4.warn(`storage injection after navigate failed: ${err}`);
-          }
-        }
-        break;
-      case "click":
-        await page.click(resolveSelector(step.selector, ctx));
-        break;
-      case "fill":
-        await page.fill(resolveSelector(step.selector, ctx), step.value);
-        break;
-      case "human-click":
-        if (step.selector) {
-          await humanClick(page, resolveSelector(step.selector, ctx));
-        } else if (step.x !== undefined && step.y !== undefined) {
-          await humanClickXY(page, step.x, step.y);
-        } else {
-          throw new Error("human-click requires selector or x/y coordinates");
-        }
-        break;
-      case "right-click":
-        if (step.selector) {
-          await page.click(resolveSelector(step.selector, ctx), { button: "right" });
-        } else if (step.x !== undefined && step.y !== undefined) {
-          await page.mouse.click(step.x, step.y, { button: "right" });
-        } else {
-          throw new Error("right-click requires selector or x/y coordinates");
-        }
-        break;
-      case "human-type":
-        await humanType(page, resolveSelector(step.selector, ctx), step.value);
-        break;
-      case "evaluate":
-        result = await page.evaluate(step.expression);
-        break;
-      case "extract":
-        result = await page.evaluate(step.expression);
-        break;
-      case "wait":
-        await page.waitForTimeout(step.ms);
-        break;
-      case "wait-for":
-        await page.waitForSelector(resolveSelector(step.selector, ctx), { timeout: step.timeout || TIMEOUTS.SELECTOR_WAIT });
-        break;
-      case "scroll":
-        await page.evaluate((dy) => window.scrollBy(0, dy || document.body.scrollHeight), step.deltaY ?? 0);
-        break;
-      case "keyboard":
-        await page.keyboard.press(step.key);
-        break;
-      case "type-code": {
-        const code = String(step.value || "");
-        const selector = step.selector ? resolveSelector(step.selector, ctx) : 'input[type="tel"]';
-        const firstInput = await page.waitForSelector(selector, { timeout: TIMEOUTS.TOTP_INPUT });
-        if (!firstInput)
-          throw new Error(`Input not found: ${selector}`);
-        await firstInput.click();
-        await page.waitForTimeout(TIMING.POST_FORM_CLICK);
-        for (const digit of code) {
-          await page.keyboard.press(digit);
-          await page.waitForTimeout(TIMING.DIGIT_DELAY_BASE + Math.random() * TIMING.DIGIT_DELAY_RANGE);
-        }
-        result = { typed: code.length };
-        break;
-      }
-      case "recaptcha-click":
-        result = await clickRecaptchaCheckbox(page);
-        break;
-      case "recaptcha-select":
-        result = await clickChallengeTiles(page, step.tiles);
-        break;
-      case "recaptcha-verify":
-        result = await clickChallengeVerify(page);
-        break;
-      case "recaptcha-info":
-        result = await getChallengeInfo(page);
-        break;
-      case "recaptcha-solve":
-        result = await handleRecaptchaSolve(page);
-        break;
-      case "recaptcha-answer":
-        result = await handleRecaptchaAnswer(page, step.tiles);
-        break;
-      case "solve-captcha":
-        result = await handleSolveCaptcha(page, monitor);
-        break;
-      case "screenshot": {
-        if (step.annotate) {
-          const annotated = await annotatedScreenshot(page, ctx);
-          const refLines = annotated.refs.map((r) => `  ${r.ref} ${r.role} "${r.name}"`).join(`
-`);
-          result = { screenshotUrl: annotated.screenshotUrl, refs: refLines };
-        } else {
-          const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
-          const url = saveScreenshot(buf, `step-${Date.now()}.jpg`, ctx.screenshotDir, ctx.publicUrl);
-          result = { screenshotUrl: url };
-        }
-        break;
-      }
-      case "snapshot": {
-        const snap = await takeSnapshot(page, ctx, {
-          interactiveOnly: step.interactiveOnly,
-          maxElements: step.maxElements
-        });
-        result = { elementCount: snap.nodes.length, snapshot: snap.text };
-        break;
-      }
-      case "find":
-        result = await handleFind(page, step, ctx);
-        break;
-      case "login":
-        result = await handleLogin(page, step, ctx);
-        break;
-      default: {
-        const _exhaustive = step;
-        throw new Error(`Unknown step type: ${_exhaustive.type}`);
-      }
-    }
-    return {
-      stepIndex,
-      step,
-      ok: true,
-      result,
-      durationMs: Date.now() - start
-    };
-  } catch (err) {
-    return {
-      stepIndex,
-      step,
-      ok: false,
-      error: getErrorMessage(err),
-      durationMs: Date.now() - start
-    };
-  }
-}
-var log4;
-var init_actions = __esm(() => {
-  init_stealth();
-  init_humanize();
-  init_recaptcha();
-  init_hcaptcha();
-  init_crypto();
-  init_knowledge();
-  init_screenshot();
-  init_snapshot();
-  init_annotate();
-  init_logger();
-  init_constants();
-  log4 = createLogger("actions");
-});
-
-// src/lib/stale-monitor.ts
-class StaleStateMonitor {
-  page;
-  timeoutMs;
-  timer = null;
-  lastActivity = Date.now();
-  abortController = null;
-  constructor(page, timeoutMs = DEFAULT_STALE_TIMEOUT_MS) {
-    this.page = page;
-    this.timeoutMs = timeoutMs;
-  }
-  async snapshot() {
-    try {
-      const [url, state] = await Promise.all([
-        Promise.resolve(this.page.url()),
-        this.page.evaluate(() => ({
-          documentReadyState: document.readyState,
-          bodyTextLength: document.body?.innerText?.length || 0,
-          elementCount: document.querySelectorAll("*").length
-        })).catch(() => ({
-          documentReadyState: "unknown",
-          bodyTextLength: 0,
-          elementCount: 0
-        }))
-      ]);
-      return {
-        url,
-        ...state,
-        timestamp: Date.now()
-      };
-    } catch {
-      return {
-        url: "unknown",
-        documentReadyState: "unknown",
-        bodyTextLength: 0,
-        elementCount: 0,
-        timestamp: Date.now()
-      };
-    }
-  }
-  static hasChanged(before, after) {
-    if (before.url !== after.url)
-      return true;
-    if (before.documentReadyState !== after.documentReadyState)
-      return true;
-    const textDiff = Math.abs(after.bodyTextLength - before.bodyTextLength);
-    if (textDiff > THRESHOLDS.STALE_CHAR_CHANGE || before.bodyTextLength > 0 && textDiff / before.bodyTextLength > THRESHOLDS.STALE_PERCENT_CHANGE) {
-      return true;
-    }
-    const elemDiff = Math.abs(after.elementCount - before.elementCount);
-    if (elemDiff > 10 || before.elementCount > 0 && elemDiff / before.elementCount > 0.05) {
-      return true;
-    }
     return false;
   }
-  reportActivity() {
-    this.lastActivity = Date.now();
-  }
-  async withMonitoring(fn) {
-    this.lastActivity = Date.now();
-    this.abortController = new AbortController;
-    const beforeSnapshot = await this.snapshot();
-    return new Promise((resolve, reject) => {
-      let resolved = false;
-      let checkInterval = null;
-      const cleanup = () => {
-        resolved = true;
-        if (checkInterval)
-          clearInterval(checkInterval);
-        if (this.timer)
-          clearTimeout(this.timer);
-        this.timer = null;
-        this.abortController = null;
-      };
-      checkInterval = setInterval(async () => {
-        if (resolved)
-          return;
-        const elapsed = Date.now() - this.lastActivity;
-        if (elapsed < this.timeoutMs)
-          return;
-        try {
-          const currentSnapshot = await this.snapshot();
-          if (StaleStateMonitor.hasChanged(beforeSnapshot, currentSnapshot)) {
-            this.lastActivity = Date.now();
-            return;
-          }
-        } catch {
-          this.lastActivity = Date.now();
-          return;
-        }
-        cleanup();
-        reject(new StaleStateError(`No state change detected for ${this.timeoutMs}ms`, this.timeoutMs));
-      }, TIMING.STALE_CHECK_INTERVAL);
-      fn().then((result) => {
-        if (!resolved) {
-          cleanup();
-          resolve(result);
-        }
-      }).catch((err) => {
-        if (!resolved) {
-          cleanup();
-          reject(err);
-        }
-      });
-    });
-  }
 }
-var DEFAULT_STALE_TIMEOUT_MS = 20000, StaleStateError;
-var init_stale_monitor = __esm(() => {
-  init_constants();
-  StaleStateError = class StaleStateError extends Error {
-    timeoutMs;
-    constructor(message, timeoutMs) {
-      super(message);
-      this.name = "StaleStateError";
-      this.timeoutMs = timeoutMs;
-    }
-  };
-});
-
-// src/lib/captcha/detector.ts
-class RecaptchaDetector {
-  async detect(page) {
-    try {
-      const found = await page.evaluate(() => {
-        const hasAnchorFrame = !!document.querySelector('iframe[src*="recaptcha/api2/anchor"], iframe[title*="reCAPTCHA"]');
-        const hasSitekey = !!document.querySelector("[data-sitekey], .g-recaptcha");
-        return hasAnchorFrame || hasSitekey;
-      });
-      if (found) {
-        return { type: "captcha", confidence: 0.95 };
-      }
-    } catch {}
-    return null;
-  }
-}
-
-class HCaptchaDetector {
-  async detect(page) {
-    try {
-      const found = await page.evaluate(() => {
-        return !!(document.querySelector('iframe[src*="hcaptcha.com"]') || document.querySelector("[data-hcaptcha-widget-id]") || document.querySelector('iframe[title*="hCaptcha"]'));
-      });
-      if (found)
-        return { type: "hcaptcha", confidence: 0.95 };
-    } catch {}
-    return null;
-  }
-}
-
-class CookieConsentDetector {
-  async detect(page) {
-    try {
-      const found = await page.evaluate(() => {
-        const keywords = ["accept cookies", "accept all", "allow cookies", "i accept", "agree"];
-        const buttons = Array.from(document.querySelectorAll("button, a"));
-        return buttons.some((el) => {
-          const text = el.innerText?.toLowerCase() || "";
-          return keywords.some((kw) => text.includes(kw));
-        });
-      });
-      if (found) {
-        return { type: "cookie-consent", confidence: 0.8 };
-      }
-    } catch {}
-    return null;
-  }
-}
-
-class LoginWallDetector {
-  async detect(page) {
-    try {
-      const found = await page.evaluate(() => {
-        const hasLoginForm = !!document.querySelector('input[type="password"]') && !!document.querySelector('input[type="email"], input[type="text"], input[name*="user"], input[name*="email"]');
-        return hasLoginForm;
-      });
-      if (found) {
-        return { type: "login-wall", confidence: 0.85, details: "Login form detected" };
-      }
-    } catch {}
-    return null;
-  }
-}
-var defaultDetectors;
-var init_detector = __esm(() => {
-  defaultDetectors = [
-    new RecaptchaDetector,
-    new HCaptchaDetector,
-    new CookieConsentDetector,
-    new LoginWallDetector
-  ];
-});
-
-// src/lib/obstacles.ts
-class RecaptchaResolver {
-  canResolve(obstacle) {
-    return obstacle.type === "captcha";
-  }
-  async resolve(page, _obstacle, _ctx, monitor) {
-    try {
-      const result = await solveRecaptcha(page, monitor);
-      if (result.solved) {
-        return { resolved: true, resolution: `auto-solved-recaptcha in ${result.rounds} rounds` };
-      }
-      return { resolved: false, error: result.reason || "reCAPTCHA solve failed" };
-    } catch (err) {
-      return { resolved: false, error: err instanceof Error ? err.message : String(err) };
-    }
-  }
-}
-
-class CookieConsentResolver {
-  canResolve(obstacle) {
-    return obstacle.type === "cookie-consent";
-  }
-  async resolve(page) {
-    const keywords = ["accept all", "accept cookies", "allow cookies", "i accept", "agree"];
-    try {
-      const buttons = await page.$$("button, a");
-      for (const btn of buttons) {
-        const text = (await btn.innerText().catch(() => "")).toLowerCase();
-        if (keywords.some((kw) => text.includes(kw))) {
-          const visible = await btn.isVisible().catch(() => false);
-          if (visible) {
-            await humanClick(page, await btn.evaluate((el) => {
-              if (el.id)
-                return `#${el.id}`;
-              if (el.className)
-                return `${el.tagName.toLowerCase()}.${el.className.split(" ")[0]}`;
-              return el.tagName.toLowerCase();
-            }));
-            await page.waitForTimeout(500);
-            return { resolved: true, resolution: "dismissed-cookie-consent" };
-          }
-        }
-      }
-    } catch {}
-    return { resolved: false, error: "Could not dismiss cookie consent" };
-  }
-}
-
-class HCaptchaResolver {
-  canResolve(obstacle) {
-    return obstacle.type === "hcaptcha";
-  }
-  async resolve(page, _obstacle, _ctx, monitor) {
-    try {
-      const result = await solveHCaptcha(page, monitor);
-      if (result.solved) {
-        return { resolved: true, resolution: `auto-solved-hcaptcha in ${result.rounds} rounds` };
-      }
-      return { resolved: false, error: result.reason || "hCaptcha solve failed" };
-    } catch (err) {
-      return { resolved: false, error: err instanceof Error ? err.message : String(err) };
-    }
-  }
-}
-async function detectObstacles(page, detectors = defaultDetectors) {
-  for (const detector of detectors) {
-    const obstacle = await detector.detect(page);
-    if (obstacle)
-      return obstacle;
-  }
-  return null;
-}
-async function resolveObstacle(page, obstacle, ctx, monitor) {
-  for (const resolver of resolvers) {
-    if (resolver.canResolve(obstacle)) {
-      return resolver.resolve(page, obstacle, ctx, monitor);
-    }
-  }
-  return { resolved: false, error: `No resolver for obstacle type: ${obstacle.type}` };
-}
-var resolvers;
-var init_obstacles = __esm(() => {
-  init_detector();
-  init_recaptcha();
-  init_hcaptcha();
-  init_humanize();
-  resolvers = [
-    new RecaptchaResolver,
-    new HCaptchaResolver,
-    new CookieConsentResolver
-  ];
-});
-
-// src/lib/api-capture.ts
-function isAuthHeader(name) {
-  return AUTH_HEADER_PATTERNS.some((p) => p.test(name));
-}
-function isLikelyId(segment) {
-  return ID_PATTERNS.some((p) => p.test(segment));
-}
-function parameterizePath(path5) {
-  const parts = path5.split("/");
-  let idCount = 0;
-  const parameterized = parts.map((part) => {
-    if (part && isLikelyId(part)) {
-      idCount++;
-      return idCount === 1 ? "{id}" : `{id${idCount}}`;
-    }
-    return part;
-  });
-  return parameterized.join("/");
-}
-function parseQueryParams(url) {
+async function resolveScreenshotPath(url) {
   try {
-    const u = new URL(url);
-    if (u.searchParams.toString() === "")
-      return;
-    const params = {};
-    u.searchParams.forEach((v, k) => {
-      params[k] = v;
-    });
-    return params;
+    if (url.startsWith("file://")) {
+      const { fileURLToPath } = await import("url");
+      const filePath2 = fileURLToPath(url);
+      const fs4 = await import("fs");
+      if (fs4.existsSync(filePath2))
+        return filePath2;
+      return null;
+    }
+    const res = await fetch(url);
+    if (!res.ok)
+      return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    const fs3 = await import("fs");
+    const dir = import_path4.default.join(import_os2.default.tmpdir(), "iframer-screenshots", "screenshots");
+    fs3.mkdirSync(dir, { recursive: true });
+    const filePath = import_path4.default.join(dir, `docker-${Date.now()}.jpg`);
+    fs3.writeFileSync(filePath, buf);
+    return filePath;
   } catch {
-    return;
-  }
-}
-function parseCookies(cookieHeader) {
-  const cookies = {};
-  for (const pair of cookieHeader.split(";")) {
-    const eq = pair.indexOf("=");
-    if (eq > 0) {
-      const name = pair.slice(0, eq).trim();
-      const value = pair.slice(eq + 1).trim();
-      cookies[name] = value;
-    }
-  }
-  return cookies;
-}
-function tryParseJson(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return;
-  }
-}
-function buildCurl(method, url, headers, auth, body) {
-  const parts = [`curl -X ${method}`];
-  if (auth.authorization) {
-    parts.push(`  -H 'Authorization: ${auth.authorization}'`);
-  }
-  if (Object.keys(auth.cookies).length > 0) {
-    const cookieStr = Object.entries(auth.cookies).map(([k, v]) => `${k}=${v}`).join("; ");
-    parts.push(`  -H 'Cookie: ${cookieStr}'`);
-  }
-  for (const [k, v] of Object.entries(auth.tokens)) {
-    parts.push(`  -H '${k}: ${v}'`);
-  }
-  for (const [k, v] of Object.entries(headers)) {
-    parts.push(`  -H '${k}: ${v}'`);
-  }
-  if (body !== undefined) {
-    const bodyStr = typeof body === "string" ? body : JSON.stringify(body);
-    parts.push(`  -d '${bodyStr.replace(/'/g, "'\\''")}'`);
-  }
-  parts.push(`  '${url}'`);
-  return parts.join(" \\\n");
-}
-
-class ApiCapture {
-  page;
-  requests = [];
-  pendingRequests = new Map;
-  currentStep = 0;
-  requestHandler;
-  responseHandler;
-  constructor(page) {
-    this.page = page;
-    this.requestHandler = (req) => {
-      const resourceType = req.resourceType();
-      if (SKIP_RESOURCE_TYPES.has(resourceType))
-        return;
-      if (SKIP_EXTENSIONS.test(req.url()))
-        return;
-      if (resourceType !== "xhr" && resourceType !== "fetch")
-        return;
-      this.pendingRequests.set(req, {
-        stepIndex: this.currentStep,
-        timestamp: Date.now()
-      });
-    };
-    this.responseHandler = async (res) => {
-      const req = res.request();
-      const meta = this.pendingRequests.get(req);
-      if (!meta)
-        return;
-      this.pendingRequests.delete(req);
-      try {
-        const url = req.url();
-        const parsed = new URL(url);
-        const allHeaders = req.headers();
-        let requestBody = undefined;
-        try {
-          const postData = req.postData();
-          if (postData) {
-            requestBody = tryParseJson(postData) ?? postData;
-          }
-        } catch {}
-        let responseBody = undefined;
-        try {
-          const resText = await res.text();
-          if (resText && resText.length < 1e5) {
-            responseBody = tryParseJson(resText) ?? resText;
-          }
-        } catch {}
-        this.requests.push({
-          method: req.method(),
-          url,
-          path: parsed.pathname,
-          queryParams: parseQueryParams(url),
-          requestHeaders: allHeaders,
-          requestBody,
-          responseStatus: res.status(),
-          responseHeaders: res.headers(),
-          responseBody,
-          resourceType: req.resourceType(),
-          triggeredAtStep: meta.stepIndex,
-          timestamp: meta.timestamp
-        });
-      } catch {}
-    };
-  }
-  start() {
-    this.page.on("request", this.requestHandler);
-    this.page.on("response", this.responseHandler);
-  }
-  setStep(index) {
-    this.currentStep = index;
-  }
-  stop() {
-    this.page.off("request", this.requestHandler);
-    this.page.off("response", this.responseHandler);
-  }
-  extractAuth(requests) {
-    const auth = { cookies: {}, tokens: {} };
-    for (const req of requests) {
-      for (const [key, value] of Object.entries(req.requestHeaders)) {
-        const lower = key.toLowerCase();
-        if (lower === "authorization" && !auth.authorization) {
-          auth.authorization = value;
-        } else if (lower === "cookie") {
-          const cookies = parseCookies(value);
-          Object.assign(auth.cookies, cookies);
-        } else if (isAuthHeader(key) && lower !== "authorization" && lower !== "cookie") {
-          auth.tokens[key] = value;
-        }
-      }
-    }
-    return auth;
-  }
-  splitHeaders(headers) {
-    const endpointHeaders = {};
-    for (const [key, value] of Object.entries(headers)) {
-      const lower = key.toLowerCase();
-      if (BROWSER_NOISE_HEADERS.has(lower))
-        continue;
-      if (isAuthHeader(key))
-        continue;
-      if (lower === "user-agent")
-        continue;
-      endpointHeaders[key] = value;
-    }
-    return endpointHeaders;
-  }
-  getResults() {
-    const byDomain = new Map;
-    for (const req of this.requests) {
-      try {
-        const host = new URL(req.url).origin;
-        if (!byDomain.has(host))
-          byDomain.set(host, []);
-        byDomain.get(host)?.push(req);
-      } catch {}
-    }
-    const apis = [];
-    for (const [baseUrl, requests] of byDomain) {
-      const auth = this.extractAuth(requests);
-      const endpointMap = new Map;
-      for (const req of requests) {
-        const paramPath = parameterizePath(req.path);
-        const key = `${req.method} ${paramPath}`;
-        const endpointHeaders = this.splitHeaders(req.requestHeaders);
-        if (!endpointMap.has(key)) {
-          endpointMap.set(key, {
-            method: req.method,
-            path: paramPath,
-            rawPaths: [req.path],
-            queryParams: req.queryParams,
-            headers: endpointHeaders,
-            requestBody: req.requestBody,
-            responseStatus: req.responseStatus,
-            responseBody: req.responseBody,
-            triggeredAtStep: req.triggeredAtStep,
-            curl: buildCurl(req.method, req.url, endpointHeaders, auth, req.requestBody)
-          });
-        } else {
-          const existing = endpointMap.get(key);
-          if (!existing)
-            continue;
-          if (!existing.rawPaths.includes(req.path)) {
-            existing.rawPaths.push(req.path);
-          }
-        }
-      }
-      const domain = new URL(baseUrl).hostname.replace(/\./g, "_");
-      apis.push({
-        domain,
-        baseUrl,
-        auth,
-        endpoints: Array.from(endpointMap.values()).sort((a, b) => a.triggeredAtStep - b.triggeredAtStep),
-        capturedAt: new Date().toISOString()
-      });
-    }
-    return apis.sort((a, b) => b.endpoints.length - a.endpoints.length);
-  }
-}
-var SKIP_RESOURCE_TYPES, SKIP_EXTENSIONS, BROWSER_NOISE_HEADERS, AUTH_HEADER_PATTERNS, ID_PATTERNS;
-var init_api_capture = __esm(() => {
-  SKIP_RESOURCE_TYPES = new Set([
-    "stylesheet",
-    "image",
-    "media",
-    "font",
-    "manifest",
-    "other"
-  ]);
-  SKIP_EXTENSIONS = /\.(css|js|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot|map)(\?|$)/i;
-  BROWSER_NOISE_HEADERS = new Set([
-    "accept-encoding",
-    "accept-language",
-    "cache-control",
-    "connection",
-    "host",
-    "pragma",
-    "sec-ch-ua",
-    "sec-ch-ua-mobile",
-    "sec-ch-ua-platform",
-    "sec-fetch-dest",
-    "sec-fetch-mode",
-    "sec-fetch-site",
-    "upgrade-insecure-requests",
-    "dnt",
-    "te",
-    "if-none-match",
-    "if-modified-since"
-  ]);
-  AUTH_HEADER_PATTERNS = [
-    /^authorization$/i,
-    /^cookie$/i,
-    /^x-csrf/i,
-    /^x-xsrf/i,
-    /^x-api-key$/i,
-    /^x-auth/i,
-    /^x-token/i,
-    /^x-session/i,
-    /^x-access/i,
-    /^x-client-token/i,
-    /^x-request-token/i,
-    /^x-super-properties$/i,
-    /^x-debug-options$/i,
-    /^x-fingerprint$/i
-  ];
-  ID_PATTERNS = [
-    /^[0-9]+$/,
-    /^[0-9a-f]{8,}$/i,
-    /^[0-9a-f]{8}-[0-9a-f]{4}-/i,
-    /^\w{20,}$/
-  ];
-});
-
-// src/lib/pipeline.ts
-async function getPageState(page, ctx, withScreenshot = false) {
-  const url = page.url();
-  const title = await page.title().catch(() => "");
-  if (!withScreenshot) {
-    return { url, title };
-  }
-  try {
-    const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
-    const screenshotUrl = saveScreenshot(buf, `state-${Date.now()}.jpg`, ctx.screenshotDir, ctx.publicUrl);
-    return { url, title, screenshotUrl };
-  } catch {
-    return { url, title };
-  }
-}
-function classifyError(err, step) {
-  if (err instanceof StaleStateError)
-    return "stale-state";
-  const msg = err.message.toLowerCase();
-  if (step.type === "login" && (msg.includes("no visible password field") || msg.includes("password field was not visible"))) {
-    return "bot-blocked";
-  }
-  if (msg.includes("timeout") || msg.includes("timed out"))
-    return "timeout";
-  if (msg.includes("not found") || msg.includes("no element") || msg.includes("waiting for selector"))
-    return "element-not-found";
-  if (msg.includes("navigation") || msg.includes("net::err"))
-    return "navigation-failed";
-  if (step.type === "solve-captcha")
-    return "captcha-unsolvable";
-  return "action-failed";
-}
-function isRetryable(errorType) {
-  return errorType === "stale-state" || errorType === "timeout" || errorType === "element-not-found";
-}
-function getSuggestion(errorType, step) {
-  switch (errorType) {
-    case "stale-state":
-      return "The page stopped responding. The step may have triggered a very slow load or the server may be unreachable.";
-    case "element-not-found":
-      return `Selector not found. The page structure may have changed. Take a screenshot to inspect the current state.`;
-    case "navigation-failed":
-      return "Navigation failed. The URL may be unreachable, blocked, or require authentication.";
-    case "captcha-unsolvable":
-      return "Automatic reCAPTCHA solving failed. The challenge may require human intervention.";
-    case "timeout":
-      return "Operation timed out. The page may be slow or the element may not appear.";
-    default:
-      return;
-  }
-}
-
-class PipelineRunner {
-  ctx;
-  constructor(ctx) {
-    this.ctx = ctx;
-  }
-  async run(page, pipeline) {
-    const startTime = Date.now();
-    const opts = pipeline.options || {};
-    const staleTimeoutMs = opts.staleTimeoutMs ?? this.ctx.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS2;
-    const continueOnObstacle = opts.continueOnObstacle ?? true;
-    const screenshotAfterEach = opts.screenshotAfterEach ?? false;
-    const continueOnError = opts.continueOnError ?? false;
-    const results = [];
-    const obstacles = [];
-    const capture = opts.captureApi ? new ApiCapture(page) : null;
-    if (capture)
-      capture.start();
-    const finishCapture = () => {
-      if (!capture)
-        return;
-      capture.stop();
-      return capture.getResults();
-    };
-    for (let i = 0;i < pipeline.steps.length; i++) {
-      if (capture)
-        capture.setStep(i);
-      const step = pipeline.steps[i];
-      const monitor = new StaleStateMonitor(page, staleTimeoutMs);
-      let stepResult;
-      try {
-        stepResult = await monitor.withMonitoring(async () => {
-          const r = await executeAction(page, step, this.ctx, monitor);
-          r.stepIndex = i;
-          return r;
-        });
-      } catch (err) {
-        const asError = err instanceof Error ? err : new Error(String(err));
-        const errorType = classifyError(asError, step);
-        const pageState = await getPageState(page, this.ctx, true);
-        stepResult = {
-          stepIndex: i,
-          step,
-          ok: false,
-          error: asError.message,
-          durationMs: Date.now() - startTime
-        };
-        results.push(stepResult);
-        return {
-          ok: false,
-          completedSteps: i,
-          totalSteps: pipeline.steps.length,
-          results,
-          obstacles,
-          finalState: pageState,
-          error: {
-            failedAtStep: i,
-            failedStep: step,
-            errorType,
-            message: asError.message,
-            pageState,
-            suggestion: getSuggestion(errorType, step),
-            retryable: isRetryable(errorType)
-          },
-          durationMs: Date.now() - startTime,
-          capturedApi: finishCapture()
-        };
-      }
-      if (screenshotAfterEach && stepResult.ok) {
-        try {
-          const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
-          stepResult.screenshotUrl = saveScreenshot(buf, `step-${i}-${Date.now()}.jpg`, this.ctx.screenshotDir, this.ctx.publicUrl);
-        } catch {}
-      }
-      results.push(stepResult);
-      if (!stepResult.ok && !continueOnError) {
-        const pageState = await getPageState(page, this.ctx, true);
-        const errorType = classifyError(new Error(stepResult.error || ""), step);
-        return {
-          ok: false,
-          completedSteps: i,
-          totalSteps: pipeline.steps.length,
-          results,
-          obstacles,
-          finalState: pageState,
-          error: {
-            failedAtStep: i,
-            failedStep: step,
-            errorType,
-            message: stepResult.error || "Step failed",
-            pageState,
-            suggestion: getSuggestion(errorType, step),
-            retryable: isRetryable(errorType)
-          },
-          durationMs: Date.now() - startTime,
-          capturedApi: finishCapture()
-        };
-      }
-      if (step.type === "navigate" && continueOnObstacle) {
-        const obstacleStart = Date.now();
-        const obstacle = await detectObstacles(page);
-        if (obstacle) {
-          const resolution = await resolveObstacle(page, obstacle, this.ctx, monitor);
-          obstacles.push({
-            type: obstacle.type,
-            detectedAtStep: i,
-            resolved: resolution.resolved,
-            resolution: resolution.resolution,
-            durationMs: Date.now() - obstacleStart
-          });
-          if (!resolution.resolved && obstacle.type === "captcha") {
-            const pageState = await getPageState(page, this.ctx, true);
-            return {
-              ok: false,
-              completedSteps: i,
-              totalSteps: pipeline.steps.length,
-              results,
-              obstacles,
-              finalState: pageState,
-              error: {
-                failedAtStep: i,
-                failedStep: step,
-                errorType: "obstacle-unresolvable",
-                message: `Obstacle detected (${obstacle.type}) but could not be resolved: ${resolution.error}`,
-                pageState,
-                suggestion: getSuggestion("captcha-unsolvable", step),
-                retryable: true
-              },
-              durationMs: Date.now() - startTime,
-              capturedApi: finishCapture()
-            };
-          }
-        }
-      }
-    }
-    const finalState = await getPageState(page, this.ctx, true);
-    return {
-      ok: true,
-      completedSteps: pipeline.steps.length,
-      totalSteps: pipeline.steps.length,
-      results,
-      obstacles,
-      finalState,
-      durationMs: Date.now() - startTime,
-      capturedApi: finishCapture()
-    };
-  }
-}
-var DEFAULT_STALE_TIMEOUT_MS2 = 20000;
-var init_pipeline = __esm(() => {
-  init_actions();
-  init_stale_monitor();
-  init_obstacles();
-  init_screenshot();
-  init_api_capture();
-});
-
-// src/lib/browser/launcher.ts
-function findChromeExecutable() {
-  if (process.env.CHROME_EXECUTABLE)
-    return process.env.CHROME_EXECUTABLE;
-  if (import_fs4.default.existsSync("/usr/bin/google-chrome-stable"))
-    return "/usr/bin/google-chrome-stable";
-  return;
-}
-async function getBrowser(_name = "chromium") {
-  if (cachedBrowser && cachedBrowser.isConnected())
-    return cachedBrowser;
-  cachedBrowser = await import_patchright.chromium.launch({
-    headless: true,
-    args: STEALTH_ARGS
-  });
-  return cachedBrowser;
-}
-async function getBrowserWithFallback(_preferred) {
-  return { browser: await getBrowser(), name: "chromium" };
-}
-async function launchHeadful(displayNum) {
-  const executablePath = findChromeExecutable();
-  const hasExtensions = import_fs4.default.existsSync(UBLOCK_PATH);
-  const args = [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-blink-features=AutomationControlled",
-    "--disable-features=IsolateOrigins,site-per-process",
-    "--disable-infobars",
-    "--window-size=1920,1080",
-    "--force-device-scale-factor=1.25",
-    "--use-gl=angle",
-    "--use-angle=swiftshader"
-  ];
-  if (hasExtensions)
-    args.push(`--load-extension=${UBLOCK_PATH}`);
-  const launchOpts = {
-    headless: false,
-    args,
-    env: { ...process.env, DISPLAY: `:${displayNum}` }
-  };
-  if (executablePath)
-    launchOpts.executablePath = executablePath;
-  log5.debug(`headful: ${executablePath || "patchright chromium"}, extensions: ${hasExtensions}`);
-  return import_patchright.chromium.launch(launchOpts);
-}
-var import_fs4, import_patchright, log5, UBLOCK_PATH = "/extensions/uBlock0.chromium", cachedBrowser = null;
-var init_launcher = __esm(() => {
-  init_stealth();
-  init_logger();
-  import_fs4 = __toESM(require("fs"));
-  import_patchright = require("patchright");
-  log5 = createLogger("launcher");
-});
-
-// src/lib/browser/fingerprint.ts
-function generateWindowsFingerprint() {
-  const fp = generator.getFingerprint();
-  const { navigator: nav, screen } = fp.fingerprint;
-  const dprOptions = [1.25, 1.5, 1.25, 1.5, 1];
-  const dpr = dprOptions[Math.floor(Math.random() * dprOptions.length)];
-  const w = screen.width || SCREEN_DEFAULTS.WIDTH;
-  const h = screen.height || SCREEN_DEFAULTS.HEIGHT;
-  return {
-    userAgent: nav.userAgent,
-    platform: "Win32",
-    screenWidth: w,
-    screenHeight: h,
-    screenAvailHeight: h - 40,
-    colorDepth: 24,
-    deviceScaleFactor: dpr,
-    hardwareConcurrency: nav.hardwareConcurrency || 8,
-    deviceMemory: nav.deviceMemory || 8,
-    languages: nav.languages || ["en-US", "en"],
-    uaData: nav.userAgentData
-  };
-}
-var import_fingerprint_generator, generator;
-var init_fingerprint = __esm(() => {
-  init_constants();
-  import_fingerprint_generator = require("fingerprint-generator");
-  generator = new import_fingerprint_generator.FingerprintGenerator({
-    browsers: [{ name: "chrome", minVersion: CHROME_MIN_VERSION }],
-    operatingSystems: ["windows"],
-    devices: ["desktop"],
-    locales: ["en-US"]
-  });
-});
-
-// src/lib/browser/session-manager.ts
-function allocateDisplay() {
-  for (let i = 0;i < MAX_SESSIONS; i++) {
-    const num = BASE_DISPLAY + i;
-    if (!usedDisplays.has(num)) {
-      usedDisplays.add(num);
-      return num;
-    }
-  }
-  throw new Error("No available displays. Max concurrent sessions reached.");
-}
-function freeDisplay(num) {
-  usedDisplays.delete(num);
-}
-function waitForSocket(displayNum, timeoutMs = 5000) {
-  const socketPath = `/tmp/.X11-unix/X${displayNum}`;
-  return new Promise((resolve, reject) => {
-    const start = Date.now();
-    const check = () => {
-      if (import_fs5.default.existsSync(socketPath))
-        return resolve();
-      if (Date.now() - start > timeoutMs)
-        return reject(new Error(`Xvfb socket not ready after ${timeoutMs}ms`));
-      setTimeout(check, 100);
-    };
-    check();
-  });
-}
-function killProcess(proc) {
-  if (proc && !proc.killed) {
-    try {
-      proc.kill("SIGTERM");
-    } catch {}
-  }
-}
-async function startSession(userId) {
-  if (sessions.has(userId)) {
-    return sessions.get(userId);
-  }
-  const displayNum = allocateDisplay();
-  const vncPort = 5900 + displayNum;
-  const wsPort = 6080 + (displayNum - BASE_DISPLAY);
-  const xvfb = import_child_process.spawn("Xvfb", [`:${displayNum}`, "-screen", "0", "1920x1080x24", "-ac"], {
-    stdio: "ignore"
-  });
-  await waitForSocket(displayNum);
-  const x11vnc = import_child_process.spawn("x11vnc", ["-display", `:${displayNum}`, "-nopw", "-listen", "localhost", "-rfbport", String(vncPort), "-shared", "-forever"], { stdio: "ignore" });
-  const noVncPath = import_fs5.default.existsSync("/usr/share/novnc") ? "/usr/share/novnc" : "/usr/share/noVNC";
-  const websockify = import_child_process.spawn("websockify", ["--web", noVncPath, String(wsPort), `localhost:${vncPort}`], {
-    stdio: "ignore"
-  });
-  await new Promise((r) => setTimeout(r, 500));
-  const browser = await launchHeadful(displayNum);
-  const fingerprint = generateWindowsFingerprint();
-  const ctxOpts = stealthContextOptions({}, userId, fingerprint);
-  const context = await browser.newContext(ctxOpts);
-  const stealthScript = buildStealthScript(fingerprint);
-  contextStealthScripts.set(context, stealthScript);
-  const page = await context.newPage();
-  log6.debug(`fingerprint: ${fingerprint.userAgent.slice(0, 60)}... DPR=${fingerprint.deviceScaleFactor} screen=${fingerprint.screenWidth}x${fingerprint.screenHeight}`);
-  const session = {
-    displayNum,
-    vncPort,
-    wsPort,
-    xvfb,
-    x11vnc,
-    websockify,
-    browser,
-    context,
-    page,
-    createdAt: new Date,
-    timeoutTimer: null
-  };
-  session.timeoutTimer = setTimeout(() => stopSession(userId), SESSION_TIMEOUT);
-  sessions.set(userId, session);
-  return session;
-}
-function resetTimeout(userId) {
-  const session = sessions.get(userId);
-  if (session) {
-    clearTimeout(session.timeoutTimer);
-    session.timeoutTimer = setTimeout(() => stopSession(userId), SESSION_TIMEOUT);
-  }
-}
-function getSession(userId) {
-  return sessions.get(userId) || null;
-}
-async function stopSession(userId) {
-  const session = sessions.get(userId);
-  if (!session)
     return null;
-  clearTimeout(session.timeoutTimer);
-  let sessionData = null;
-  try {
-    const { extractSession: extractSession2 } = await Promise.resolve().then(() => exports_persistence);
-    sessionData = await extractSession2(session.context, session.page);
-  } catch {}
-  contextStealthScripts.delete(session.context);
-  try {
-    await session.context.close();
-  } catch {}
-  try {
-    await session.browser.close();
-  } catch {}
-  killProcess(session.websockify);
-  killProcess(session.x11vnc);
-  killProcess(session.xvfb);
-  await new Promise((r) => setTimeout(r, 1000));
-  try {
-    import_fs5.default.unlinkSync(`/tmp/.X11-unix/X${session.displayNum}`);
-  } catch {}
-  freeDisplay(session.displayNum);
-  sessions.delete(userId);
-  return sessionData;
-}
-async function cleanupAllSessions() {
-  const userIds = [...sessions.keys()];
-  await Promise.all(userIds.map((id) => stopSession(id)));
-}
-var import_child_process, import_fs5, log6, BASE_DISPLAY, MAX_SESSIONS, SESSION_TIMEOUT, sessions, usedDisplays;
-var init_session_manager = __esm(() => {
-  init_launcher();
-  init_stealth();
-  init_logger();
-  init_fingerprint();
-  import_child_process = require("child_process");
-  import_fs5 = __toESM(require("fs"));
-  log6 = createLogger("session");
-  BASE_DISPLAY = parseInt(process.env.VNC_BASE_DISPLAY || "99", 10);
-  MAX_SESSIONS = parseInt(process.env.VNC_MAX_SESSIONS || "20", 10);
-  SESSION_TIMEOUT = parseInt(process.env.VNC_SESSION_TIMEOUT_MS || "300000", 10);
-  sessions = new Map;
-  usedDisplays = new Set;
-});
-
-// src/lib/session/sqlite-store.ts
-function createBunDb(dbPath) {
-  const { Database } = require("bun:sqlite");
-  const db = new Database(dbPath);
-  db.run("PRAGMA journal_mode = WAL");
-  return {
-    queryGet: (sql, ...params) => db.query(sql).get(...params),
-    queryAll: (sql, ...params) => db.query(sql).all(...params),
-    run: (sql, ...params) => {
-      if (params.length > 0) {
-        db.query(sql).run(...params);
-      } else {
-        db.run(sql);
-      }
-    },
-    close: () => db.close()
-  };
-}
-function createNodeDb(dbPath) {
-  const Database = require("better-sqlite3");
-  const db = new Database(dbPath);
-  db.pragma("journal_mode = WAL");
-  return {
-    queryGet: (sql, ...params) => db.prepare(sql).get(...params),
-    queryAll: (sql, ...params) => db.prepare(sql).all(...params),
-    run: (sql, ...params) => {
-      if (params.length > 0) {
-        db.prepare(sql).run(...params);
-      } else {
-        db.exec(sql);
-      }
-    },
-    close: () => db.close()
-  };
-}
-
-class SqliteStore {
-  db;
-  constructor(dataDir) {
-    import_fs6.default.mkdirSync(dataDir, { recursive: true });
-    const dbPath = import_path5.default.join(dataDir, "iframer.db");
-    this.db = IS_BUN ? createBunDb(dbPath) : createNodeDb(dbPath);
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS sessions (
-        user_id TEXT PRIMARY KEY,
-        blob    BLOB NOT NULL
-      )
-    `);
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS credentials (
-        user_id TEXT NOT NULL,
-        domain  TEXT NOT NULL,
-        blob    BLOB NOT NULL,
-        PRIMARY KEY (user_id, domain)
-      )
-    `);
-    this.migrateLegacyUserIds();
-  }
-  migrateLegacyUserIds() {
-    const CANONICAL = "iframer-local";
-    const LEGACY = ["cli-user", "mcp-user", "default"];
-    for (const legacy of LEGACY) {
-      this.db.run(`INSERT OR IGNORE INTO credentials (user_id, domain, blob)
-         SELECT ?, domain, blob FROM credentials WHERE user_id = ?`, CANONICAL, legacy);
-      this.db.run(`INSERT OR IGNORE INTO sessions (user_id, blob)
-         SELECT ?, blob FROM sessions WHERE user_id = ?`, CANONICAL, legacy);
-    }
-  }
-  async getSession(userId) {
-    const row = this.db.queryGet("SELECT blob FROM sessions WHERE user_id = ?", userId);
-    return row ? Buffer.from(row.blob) : null;
-  }
-  async setSession(userId, blob) {
-    this.db.run("INSERT OR REPLACE INTO sessions (user_id, blob) VALUES (?, ?)", userId, blob);
-  }
-  async deleteSession(userId) {
-    this.db.run("DELETE FROM sessions WHERE user_id = ?", userId);
-  }
-  async setCredential(userId, domain, encryptedBlob) {
-    this.db.run("INSERT OR REPLACE INTO credentials (user_id, domain, blob) VALUES (?, ?, ?)", userId, domain, encryptedBlob);
-  }
-  async getCredential(userId, domain) {
-    const row = this.db.queryGet("SELECT blob FROM credentials WHERE user_id = ? AND domain = ?", userId, domain);
-    return row ? Buffer.from(row.blob) : null;
-  }
-  async deleteCredential(userId, domain) {
-    this.db.run("DELETE FROM credentials WHERE user_id = ? AND domain = ?", userId, domain);
-  }
-  async listCredentialDomains(userId) {
-    const rows = this.db.queryAll("SELECT domain FROM credentials WHERE user_id = ?", userId);
-    return rows.map((r) => r.domain);
-  }
-  close() {
-    this.db.close();
   }
 }
-var import_path5, import_fs6, IS_BUN;
-var init_sqlite_store = __esm(() => {
-  import_path5 = __toESM(require("path"));
-  import_fs6 = __toESM(require("fs"));
-  IS_BUN = typeof globalThis.Bun !== "undefined";
-});
-
-// src/lib/storage.ts
-function createStore(options = {}) {
-  const dataDir = options.dataDir || getDataDir();
-  return new SqliteStore(dataDir);
+function err(message) {
+  return { content: [{ type: "text", text: message }], isError: true };
 }
-var init_storage = __esm(() => {
-  init_sqlite_store();
-  init_paths();
-});
-
-// src/lib/browser/chrome-downloader.ts
-var exports_chrome_downloader = {};
-__export(exports_chrome_downloader, {
-  isChromiumInstalled: () => isChromiumInstalled,
-  findChromeForTesting: () => findChromeForTesting,
-  findChrome: () => findChrome,
-  ensureChrome: () => ensureChrome,
-  downloadChrome: () => downloadChrome
-});
-function getPlatform() {
-  const arch = process.arch;
-  const platform = process.platform;
-  if (platform === "darwin")
-    return arch === "arm64" ? "mac-arm64" : "mac-x64";
-  if (platform === "linux")
-    return arch === "arm64" ? "linux-arm64" : "linux64";
-  if (platform === "win32")
-    return "win64";
-  throw new Error(`Unsupported platform: ${platform}-${arch}`);
+function getErrorMessage(err2) {
+  return err2 instanceof Error ? err2.message : String(err2);
 }
-function getChromeExecutablePath(installDir) {
-  const platform = process.platform;
-  if (platform === "darwin") {
-    const entries = import_fs7.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
-    const dir = entries[0] || "chrome-mac-arm64";
-    return import_path6.default.join(installDir, dir, "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing");
-  }
-  if (platform === "linux") {
-    const entries = import_fs7.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
-    const dir = entries[0] || "chrome-linux64";
-    return import_path6.default.join(installDir, dir, "chrome");
-  }
-  if (platform === "win32") {
-    const entries = import_fs7.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
-    const dir = entries[0] || "chrome-win64";
-    return import_path6.default.join(installDir, dir, "chrome.exe");
-  }
-  throw new Error(`Unsupported platform: ${platform}`);
-}
-async function downloadChrome(installDir = DEFAULT_INSTALL_DIR) {
-  log7.info("Downloading Chrome for Testing (first time only)...");
-  const res = await fetch(CHROME_VERSIONS_URL);
-  if (!res.ok)
-    throw new Error(`Failed to fetch Chrome versions: ${res.status}`);
-  const data = await res.json();
-  const channel = data.channels?.Stable;
-  if (!channel)
-    throw new Error("No Stable channel found in Chrome for Testing versions");
-  const platform = getPlatform();
-  const download = channel.downloads?.chrome?.find((d) => d.platform === platform);
-  if (!download)
-    throw new Error(`No Chrome for Testing download for platform: ${platform}`);
-  const url = download.url;
-  const version = channel.version;
-  log7.debug(`Version ${version} for ${platform}`);
-  log7.debug(`URL: ${url}`);
-  import_fs7.default.mkdirSync(installDir, { recursive: true });
-  const zipPath = import_path6.default.join(installDir, "chrome.zip");
-  const dlRes = await fetch(url);
-  if (!dlRes.ok)
-    throw new Error(`Download failed: ${dlRes.status}`);
-  const buf = Buffer.from(await dlRes.arrayBuffer());
-  import_fs7.default.writeFileSync(zipPath, buf);
-  log7.info(`Downloaded ${(buf.length / 1024 / 1024).toFixed(1)}MB`);
-  import_child_process2.execSync(`unzip -o -q "${zipPath}" -d "${installDir}"`, { stdio: "inherit" });
-  import_fs7.default.unlinkSync(zipPath);
-  const execPath = getChromeExecutablePath(installDir);
-  if (!import_fs7.default.existsSync(execPath)) {
-    throw new Error(`Chrome executable not found after extraction: ${execPath}`);
-  }
-  if (process.platform !== "win32") {
-    import_fs7.default.chmodSync(execPath, 493);
-  }
-  import_fs7.default.writeFileSync(import_path6.default.join(installDir, "version.json"), JSON.stringify({ version, platform, downloadedAt: new Date().toISOString() }));
-  log7.info(`Installed at: ${execPath}`);
-  return execPath;
-}
-function findChromeForTesting() {
-  if (process.env.CHROME_EXECUTABLE) {
-    if (import_fs7.default.existsSync(process.env.CHROME_EXECUTABLE))
-      return process.env.CHROME_EXECUTABLE;
-  }
-  try {
-    const execPath = getChromeExecutablePath(DEFAULT_INSTALL_DIR);
-    if (import_fs7.default.existsSync(execPath))
-      return execPath;
-  } catch {}
-  return null;
-}
-function findChrome() {
-  const cft = findChromeForTesting();
-  if (cft)
-    return cft;
-  const systemPaths = process.platform === "darwin" ? [
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium"
-  ] : process.platform === "linux" ? [
-    "/usr/bin/google-chrome-stable",
-    "/usr/bin/google-chrome",
-    "/usr/bin/chromium-browser",
-    "/usr/bin/chromium",
-    ...(() => {
-      try {
-        const dirs = import_fs7.default.readdirSync("/ms-playwright").filter((d) => d.startsWith("chromium-")).sort().reverse();
-        return dirs.map((d) => import_path6.default.join("/ms-playwright", d, "chrome-linux", "chrome"));
-      } catch {
-        return [];
-      }
-    })()
-  ] : [
-    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
-  ];
-  for (const p of systemPaths) {
-    if (import_fs7.default.existsSync(p))
-      return p;
-  }
-  return null;
-}
-function isChromiumInstalled() {
-  return findChrome() !== null;
-}
-async function ensureChrome() {
-  const cft = findChromeForTesting();
-  if (cft)
-    return cft;
-  try {
-    return await downloadChrome();
-  } catch (err) {
-    log7.error(`Failed to download Chrome for Testing: ${err instanceof Error ? err.message : String(err)}`);
-    const system = findChrome();
-    if (system) {
-      log7.warn(`Falling back to system Chrome: ${system}`);
-      return system;
-    }
-    throw new Error("No Chrome found. Download failed and no system Chrome available.");
-  }
-}
-var import_fs7, import_path6, import_os2, import_child_process2, log7, CHROME_VERSIONS_URL = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json", DEFAULT_INSTALL_DIR;
-var init_chrome_downloader = __esm(() => {
-  init_logger();
-  import_fs7 = __toESM(require("fs"));
-  import_path6 = __toESM(require("path"));
-  import_os2 = __toESM(require("os"));
-  import_child_process2 = require("child_process");
-  log7 = createLogger("chrome");
-  DEFAULT_INSTALL_DIR = import_path6.default.join(import_os2.default.homedir(), ".iframer", "chrome");
-});
-
-// src/lib/browser/daemon.ts
-class BrowserDaemon {
-  instances = new Map;
-  idleTimers = new Map;
-  idleTimeout;
-  constructor(idleTimeout = DEFAULT_IDLE_TIMEOUT) {
-    this.idleTimeout = idleTimeout;
-    const cleanup = () => this.stopAll().catch((err) => log8.warn(`cleanup failed: ${err}`));
-    process.on("exit", cleanup);
-    process.on("SIGINT", () => {
-      cleanup();
-      process.exit(0);
-    });
-    process.on("SIGTERM", () => {
-      cleanup();
-      process.exit(0);
-    });
-  }
-  async ensure(mode) {
-    if (mode === "docker-headful") {
-      throw new Error("Docker mode doesn't use the daemon. Use the Docker API.");
-    }
-    let instance = this.instances.get(mode);
-    if (instance) {
-      try {
-        if (instance.browser.isConnected()) {
-          let page2 = instance.page;
-          let context2 = instance.context;
-          try {
-            await page2.evaluate("1");
-          } catch {
-            log8.info(`Page for ${mode} is dead, creating fresh context`);
-            try {
-              await context2.close();
-            } catch {}
-            context2 = await instance.browser.newContext();
-            page2 = await context2.newPage();
-            instance.context = context2;
-            instance.page = page2;
-          }
-          this.resetIdleTimer(mode);
-          return { browser: instance.browser, context: context2, page: page2 };
-        }
-      } catch {}
-      await this.stopMode(mode);
-    }
-    const executablePath = await ensureChrome();
-    log8.info(`Launching Chrome for Testing in ${mode} mode: ${executablePath}`);
-    const userDataDir = import_path7.default.join(import_os3.default.homedir(), ".iframer", "chrome-profile", mode);
-    import_fs8.default.mkdirSync(userDataDir, { recursive: true });
-    const browser = await import_patchright2.chromium.launch({
-      executablePath,
-      headless: mode === "headless",
-      args: [
-        "--disable-blink-features=AutomationControlled",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-infobars"
-      ]
-    });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    instance = {
-      browser,
-      context,
-      page,
-      mode,
-      createdAt: new Date
-    };
-    this.instances.set(mode, instance);
-    this.resetIdleTimer(mode);
-    log8.info(`Chrome ${mode} ready`);
-    return { browser, context, page };
-  }
-  isRunning(mode) {
-    const instance = this.instances.get(mode);
-    if (!instance)
-      return false;
-    try {
-      return instance.browser.isConnected();
-    } catch {
-      return false;
-    }
-  }
-  liveInstances() {
-    return [...this.instances.values()].filter((inst) => {
-      try {
-        return inst.browser.isConnected();
-      } catch {
-        return false;
-      }
-    });
-  }
-  async stopMode(mode) {
-    const instance = this.instances.get(mode);
-    if (!instance)
-      return;
-    const timer = this.idleTimers.get(mode);
-    if (timer)
-      clearTimeout(timer);
-    this.idleTimers.delete(mode);
-    log8.info(`Stopping Chrome ${mode}...`);
-    try {
-      await instance.context.close();
-    } catch {}
-    try {
-      await instance.browser.close();
-    } catch {}
-    this.instances.delete(mode);
-  }
-  async stopAll() {
-    const modes = [...this.instances.keys()];
-    await Promise.all(modes.map((m) => this.stopMode(m)));
-  }
-  resetIdleTimer(mode) {
-    const existing = this.idleTimers.get(mode);
-    if (existing)
-      clearTimeout(existing);
-    this.idleTimers.set(mode, setTimeout(() => {
-      log8.info(`Idle timeout for ${mode}, stopping...`);
-      this.stopMode(mode);
-    }, this.idleTimeout));
-  }
-}
-var import_patchright2, import_os3, import_path7, import_fs8, log8, DEFAULT_IDLE_TIMEOUT;
-var init_daemon = __esm(() => {
-  init_chrome_downloader();
-  init_logger();
-  import_patchright2 = require("patchright");
-  import_os3 = __toESM(require("os"));
-  import_path7 = __toESM(require("path"));
-  import_fs8 = __toESM(require("fs"));
-  log8 = createLogger("daemon");
-  DEFAULT_IDLE_TIMEOUT = 5 * 60 * 1000;
-});
 
 // src/lib/domain-modes.ts
-var exports_domain_modes = {};
-__export(exports_domain_modes, {
-  DomainModeStore: () => DomainModeStore
-});
+var import_fs3 = __toESM(require("fs"));
+var import_path5 = __toESM(require("path"));
+var log2 = createLogger("domain-modes");
 function defaultFile() {
-  return import_path8.default.join(getDataDir(), "domain-modes.json");
+  return import_path5.default.join(getDataDir(), "domain-modes.json");
 }
+var TTL_DAYS = 14;
+var ESCALATION_LADDER = ["headless", "docker-headful", "binary-headful"];
 
 class DomainModeStore {
   data = {};
@@ -4095,8 +429,8 @@ class DomainModeStore {
   }
   load() {
     try {
-      if (import_fs9.default.existsSync(this.filePath)) {
-        this.data = JSON.parse(import_fs9.default.readFileSync(this.filePath, "utf-8"));
+      if (import_fs3.default.existsSync(this.filePath)) {
+        this.data = JSON.parse(import_fs3.default.readFileSync(this.filePath, "utf-8"));
       }
     } catch {
       this.data = {};
@@ -4104,864 +438,51 @@ class DomainModeStore {
   }
   save() {
     try {
-      import_fs9.default.mkdirSync(import_path8.default.dirname(this.filePath), { recursive: true });
-      import_fs9.default.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2));
-    } catch (err) {
-      log9.error("Failed to save:", err);
+      import_fs3.default.mkdirSync(import_path5.default.dirname(this.filePath), { recursive: true });
+      import_fs3.default.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2));
+    } catch (err2) {
+      log2.error("Failed to save:", err2);
     }
   }
-}
-var import_fs9, import_path8, log9, TTL_DAYS = 14, ESCALATION_LADDER;
-var init_domain_modes = __esm(() => {
-  init_logger();
-  init_paths();
-  import_fs9 = __toESM(require("fs"));
-  import_path8 = __toESM(require("path"));
-  log9 = createLogger("domain-modes");
-  ESCALATION_LADDER = ["headless", "docker-headful", "binary-headful"];
-});
-
-// src/lib/block-detection.ts
-async function detectBlock(page) {
-  try {
-    const [title, url, bodyText] = await Promise.all([
-      page.title().catch(() => ""),
-      Promise.resolve(page.url()),
-      page.evaluate(() => document.body?.innerText?.slice(0, 1000) || "").catch(() => "")
-    ]);
-    if (title.includes("Just a moment") || title.includes("Attention Required")) {
-      return { blocked: true, reason: "cloudflare-challenge" };
-    }
-    if (bodyText.includes("Verify you are human") || bodyText.includes("cf-turnstile")) {
-      return { blocked: true, reason: "cloudflare-turnstile" };
-    }
-    if (bodyText.includes("Checking your browser") || bodyText.includes("Please wait while we verify")) {
-      return { blocked: true, reason: "cloudflare-checking" };
-    }
-    const hasCfChallenge = await page.evaluate(() => {
-      return !!document.querySelector('iframe[src*="challenges.cloudflare.com"]');
-    }).catch((err) => {
-      log10.warn(`CF challenge check failed, assuming blocked: ${err}`);
-      return true;
-    });
-    if (hasCfChallenge) {
-      return { blocked: true, reason: "cloudflare-turnstile" };
-    }
-    if (title.includes("Access Denied") && bodyText.includes("Reference #")) {
-      return { blocked: true, reason: "akamai-block" };
-    }
-    if (bodyText.includes("Press & Hold") && bodyText.includes("human")) {
-      return { blocked: true, reason: "perimeterx-block" };
-    }
-    if (bodyText.includes("datadome") || bodyText.includes("captcha-delivery.com")) {
-      return { blocked: true, reason: "datadome-block" };
-    }
-    if (bodyText.trim().length < THRESHOLDS.MIN_BODY_TEXT) {
-      const hasCaptchaIframe = await page.evaluate(() => {
-        return !!(document.querySelector('iframe[src*="recaptcha"]') || document.querySelector('iframe[src*="hcaptcha"]'));
-      }).catch((err) => {
-        log10.warn(`captcha iframe check failed, assuming blocked: ${err}`);
-        return true;
-      });
-      if (hasCaptchaIframe) {
-        return { blocked: true, reason: "captcha-wall" };
-      }
-    }
-    if (title.includes("403") || title.includes("Forbidden")) {
-      return { blocked: true, reason: "http-403" };
-    }
-    if (!url.includes("about:blank") && bodyText.trim().length < 20 && title.length < 5) {}
-    return { blocked: false };
-  } catch (err) {
-    log10.warn(`page evaluation failed, assuming blocked: ${err}`);
-    return { blocked: true, reason: "evaluation-failed" };
-  }
-}
-var log10;
-var init_block_detection = __esm(() => {
-  init_constants();
-  init_logger();
-  log10 = createLogger("block-detection");
-});
-
-// src/lib/browser/cdp-launcher.ts
-function hasDisplay() {
-  if (process.platform === "darwin" || process.platform === "win32")
-    return true;
-  return !!process.env.DISPLAY;
-}
-function checkModeAvailability() {
-  return {
-    headless: true,
-    binaryHeadful: hasDisplay()
-  };
-}
-var log11;
-var init_cdp_launcher = __esm(() => {
-  init_chrome_downloader();
-  init_logger();
-  log11 = createLogger("cdp-launcher");
-});
-
-// src/lib/iframer.ts
-var exports_iframer = {};
-__export(exports_iframer, {
-  Iframer: () => Iframer
-});
-function getErrorMessage2(err) {
-  return err instanceof Error ? err.message : String(err);
-}
-
-class Iframer {
-  screenshotDir;
-  publicUrl;
-  staleTimeoutMs;
-  userRefs = new Map;
-  store;
-  daemon;
-  domainModes;
-  operatingMode;
-  constructor(config = {}) {
-    this.screenshotDir = config.screenshotDir || DEFAULT_SCREENSHOT_DIR;
-    this.publicUrl = config.publicUrl || DEFAULT_PUBLIC_URL;
-    this.staleTimeoutMs = config.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS3;
-    this.store = createStore({ dataDir: config.dataDir });
-    this.daemon = new BrowserDaemon(config.sessionTimeoutMs);
-    this.domainModes = new DomainModeStore;
-    this.operatingMode = config.mode || "local";
-  }
-  makeContext(userId, token) {
-    if (!this.userRefs.has(userId)) {
-      this.userRefs.set(userId, { refMap: new Map, nextRefId: 1 });
-    }
-    const refs = this.userRefs.get(userId);
-    return {
-      userId,
-      token,
-      screenshotDir: this.screenshotDir,
-      publicUrl: this.publicUrl,
-      staleTimeoutMs: this.staleTimeoutMs,
-      refMap: refs.refMap,
-      nextRefId: refs.nextRefId,
-      store: this.store
-    };
-  }
-  getAvailableModes() {
-    const modes = ["headless"];
-    const { binaryHeadful } = checkModeAvailability();
-    if (binaryHeadful)
-      modes.push("binary-headful");
-    if (this.operatingMode === "docker")
-      modes.push("docker-headful");
-    return modes;
-  }
-  async getModeAvailability() {
-    const { binaryHeadful } = checkModeAvailability();
-    return {
-      headless: { available: true },
-      "binary-headful": {
-        available: binaryHeadful,
-        reason: binaryHeadful ? undefined : "No display available"
-      },
-      "docker-headful": {
-        available: this.operatingMode === "docker",
-        reason: this.operatingMode === "docker" ? undefined : "Docker not configured"
-      }
-    };
-  }
-  async fetch(userId, token, request) {
-    const { url, browser: preferredBrowser, waitUntil = "domcontentloaded", waitForSelector, extract, actions = [], returnHtml = false, headers = {}, locale = "pt-BR", sessionless = false } = request;
-    const useSession = !sessionless && !!userId && !!token;
-    const startedAt = Date.now();
-    let context = null;
-    try {
-      let sessionData = null;
-      let encryptionKey = null;
-      if (useSession) {
-        encryptionKey = await deriveKey(token);
-        const blob = await this.store.getSession(userId);
-        if (blob && blob.length > 0) {
-          sessionData = JSON.parse(decrypt(blob, encryptionKey));
-        }
-      }
-      const { browser, name: browserName } = await getBrowserWithFallback(preferredBrowser);
-      context = await browser.newContext(stealthContextOptions({ locale, extraHTTPHeaders: { ...headers } }, userId ?? undefined));
-      if (sessionData)
-        await injectCookies(context, sessionData);
-      const page = await context.newPage();
-      await applyStealthToPage(page);
-      await page.goto(url, { waitUntil: waitUntil || "domcontentloaded", timeout: TIMEOUTS.NAVIGATION });
-      if (sessionData)
-        await injectStorage(page, sessionData);
-      if (waitForSelector)
-        await page.waitForSelector(waitForSelector, { timeout: TIMEOUTS.SELECTOR_WAIT });
-      for (const action of actions) {
-        switch (action.type) {
-          case "click":
-            await page.click(action.selector);
-            break;
-          case "fill":
-            await page.fill(action.selector, action.value);
-            break;
-          case "wait":
-            await page.waitForTimeout(action.ms);
-            break;
-          case "scroll":
-            await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-            break;
-          case "human-click":
-            await humanClick(page, action.selector);
-            break;
-          case "human-type":
-            await humanType(page, action.selector, action.value);
-            break;
-          case "recaptcha-click":
-            await clickRecaptchaCheckbox(page);
-            break;
-          case "recaptcha-select":
-            await clickChallengeTiles(page, action.tiles);
-            break;
-          case "recaptcha-verify":
-            await clickChallengeVerify(page);
-            break;
-        }
-      }
-      const finalUrl = page.url();
-      const html = returnHtml ? await page.content() : undefined;
-      const result = extract ? await page.evaluate(extract) : undefined;
-      if (useSession) {
-        const updatedSession = await extractSession(context, page);
-        const encrypted = encrypt(JSON.stringify(updatedSession), encryptionKey);
-        await this.store.setSession(userId, encrypted);
-      }
-      return { ok: true, browser: browserName, url: finalUrl, html, result, durationMs: Date.now() - startedAt };
-    } catch (err) {
-      return { ok: false, browser: "unknown", url, error: getErrorMessage2(err), durationMs: Date.now() - startedAt };
-    } finally {
-      if (context)
-        await context.close();
-    }
-  }
-  async startSession(userId, token, options = {}) {
-    const existing = getSession(userId);
-    if (existing) {
-      resetTimeout(userId);
-      return {
-        noVncUrl: `http://localhost:${existing.wsPort}/vnc.html?autoconnect=true`,
-        wsPort: existing.wsPort
-      };
-    }
-    const session = await startSession(userId);
-    const encryptionKey = await deriveKey(token);
-    const blob = await this.store.getSession(userId);
-    let sessionData = null;
-    if (blob && blob.length > 0) {
-      sessionData = JSON.parse(decrypt(blob, encryptionKey));
-      if (sessionData)
-        await injectCookies(session.context, sessionData);
-    }
-    if (options.url) {
-      await session.page.goto(options.url, { waitUntil: "domcontentloaded", timeout: TIMEOUTS.NAVIGATION });
-      if (sessionData)
-        await injectStorage(session.page, sessionData);
-    }
-    return {
-      noVncUrl: `http://localhost:${session.wsPort}/vnc.html?autoconnect=true`,
-      wsPort: session.wsPort
-    };
-  }
-  getSession(userId) {
-    return getSession(userId);
-  }
-  async stopSession(userId, token) {
-    let sessionSaved = false;
-    if (token) {
-      const encryptionKey = await deriveKey(token);
-      for (const inst of this.daemon.liveInstances()) {
-        try {
-          const data = await extractSession(inst.context, inst.page);
-          if (data) {
-            const encrypted = encrypt(JSON.stringify(data), encryptionKey);
-            await this.store.setSession(userId, encrypted);
-            sessionSaved = true;
-            break;
-          }
-        } catch (err) {
-          log12.warn(`stopSession: failed to extract daemon state: ${getErrorMessage2(err)}`);
-        }
-      }
-    }
-    const dockerSessionData = await stopSession(userId);
-    if (dockerSessionData && token) {
-      const encryptionKey = await deriveKey(token);
-      const encrypted = encrypt(JSON.stringify(dockerSessionData), encryptionKey);
-      await this.store.setSession(userId, encrypted);
-      sessionSaved = true;
-    }
-    await this.daemon.stopAll();
-    return { ok: true, sessionSaved };
-  }
-  pendingElicitOtp;
-  async execute(userId, token, pipeline, runtime) {
-    this.pendingElicitOtp = runtime?.elicitOtp;
-    try {
-      return await this.executeInner(userId, token, pipeline);
-    } finally {
-      this.pendingElicitOtp = undefined;
-    }
-  }
-  async executeInner(userId, token, pipeline) {
-    const opts = pipeline.options || {};
-    const forcedMode = opts.mode;
-    const autoEscalate = opts.autoEscalate !== false;
-    const firstNav = pipeline.steps.find((s) => s.type === "navigate");
-    const domain = firstNav ? new URL(firstNav.url).hostname : null;
-    const availableModes = this.getAvailableModes();
-    let mode;
-    if (forcedMode && availableModes.includes(forcedMode)) {
-      mode = forcedMode;
-    } else if (domain) {
-      mode = this.domainModes.getBestMode(domain, availableModes);
-    } else {
-      mode = availableModes[0] || "headless";
-    }
-    let result = await this.executeWithMode(userId, token, pipeline, mode);
-    if (!result.ok && autoEscalate && domain && result.error?.errorType === "bot-blocked") {
-      const failedMode = mode;
-      if (domain)
-        this.domainModes.recordFailure(domain, failedMode, result.error?.message || "blocked");
-      const nextMode = this.domainModes.getNextMode(failedMode, availableModes);
-      if (nextMode) {
-        log12.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
-        if (failedMode !== "docker-headful") {
-          await this.daemon.stopMode(failedMode);
-        }
-        result = await this.executeWithMode(userId, token, pipeline, nextMode);
-        result.modeEscalated = true;
-        result.modeUsed = nextMode;
-        if (result.ok && domain) {
-          this.domainModes.recordSuccess(domain, nextMode);
-        } else if (!result.ok && domain && result.error?.errorType === "bot-blocked") {
-          this.domainModes.recordFailure(domain, nextMode, result.error?.message || "blocked");
-          const thirdMode = this.domainModes.getNextMode(nextMode, availableModes);
-          if (thirdMode) {
-            log12.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
-            if (nextMode !== "docker-headful") {
-              await this.daemon.stopMode(nextMode);
-            }
-            result = await this.executeWithMode(userId, token, pipeline, thirdMode);
-            result.modeEscalated = true;
-            result.modeUsed = thirdMode;
-            if (result.ok && domain) {
-              this.domainModes.recordSuccess(domain, thirdMode);
-            }
-          }
-        }
-      }
-    } else if (result.ok && domain) {
-      this.domainModes.recordSuccess(domain, mode);
-    }
-    return result;
-  }
-  async executeWithMode(userId, token, pipeline, mode) {
-    if (mode === "docker-headful") {
-      return this.executeDocker(userId, token, pipeline);
-    }
-    return this.executeLocal(userId, token, pipeline, mode);
-  }
-  async executeDocker(userId, token, pipeline) {
-    let session = getSession(userId);
-    if (!session) {
-      const firstNav = pipeline.steps.find((s) => s.type === "navigate");
-      await this.startSession(userId, token, firstNav ? { url: firstNav.url } : {});
-      session = getSession(userId);
-    }
-    resetTimeout(userId);
-    const ctx = this.makeContext(userId, token);
-    const runner = new PipelineRunner(ctx);
-    const result = await runner.run(session.page, pipeline);
-    if (result.ok) {
-      const blockResult = await detectBlock(session.page);
-      if (blockResult.blocked) {
-        const pageState = await this.getPageState(session.page, ctx);
-        return {
-          ...result,
-          ok: false,
-          modeUsed: "docker-headful",
-          error: {
-            failedAtStep: result.completedSteps - 1,
-            failedStep: pipeline.steps[result.completedSteps - 1],
-            errorType: "bot-blocked",
-            message: `Page blocked by bot detection: ${blockResult.reason}`,
-            pageState,
-            suggestion: "The page is blocked by bot detection. Try a different browser mode.",
-            retryable: true
-          }
-        };
-      }
-    }
-    const refs = this.userRefs.get(userId);
-    if (refs)
-      refs.nextRefId = ctx.nextRefId;
-    result.modeUsed = "docker-headful";
-    return result;
-  }
-  async executeLocal(userId, token, pipeline, mode) {
-    const startTime = Date.now();
-    try {
-      const { page } = await this.daemon.ensure(mode);
-      const encryptionKey = await deriveKey(token);
-      const blob = await this.store.getSession(userId);
-      let sessionData = null;
-      if (blob && blob.length > 0) {
-        try {
-          sessionData = JSON.parse(decrypt(blob, encryptionKey));
-          await injectCookies(page.context(), sessionData);
-        } catch {}
-      }
-      const ctx = this.makeContext(userId, token);
-      if (sessionData)
-        ctx.sessionData = sessionData;
-      if (this.pendingElicitOtp)
-        ctx.elicitOtp = this.pendingElicitOtp;
-      const runner = new PipelineRunner(ctx);
-      const result = await runner.run(page, pipeline);
-      if (result.ok) {
-        const blockResult = await detectBlock(page);
-        if (blockResult.blocked) {
-          const pageState = await this.getPageState(page, ctx);
-          return {
-            ...result,
-            ok: false,
-            modeUsed: mode,
-            error: {
-              failedAtStep: result.completedSteps - 1,
-              failedStep: pipeline.steps[result.completedSteps - 1],
-              errorType: "bot-blocked",
-              message: `Page blocked by bot detection: ${blockResult.reason}`,
-              pageState,
-              suggestion: `The page was blocked in ${mode} mode. ${mode === "headless" ? "Try docker-headful mode." : mode === "docker-headful" ? "Try binary-headful mode." : "All modes exhausted."}`,
-              retryable: true
-            }
-          };
-        }
-      }
-      let updatedSession = null;
-      if (result.ok) {
-        try {
-          updatedSession = await extractSession(page.context(), page);
-          const encrypted = encrypt(JSON.stringify(updatedSession), encryptionKey);
-          await this.store.setSession(userId, encrypted);
-        } catch {}
-      }
-      if (result.ok) {
-        try {
-          this.updateKnowledgeFromRun(pipeline, result, updatedSession, mode);
-        } catch (err) {
-          log12.warn(`knowledge update failed: ${getErrorMessage2(err)}`);
-        }
-      }
-      const refs = this.userRefs.get(userId);
-      if (refs)
-        refs.nextRefId = ctx.nextRefId;
-      result.modeUsed = mode;
-      return result;
-    } catch (err) {
-      return {
-        ok: false,
-        completedSteps: 0,
-        totalSteps: pipeline.steps.length,
-        results: [],
-        finalState: { url: "", title: "" },
-        obstacles: [],
-        error: {
-          failedAtStep: 0,
-          failedStep: pipeline.steps[0],
-          errorType: "action-failed",
-          message: `Failed to launch browser in ${mode} mode: ${getErrorMessage2(err)}`,
-          pageState: { url: "", title: "" },
-          suggestion: `Browser launch failed. ${mode === "binary-headful" ? "Make sure a display is available." : "Check Chrome installation."}`,
-          retryable: true
-        },
-        durationMs: Date.now() - startTime,
-        modeUsed: mode
-      };
-    }
-  }
-  updateKnowledgeFromRun(pipeline, result, sessionData, mode) {
-    const firstNav = pipeline.steps.find((s) => s.type === "navigate");
-    if (!firstNav || firstNav.type !== "navigate")
-      return;
-    let domain;
-    try {
-      domain = new URL(firstNav.url).hostname;
-    } catch {
-      return;
-    }
-    const domainRoot = domain.replace(/^www\./, "");
-    const hadLogin = pipeline.steps.some((s) => s.type === "login");
-    const auth = { type: "unknown" };
-    const cookieNames = [];
-    const localStorageKeys = [];
-    const sessionStorageKeys = [];
-    if (sessionData) {
-      for (const c of sessionData.cookies ?? []) {
-        if (c.domain.endsWith(domainRoot) || domainRoot.endsWith(c.domain.replace(/^\./, ""))) {
-          if (!cookieNames.includes(c.name))
-            cookieNames.push(c.name);
-        }
-      }
-      for (const [origin, store] of Object.entries(sessionData.localStorage ?? {})) {
-        if (origin.includes(domainRoot)) {
-          for (const k of Object.keys(store)) {
-            if (!localStorageKeys.includes(k))
-              localStorageKeys.push(k);
-          }
-        }
-      }
-      for (const [origin, store] of Object.entries(sessionData.sessionStorage ?? {})) {
-        if (origin.includes(domainRoot)) {
-          for (const k of Object.keys(store)) {
-            if (!sessionStorageKeys.includes(k))
-              sessionStorageKeys.push(k);
-          }
-        }
-      }
-    }
-    if (cookieNames.length > 0 && localStorageKeys.length > 0) {
-      auth.type = "cookies+localStorage";
-    } else if (localStorageKeys.length > 0) {
-      auth.type = "localStorage";
-    } else if (cookieNames.length > 0) {
-      auth.type = "cookies";
-    }
-    if (cookieNames.length > 0)
-      auth.cookieNames = cookieNames;
-    if (localStorageKeys.length > 0)
-      auth.localStorageKeys = localStorageKeys;
-    if (sessionStorageKeys.length > 0)
-      auth.sessionStorageKeys = sessionStorageKeys;
-    const endpoints = [];
-    const replayHeaders = new Set;
-    for (const api of result.capturedApi ?? []) {
-      if (!api.domain.includes(domainRoot) && !domainRoot.includes(api.domain.replace(/^www\./, "")))
-        continue;
-      if (api.auth?.authorization)
-        replayHeaders.add("Authorization");
-      for (const name of Object.keys(api.auth?.tokens ?? {}))
-        replayHeaders.add(name);
-      for (const ep of api.endpoints ?? []) {
-        endpoints.push({
-          method: ep.method,
-          path: ep.path,
-          description: `Status ${ep.responseStatus}. Triggered at step ${ep.triggeredAtStep}.`,
-          example: ep.curl,
-          firstSeen: new Date().toISOString()
-        });
-      }
-    }
-    if (replayHeaders.size > 0) {
-      auth.headers = [...replayHeaders];
-      if (!auth.type.includes("header"))
-        auth.type = auth.type === "unknown" ? "headers" : `${auth.type}+headers`;
-    }
-    const notes = [];
-    if (hadLogin)
-      notes.push(`Last successful login via browser in ${mode} mode.`);
-    if (result.obstacles?.some((o) => o.type?.includes("captcha")))
-      notes.push("Captcha encountered — browser required for fresh logins.");
-    mergeKnowledge(domainRoot, {
-      lastMode: mode,
-      browserRequired: true,
-      auth,
-      endpoints,
-      notes
-    });
-  }
-  async getPageState(page, ctx) {
-    try {
-      const url = page.url();
-      const title = await page.title().catch(() => "");
-      const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false }).catch(() => null);
-      const screenshotUrl = buf ? saveScreenshot(buf, `block-${Date.now()}.jpg`, ctx.screenshotDir, ctx.publicUrl) : undefined;
-      return { url, title, screenshotUrl };
-    } catch {
-      return { url: "", title: "" };
-    }
-  }
-  async screenshot(userId) {
-    const session = getSession(userId);
-    if (!session)
-      return null;
-    resetTimeout(userId);
-    const buf = await session.page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
-    const screenshotUrl = saveScreenshot(buf, `screenshot-${Date.now()}.jpg`, this.screenshotDir, this.publicUrl);
-    return {
-      screenshotUrl,
-      url: session.page.url(),
-      title: await session.page.title()
-    };
-  }
-  async storeCredential(userId, token, credential) {
-    const credKey = await deriveKey(token, "credentials");
-    const normalizedDomain = normalizeDomain(credential.domain);
-    const data = {
-      ...credential,
-      domain: normalizedDomain,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    const encrypted = encrypt(JSON.stringify(data), credKey);
-    await this.store.setCredential(userId, normalizedDomain, encrypted);
-  }
-  async getCredential(userId, token, domain) {
-    const credKey = await deriveKey(token, "credentials");
-    for (const candidate of domainLookupChain(domain)) {
-      const blob = await this.store.getCredential(userId, candidate);
-      if (blob && blob.length > 0) {
-        try {
-          return JSON.parse(decrypt(blob, credKey));
-        } catch (err) {
-          throw new Error(`Credentials for ${candidate} exist but cannot be decrypted. ` + `The encryption key has changed. Re-store with: ` + `iframer-toolkit credentials add ${candidate}`);
-        }
-      }
-    }
-    return null;
-  }
-  async listCredentials(userId) {
-    return this.store.listCredentialDomains(userId);
-  }
-  async deleteCredential(userId, domain) {
-    await this.store.deleteCredential(userId, normalizeDomain(domain));
-  }
-  async loginWithCredentials(userId, token, domain, selectors) {
-    const session = getSession(userId);
-    if (!session)
-      return { ok: false, url: "", title: "", error: "No active interactive session. Start one first." };
-    const credKey = await deriveKey(token, "credentials");
-    let blob = null;
-    for (const candidate of domainLookupChain(domain)) {
-      const b = await this.store.getCredential(userId, candidate);
-      if (b && b.length > 0) {
-        blob = b;
-        break;
-      }
-    }
-    if (!blob) {
-      const stored = await this.store.listCredentialDomains(userId);
-      return { ok: false, url: "", title: "", error: `No credentials stored for ${normalizeDomain(domain)}. Stored: ${stored.join(", ") || "(none)"}` };
-    }
-    const credential = JSON.parse(decrypt(blob, credKey));
-    const page = session.page;
-    resetTimeout(userId);
-    if (selectors.username && credential.username) {
-      await humanType(page, selectors.username, credential.username);
-      await page.waitForTimeout(TIMING.PRE_NAVIGATE[0] + Math.random() * (TIMING.PRE_NAVIGATE[1] - TIMING.PRE_NAVIGATE[0]));
-    }
-    if (selectors.password && credential.password) {
-      await humanType(page, selectors.password, credential.password);
-      await page.waitForTimeout(TIMING.PRE_NAVIGATE[0] + Math.random() * (TIMING.PRE_NAVIGATE[1] - TIMING.PRE_NAVIGATE[0]));
-    }
-    if (selectors.submit) {
-      await humanClick(page, selectors.submit);
-      await page.waitForLoadState("domcontentloaded").catch(() => {});
-      await page.waitForTimeout(TIMING.POST_LOGIN_WAIT);
-    }
-    if (selectors.totp && credential.totp_secret) {
-      const totp = generateTOTP(credential.totp_secret);
-      await page.click(selectors.totp);
-      await page.keyboard.type(totp, { delay: 50 });
-      await page.waitForTimeout(TIMING.POST_TOTP_WAIT);
-    }
-    const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
-    const screenshotUrl = saveScreenshot(buf, `login-${Date.now()}.jpg`, this.screenshotDir, this.publicUrl);
-    return { ok: true, url: page.url(), title: await page.title(), screenshotUrl };
-  }
-  async clearSession(userId) {
-    await this.store.deleteSession(userId);
-  }
-  async shutdown() {
-    await this.daemon.stopAll();
-    await cleanupAllSessions();
-    if ("close" in this.store && typeof this.store.close === "function") {
-      this.store.close();
-    }
-  }
-}
-var import_path9, log12, DEFAULT_SCREENSHOT_DIR, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3 = 20000;
-var init_iframer = __esm(() => {
-  init_pipeline();
-  init_session_manager();
-  init_launcher();
-  init_stealth();
-  init_humanize();
-  init_crypto();
-  init_knowledge();
-  init_screenshot();
-  init_storage();
-  init_daemon();
-  init_domain_modes();
-  init_block_detection();
-  init_cdp_launcher();
-  init_constants();
-  init_logger();
-  import_path9 = __toESM(require("path"));
-  log12 = createLogger("iframer");
-  DEFAULT_SCREENSHOT_DIR = import_path9.default.join("/Users/eduardoverona/tools/iframer-toolkit/src/lib", "../../.screenshots");
-  DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
-});
-
-// src/mcp/server.ts
-var import_mcp = require("@modelcontextprotocol/sdk/server/mcp.js");
-var import_stdio = require("@modelcontextprotocol/sdk/server/stdio.js");
-
-// src/mcp/helpers.ts
-init_logger();
-init_crypto();
-var import_path10 = __toESM(require("path"));
-var import_os4 = __toESM(require("os"));
-var log13 = createLogger("mcp");
-var BASE_URL = process.env.IFRAMER_URL || "http://localhost:3021";
-var IFRAMER_SECRET = process.env.IFRAMER_SECRET;
-var IFRAMER_MODE = process.env.IFRAMER_MODE;
-var LOCAL_USER = "iframer-local";
-var LOCAL_TOKEN = getLocalToken();
-var _iframer = null;
-async function getIframer() {
-  if (!_iframer) {
-    const { Iframer: Iframer2 } = await Promise.resolve().then(() => (init_iframer(), exports_iframer));
-    const baseDir = import_path10.default.join(import_os4.default.tmpdir(), "iframer-screenshots");
-    const screenshotDir = import_path10.default.join(baseDir, "screenshots");
-    _iframer = new Iframer2({
-      screenshotDir,
-      publicUrl: `file://${baseDir}`,
-      mode: "local"
-    });
-  }
-  return _iframer;
-}
-function authHeaders() {
-  const headers = { "Content-Type": "application/json" };
-  if (IFRAMER_SECRET)
-    headers["x-api-key"] = IFRAMER_SECRET;
-  return headers;
-}
-async function apiPost(endpoint, body) {
-  const res = await fetch(`${BASE_URL}${endpoint}`, {
-    method: "POST",
-    headers: authHeaders(),
-    body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(180000)
-  });
-  return res.json();
-}
-async function apiGet(endpoint) {
-  const res = await fetch(`${BASE_URL}${endpoint}`, { headers: authHeaders() });
-  return res.json();
-}
-async function isDockerRunning() {
-  try {
-    const res = await fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3000) });
-    const data = await res.json();
-    return data.ok === true;
-  } catch {
-    return false;
-  }
-}
-function hasDisplay2() {
-  if (process.platform === "darwin" || process.platform === "win32")
-    return true;
-  return !!process.env.DISPLAY;
-}
-async function detectAvailableModes() {
-  const dockerAvailable = await isDockerRunning();
-  let chromeInstalled = false;
-  try {
-    const { findChromeForTesting: findChromeForTesting2 } = await Promise.resolve().then(() => (init_chrome_downloader(), exports_chrome_downloader));
-    chromeInstalled = !!findChromeForTesting2();
-  } catch {}
-  const display = hasDisplay2();
-  return {
-    headless: {
-      available: chromeInstalled,
-      reason: chromeInstalled ? undefined : "Chrome for Testing not installed. Run: bun tests/test-modes.ts (or the agent can auto-download it on first execute)"
-    },
-    "binary-headful": {
-      available: chromeInstalled && display,
-      reason: !chromeInstalled ? "Chrome for Testing not installed" : !display ? "No display available ($DISPLAY not set)" : undefined
-    },
-    "docker-headful": {
-      available: dockerAvailable,
-      reason: dockerAvailable ? undefined : `Docker container not running at ${BASE_URL}`
-    },
-    chromeForTesting: {
-      installed: chromeInstalled,
-      ...!chromeInstalled ? { action: `Run this command to install: bun -e "require('./src/lib/browser/chrome-downloader').downloadChrome()"` } : {}
-    }
-  };
-}
-async function fetchScreenshot(url) {
-  try {
-    if (url.startsWith("file://")) {
-      const fs10 = await import("fs");
-      const { fileURLToPath } = await import("url");
-      const filePath = fileURLToPath(url);
-      const buf2 = fs10.readFileSync(filePath);
-      return { type: "image", data: buf2.toString("base64"), mimeType: "image/jpeg" };
-    }
-    const res = await fetch(url);
-    if (!res.ok)
-      return null;
-    const buf = await res.arrayBuffer();
-    return { type: "image", data: Buffer.from(buf).toString("base64"), mimeType: "image/jpeg" };
-  } catch {
-    return null;
-  }
-}
-function err(message) {
-  return { content: [{ type: "text", text: message }], isError: true };
-}
-async function ensureLocalChrome() {
-  const { findChromeForTesting: findChromeForTesting2, downloadChrome: downloadChrome2 } = await Promise.resolve().then(() => (init_chrome_downloader(), exports_chrome_downloader));
-  if (!findChromeForTesting2()) {
-    await downloadChrome2();
-  }
-}
-function getErrorMessage3(err2) {
-  return err2 instanceof Error ? err2.message : String(err2);
 }
 
 // src/mcp/tools/status.ts
 function registerStatusTool(server) {
   server.tool("status", `Get the full state of iframer in one call. Call this first. Returns: available browser modes, API health, active session, stored credentials, and domain memory.`, {}, async () => {
     try {
-      const status = { modes: {}, api: false, session: null, credentials: [], domainMemory: null };
-      status.modes = await detectAvailableModes();
+      const status = {};
+      const dockerRunning = await isDockerRunning();
+      status.dockerApi = dockerRunning;
       try {
-        const health = await fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3000) });
-        const healthCheck = await health.json();
-        status.api = healthCheck.ok === true;
+        const localHealth = await localApiGet("/health");
+        status.localServer = localHealth.ok;
       } catch {
-        status.api = false;
+        status.localServer = false;
       }
-      if (status.api) {
+      try {
+        const browserHealth = await localApiGet("/browser/health");
+        status.browserAlive = browserHealth.alive;
+        status.runningModes = browserHealth.modes;
+      } catch {}
+      if (dockerRunning) {
         try {
           const sessionData = await apiGet("/interactive/status");
-          status.session = sessionData.active ? { active: true, noVncUrl: sessionData.noVncUrl, createdAt: sessionData.createdAt, url: sessionData.url } : { active: false };
+          status.dockerSession = sessionData.active ? { active: true, noVncUrl: sessionData.noVncUrl } : { active: false };
         } catch {}
       }
       try {
-        const iframer = await getIframer();
-        status.credentials = await iframer.listCredentials(LOCAL_USER);
-      } catch {}
+        const credData = await localApiGet("/credentials");
+        status.credentials = credData.domains || [];
+      } catch {
+        status.credentials = [];
+      }
       try {
-        const { DomainModeStore: DomainModeStore2 } = await Promise.resolve().then(() => (init_domain_modes(), exports_domain_modes));
-        const domainModes = new DomainModeStore2;
+        const domainModes = new DomainModeStore;
         status.domainMemory = domainModes.getSummary();
       } catch {}
       return { content: [{ type: "text", text: JSON.stringify(status, null, 2) }] };
     } catch (e) {
-      return err(`Error: ${getErrorMessage3(e)}`);
+      return err(`Error: ${getErrorMessage(e)}`);
     }
   });
 }
@@ -4985,8 +506,7 @@ PRE-FLIGHT: Call \`knowledge get <domain>\` first. If the cache shows a direct-A
     sessionless: import_zod.z.boolean().optional().describe("Skip session persistence")
   }, async (params) => {
     try {
-      const iframer = await getIframer();
-      const fetchResult = await iframer.fetch(LOCAL_USER, LOCAL_TOKEN, params);
+      const fetchResult = await localApiPost("/fetch", params);
       if (!fetchResult.ok)
         return err(`Error: ${fetchResult.error}`);
       const { html, ...rest } = fetchResult;
@@ -4996,7 +516,7 @@ PRE-FLIGHT: Call \`knowledge get <domain>\` first. If the cache shows a direct-A
 ` + html : JSON.stringify(rest, null, 2);
       return { content: [{ type: "text", text }] };
     } catch (e) {
-      return err(`Error: ${getErrorMessage3(e)}`);
+      return err(`Error: ${getErrorMessage(e)}`);
     }
   });
 }
@@ -5037,59 +557,35 @@ var stepSchema = import_zod2.z.discriminatedUnion("type", [
 function registerExecuteTool(server) {
   server.tool("execute", `Execute a pipeline of browser steps. Auto-starts a session if needed. Handles obstacles (captcha, cookie banners) automatically.
 
-MANDATORY PRE-FLIGHT: Before calling this tool for any website, call \`knowledge get <domain>\` first. If the cache shows a direct-API path that satisfies the user's request, skip this tool entirely — direct API calls are orders of magnitude faster than a browser pipeline. Only fall through to \`execute\` when the cache is missing, stale, or insufficient. Every successful run here updates the knowledge cache automatically.
+MANDATORY PRE-FLIGHT: Before calling this tool for any website, call \`knowledge get <domain>\` first. If the cache shows a direct-API path that satisfies the user's request, skip this tool entirely — direct API calls are orders of magnitude faster. Only fall through to \`execute\` when the cache is missing, stale, or insufficient. Every successful run here updates the knowledge cache automatically.
 
 Steps run sequentially. Each step has a 20-second stale-state timeout — if nothing changes on the page for 20s, execution stops and returns a detailed error so you can decide what to do.
 
 Key step types:
 - navigate: go to a URL (obstacle detection runs after this)
 - snapshot: get the page's interactive elements as a structured list with refs (@e1, @e2...). Use this BEFORE interacting to see what's on the page. Then use refs in click/fill/human-click/human-type steps instead of CSS selectors.
-- find: locate a specific element by role, name, text, placeholder, or label. Returns a ref. Use when you know what you're looking for (e.g. find role=button name="Sign In" → @e1, then click @e1).
-- screenshot: take a screenshot. Add annotate=true to overlay numbered badges on interactive elements — returns refs you can use in subsequent steps.
+- find: locate a specific element by role, name, text, placeholder, or label. Returns a ref.
+- screenshot: take a screenshot. Add annotate=true to overlay numbered badges on interactive elements.
 - extract: evaluate JS and include the result in the response
-- solve-captcha: auto-detect and auto-solve reCAPTCHA OR hCaptcha with vision (uses Claude) — works for both, no config needed
-- login: fill login form with stored credentials (never exposes passwords)
+- solve-captcha: auto-detect and solve reCAPTCHA/hCaptcha with vision AI
+- login: fill login form with stored credentials (never exposes passwords). Handles email-first flows (Slack, Microsoft, Google) and standard forms.
 
-IMPORTANT — Element refs (@e1, @e2...): All selector fields (click, fill, human-click, human-type, wait-for) accept @e refs from snapshot, find, or annotated screenshot. PREFER refs over CSS selectors — they're more reliable. Run snapshot first to see what's available.
+IMPORTANT — Element refs (@e1, @e2...): All selector fields accept @e refs from snapshot, find, or annotated screenshot. PREFER refs over CSS selectors.
 
-API capture (options.captureApi): When enabled, records all XHR/fetch requests the page makes during execution. Use this when the user asks to "reverse engineer", "capture endpoints", "map the API", "remember how this works", or "save the endpoints". Returns structured endpoint data grouped by domain with parameterized paths, request/response bodies, and which pipeline step triggered each call. The agent can then save these to a directory for future direct API usage.
-
-Returns: ok, completedSteps, results (with extract values), obstacles (what was detected/resolved), capturedApi (when enabled), and on failure: errorContext with screenshot, URL, errorType, suggestion, retryable.
-
-IMPORTANT — Do NOT specify options.mode unless the user explicitly asks for a specific browser mode. iframer auto-selects the best mode and auto-escalates if blocked (headless → docker-headful → binary-headful) in a single call. Specifying a mode disables auto-escalation and often picks a worse mode than iframer would choose.`, {
+Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: errorContext with screenshot path, URL, errorType, suggestion, retryable.`, {
     steps: import_zod3.z.array(stepSchema).describe("Pipeline steps to execute sequentially"),
     options: import_zod3.z.object({
       staleTimeoutMs: import_zod3.z.number().optional().describe("Override the 20s stale-state timeout per step"),
       screenshotAfterEach: import_zod3.z.boolean().optional().describe("Take a screenshot after every step (expensive)"),
       continueOnObstacle: import_zod3.z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
       continueOnError: import_zod3.z.boolean().optional().describe("Continue past failing steps (default: false)"),
-      captureApi: import_zod3.z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes. Use when the user wants to reverse-engineer, map, or save a site's API endpoints."),
-      mode: import_zod3.z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("DO NOT SET THIS unless user explicitly requests a mode. iframer auto-selects and auto-escalates. Setting this disables auto-escalation."),
+      captureApi: import_zod3.z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes."),
+      mode: import_zod3.z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("DO NOT SET THIS unless user explicitly requests a mode. iframer auto-selects and auto-escalates."),
       autoEscalate: import_zod3.z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)")
     }).optional()
   }, async (params) => {
     try {
       const dockerRunning = await isDockerRunning();
-      const elicitOtp = async (domain) => {
-        try {
-          const result = await server.server.elicitInput({
-            mode: "form",
-            message: `${domain} is asking for a one-time code. Paste the code from your email / SMS / authenticator app:`,
-            requestedSchema: {
-              type: "object",
-              properties: {
-                code: { type: "string", title: "One-time code" }
-              },
-              required: ["code"]
-            }
-          });
-          if (result.action === "decline" || !result.content)
-            return null;
-          return (result.content.code || "").trim() || null;
-        } catch {
-          return null;
-        }
-      };
       async function runWithMode(mode) {
         if (mode === "docker-headful") {
           if (!dockerRunning) {
@@ -5106,9 +602,9 @@ IMPORTANT — Do NOT specify options.mode unless the user explicitly asks for a 
                 failedAtStep: 0,
                 failedStep: params.steps[0],
                 errorType: "action-failed",
-                message: `docker-headful mode was requested but the Docker API is not reachable. Start the Docker server (\`bun run start:docker\`) or omit the mode override to let iframer auto-select.`,
+                message: "docker-headful mode was requested but the Docker API is not reachable.",
                 pageState: { url: "", title: "" },
-                suggestion: "Start Docker with `bun run start:docker`, or remove options.mode to use auto-selection (headless → binary-headful).",
+                suggestion: "Start Docker with `bun run start:docker`, or omit options.mode.",
                 retryable: false
               }
             };
@@ -5118,21 +614,42 @@ IMPORTANT — Do NOT specify options.mode unless the user explicitly asks for a 
             options: { ...params.options, mode: "docker-headful", autoEscalate: false }
           });
         }
-        await ensureLocalChrome();
-        const iframer = await getIframer();
-        return iframer.execute(LOCAL_USER, LOCAL_TOKEN, {
+        return localApiPost("/execute", {
           steps: params.steps,
           options: { ...params.options, mode: mode || undefined }
-        }, { elicitOtp });
+        });
+      }
+      let execResult;
+      try {
+        execResult = await runWithMode(params.options?.mode);
+      } catch (execErr) {
+        const msg = execErr instanceof Error ? execErr.message : String(execErr);
+        const isCrash = /connect|ECONNREFUSED|EPIPE|closed|timed out|abort|fetch failed/i.test(msg);
+        if (isCrash) {
+          log.info(`Execute crashed (${msg.slice(0, 80)}), restarting local server and retrying...`);
+          try {
+            await localServer.restart();
+          } catch {}
+          try {
+            execResult = await runWithMode(params.options?.mode);
+          } catch (retryErr) {
+            return err(`Browser server crashed and retry also failed.
+` + `Original: ${msg}
+Retry: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}
+
+` + `Call \`session restart\` to reset, then retry.`);
+          }
+        } else {
+          throw execErr;
+        }
       }
       const requestedMode = params.options?.mode;
-      let execResult = await runWithMode(requestedMode);
       if (!execResult.ok && execResult.error?.errorType === "bot-blocked" && params.options?.autoEscalate !== false && !requestedMode) {
         const escalation = ["docker-headful", "binary-headful"];
         for (const nextMode of escalation) {
           if (nextMode === "docker-headful" && !dockerRunning)
             continue;
-          log13.info(`Auto-escalating to ${nextMode}`);
+          log.info(`Auto-escalating to ${nextMode}`);
           execResult = await runWithMode(nextMode);
           if (execResult.ok)
             break;
@@ -5147,18 +664,21 @@ IMPORTANT — Do NOT specify options.mode unless the user explicitly asks for a 
       } else {
         screenshotUrl = execResult.finalState?.screenshotUrl ?? null;
       }
+      if (screenshotUrl) {
+        const filePath = await resolveScreenshotPath(screenshotUrl);
+        if (filePath) {
+          lines.push(`
+Screenshot saved: ${filePath}`);
+          lines.push("Use the Read tool on the path above to view the screenshot.");
+        }
+      }
       const content = [{ type: "text", text: lines.join(`
 `) }];
-      if (screenshotUrl) {
-        const img = await fetchScreenshot(screenshotUrl);
-        if (img)
-          content.push(img);
-      }
       if (!execResult.ok)
         return { content, isError: true };
       return { content };
     } catch (e) {
-      return err(`Error: ${getErrorMessage3(e)}`);
+      return err(`Error: ${getErrorMessage(e)}`);
     }
   });
 }
@@ -5179,7 +699,7 @@ Final page: ${data.finalState.title}`);
     try {
       const domain = new URL(data.finalState.url).hostname.replace(/^www\./, "");
       lines.push(`
-\uD83D\uDCA1 Knowledge cache updated for ${domain}. Before the next browser run on this domain, call \`knowledge get ${domain}\` — you may be able to skip the browser entirely.`);
+Knowledge cache updated for ${domain}. Before the next browser run on this domain, call \`knowledge get ${domain}\` — you may be able to skip the browser entirely.`);
     } catch {}
   }
   const meaningful = (data.results || []).filter((r) => r.ok && r.result !== undefined && r.result !== null);
@@ -5213,25 +733,11 @@ Obstacles handled:`);
     for (const api of data.capturedApi) {
       lines.push(`
 ${api.domain} (${api.baseUrl})`);
-      const authParts = [];
-      if (api.auth?.authorization)
-        authParts.push("Authorization header");
-      if (api.auth?.cookies && Object.keys(api.auth.cookies).length > 0)
-        authParts.push(`${Object.keys(api.auth.cookies).length} cookies`);
-      if (api.auth?.tokens && Object.keys(api.auth.tokens).length > 0)
-        authParts.push(`${Object.keys(api.auth.tokens).length} token headers (${Object.keys(api.auth.tokens).join(", ")})`);
-      if (authParts.length > 0)
-        lines.push(`  Auth: ${authParts.join(", ")}`);
       lines.push("  Endpoints:");
       for (const ep of api.endpoints) {
         lines.push(`    ${ep.method} ${ep.path}  [step ${ep.triggeredAtStep}, status ${ep.responseStatus}]`);
-        if (ep.rawPaths.length > 1) {
-          lines.push(`      examples: ${ep.rawPaths.slice(0, 3).join(", ")}`);
-        }
       }
     }
-    lines.push(`
-The capturedApi field contains full endpoint data including auth, headers, request/response bodies, and curl commands. Save it to a directory for the user — use auth.json for shared credentials and one file per endpoint.`);
   }
   if (data.error) {
     lines.push(`
@@ -5255,38 +761,224 @@ The capturedApi field contains full endpoint data including auth, headers, reque
 // src/mcp/tools/session.ts
 var import_zod4 = require("zod");
 function registerSessionTool(server) {
-  server.tool("session", `Manage the browser session lifecycle. Use action=stop when done to save cookies/localStorage for future use. Use action=clear to wipe all stored session data.
+  server.tool("session", `Manage the browser session and lifecycle.
 
-Sessions live in the single local SQLite database (~/.iframer/iframer.db) and are shared across every browser mode (headless, binary-headful, docker-headful). There is no separate Docker-side session store.`, {
-    action: import_zod4.z.enum(["stop", "clear"]).describe("stop: end session and save state | clear: delete all stored session data")
+Actions:
+- **stop**: save cookies/localStorage to the store, then close the browser. Session data persists for the next run.
+- **clear**: wipe all stored session data (cookies/localStorage) from the database. Does NOT kill running browsers.
+- **restart**: kill all running browser instances (local + Docker) and reset state. The next \`execute\` call will launch a fresh browser automatically. Use this when the browser is frozen, crashed, or in a bad state. Credentials and knowledge cache are NOT affected.
+
+Sessions live in the single local SQLite database (~/.iframer/iframer.db), shared across every browser mode.`, {
+    action: import_zod4.z.enum(["stop", "clear", "restart"]).describe("stop: save session state + close browser | clear: wipe stored session data | restart: kill all browsers, fresh start on next execute")
   }, async ({ action }) => {
     try {
-      const iframer = await getIframer();
       if (action === "stop") {
-        const stopResult = await iframer.stopSession(LOCAL_USER, LOCAL_TOKEN);
-        return { content: [{ type: "text", text: `Session stopped. State saved: ${stopResult.sessionSaved}` }] };
-      } else {
-        await iframer.clearSession(LOCAL_USER);
-        return { content: [{ type: "text", text: "Session data cleared." }] };
+        const result = await localApiPost("/interactive/stop").catch(() => ({ ok: true, sessionSaved: false }));
+        return { content: [{ type: "text", text: `Session stopped. State saved: ${result.sessionSaved ?? false}` }] };
       }
+      if (action === "clear") {
+        await localApiDelete("/session").catch(() => {});
+        return { content: [{ type: "text", text: "Session data cleared from database." }] };
+      }
+      if (action === "restart") {
+        const parts = [];
+        try {
+          await localApiPost("/browser/restart");
+          parts.push("Local browser restarted.");
+        } catch {
+          try {
+            await localServer.restart();
+            parts.push("Local server respawned.");
+          } catch (e) {
+            parts.push(`Local restart failed: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
+        try {
+          if (await isDockerRunning()) {
+            await apiPost("/browser/restart");
+            parts.push("Docker browser restarted.");
+          }
+        } catch {}
+        parts.push("Credentials and knowledge cache are untouched. Next execute launches a fresh browser.");
+        return { content: [{ type: "text", text: parts.join(" ") }] };
+      }
+      return err("Unknown action");
     } catch (e) {
-      return err(`Error: ${getErrorMessage3(e)}`);
+      return err(`Error: ${getErrorMessage(e)}`);
     }
   });
 }
 
 // src/mcp/tools/credentials.ts
 var import_zod5 = require("zod");
-var import_fs10 = __toESM(require("fs"));
-var import_path11 = __toESM(require("path"));
-init_paths();
-init_knowledge();
+var import_fs5 = __toESM(require("fs"));
+var import_path7 = __toESM(require("path"));
+
+// src/lib/knowledge.ts
+var import_fs4 = __toESM(require("fs"));
+var import_path6 = __toESM(require("path"));
+var log3 = createLogger("knowledge");
+function getKnowledgeDir() {
+  return import_path6.default.join(getDataDir(), "knowledge");
+}
+function getKnowledgePath(domain) {
+  const safe = sanitizeDomain(domain);
+  return import_path6.default.join(getKnowledgeDir(), `${safe}.md`);
+}
+function normalizeDomain(input) {
+  let d = (input || "").trim().toLowerCase();
+  if (!d)
+    return "";
+  try {
+    if (d.includes("://")) {
+      d = new URL(d).hostname;
+    } else if (d.includes("/")) {
+      d = new URL(`https://${d}`).hostname;
+    }
+  } catch {}
+  d = d.replace(/:\d+$/, "");
+  d = d.replace(/^www\./, "");
+  return d;
+}
+function sanitizeDomain(input) {
+  const normalized = normalizeDomain(input);
+  return normalized.replace(/[^a-z0-9.-]/g, "_");
+}
+function readKnowledge(domain) {
+  const p = getKnowledgePath(domain);
+  try {
+    return import_fs4.default.readFileSync(p, "utf8");
+  } catch {
+    return null;
+  }
+}
+function listKnowledge() {
+  const dir = getKnowledgeDir();
+  let entries = [];
+  try {
+    entries = import_fs4.default.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const results = [];
+  for (const file of entries) {
+    if (!file.endsWith(".md"))
+      continue;
+    const full = import_path6.default.join(dir, file);
+    try {
+      const stat = import_fs4.default.statSync(full);
+      const raw = import_fs4.default.readFileSync(full, "utf8");
+      const parsed = parseMarkdown(raw);
+      results.push({
+        domain: parsed?.domain ?? file.replace(/\.md$/, ""),
+        lastVerified: parsed?.lastVerified ?? new Date(stat.mtimeMs).toISOString(),
+        lastMode: parsed?.lastMode ?? "unknown",
+        sizeBytes: stat.size
+      });
+    } catch {}
+  }
+  results.sort((a, b) => a.lastVerified < b.lastVerified ? 1 : -1);
+  return results;
+}
+function clearKnowledge(domain) {
+  const dir = getKnowledgeDir();
+  if (domain) {
+    const p = getKnowledgePath(domain);
+    try {
+      import_fs4.default.unlinkSync(p);
+      return { removed: 1 };
+    } catch {
+      return { removed: 0 };
+    }
+  }
+  let removed = 0;
+  try {
+    const entries = import_fs4.default.readdirSync(dir);
+    for (const f of entries) {
+      if (f.endsWith(".md")) {
+        try {
+          import_fs4.default.unlinkSync(import_path6.default.join(dir, f));
+          removed++;
+        } catch {}
+      }
+    }
+  } catch {}
+  return { removed };
+}
+function parseMarkdown(raw) {
+  const frontmatterMatch = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n/);
+  if (!frontmatterMatch)
+    return null;
+  const fm = {};
+  for (const line of frontmatterMatch[1].split(`
+`)) {
+    const m = line.match(/^(\w+):\s*(.*)$/);
+    if (m)
+      fm[m[1]] = m[2].trim();
+  }
+  const body = raw.slice(frontmatterMatch[0].length);
+  const auth = { type: fm.authType ?? "unknown" };
+  const authSection = extractSection(body, "Auth material");
+  if (authSection) {
+    auth.cookieNames = extractBackticks(/\*\*Required cookies:\*\*\s+(.+)/, authSection);
+    auth.localStorageKeys = extractBackticks(/\*\*localStorage keys:\*\*\s+(.+)/, authSection);
+    auth.sessionStorageKeys = extractBackticks(/\*\*sessionStorage keys:\*\*\s+(.+)/, authSection);
+    auth.headers = extractBackticks(/\*\*Request headers:\*\*\s+(.+)/, authSection);
+  }
+  const endpoints = [];
+  const endpointSection = extractSection(body, "Known endpoints");
+  if (endpointSection) {
+    const endpointRegex = /^### (GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\S+)\s*$/gim;
+    let m;
+    while ((m = endpointRegex.exec(endpointSection)) !== null) {
+      endpoints.push({ method: m[1], path: m[2] });
+    }
+  }
+  const notes = [];
+  const notesSection = extractSection(body, "Notes");
+  if (notesSection) {
+    for (const line of notesSection.split(`
+`)) {
+      const m = line.match(/^-\s+(.+)$/);
+      if (m)
+        notes.push(m[1].trim());
+    }
+  }
+  return {
+    domain: fm.domain ?? "",
+    lastVerified: fm.lastVerified ?? "",
+    lastMode: fm.lastMode ?? "unknown",
+    browserRequired: fm.browserRequired !== "false",
+    auth,
+    endpoints,
+    notes
+  };
+}
+function extractSection(body, heading) {
+  const re = new RegExp(`^##\\s+${heading}\\s*$`, "m");
+  const match = body.match(re);
+  if (!match || match.index === undefined)
+    return null;
+  const start = match.index + match[0].length;
+  const nextSection = body.slice(start).match(/^##\s+/m);
+  const end = nextSection?.index != null ? start + nextSection.index : body.length;
+  return body.slice(start, end);
+}
+function extractBackticks(re, text) {
+  const m = text.match(re);
+  if (!m)
+    return;
+  const items = [...m[1].matchAll(/`([^`]+)`/g)].map((x) => x[1]);
+  return items.length > 0 ? items : undefined;
+}
+
+// src/mcp/tools/credentials.ts
 var ELICIT_TIMEOUT_MS = 45000;
 function mcpLog(event, data) {
   try {
     const dir = getDataDir();
-    import_fs10.default.mkdirSync(dir, { recursive: true });
-    import_fs10.default.appendFileSync(import_path11.default.join(dir, "mcp.log"), JSON.stringify({ ts: new Date().toISOString(), event, ...data }) + `
+    import_fs5.default.mkdirSync(dir, { recursive: true });
+    import_fs5.default.appendFileSync(import_path7.default.join(dir, "mcp.log"), JSON.stringify({ ts: new Date().toISOString(), event, ...data }) + `
 `);
   } catch {}
 }
@@ -5302,31 +994,29 @@ CORRECT WORKFLOW when the user needs to be logged into a site:
 3. If the target domain is NOT in the list → call \`credentials\` with \`action=store, domain=<site>\`. This attempts to pop a secure form in the user's UI. The response is either \`Credentials stored for <site>.\` (success) OR a loud error telling you the client doesn't support form elicitation, with instructions for the user to run a CLI command. Relay the error verbatim and STOP — do not proceed with login until the user confirms they ran the command.
 4. Call \`execute\` with \`[{type:"navigate", url:"https://<site>/login"}, {type:"login", domain:"<site>"}]\`. The login step auto-detects the form, fills stored credentials, handles 2FA, submits, and auto-escalates browser modes if blocked.
 
-Domain matching is flexible: \`figma.com\` in the store matches \`www.figma.com\`, \`auth.figma.com\`, etc. via parent-domain fallback. Store the bare registrable domain (e.g. \`figma.com\`, not \`www.figma.com\`).
-
 ═══════════════════════════════════════════════════════════════════════
-CRITICAL RULES — violating these is a bug, not creative problem solving
+CRITICAL RULES
 ═══════════════════════════════════════════════════════════════════════
 
-1. **NEVER re-store credentials as a recovery from a failed login.** If credentials already exist for a domain, the store call will be REJECTED by this tool. A login step failure is ALMOST NEVER a credential problem — it is browser-mode / bot-detection / site-structure. The correct recovery is to retry the \`execute\` call with a stronger \`options.mode\` (binary-headful or docker-headful), NOT to re-ask the user for their password.
+1. **NEVER re-store credentials as a recovery from a failed login.** If credentials already exist, the store call will be REJECTED. Login failures are browser-mode / bot-detection / page-structure problems, not credential problems.
 
 2. **NEVER ask the user "do you have credentials?"** — call action=list and read the response.
 
-3. **NEVER confabulate.** If action=list returns "No credentials stored", the database is empty. Do not claim anything is stored.
+3. **NEVER confabulate.** If action=list returns "No credentials stored", the database is empty.
 
-4. **NEVER pretend a store call succeeded if the response was an error.** Read the error text and relay it verbatim to the user.
+4. **NEVER pretend a store call succeeded if the response was an error.**
 
-5. **NEVER ask the user to paste their password in chat.** Always use action=store (which pops a secure form), or the CLI fallback from the error message.
+5. **NEVER ask the user to paste their password in chat.**
 
-6. **\`force: true\` on store is ONLY for explicit password changes.** If the user says "my password changed" or "update my credentials for X", use force. Otherwise never.`, {
-    action: import_zod5.z.enum(["store", "list"]).describe("store: prompt the user for credentials via a secure form (NEVER use this as a recovery from a login failure — if credentials already exist, this call will be rejected) | list: show which domains already have stored credentials"),
-    domain: import_zod5.z.string().optional().describe('Domain (required for store). Use the bare registrable domain, e.g. "figma.com" not "www.figma.com".'),
-    force: import_zod5.z.boolean().optional().describe("Overwrite existing credentials. Only use this when the user EXPLICITLY asks to change their stored credentials. Never use `force` to recover from a login failure.")
+6. **\`force: true\` on store is ONLY for explicit password changes.**`, {
+    action: import_zod5.z.enum(["store", "list"]).describe("store: prompt for credentials | list: show stored domains"),
+    domain: import_zod5.z.string().optional().describe("Domain (required for store). Use the bare registrable domain."),
+    force: import_zod5.z.boolean().optional().describe("Overwrite existing. ONLY for explicit password changes.")
   }, async ({ action, domain, force }) => {
     try {
-      const iframer = await getIframer();
       if (action === "list") {
-        const domains = await iframer.listCredentials(LOCAL_USER);
+        const credData2 = await localApiGet("/credentials");
+        const domains = credData2.domains || [];
         if (!domains.length) {
           return { content: [{ type: "text", text: "No credentials stored. Call this tool again with action=store and the domain to prompt the user for credentials now." }] };
         }
@@ -5339,19 +1029,15 @@ ${domains.map((d) => `  - ${d}`).join(`
       if (!domain)
         return err("domain is required for action=store");
       const normalized = normalizeDomain(domain);
-      const stored = await iframer.listCredentials(LOCAL_USER);
-      const alreadyExists = domainMatches(normalized, stored);
-      if (alreadyExists && !force) {
+      const credData = await localApiGet("/credentials");
+      const stored = credData.domains || [];
+      if (domainMatches(normalized, stored) && !force) {
         mcpLog("credentials.store.rejected_already_exists", { domain: normalized });
-        return err(`REFUSING TO RE-STORE: credentials for "${normalized}" already exist in the store. ` + `If a login using these credentials just failed, the problem is NOT the credentials — it is almost always browser-mode / bot-detection / page-structure. ` + `DO NOT ask the user to re-enter their password. INSTEAD:
+        return err(`REFUSING TO RE-STORE: credentials for "${normalized}" already exist. ` + `Login failures are NOT credential problems — retry with a stronger browser mode.
 
-` + `  1. Retry the \`execute\` call with \`options.mode: "binary-headful"\` (or "docker-headful" if Docker is running).
-` + `  2. If you already tried stronger modes and they also failed, take a \`snapshot\` of the login page to see what the site is actually rendering.
-` + `  3. ONLY if the user EXPLICITLY says "my password changed" or "I want to update my credentials" should you call this tool again with \`force: true\`.
-
-` + `NEVER use this tool as a reflexive "recovery" from a failed login.`);
+` + `Use \`force: true\` ONLY if the user explicitly says their password changed.`);
       }
-      mcpLog("credentials.store.attempt", { domain: normalized, force: !!force, alreadyExists });
+      mcpLog("credentials.store.attempt", { domain: normalized, force: !!force });
       let result;
       try {
         const elicitPromise = server.server.elicitInput({
@@ -5367,44 +1053,45 @@ ${domains.map((d) => `  - ${d}`).join(`
             required: ["username", "password"]
           }
         });
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error(`elicitation timed out after ${ELICIT_TIMEOUT_MS}ms — the client did not respond`)), ELICIT_TIMEOUT_MS));
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error(`elicitation timed out after ${ELICIT_TIMEOUT_MS}ms`)), ELICIT_TIMEOUT_MS));
         result = await Promise.race([elicitPromise, timeoutPromise]);
       } catch (elicitErr) {
         const msg = elicitErr instanceof Error ? elicitErr.message : String(elicitErr);
         mcpLog("credentials.store.elicit_failed", { domain: normalized, error: msg });
         return err(`FAILED TO STORE CREDENTIALS for ${normalized}: ${msg}
 
-` + `This MCP client cannot collect credentials via the secure form flow. The user MUST run this command in their terminal:
+` + `The user MUST run this command in their terminal:
 
 ` + `  iframer-toolkit credentials add ${normalized}
 
-` + `After they run it, retry the login. ` + `DO NOT pretend credentials were stored. ` + `DO NOT call \`credentials list\` and assume success from its output. ` + `DO NOT proceed with login until the user explicitly confirms they ran the CLI command.`);
+` + `After they run it, retry the login. DO NOT pretend credentials were stored.`);
       }
       mcpLog("credentials.store.elicit_result", { domain: normalized, action: result.action, hasContent: !!result.content });
       if (result.action !== "accept" || !result.content) {
-        return err(`Credential form was ${result.action || "dismissed"}. No credentials were saved for ${normalized}. ` + `Ask the user to retry or store credentials via CLI: \`iframer-toolkit credentials add ${normalized}\`.`);
+        return err(`Credential form was ${result.action || "dismissed"}. No credentials saved for ${normalized}.`);
       }
       const { username, password, totp_secret } = result.content;
       if (!username || !password) {
-        mcpLog("credentials.store.incomplete", { domain: normalized, hasUsername: !!username, hasPassword: !!password });
-        return err(`Credential form was submitted but username or password was empty. No credentials were saved for ${normalized}.`);
+        return err(`Form submitted but username or password was empty. No credentials saved.`);
       }
       try {
-        await iframer.storeCredential(LOCAL_USER, LOCAL_TOKEN, {
+        const storeResult = await localApiPost("/credentials", {
           domain: normalized,
           username,
           password,
           totp_secret: totp_secret || undefined
         });
+        if (!storeResult.ok)
+          return err(`Failed to store: ${storeResult.error}`);
       } catch (storeErr) {
         const msg = storeErr instanceof Error ? storeErr.message : String(storeErr);
         mcpLog("credentials.store.write_failed", { domain: normalized, error: msg });
-        return err(`Failed to write credentials to store: ${msg}`);
+        return err(`Failed to write credentials: ${msg}`);
       }
       mcpLog("credentials.store.success", { domain: normalized });
-      return { content: [{ type: "text", text: `Credentials stored for ${normalized}. These are shared across all browser modes (headless, binary-headful, docker-headful).` }] };
+      return { content: [{ type: "text", text: `Credentials stored for ${normalized}. Shared across all browser modes.` }] };
     } catch (e) {
-      return err(`Error: ${getErrorMessage3(e)}`);
+      return err(`Error: ${getErrorMessage(e)}`);
     }
   });
 }
@@ -5447,7 +1134,8 @@ The outputDir defaults to the current working directory + the domain name (e.g. 
     options: import_zod6.z.object({
       staleTimeoutMs: import_zod6.z.number().optional().describe("Override the 20s stale-state timeout per step"),
       continueOnObstacle: import_zod6.z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
-      continueOnError: import_zod6.z.boolean().optional().describe("Continue past failing steps (default: false)")
+      continueOnError: import_zod6.z.boolean().optional().describe("Continue past failing steps (default: false)"),
+      mode: import_zod6.z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("Browser mode override")
     }).optional()
   }, async (params) => {
     try {
@@ -5455,7 +1143,9 @@ The outputDir defaults to the current working directory + the domain name (e.g. 
         steps: params.steps,
         options: { ...params.options, captureApi: true }
       };
-      const captureResult = await apiPost("/execute", execParams);
+      const mode = params.options?.mode;
+      const dockerRunning = await isDockerRunning();
+      const captureResult = mode === "docker-headful" && dockerRunning ? await apiPost("/execute", execParams) : await localApiPost("/execute", execParams);
       const lines = [];
       lines.push(`ok: ${captureResult.ok}`);
       lines.push(`steps: ${captureResult.completedSteps}/${captureResult.totalSteps}`);
@@ -5485,14 +1175,17 @@ No API calls were captured. The page may not have made any XHR/fetch requests du
             lines.push(`Suggestion: ${captureResult.error.suggestion}`);
         }
       }
-      const content = [{ type: "text", text: lines.join(`
-`) }];
       const screenshotUrl = captureResult.error?.pageState?.screenshotUrl ?? captureResult.finalState?.screenshotUrl;
       if (screenshotUrl) {
-        const img = await fetchScreenshot(screenshotUrl);
-        if (img)
-          content.push(img);
+        const filePath = await resolveScreenshotPath(screenshotUrl);
+        if (filePath) {
+          lines.push(`
+Screenshot saved: ${filePath}`);
+          lines.push("Use the Read tool on the path above to view the screenshot.");
+        }
       }
+      const content = [{ type: "text", text: lines.join(`
+`) }];
       if (captureResult.capturedApi && captureResult.capturedApi.length > 0) {
         content.push({
           type: "text",
@@ -5504,7 +1197,7 @@ No API calls were captured. The page may not have made any XHR/fetch requests du
         return { content, isError: true };
       return { content };
     } catch (e) {
-      return err(`Connection error: ${getErrorMessage3(e)}. Is the API running at ${BASE_URL}?`);
+      return err(`Connection error: ${getErrorMessage(e)}. Try \`session restart\` and retry.`);
     }
   });
 }
@@ -5579,7 +1272,6 @@ IMPORTANT: Auth data contains real tokens/cookies — they expire. Remind the us
 }
 
 // src/mcp/tools/knowledge.ts
-init_knowledge();
 var import_zod7 = require("zod");
 function registerKnowledgeTool(server) {
   server.tool("knowledge", `Per-domain knowledge cache. Call this BEFORE every \`execute\` or \`browse\` on a website — it's orders of magnitude faster than launching a browser when the cache already has what you need.
@@ -5656,7 +1348,7 @@ Actions:
       }
       return err("Unknown action");
     } catch (e) {
-      return err(`Error: ${getErrorMessage3(e)}`);
+      return err(`Error: ${getErrorMessage(e)}`);
     }
   });
 }
@@ -5665,66 +1357,31 @@ Actions:
 var IS_DEV = process.env.IFRAMER_URL?.includes("localhost") || process.env.IFRAMER_URL?.includes("127.0.0.1");
 var INSTRUCTIONS = IS_DEV ? `iframer-dev — local development instance of iframer (connects to ${BASE_URL}).
 
-This is the LOCAL dev server running in Docker on localhost. Use this MCP when developing or testing iframer itself.
+CRITICAL RULES:
+1. NEVER ask the user "do you have credentials?". Call credentials action=list and read the response.
+2. NEVER ask the user for passwords in chat. Use credentials action=store (secure form) or the CLI fallback.
+3. DO NOT present options when you can just act. Check credentials, execute, show results.
+4. If execute fails, read the error. It tells you exactly what happened and where.
+5. Call "session" action=stop when done to save session state.
 
-CRITICAL RULES — NEVER VIOLATE THESE:
-1. NEVER ask the user "do you have credentials?" or "do you want to log in manually?". If credentials are missing, immediately call "credentials" action=store — it prompts the user with a secure form. Just do it.
-2. NEVER suggest manual browser login as a first option. Automate first, manual only as last resort after multiple failures.
-3. NEVER ask the user for passwords or credentials in the chat.
-4. DO NOT present options or ask questions when you can just act. Check credentials, execute. Show results, not questions.
+CAPTCHA: Use the "solve-captcha" step — auto-detects reCAPTCHA/hCaptcha and solves with vision AI.
+REVERSE ENGINEERING: Use the "reverse-engineer" tool when the user asks to capture/map APIs.` : `iframer — browser access for AI agents when normal methods fail.
 
-CREDENTIAL FLOW (follow exactly):
-1. Call "credentials" action=list to check if credentials exist.
-2. If they exist → proceed with login step in execute.
-3. If missing → immediately call "credentials" action=store. Do NOT tell the user and ask what to do.
-4. After stored → proceed with login step in execute.
+CRITICAL RULES:
+1. NEVER ask "do you have credentials?". Call credentials action=list and read the response.
+2. NEVER ask for passwords in chat. Use credentials action=store or the CLI fallback.
+3. DO NOT present options when you can just act. Check status, credentials, execute.
+4. NEVER re-store credentials when login fails. Login failures are browser-mode problems, not credential problems.
+5. ALWAYS check "knowledge get <domain>" before launching a browser. Skip the browser if the cache has what you need.
+6. If execute fails, read the FULL error. It tells you the step, error type, and suggestion.
+7. If the browser crashes, call "session restart" and retry. Don't panic.
 
-BROWSER MODES: NEVER pass options.mode to execute. iframer auto-selects the best mode (headless → docker-headful → binary-headful) and escalates automatically. binary-headful opens a visible browser window on the user's screen — only use it as an absolute last resort.
+BROWSER MODES: Don't specify options.mode — iframer auto-selects and auto-escalates (headless → binary-headful). Only set a mode if the user explicitly asks.
 
-WORKFLOW:
-1. Use "execute" with a pipeline of steps — the session starts automatically inside Docker
-2. iframer handles obstacles (captcha, cookie banners) automatically
-3. If execute fails, read the error — it tells you exactly what went wrong and where
-4. Call "session" action=stop when done to save session state
+CAPTCHA: In binary-headful mode, ask the user to solve it in the visible window. In docker-headful mode, use the "solve-captcha" step.
 
-TIMEOUTS: Each step has a 20-second stale-state timeout. If nothing changes for 20s, iframer aborts with a detailed error.
-
-CAPTCHA: ALWAYS use the "solve-captcha" step — auto-detects and solves reCAPTCHA/hCaptcha using vision AI. NEVER manually select tiles.
-
-REVERSE ENGINEERING: When the user asks to "reverse engineer", "map the API", "capture endpoints", or "save the endpoints" — use the "reverse-engineer" tool.` : `iframer — browser access for AI agents when normal methods fail.
-
-CRITICAL RULES — NEVER VIOLATE THESE:
-1. NEVER ask the user "do you have credentials?" or "do you want to log in manually?". If credentials are missing, immediately call "credentials" action=store — it prompts the user with a secure form. Just do it, don't ask.
-2. NEVER suggest "opening the page so you can log in manually" as a first option. Manual login is ONLY acceptable after automated login has failed multiple times.
-3. NEVER mention that a browser window will pop up or warn about disruption. iframer handles mode selection and escalation automatically in code.
-4. NEVER ask the user for passwords or credentials in the chat.
-5. DO NOT present options or ask questions when you can just act. Check status, check credentials, execute. The user should see results, not questions.
-6. NEVER fall back to Wayback Machine, web search, or other external tools after a single iframer failure. iframer auto-escalates through all browser modes in one call. Only consider alternatives if execute returns a final failure after exhausting all modes.
-
-CREDENTIAL FLOW (follow this exactly, no exceptions):
-1. Call "credentials" action=list to check if credentials exist for the domain.
-2. If credentials exist → proceed directly with the login step in execute.
-3. If credentials are missing → immediately call "credentials" action=store with the domain. Do NOT tell the user credentials are missing and ask what to do. Just trigger the secure prompt.
-4. After credentials are stored → proceed with the login step in execute.
-
-PHILOSOPHY: You are a capable agent. Do your work locally first. Only call iframer when you hit a wall: captcha, login-gated content, heavy bot detection, or content that requires a real browser to render.
-
-WORKFLOW:
-1. Call "status" first — know what's available before doing anything
-2. For simple blocked pages: use "browse" (headless, fast)
-3. For captchas/logins/complex flows: use "execute" with a pipeline of steps
-4. iframer handles obstacles (captcha, cookie banners) automatically during execute
-5. If execute can't finish, it returns exactly where it stopped and why — you decide what to do next
-6. Call "session" action=stop when done to save session state
-
-BROWSER MODES: NEVER specify options.mode — iframer auto-selects the best mode and auto-escalates if blocked (headless → docker-headful → binary-headful) in a single execute call. You do NOT need to pick a mode or retry with different modes. Just call execute without mode and let it work. The only exception: if the user explicitly asks for a specific mode.
-
-TIMEOUTS: Each step has a 20-second stale-state timeout. If nothing changes on the page for 20s, iframer aborts and returns a detailed error.
-
-CAPTCHA: ALWAYS use the "solve-captcha" step — it auto-detects reCAPTCHA vs hCaptcha and solves with vision AI. NEVER manually select tiles with recaptcha-select.
-
-REVERSE ENGINEERING: When the user asks to "reverse engineer", "map the API", "capture endpoints", or "figure out how this site works" — use the "reverse-engineer" tool.`;
-var server = new import_mcp.McpServer({ name: "iframer", version: "2.1.5" }, { instructions: INSTRUCTIONS });
+REVERSE ENGINEERING: Use the "reverse-engineer" tool when the user asks to capture/map/save API endpoints.`;
+var server = new import_mcp.McpServer({ name: "iframer", version: "3.0.0" }, { instructions: INSTRUCTIONS });
 registerStatusTool(server);
 registerBrowseTool(server);
 registerExecuteTool(server);
@@ -5732,6 +1389,28 @@ registerSessionTool(server);
 registerCredentialsTool(server);
 registerReverseEngineerTool(server);
 registerKnowledgeTool(server);
+function cleanup() {
+  localServer.shutdown();
+}
+process.on("exit", cleanup);
+process.on("SIGTERM", () => {
+  cleanup();
+  process.exit(0);
+});
+process.on("SIGINT", () => {
+  cleanup();
+  process.exit(0);
+});
+process.on("uncaughtException", (err2) => {
+  try {
+    console.error(`[mcp] uncaughtException: ${err2?.message}`);
+  } catch {}
+});
+process.on("unhandledRejection", (reason) => {
+  try {
+    console.error(`[mcp] unhandledRejection: ${reason}`);
+  } catch {}
+});
 var transport = new import_stdio.StdioServerTransport;
 (async () => {
   await server.connect(transport);
