@@ -1,30 +1,62 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getIframer, err, getErrorMessage, LOCAL_USER, LOCAL_TOKEN } from "../helpers";
+import { localApiPost, localApiDelete, apiPost, isDockerRunning, err, getErrorMessage, localServer } from "../helpers";
 
 export function registerSessionTool(server: McpServer) {
   server.tool(
     "session",
-    `Manage the browser session lifecycle. Use action=stop when done to save cookies/localStorage for future use. Use action=clear to wipe all stored session data.
+    `Manage the browser session and lifecycle.
 
-Sessions live in the single local SQLite database (~/.iframer/iframer.db) and are shared across every browser mode (headless, binary-headful, docker-headful). There is no separate Docker-side session store.`,
+Actions:
+- **stop**: save cookies/localStorage to the store, then close the browser. Session data persists for the next run.
+- **clear**: wipe all stored session data (cookies/localStorage) from the database. Does NOT kill running browsers.
+- **restart**: kill all running browser instances (local + Docker) and reset state. The next \`execute\` call will launch a fresh browser automatically. Use this when the browser is frozen, crashed, or in a bad state. Credentials and knowledge cache are NOT affected.
+
+Sessions live in the single local SQLite database (~/.iframer/iframer.db), shared across every browser mode.`,
     {
-      action: z.enum(["stop", "clear"]).describe("stop: end session and save state | clear: delete all stored session data"),
+      action: z.enum(["stop", "clear", "restart"]).describe("stop: save session state + close browser | clear: wipe stored session data | restart: kill all browsers, fresh start on next execute"),
     },
     async ({ action }) => {
       try {
-        // Sessions are host-local, NEVER routed through the Docker API.
-        // See status.ts / credentials.ts for the same pattern — the Docker
-        // container no longer owns any state, only browser execution.
-        const iframer = await getIframer();
-
         if (action === "stop") {
-          const stopResult = await iframer.stopSession(LOCAL_USER, LOCAL_TOKEN);
-          return { content: [{ type: "text" as const, text: `Session stopped. State saved: ${stopResult.sessionSaved}` }] };
-        } else {
-          await iframer.clearSession(LOCAL_USER);
-          return { content: [{ type: "text" as const, text: "Session data cleared." }] };
+          const result = await localApiPost<{ ok: boolean; sessionSaved?: boolean }>("/interactive/stop").catch(() => ({ ok: true, sessionSaved: false }));
+          return { content: [{ type: "text" as const, text: `Session stopped. State saved: ${result.sessionSaved ?? false}` }] };
         }
+
+        if (action === "clear") {
+          await localApiDelete("/session").catch(() => {});
+          return { content: [{ type: "text" as const, text: "Session data cleared from database." }] };
+        }
+
+        if (action === "restart") {
+          // Restart local background server (kills browsers, spawns fresh process)
+          const parts: string[] = [];
+          try {
+            await localApiPost("/browser/restart");
+            parts.push("Local browser restarted.");
+          } catch {
+            // Server might be dead — restart the whole process
+            try {
+              await localServer.restart();
+              parts.push("Local server respawned.");
+            } catch (e: unknown) {
+              parts.push(`Local restart failed: ${e instanceof Error ? e.message : String(e)}`);
+            }
+          }
+
+          // Also restart Docker browser if available
+          try {
+            if (await isDockerRunning()) {
+              await apiPost("/browser/restart");
+              parts.push("Docker browser restarted.");
+            }
+          } catch {}
+
+          parts.push("Credentials and knowledge cache are untouched. Next execute launches a fresh browser.");
+          return { content: [{ type: "text" as const, text: parts.join(" ") }] };
+        }
+
+        return err("Unknown action");
       } catch (e: unknown) {
         return err(`Error: ${getErrorMessage(e)}`);
       }

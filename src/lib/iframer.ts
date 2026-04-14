@@ -615,6 +615,31 @@ export class Iframer {
     }
   }
 
+  // ─── Browser lifecycle ───────────────────────────────────────────
+
+  /** Check if any browser is alive and connected. */
+  browserHealth(): { alive: boolean; modes: string[] } {
+    const modes: string[] = [];
+    for (const m of ["headless", "binary-headful"] as const) {
+      if (this.daemon.isRunning(m)) modes.push(m);
+    }
+    return { alive: modes.length > 0, modes };
+  }
+
+  /** Kill all browser instances and reset state. Next execute call will
+   *  launch a fresh browser automatically — no manual restart needed. */
+  async restartBrowser(): Promise<{ killed: string[]; message: string }> {
+    const health = this.browserHealth();
+    await this.daemon.stopAll();
+    await sessionManager.cleanupAllSessions();
+    return {
+      killed: health.modes,
+      message: health.modes.length > 0
+        ? `Killed browser(s): ${health.modes.join(", ")}. Next execute call will launch a fresh instance.`
+        : "No browsers were running. Next execute call will launch fresh.",
+    };
+  }
+
   // ─── Screenshots ─────────────────────────────────────────────────
 
   async screenshot(userId: string): Promise<{ screenshotUrl: string; url: string; title: string } | null> {

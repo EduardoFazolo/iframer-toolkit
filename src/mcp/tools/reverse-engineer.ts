@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { apiPost, fetchScreenshot, err, getErrorMessage, BASE_URL } from "../helpers";
+import { localApiPost, apiPost, isDockerRunning, resolveScreenshotPath, err, getErrorMessage } from "../helpers";
 import { stepSchema } from "./step-schema";
 
 export function registerReverseEngineerTool(server: McpServer) {
@@ -43,6 +43,7 @@ The outputDir defaults to the current working directory + the domain name (e.g. 
         staleTimeoutMs: z.number().optional().describe("Override the 20s stale-state timeout per step"),
         continueOnObstacle: z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
         continueOnError: z.boolean().optional().describe("Continue past failing steps (default: false)"),
+        mode: z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("Browser mode override"),
       }).optional(),
     },
     async (params) => {
@@ -51,7 +52,12 @@ The outputDir defaults to the current working directory + the domain name (e.g. 
           steps: params.steps,
           options: { ...params.options, captureApi: true },
         };
-        const captureResult = await apiPost<any>("/execute", execParams);
+        // Route through Docker only for docker-headful mode, local server for everything else
+        const mode = params.options?.mode;
+        const dockerRunning = await isDockerRunning();
+        const captureResult = (mode === "docker-headful" && dockerRunning)
+          ? await apiPost<any>("/execute", execParams)
+          : await localApiPost<any>("/execute", execParams);
 
         const lines: string[] = [];
         lines.push(`ok: ${captureResult.ok}`);
@@ -81,13 +87,16 @@ The outputDir defaults to the current working directory + the domain name (e.g. 
           }
         }
 
-        const content: any[] = [{ type: "text" as const, text: lines.join("\n") }];
-
         const screenshotUrl = captureResult.error?.pageState?.screenshotUrl ?? captureResult.finalState?.screenshotUrl;
         if (screenshotUrl) {
-          const img = await fetchScreenshot(screenshotUrl);
-          if (img) content.push(img);
+          const filePath = await resolveScreenshotPath(screenshotUrl);
+          if (filePath) {
+            lines.push(`\nScreenshot saved: ${filePath}`);
+            lines.push("Use the Read tool on the path above to view the screenshot.");
+          }
         }
+
+        const content: any[] = [{ type: "text" as const, text: lines.join("\n") }];
 
         if (captureResult.capturedApi && captureResult.capturedApi.length > 0) {
           content.push({
@@ -99,7 +108,7 @@ The outputDir defaults to the current working directory + the domain name (e.g. 
         if (!captureResult.ok) return { content, isError: true };
         return { content };
       } catch (e: unknown) {
-        return err(`Connection error: ${getErrorMessage(e)}. Is the API running at ${BASE_URL}?`);
+        return err(`Connection error: ${getErrorMessage(e)}. Try \`session restart\` and retry.`);
       }
     }
   );

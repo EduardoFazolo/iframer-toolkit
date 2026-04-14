@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { apiPost, getIframer, isDockerRunning, ensureLocalChrome, fetchScreenshot, err, getErrorMessage, log, LOCAL_USER, LOCAL_TOKEN } from "../helpers";
+import { apiPost, localApiPost, isDockerRunning, resolveScreenshotPath, err, getErrorMessage, log, localServer } from "../helpers";
 import { stepSchema } from "./step-schema";
 
 export function registerExecuteTool(server: McpServer) {
@@ -8,26 +8,22 @@ export function registerExecuteTool(server: McpServer) {
     "execute",
     `Execute a pipeline of browser steps. Auto-starts a session if needed. Handles obstacles (captcha, cookie banners) automatically.
 
-MANDATORY PRE-FLIGHT: Before calling this tool for any website, call \`knowledge get <domain>\` first. If the cache shows a direct-API path that satisfies the user's request, skip this tool entirely — direct API calls are orders of magnitude faster than a browser pipeline. Only fall through to \`execute\` when the cache is missing, stale, or insufficient. Every successful run here updates the knowledge cache automatically.
+MANDATORY PRE-FLIGHT: Before calling this tool for any website, call \`knowledge get <domain>\` first. If the cache shows a direct-API path that satisfies the user's request, skip this tool entirely — direct API calls are orders of magnitude faster. Only fall through to \`execute\` when the cache is missing, stale, or insufficient. Every successful run here updates the knowledge cache automatically.
 
 Steps run sequentially. Each step has a 20-second stale-state timeout — if nothing changes on the page for 20s, execution stops and returns a detailed error so you can decide what to do.
 
 Key step types:
 - navigate: go to a URL (obstacle detection runs after this)
 - snapshot: get the page's interactive elements as a structured list with refs (@e1, @e2...). Use this BEFORE interacting to see what's on the page. Then use refs in click/fill/human-click/human-type steps instead of CSS selectors.
-- find: locate a specific element by role, name, text, placeholder, or label. Returns a ref. Use when you know what you're looking for (e.g. find role=button name="Sign In" → @e1, then click @e1).
-- screenshot: take a screenshot. Add annotate=true to overlay numbered badges on interactive elements — returns refs you can use in subsequent steps.
+- find: locate a specific element by role, name, text, placeholder, or label. Returns a ref.
+- screenshot: take a screenshot. Add annotate=true to overlay numbered badges on interactive elements.
 - extract: evaluate JS and include the result in the response
-- solve-captcha: auto-detect and auto-solve reCAPTCHA OR hCaptcha with vision (uses Claude) — works for both, no config needed
-- login: fill login form with stored credentials (never exposes passwords)
+- solve-captcha: auto-detect and solve reCAPTCHA/hCaptcha with vision AI
+- login: fill login form with stored credentials (never exposes passwords). Handles email-first flows (Slack, Microsoft, Google) and standard forms.
 
-IMPORTANT — Element refs (@e1, @e2...): All selector fields (click, fill, human-click, human-type, wait-for) accept @e refs from snapshot, find, or annotated screenshot. PREFER refs over CSS selectors — they're more reliable. Run snapshot first to see what's available.
+IMPORTANT — Element refs (@e1, @e2...): All selector fields accept @e refs from snapshot, find, or annotated screenshot. PREFER refs over CSS selectors.
 
-API capture (options.captureApi): When enabled, records all XHR/fetch requests the page makes during execution. Use this when the user asks to "reverse engineer", "capture endpoints", "map the API", "remember how this works", or "save the endpoints". Returns structured endpoint data grouped by domain with parameterized paths, request/response bodies, and which pipeline step triggered each call. The agent can then save these to a directory for future direct API usage.
-
-Returns: ok, completedSteps, results (with extract values), obstacles (what was detected/resolved), capturedApi (when enabled), and on failure: errorContext with screenshot, URL, errorType, suggestion, retryable.
-
-IMPORTANT — Do NOT specify options.mode unless the user explicitly asks for a specific browser mode. iframer auto-selects the best mode and auto-escalates if blocked (headless → docker-headful → binary-headful) in a single call. Specifying a mode disables auto-escalation and often picks a worse mode than iframer would choose.`,
+Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: errorContext with screenshot path, URL, errorType, suggestion, retryable.`,
     {
       steps: z.array(stepSchema).describe("Pipeline steps to execute sequentially"),
       options: z.object({
@@ -35,8 +31,8 @@ IMPORTANT — Do NOT specify options.mode unless the user explicitly asks for a 
         screenshotAfterEach: z.boolean().optional().describe("Take a screenshot after every step (expensive)"),
         continueOnObstacle: z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
         continueOnError: z.boolean().optional().describe("Continue past failing steps (default: false)"),
-        captureApi: z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes. Use when the user wants to reverse-engineer, map, or save a site's API endpoints."),
-        mode: z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("DO NOT SET THIS unless user explicitly requests a mode. iframer auto-selects and auto-escalates. Setting this disables auto-escalation."),
+        captureApi: z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes."),
+        mode: z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("DO NOT SET THIS unless user explicitly requests a mode. iframer auto-selects and auto-escalates."),
         autoEscalate: z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)"),
       }).optional(),
     },
@@ -44,52 +40,22 @@ IMPORTANT — Do NOT specify options.mode unless the user explicitly asks for a 
       try {
         const dockerRunning = await isDockerRunning();
 
-        /** Build an elicitation callback so the login action can request an OTP
-         *  from the user mid-pipeline when a 2FA field appears but no TOTP secret
-         *  is stored (email/SMS codes, or first-time 2FA users). Only available
-         *  on the local execution path — Docker mode can't round-trip elicitation. */
-        const elicitOtp = async (domain: string): Promise<string | null> => {
-          try {
-            const result = await (server as unknown as { server: { elicitInput: (opts: unknown) => Promise<{ action: string; content?: Record<string, string> }> } }).server.elicitInput({
-              mode: "form",
-              message: `${domain} is asking for a one-time code. Paste the code from your email / SMS / authenticator app:`,
-              requestedSchema: {
-                type: "object",
-                properties: {
-                  code: { type: "string", title: "One-time code" },
-                },
-                required: ["code"],
-              },
-            });
-            if (result.action === "decline" || !result.content) return null;
-            return (result.content.code || "").trim() || null;
-          } catch {
-            return null;
-          }
-        };
-
         async function runWithMode(mode?: string): Promise<any> {
           // docker-headful is the only mode that goes through the Docker API.
-          // Every other mode runs on the host so CLI, MCP, and all browser
-          // modes share one credential / session / knowledge store.
+          // Every other mode runs on the local background server so CLI, MCP,
+          // and all browser modes share one credential / session / knowledge store.
           if (mode === "docker-headful") {
             if (!dockerRunning) {
               return {
-                ok: false,
-                completedSteps: 0,
-                totalSteps: params.steps.length,
-                results: [],
-                finalState: { url: "", title: "" },
-                obstacles: [],
-                durationMs: 0,
-                modeUsed: "docker-headful",
+                ok: false, completedSteps: 0, totalSteps: params.steps.length,
+                results: [], finalState: { url: "", title: "" }, obstacles: [],
+                durationMs: 0, modeUsed: "docker-headful",
                 error: {
-                  failedAtStep: 0,
-                  failedStep: params.steps[0],
+                  failedAtStep: 0, failedStep: params.steps[0],
                   errorType: "action-failed",
-                  message: `docker-headful mode was requested but the Docker API is not reachable. Start the Docker server (\`bun run start:docker\`) or omit the mode override to let iframer auto-select.`,
+                  message: "docker-headful mode was requested but the Docker API is not reachable.",
                   pageState: { url: "", title: "" },
-                  suggestion: "Start Docker with `bun run start:docker`, or remove options.mode to use auto-selection (headless → binary-headful).",
+                  suggestion: "Start Docker with `bun run start:docker`, or omit options.mode.",
                   retryable: false,
                 },
               };
@@ -100,26 +66,42 @@ IMPORTANT — Do NOT specify options.mode unless the user explicitly asks for a 
             });
           }
 
-          // headless, binary-headful, and the auto-select path all run on
-          // the host. A mode hint is a preferred STARTING point, not a hard
-          // ceiling — auto-escalation stays enabled so a headless bot-block
-          // transparently retries in binary-headful.
-          await ensureLocalChrome();
-          const iframer = await getIframer();
-          return iframer.execute(
-            LOCAL_USER,
-            LOCAL_TOKEN,
-            {
-              steps: params.steps,
-              options: { ...params.options, mode: (mode as any) || undefined },
-            },
-            { elicitOtp }
-          );
+          // headless, binary-headful, and auto-select all go to the local
+          // background server. Auto-escalation stays enabled.
+          return localApiPost("/execute", {
+            steps: params.steps,
+            options: { ...params.options, mode: mode || undefined },
+          });
         }
 
-        const requestedMode = params.options?.mode;
-        let execResult = await runWithMode(requestedMode);
+        // Run with crash recovery: if the local server dies mid-pipeline,
+        // restart it and retry once.
+        let execResult: any;
+        try {
+          execResult = await runWithMode(params.options?.mode);
+        } catch (execErr: unknown) {
+          const msg = execErr instanceof Error ? execErr.message : String(execErr);
+          const isCrash = /connect|ECONNREFUSED|EPIPE|closed|timed out|abort|fetch failed/i.test(msg);
+          if (isCrash) {
+            log.info(`Execute crashed (${msg.slice(0, 80)}), restarting local server and retrying...`);
+            try { await localServer.restart(); } catch {}
+            try {
+              execResult = await runWithMode(params.options?.mode);
+            } catch (retryErr: unknown) {
+              return err(
+                `Browser server crashed and retry also failed.\n` +
+                `Original: ${msg}\nRetry: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}\n\n` +
+                `Call \`session restart\` to reset, then retry.`
+              );
+            }
+          } else {
+            throw execErr;
+          }
+        }
 
+        // Bot-block auto-escalation at the MCP level (in case the server-side
+        // escalation didn't fire — e.g., server returned before escalating)
+        const requestedMode = params.options?.mode;
         if (!execResult.ok && execResult.error?.errorType === "bot-blocked" && params.options?.autoEscalate !== false && !requestedMode) {
           const escalation = ["docker-headful", "binary-headful"];
           for (const nextMode of escalation) {
@@ -140,12 +122,16 @@ IMPORTANT — Do NOT specify options.mode unless the user explicitly asks for a 
           screenshotUrl = execResult.finalState?.screenshotUrl ?? null;
         }
 
-        const content: any[] = [{ type: "text" as const, text: lines.join("\n") }];
+        // Return screenshot as file path, never base64.
         if (screenshotUrl) {
-          const img = await fetchScreenshot(screenshotUrl);
-          if (img) content.push(img);
+          const filePath = await resolveScreenshotPath(screenshotUrl);
+          if (filePath) {
+            lines.push(`\nScreenshot saved: ${filePath}`);
+            lines.push("Use the Read tool on the path above to view the screenshot.");
+          }
         }
 
+        const content: any[] = [{ type: "text" as const, text: lines.join("\n") }];
         if (!execResult.ok) return { content, isError: true };
         return { content };
       } catch (e: unknown) {
@@ -167,11 +153,11 @@ export function formatExecuteResult(data: any): string[] {
     lines.push(`URL: ${data.finalState.url}`);
   }
 
-  // Breadcrumb for the agent: hint at the knowledge cache so future calls check it first
+  // Knowledge cache hint
   if (data.ok && data.finalState?.url) {
     try {
       const domain = new URL(data.finalState.url).hostname.replace(/^www\./, "");
-      lines.push(`\n💡 Knowledge cache updated for ${domain}. Before the next browser run on this domain, call \`knowledge get ${domain}\` — you may be able to skip the browser entirely.`);
+      lines.push(`\nKnowledge cache updated for ${domain}. Before the next browser run on this domain, call \`knowledge get ${domain}\` — you may be able to skip the browser entirely.`);
     } catch {}
   }
 
@@ -201,21 +187,11 @@ export function formatExecuteResult(data: any): string[] {
     lines.push("\n--- Captured API ---");
     for (const api of data.capturedApi) {
       lines.push(`\n${api.domain} (${api.baseUrl})`);
-      const authParts: string[] = [];
-      if (api.auth?.authorization) authParts.push("Authorization header");
-      if (api.auth?.cookies && Object.keys(api.auth.cookies).length > 0) authParts.push(`${Object.keys(api.auth.cookies).length} cookies`);
-      if (api.auth?.tokens && Object.keys(api.auth.tokens).length > 0) authParts.push(`${Object.keys(api.auth.tokens).length} token headers (${Object.keys(api.auth.tokens).join(", ")})`);
-      if (authParts.length > 0) lines.push(`  Auth: ${authParts.join(", ")}`);
-
       lines.push("  Endpoints:");
       for (const ep of api.endpoints) {
         lines.push(`    ${ep.method} ${ep.path}  [step ${ep.triggeredAtStep}, status ${ep.responseStatus}]`);
-        if (ep.rawPaths.length > 1) {
-          lines.push(`      examples: ${ep.rawPaths.slice(0, 3).join(", ")}`);
-        }
       }
     }
-    lines.push("\nThe capturedApi field contains full endpoint data including auth, headers, request/response bodies, and curl commands. Save it to a directory for the user — use auth.json for shared credentials and one file per endpoint.");
   }
 
   if (data.error) {
