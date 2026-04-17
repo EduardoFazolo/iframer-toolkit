@@ -1,5 +1,5 @@
 import type { Page, Request, Response } from "patchright";
-import type { CapturedRequest, CapturedApi, CapturedAuth, CapturedEndpoint } from "./types";
+import type { CapturedRequest, CapturedApi, CapturedAuth, CapturedEndpoint, ApiProtocol, ApiVerb } from "./types";
 
 const SKIP_RESOURCE_TYPES = new Set([
   "stylesheet", "image", "media", "font", "manifest", "other",
@@ -95,6 +95,143 @@ function tryParseJson(text: string): unknown {
   }
 }
 
+// ─── Protocol classification ───────────────────────────────────────
+
+function hasGraphQLShape(body: unknown): boolean {
+  if (!body || typeof body !== "object") return false;
+  const b = body as Record<string, unknown>;
+  if (typeof b.query === "string" && /^\s*(query|mutation|subscription|fragment|\{)/.test(b.query)) return true;
+  if (typeof b.operationName === "string" && ("variables" in b || "query" in b || "doc_id" in b)) return true;
+  if ("doc_id" in b && "variables" in b) return true;
+  return false;
+}
+
+function gqlActionFromBody(body: unknown): string | undefined {
+  if (typeof body === "object" && body !== null) {
+    const b = body as Record<string, unknown>;
+    if (typeof b.operationName === "string" && b.operationName) return b.operationName;
+    if (typeof b.fb_api_req_friendly_name === "string") return b.fb_api_req_friendly_name;
+    if (b.doc_id != null) return `doc_${String(b.doc_id)}`;
+    if (typeof b.queryId === "string") return b.queryId;
+    if (typeof b.query === "string") {
+      const m = b.query.match(/\b(?:query|mutation|subscription)\s+(\w+)/);
+      if (m) return m[1];
+    }
+  }
+  if (typeof body === "string") {
+    const friendly = body.match(/fb_api_req_friendly_name=([^&]+)/);
+    if (friendly) return decodeURIComponent(friendly[1]);
+    const op = body.match(/(?:^|&)operationName=([^&]+)/);
+    if (op) return decodeURIComponent(op[1]);
+    const doc = body.match(/(?:^|&)doc_id=(\d+)/);
+    if (doc) return `doc_${doc[1]}`;
+  }
+  return undefined;
+}
+
+interface Classification {
+  protocol: ApiProtocol;
+  action: string;
+}
+
+function classifyRequest(req: CapturedRequest): Classification {
+  const path = req.path;
+  const lowerPath = path.toLowerCase();
+  const ct = (req.requestHeaders["content-type"] || req.requestHeaders["Content-Type"] || "").toLowerCase();
+  const body = req.requestBody;
+
+  if (ct.includes("application/grpc")) {
+    return { protocol: "grpc-web", action: path.replace(/^\//, "") };
+  }
+
+  const soapAction = req.requestHeaders["soapaction"] || req.requestHeaders["SOAPAction"];
+  if (soapAction || ct.includes("text/xml") || ct.includes("application/soap+xml")) {
+    return { protocol: "soap", action: (soapAction || path).replace(/^["/]|["/]$/g, "") };
+  }
+
+  if (/\/graphql\b/.test(lowerPath) || hasGraphQLShape(body)) {
+    return { protocol: "graphql", action: gqlActionFromBody(body) ?? "anonymous" };
+  }
+
+  if (body && typeof body === "object") {
+    const b = body as Record<string, unknown>;
+    if (typeof b.jsonrpc === "string" && typeof b.method === "string") {
+      return { protocol: "json-rpc", action: b.method };
+    }
+  }
+
+  if (typeof body === "string" && /fb_api_req_friendly_name=|^[^=&]+=.+&/.test(body)) {
+    const friendly = gqlActionFromBody(body);
+    if (friendly) return { protocol: "form-rpc", action: friendly };
+  }
+
+  return { protocol: "rest", action: `${req.method} ${parameterizePath(path)}` };
+}
+
+function inferVerb(protocol: ApiProtocol, action: string, method: string, responseBody: unknown): ApiVerb {
+  const lower = action.toLowerCase();
+
+  if (protocol === "rest") {
+    const m = method.toUpperCase();
+    if (m === "DELETE") return "delete";
+    if (m === "POST") return "create";
+    if (m === "PUT" || m === "PATCH") return "update";
+    if (m === "GET") return Array.isArray(responseBody) || Array.isArray((responseBody as any)?.data) ? "list" : "read";
+    return "action";
+  }
+
+  if (/\b(delete|remove|destroy|unfollow|unlike|dislike)\b/.test(lower)) return "delete";
+  if (/\b(create|add|insert|post|send|submit|publish|upload|register|signup|like|follow|react)\b/.test(lower)) return "create";
+  if (/\b(update|edit|patch|set|change|rename|modify|mark|move)\b/.test(lower)) return "update";
+  if (/\b(list|search|feed|timeline|paginated|browse|index|all|many)\b/.test(lower)) return "list";
+  if (/\b(get|fetch|load|read|query|view|show|profile|info|detail|me)\b/.test(lower)) return "read";
+
+  if (protocol === "graphql") {
+    const q = (responseBody as any)?.query;
+    if (typeof q === "string" && /^\s*mutation\b/.test(q)) return "action";
+    return "read";
+  }
+
+  return "action";
+}
+
+function pascalCase(s: string): string {
+  return s.replace(/[^a-zA-Z0-9]+/g, " ").trim().split(/\s+/)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join("");
+}
+
+function camelCase(s: string): string {
+  const p = pascalCase(s);
+  return p.charAt(0).toLowerCase() + p.slice(1);
+}
+
+function buildFunctionName(protocol: ApiProtocol, action: string, method: string, verb: ApiVerb): string {
+  if (protocol === "rest") {
+    const parts = action.split(" ");
+    const httpMethod = parts[0];
+    const path = parts.slice(1).join(" ");
+    const segs = path.split("/").filter(s => s && !s.startsWith("{"));
+    const verbPrefix = httpMethod === "GET" ? (verb === "list" ? "list" : "get")
+      : httpMethod === "POST" ? "create"
+      : httpMethod === "PUT" ? "update"
+      : httpMethod === "PATCH" ? "patch"
+      : httpMethod === "DELETE" ? "delete"
+      : httpMethod.toLowerCase();
+    return camelCase(`${verbPrefix} ${segs.join(" ")}`) || camelCase(action);
+  }
+  if (protocol === "graphql" || protocol === "form-rpc") {
+    const base = action.replace(/^(Use|FB|IG)/, "").replace(/(Query|Mutation|Subscription|RootQuery)$/, "");
+    return camelCase(base) || camelCase(action);
+  }
+  if (protocol === "json-rpc") return camelCase(action.replace(/[._]/g, " "));
+  if (protocol === "grpc-web") {
+    const last = action.split("/").pop() || action;
+    return camelCase(last);
+  }
+  return camelCase(action);
+}
+
 /** Build a curl command that fully replays the request */
 function buildCurl(
   method: string,
@@ -174,7 +311,7 @@ export class ApiCapture {
         let responseBody: unknown = undefined;
         try {
           const resText = await res.text();
-          if (resText && resText.length < 100_000) {
+          if (resText && resText.length < 2_000_000) {
             responseBody = tryParseJson(resText) ?? resText;
           }
         } catch {}
@@ -267,10 +404,13 @@ export class ApiCapture {
 
       for (const req of requests) {
         const paramPath = parameterizePath(req.path);
-        const key = `${req.method} ${paramPath}`;
+        const { protocol, action } = classifyRequest(req);
+        const key = `${protocol}:${action}`;
         const endpointHeaders = this.splitHeaders(req.requestHeaders);
 
         if (!endpointMap.has(key)) {
+          const verb = inferVerb(protocol, action, req.method, req.responseBody);
+          const functionName = buildFunctionName(protocol, action, req.method, verb);
           endpointMap.set(key, {
             method: req.method,
             path: paramPath,
@@ -282,6 +422,10 @@ export class ApiCapture {
             responseBody: req.responseBody,
             triggeredAtStep: req.triggeredAtStep,
             curl: buildCurl(req.method, req.url, endpointHeaders, auth, req.requestBody),
+            protocol,
+            action,
+            verb,
+            functionName,
           });
         } else {
           const existing = endpointMap.get(key);
