@@ -2936,6 +2936,136 @@ function tryParseJson(text) {
     return;
   }
 }
+function hasGraphQLShape(body) {
+  if (!body || typeof body !== "object")
+    return false;
+  const b = body;
+  if (typeof b.query === "string" && /^\s*(query|mutation|subscription|fragment|\{)/.test(b.query))
+    return true;
+  if (typeof b.operationName === "string" && (("variables" in b) || ("query" in b) || ("doc_id" in b)))
+    return true;
+  if ("doc_id" in b && "variables" in b)
+    return true;
+  return false;
+}
+function gqlActionFromBody(body) {
+  if (typeof body === "object" && body !== null) {
+    const b = body;
+    if (typeof b.operationName === "string" && b.operationName)
+      return b.operationName;
+    if (typeof b.fb_api_req_friendly_name === "string")
+      return b.fb_api_req_friendly_name;
+    if (b.doc_id != null)
+      return `doc_${String(b.doc_id)}`;
+    if (typeof b.queryId === "string")
+      return b.queryId;
+    if (typeof b.query === "string") {
+      const m = b.query.match(/\b(?:query|mutation|subscription)\s+(\w+)/);
+      if (m)
+        return m[1];
+    }
+  }
+  if (typeof body === "string") {
+    const friendly = body.match(/fb_api_req_friendly_name=([^&]+)/);
+    if (friendly)
+      return decodeURIComponent(friendly[1]);
+    const op = body.match(/(?:^|&)operationName=([^&]+)/);
+    if (op)
+      return decodeURIComponent(op[1]);
+    const doc = body.match(/(?:^|&)doc_id=(\d+)/);
+    if (doc)
+      return `doc_${doc[1]}`;
+  }
+  return;
+}
+function classifyRequest(req) {
+  const path4 = req.path;
+  const lowerPath = path4.toLowerCase();
+  const ct = (req.requestHeaders["content-type"] || req.requestHeaders["Content-Type"] || "").toLowerCase();
+  const body = req.requestBody;
+  if (ct.includes("application/grpc")) {
+    return { protocol: "grpc-web", action: path4.replace(/^\//, "") };
+  }
+  const soapAction = req.requestHeaders["soapaction"] || req.requestHeaders["SOAPAction"];
+  if (soapAction || ct.includes("text/xml") || ct.includes("application/soap+xml")) {
+    return { protocol: "soap", action: (soapAction || path4).replace(/^["/]|["/]$/g, "") };
+  }
+  if (/\/graphql\b/.test(lowerPath) || hasGraphQLShape(body)) {
+    return { protocol: "graphql", action: gqlActionFromBody(body) ?? "anonymous" };
+  }
+  if (body && typeof body === "object") {
+    const b = body;
+    if (typeof b.jsonrpc === "string" && typeof b.method === "string") {
+      return { protocol: "json-rpc", action: b.method };
+    }
+  }
+  if (typeof body === "string" && /fb_api_req_friendly_name=|^[^=&]+=.+&/.test(body)) {
+    const friendly = gqlActionFromBody(body);
+    if (friendly)
+      return { protocol: "form-rpc", action: friendly };
+  }
+  return { protocol: "rest", action: `${req.method} ${parameterizePath(path4)}` };
+}
+function inferVerb(protocol, action, method, responseBody) {
+  const lower = action.toLowerCase();
+  if (protocol === "rest") {
+    const m = method.toUpperCase();
+    if (m === "DELETE")
+      return "delete";
+    if (m === "POST")
+      return "create";
+    if (m === "PUT" || m === "PATCH")
+      return "update";
+    if (m === "GET")
+      return Array.isArray(responseBody) || Array.isArray(responseBody?.data) ? "list" : "read";
+    return "action";
+  }
+  if (/\b(delete|remove|destroy|unfollow|unlike|dislike)\b/.test(lower))
+    return "delete";
+  if (/\b(create|add|insert|post|send|submit|publish|upload|register|signup|like|follow|react)\b/.test(lower))
+    return "create";
+  if (/\b(update|edit|patch|set|change|rename|modify|mark|move)\b/.test(lower))
+    return "update";
+  if (/\b(list|search|feed|timeline|paginated|browse|index|all|many)\b/.test(lower))
+    return "list";
+  if (/\b(get|fetch|load|read|query|view|show|profile|info|detail|me)\b/.test(lower))
+    return "read";
+  if (protocol === "graphql") {
+    const q = responseBody?.query;
+    if (typeof q === "string" && /^\s*mutation\b/.test(q))
+      return "action";
+    return "read";
+  }
+  return "action";
+}
+function pascalCase(s) {
+  return s.replace(/[^a-zA-Z0-9]+/g, " ").trim().split(/\s+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join("");
+}
+function camelCase(s) {
+  const p = pascalCase(s);
+  return p.charAt(0).toLowerCase() + p.slice(1);
+}
+function buildFunctionName(protocol, action, method, verb) {
+  if (protocol === "rest") {
+    const parts = action.split(" ");
+    const httpMethod = parts[0];
+    const path4 = parts.slice(1).join(" ");
+    const segs = path4.split("/").filter((s) => s && !s.startsWith("{"));
+    const verbPrefix = httpMethod === "GET" ? verb === "list" ? "list" : "get" : httpMethod === "POST" ? "create" : httpMethod === "PUT" ? "update" : httpMethod === "PATCH" ? "patch" : httpMethod === "DELETE" ? "delete" : httpMethod.toLowerCase();
+    return camelCase(`${verbPrefix} ${segs.join(" ")}`) || camelCase(action);
+  }
+  if (protocol === "graphql" || protocol === "form-rpc") {
+    const base = action.replace(/^(Use|FB|IG)/, "").replace(/(Query|Mutation|Subscription|RootQuery)$/, "");
+    return camelCase(base) || camelCase(action);
+  }
+  if (protocol === "json-rpc")
+    return camelCase(action.replace(/[._]/g, " "));
+  if (protocol === "grpc-web") {
+    const last = action.split("/").pop() || action;
+    return camelCase(last);
+  }
+  return camelCase(action);
+}
 function buildCurl(method, url, headers, auth, body) {
   const parts = [`curl -X ${method}`];
   if (auth.authorization) {
@@ -3001,7 +3131,7 @@ class ApiCapture {
         let responseBody = undefined;
         try {
           const resText = await res.text();
-          if (resText && resText.length < 1e5) {
+          if (resText && resText.length < 2000000) {
             responseBody = tryParseJson(resText) ?? resText;
           }
         } catch {}
@@ -3080,9 +3210,12 @@ class ApiCapture {
       const endpointMap = new Map;
       for (const req of requests) {
         const paramPath = parameterizePath(req.path);
-        const key = `${req.method} ${paramPath}`;
+        const { protocol, action } = classifyRequest(req);
+        const key = `${protocol}:${action}`;
         const endpointHeaders = this.splitHeaders(req.requestHeaders);
         if (!endpointMap.has(key)) {
+          const verb = inferVerb(protocol, action, req.method, req.responseBody);
+          const functionName = buildFunctionName(protocol, action, req.method, verb);
           endpointMap.set(key, {
             method: req.method,
             path: paramPath,
@@ -3093,7 +3226,11 @@ class ApiCapture {
             responseStatus: req.responseStatus,
             responseBody: req.responseBody,
             triggeredAtStep: req.triggeredAtStep,
-            curl: buildCurl(req.method, req.url, endpointHeaders, auth, req.requestBody)
+            curl: buildCurl(req.method, req.url, endpointHeaders, auth, req.requestBody),
+            protocol,
+            action,
+            verb,
+            functionName
           });
         } else {
           const existing = endpointMap.get(key);
@@ -4677,6 +4814,23 @@ class Iframer {
       return { url: "", title: "" };
     }
   }
+  browserHealth() {
+    const modes = [];
+    for (const m of ["headless", "binary-headful"]) {
+      if (this.daemon.isRunning(m))
+        modes.push(m);
+    }
+    return { alive: modes.length > 0, modes };
+  }
+  async restartBrowser() {
+    const health = this.browserHealth();
+    await this.daemon.stopAll();
+    await cleanupAllSessions();
+    return {
+      killed: health.modes,
+      message: health.modes.length > 0 ? `Killed browser(s): ${health.modes.join(", ")}. Next execute call will launch a fresh instance.` : "No browsers were running. Next execute call will launch fresh."
+    };
+  }
   async screenshot(userId) {
     const session = getSession(userId);
     if (!session)
@@ -4949,6 +5103,41 @@ function resolveIframerSecret() {
       secret = match[1].trim();
   } catch {}
   return secret;
+}
+function installSkill() {
+  const candidates = [
+    path9.join(__dirname, "..", "skills", "iframer.md"),
+    path9.join(__dirname, "skills", "iframer.md")
+  ];
+  let source = null;
+  for (const c of candidates) {
+    if (fs9.existsSync(c)) {
+      source = c;
+      break;
+    }
+  }
+  if (!source)
+    return false;
+  const destDir = path9.join(HOME_DIR, ".claude", "commands");
+  const dest = path9.join(destDir, "iframer.md");
+  try {
+    fs9.mkdirSync(destDir, { recursive: true });
+    fs9.copyFileSync(source, dest);
+    return true;
+  } catch (err) {
+    console.error(`  Warning: could not install skill: ${err.message}`);
+    return false;
+  }
+}
+function removeSkill() {
+  const dest = path9.join(HOME_DIR, ".claude", "commands", "iframer.md");
+  try {
+    if (fs9.existsSync(dest)) {
+      fs9.unlinkSync(dest);
+      return true;
+    }
+  } catch {}
+  return false;
 }
 function writeMachineSecret(secret) {
   try {
@@ -5798,6 +5987,7 @@ async function main() {
         mcpEntry.env.IFRAMER_MODE = "local";
       const claudeConfigPath = installClaudeMcp(mcpName, mcpEntry);
       const codexConfigPath = installCodexMcp(mcpName, mcpEntry);
+      const skillInstalled = installSkill();
       console.log(`
   ${mcpName} MCP installed!`);
       console.log(`  Encryption key: ${secretSource} → ~/.iframer/secret`);
@@ -5807,6 +5997,8 @@ async function main() {
         console.log("  Mode: docker (connects to Docker container)");
       console.log(`  Claude Code config written to: ${claudeConfigPath}`);
       console.log(`  Codex config written to: ${codexConfigPath}`);
+      if (skillInstalled)
+        console.log("  Skill /iframer installed for Claude Code");
       console.log(`  Restart Claude Code and Codex to activate the iframer tools.
 `);
       break;
@@ -5816,7 +6008,8 @@ async function main() {
       const mcpName = isDev ? "iframer-dev" : "iframer";
       const claudeResult = removeClaudeMcp(mcpName);
       const codexResult = removeCodexMcp(mcpName);
-      if (!claudeResult.removed && !codexResult.removed) {
+      const skillRemoved = removeSkill();
+      if (!claudeResult.removed && !codexResult.removed && !skillRemoved) {
         console.log(`  ${mcpName} MCP is not installed in Claude Code or Codex.`);
         break;
       }
@@ -5826,6 +6019,8 @@ async function main() {
         console.log(`  Claude Code config updated: ${claudeResult.path}`);
       if (codexResult.removed)
         console.log(`  Codex config updated: ${codexResult.path}`);
+      if (skillRemoved)
+        console.log("  Skill /iframer removed from Claude Code");
       console.log(`  Restart Claude Code and Codex for the change to take effect.
 `);
       break;

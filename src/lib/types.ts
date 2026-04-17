@@ -91,6 +91,10 @@ export interface CapturedApi {
   capturedAt: string;
 }
 
+export type ApiProtocol = "rest" | "graphql" | "json-rpc" | "grpc-web" | "form-rpc" | "soap";
+
+export type ApiVerb = "read" | "list" | "create" | "update" | "delete" | "action" | "unknown";
+
 export interface CapturedEndpoint {
   method: string;
   path: string;              // parameterized: /api/v9/channels/{id}/messages
@@ -102,6 +106,10 @@ export interface CapturedEndpoint {
   responseBody?: unknown;        // example response
   triggeredAtStep: number;
   curl: string;              // ready-to-use curl command
+  protocol: ApiProtocol;     // transport kind (rest, graphql, json-rpc, etc.)
+  action: string;            // protocol-specific action id (operationName, rpc method, METHOD path)
+  verb: ApiVerb;             // inferred semantic verb (read/list/create/update/delete/action)
+  functionName: string;      // suggested camelCase function name for generated code
 }
 
 // ─── Pipeline Results ───────────────────────────────────────────────

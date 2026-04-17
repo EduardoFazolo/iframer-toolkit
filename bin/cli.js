@@ -174,6 +174,53 @@ function resolveIframerSecret() {
 }
 
 /**
+ * Install the /iframer skill command to the Claude Code commands directory.
+ * The skill file ships with the iframer-toolkit package and teaches the agent
+ * how to use the MCP tools correctly (pipeline building, mode selection,
+ * credential flow, snapshot→refs workflow, etc.).
+ *
+ * Returns true if installed, false if the source file wasn't found.
+ */
+function installSkill() {
+  // Skill source: look next to this script (dev: repo root), or in the
+  // npm-installed package layout (dist/../skills/).
+  const candidates = [
+    path.join(__dirname, "..", "skills", "iframer.md"),
+    path.join(__dirname, "skills", "iframer.md"),
+  ];
+  let source = null;
+  for (const c of candidates) {
+    if (fs.existsSync(c)) { source = c; break; }
+  }
+  if (!source) return false;
+
+  const destDir = path.join(HOME_DIR, ".claude", "commands");
+  const dest = path.join(destDir, "iframer.md");
+  try {
+    fs.mkdirSync(destDir, { recursive: true });
+    fs.copyFileSync(source, dest);
+    return true;
+  } catch (err) {
+    console.error(`  Warning: could not install skill: ${err.message}`);
+    return false;
+  }
+}
+
+/**
+ * Remove the /iframer skill from the Claude Code commands directory.
+ */
+function removeSkill() {
+  const dest = path.join(HOME_DIR, ".claude", "commands", "iframer.md");
+  try {
+    if (fs.existsSync(dest)) {
+      fs.unlinkSync(dest);
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
+/**
  * Ensure ~/.iframer/secret contains the given token (overwriting any prior
  * value). Called during install-mcp to unify CLI and MCP encryption keys.
  */
@@ -1092,12 +1139,19 @@ async function main() {
 
       const claudeConfigPath = installClaudeMcp(mcpName, mcpEntry);
       const codexConfigPath = installCodexMcp(mcpName, mcpEntry);
+
+      // Install the /iframer skill command so the agent knows how to use the
+      // MCP tools correctly. The skill file ships with the package and gets
+      // copied to the client's commands directory.
+      const skillInstalled = installSkill();
+
       console.log(`\n  ${mcpName} MCP installed!`);
       console.log(`  Encryption key: ${secretSource} → ~/.iframer/secret`);
       if (!isDev) console.log("  Mode: local (headless + binary-headful, no Docker needed)");
       else console.log("  Mode: docker (connects to Docker container)");
       console.log(`  Claude Code config written to: ${claudeConfigPath}`);
       console.log(`  Codex config written to: ${codexConfigPath}`);
+      if (skillInstalled) console.log("  Skill /iframer installed for Claude Code");
       console.log("  Restart Claude Code and Codex to activate the iframer tools.\n");
       break;
     }
@@ -1109,8 +1163,9 @@ async function main() {
       const mcpName = isDev ? "iframer-dev" : "iframer";
       const claudeResult = removeClaudeMcp(mcpName);
       const codexResult = removeCodexMcp(mcpName);
+      const skillRemoved = removeSkill();
 
-      if (!claudeResult.removed && !codexResult.removed) {
+      if (!claudeResult.removed && !codexResult.removed && !skillRemoved) {
         console.log(`  ${mcpName} MCP is not installed in Claude Code or Codex.`);
         break;
       }
@@ -1118,6 +1173,7 @@ async function main() {
       console.log(`\n  ${mcpName} MCP removed!`);
       if (claudeResult.removed) console.log(`  Claude Code config updated: ${claudeResult.path}`);
       if (codexResult.removed) console.log(`  Codex config updated: ${codexResult.path}`);
+      if (skillRemoved) console.log("  Skill /iframer removed from Claude Code");
       console.log("  Restart Claude Code and Codex for the change to take effect.\n");
       break;
     }
