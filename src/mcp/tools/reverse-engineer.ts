@@ -17,24 +17,38 @@ Use this when the user asks to:
 How it works:
 1. You provide steps (same as execute) — navigate, click, fill, extract, etc.
 2. iframer runs them while recording all API calls the page makes
-3. Returns structured data per domain: shared auth (cookies, tokens, Authorization header) + each endpoint with method, path, headers, body, response, and a curl command
+3. Returns structured data per domain: shared auth + endpoints classified by protocol (rest, graphql, json-rpc, grpc-web, form-rpc, soap) with method, path, action, verb, headers, body, response, curl
 
-After getting results, save them as RUNNABLE CODE to a directory:
-  <outputDir>/
-    auth.js                — exports shared cookies, tokens, authorization as an object
-    getMessages.js         — one .js file per endpoint: exports an async function that calls the endpoint using fetch, with auth imported from auth.js
-    index.js               — re-exports all endpoint functions
-    README.md              — summary of all endpoints and their dependency chain
+IMPORTANT — one request ≠ one endpoint. Each endpoint has (protocol, action):
+- REST: action = "METHOD /parameterized/path". Verb from HTTP method.
+- GraphQL: action = operationName (or doc_id for persisted queries). Many ops share the single /graphql URL — EACH operation is its own endpoint.
+- JSON-RPC: action = body.method (e.g. eth_getBalance, user.list).
+- gRPC-web: action = request path.
+- Form-RPC (FB-style urlencoded): action = fb_api_req_friendly_name / doc_id.
+- SOAP: action = SOAPAction header.
 
-If typed=true (user asks to "infer types", "add types", "save as typescript", etc.), save as .ts instead:
-    auth.ts                — typed auth config with interface
-    getMessages.ts         — async function with inferred request/response types based on captured data
-    types.ts               — all inferred interfaces (e.g. Message, Channel, User) derived from response bodies
-    index.ts               — re-exports all endpoint functions
+Generate ONE function per (protocol, action). Do NOT merge different GraphQL operations into one function just because they share the URL.
 
-Naming: convert endpoint paths to camelCase function names (e.g. GET /api/v9/channels/{id}/messages → getChannelMessages). Group related endpoints logically.
+Output layout — save as RUNNABLE CODE to <outputDir>/:
+  auth.{js,ts}                  — shared cookies, tokens, authorization
+  transport/
+    rest.{js,ts}                — shared REST helper (only if any rest endpoints)
+    graphql.{js,ts}             — shared GraphQL client: post(operationName|docId, variables)
+    jsonRpc.{js,ts}             — shared JSON-RPC client (if any)
+    grpc.{js,ts}                — shared gRPC-web client (if any)
+  <protocol>/<verb>/<functionName>.{js,ts}
+    e.g. graphql/queries/getTimelineFeed.ts
+         graphql/mutations/reactToPost.ts
+         rest/read/getChannelMessages.ts
+         rest/create/createMessage.ts
+         jsonRpc/ethGetBalance.ts
+  index.{js,ts}                 — re-exports all endpoint functions
+  types.ts                      — (typed mode only) inferred interfaces from responses
+  README.md                     — endpoints grouped by protocol + verb, dependency chain, auth expiry warning
 
-The outputDir defaults to the current working directory + the domain name (e.g. ./example_com/). Ask the user where to save if unclear.`,
+Use capturedApi[i].endpoints[j].protocol, .action, .verb, .functionName directly — iframer already classified them. Put queries (verb=read|list) under queries/, mutations (verb=create|update|delete|action) under mutations/ for GraphQL. For REST, group by verb dir.
+
+The outputDir defaults to ./<domain>/. Ask the user where to save if unclear.`,
     {
       steps: z.array(stepSchema).describe("Pipeline steps to execute while capturing API calls"),
       outputDir: z.string().optional().describe("Directory to save the captured API files. If not provided, ask the user or default to ./<domain>/"),
@@ -96,15 +110,27 @@ The outputDir defaults to the current working directory + the domain name (e.g. 
           }
         }
 
-        const content: any[] = [{ type: "text" as const, text: lines.join("\n") }];
-
+        // Save the FULL capturedApi JSON to disk so humans/agents can read it
+        // via Bash/python later. NEVER inline the full JSON in the MCP response
+        // — FB endpoints alone can be 8KB each, and a walk with 30 endpoints
+        // would dump 240KB into the agent's context window.
         if (captureResult.capturedApi && captureResult.capturedApi.length > 0) {
-          content.push({
-            type: "text" as const,
-            text: "--- capturedApi JSON ---\n" + JSON.stringify(captureResult.capturedApi, null, 2),
-          });
+          const mainDomain = captureResult.capturedApi[0]?.domain || "api";
+          const outDir = params.outputDir || `./${mainDomain}`;
+          try {
+            const fs = await import("fs");
+            const path = await import("path");
+            fs.mkdirSync(outDir, { recursive: true });
+            const jsonPath = path.join(outDir, "captured-api.json");
+            fs.writeFileSync(jsonPath, JSON.stringify(captureResult.capturedApi, null, 2));
+            lines.push(`\nFull captured data saved to: ${jsonPath}`);
+            lines.push("Read this file for complete curl commands, request/response bodies, and auth data.");
+          } catch (writeErr) {
+            lines.push(`\n(Could not save captured JSON: ${writeErr instanceof Error ? writeErr.message : String(writeErr)})`);
+          }
         }
 
+        const content: any[] = [{ type: "text" as const, text: lines.join("\n") }];
         if (!captureResult.ok) return { content, isError: true };
         return { content };
       } catch (e: unknown) {
@@ -131,24 +157,23 @@ function formatCapturedApi(lines: string[], capturedApi: any[], params: { output
       for (const part of authParts) lines.push(`  ${part}`);
     }
 
-    lines.push(`\nEndpoints (${api.endpoints.length}):`);
+    const byProtocol = new Map<string, any[]>();
     for (const ep of api.endpoints) {
-      lines.push(`\n  ${ep.method} ${ep.path}`);
-      lines.push(`    Status: ${ep.responseStatus}`);
-      lines.push(`    Triggered at step: ${ep.triggeredAtStep}`);
-      if (ep.rawPaths.length > 1) {
-        lines.push(`    Seen paths: ${ep.rawPaths.slice(0, 5).join(", ")}`);
-      }
-      if (ep.headers && Object.keys(ep.headers).length > 0) {
-        lines.push(`    Headers: ${Object.keys(ep.headers).join(", ")}`);
-      }
+      const p = ep.protocol || "rest";
+      if (!byProtocol.has(p)) byProtocol.set(p, []);
+      byProtocol.get(p)!.push(ep);
+    }
+    const protocolSummary = Array.from(byProtocol.entries()).map(([p, eps]) => `${p}=${eps.length}`).join(", ");
+    lines.push(`\nEndpoints (${api.endpoints.length}) [${protocolSummary}]:`);
+    for (const ep of api.endpoints) {
+      lines.push(`\n  [${ep.protocol}/${ep.verb}] ${ep.functionName}`);
+      lines.push(`    Action: ${ep.action}`);
+      lines.push(`    ${ep.method} ${ep.path}  →  ${ep.responseStatus}`);
+      // Show only the meaningful part of request body — skip framework noise
       if (ep.requestBody) {
-        const bodyPreview = JSON.stringify(ep.requestBody).slice(0, 200);
-        lines.push(`    Request body: ${bodyPreview}${bodyPreview.length >= 200 ? "..." : ""}`);
-      }
-      if (ep.responseBody) {
-        const resPreview = JSON.stringify(ep.responseBody).slice(0, 200);
-        lines.push(`    Response: ${resPreview}${resPreview.length >= 200 ? "..." : ""}`);
+        const body = ep.requestBody as Record<string, unknown>;
+        const signalKeys = extractSignalKeys(body);
+        if (signalKeys) lines.push(`    Params: ${signalKeys}`);
       }
     }
   }
@@ -159,19 +184,56 @@ function formatCapturedApi(lines: string[], capturedApi: any[], params: { output
   lines.push(`\n━━━ Save instructions ━━━`);
   lines.push(`Save to: ${dir}`);
   lines.push(`Format: ${ext} files`);
-  lines.push(`\nGenerate these files from the capturedApi data:`);
-  if (params.typed) {
-    lines.push(`  1. auth.ts — export the auth object with a typed interface (AuthConfig)`);
-    lines.push(`  2. types.ts — infer TypeScript interfaces from the response bodies (e.g. if response has {id: "123", content: "hi"} → interface Message { id: string; content: string; }). Name types based on the endpoint context.`);
-    lines.push(`  3. One .ts file per endpoint — export an async function that calls fetch with the right method, headers (from auth.ts), and body. Use the inferred types for params and return values.`);
-    lines.push(`  4. index.ts — re-export all endpoint functions`);
-    lines.push(`  5. README.md — endpoint summary and dependency chain`);
-  } else {
-    lines.push(`  1. auth.js — module.exports the auth object (cookies, tokens, authorization)`);
-    lines.push(`  2. One .js file per endpoint — module.exports an async function that calls fetch with the right method, headers (require from auth.js), and body.`);
-    lines.push(`  3. index.js — re-export all endpoint functions`);
-    lines.push(`  4. README.md — endpoint summary and dependency chain`);
-  }
-  lines.push(`\nFunction naming: convert paths to camelCase (e.g. GET /api/v9/channels/{id}/messages → getChannelMessages, DELETE /api/v9/channels/{id}/messages/{id2} → deleteChannelMessage).`);
+
+  const protocolsSeen = new Set<string>();
+  for (const api of capturedApi) for (const ep of api.endpoints) protocolsSeen.add(ep.protocol);
+
+  lines.push(`\nLayout (protocols present: ${Array.from(protocolsSeen).join(", ")}):`);
+  lines.push(`  auth${ext}`);
+  if (protocolsSeen.has("rest")) lines.push(`  transport/rest${ext}            — shared fetch wrapper with auth headers`);
+  if (protocolsSeen.has("graphql")) lines.push(`  transport/graphql${ext}         — post(operationName|docId, variables) → shared GraphQL client`);
+  if (protocolsSeen.has("json-rpc")) lines.push(`  transport/jsonRpc${ext}         — shared JSON-RPC client`);
+  if (protocolsSeen.has("grpc-web")) lines.push(`  transport/grpc${ext}            — shared gRPC-web client`);
+  if (protocolsSeen.has("form-rpc")) lines.push(`  transport/formRpc${ext}         — shared urlencoded RPC client`);
+  if (protocolsSeen.has("soap")) lines.push(`  transport/soap${ext}            — shared SOAP client`);
+  lines.push(`  <protocol>/<verb>/<functionName>${ext}  — one file per endpoint, uses shared transport`);
+  lines.push(`    e.g. graphql/queries/<fn>${ext}, graphql/mutations/<fn>${ext}, rest/read/<fn>${ext}, rest/create/<fn>${ext}`);
+  lines.push(`  index${ext}                         — re-export all endpoint functions`);
+  if (params.typed) lines.push(`  types.ts                         — interfaces inferred from response bodies`);
+  lines.push(`  README.md                        — endpoints grouped by protocol + verb, auth expiry warning`);
+
+  lines.push(`\nRules:`);
+  lines.push(`  - One function per (protocol, action). Use the functionName field verbatim for the file + export name.`);
+  lines.push(`  - verb=read|list → queries/ (GraphQL) or read/ (REST). verb=create|update|delete|action → mutations/ (GraphQL) or verb dir (REST).`);
+  lines.push(`  - Each endpoint file is minimal: import transport + auth, call transport with the action id, pass variables, return typed result.`);
+  lines.push(`  - GraphQL transport signature: post(opNameOrDocId: string, variables: object). Pick doc_id when present in captured body, else operationName.`);
+  lines.push(`  - Do NOT inline auth headers per endpoint — they live in auth${ext} and the transport reads them.`);
   lines.push(`\nIMPORTANT: Auth data contains real tokens/cookies — they expire. Remind the user.`);
+}
+
+/** Extract only the meaningful parameter keys from a request body, skipping
+ *  framework noise (__csr, __hsdp, __hblp, __dyn, __a, __spin_*, lsd, fb_dtsg, etc.).
+ *  Returns a compact string like "doc_id, variables={comment_id,feedback_id}" or null. */
+function extractSignalKeys(body: Record<string, unknown>): string | null {
+  const NOISE = new Set([
+    "__csr", "__hsdp", "__hblp", "__dyn", "__a", "__req", "__hs",
+    "__comet_req", "__ccg", "__spin_r", "__spin_b", "__spin_t",
+    "__jssesw", "lsd", "fb_dtsg", "fb_api_caller_class",
+    "fb_api_req_friendly_name", "jazoest", "server_timestamps",
+    "__s", "__user", "dpr", "__rev",
+  ]);
+
+  const signalEntries: string[] = [];
+  for (const [k, v] of Object.entries(body)) {
+    if (NOISE.has(k)) continue;
+    if (typeof v === "string" && v.length > 80) {
+      signalEntries.push(`${k}=${v.slice(0, 40)}...`);
+    } else if (typeof v === "object" && v !== null) {
+      const keys = Object.keys(v).slice(0, 5).join(",");
+      signalEntries.push(`${k}={${keys}${Object.keys(v).length > 5 ? ",..." : ""}}`);
+    } else {
+      signalEntries.push(`${k}=${String(v).slice(0, 40)}`);
+    }
+  }
+  return signalEntries.length > 0 ? signalEntries.join(", ") : null;
 }
