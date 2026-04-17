@@ -28,6 +28,17 @@ export function registerRoutes(app: Express): void {
     res.json({ ok: true, browsers });
   });
 
+  // ─── Browser lifecycle ──────────────────────────────────────────
+
+  app.get("/browser/health", (_req, res) => {
+    res.json({ ok: true, ...iframer.browserHealth() });
+  });
+
+  app.post("/browser/restart", asyncHandler(async (_req: Request, res: Response) => {
+    const result = await iframer.restartBrowser();
+    res.json({ ok: true, ...result });
+  }));
+
   // ─── Pipeline execution (new primary endpoint) ───────────────────
 
   app.post("/execute", asyncHandler(async (req: Request, res: Response) => {

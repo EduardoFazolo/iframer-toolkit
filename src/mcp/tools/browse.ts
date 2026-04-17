@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getIframer, err, getErrorMessage, LOCAL_USER, LOCAL_TOKEN } from "../helpers";
+import { localApiPost, err, getErrorMessage } from "../helpers";
 
 export function registerBrowseTool(server: McpServer) {
   server.tool(
@@ -23,12 +23,7 @@ PRE-FLIGHT: Call \`knowledge get <domain>\` first. If the cache shows a direct-A
     },
     async (params) => {
       try {
-        // Always run through the local iframer instance. The Docker API path
-        // maintained a separate session/credential store that created
-        // split-brain bugs with the rest of the toolkit.
-        const iframer = await getIframer();
-        const fetchResult: any = await iframer.fetch(LOCAL_USER, LOCAL_TOKEN, params as any);
-
+        const fetchResult: any = await localApiPost("/fetch", params);
         if (!fetchResult.ok) return err(`Error: ${fetchResult.error}`);
         const { html, ...rest } = fetchResult;
         const text = html

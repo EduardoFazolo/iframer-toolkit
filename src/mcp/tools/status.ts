@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { BASE_URL, apiGet, detectAvailableModes, getIframer, err, getErrorMessage, LOCAL_USER } from "../helpers";
+import { localApiGet, apiGet, isDockerRunning, err, getErrorMessage } from "../helpers";
+import { DomainModeStore } from "../../lib/domain-modes";
 
 export function registerStatusTool(server: McpServer) {
   server.tool(
@@ -8,36 +9,46 @@ export function registerStatusTool(server: McpServer) {
     {},
     async () => {
       try {
-        const status: { modes: Record<string, Record<string, unknown>>; api: boolean; session: unknown; credentials: string[]; domainMemory: unknown } = { modes: {}, api: false, session: null, credentials: [], domainMemory: null };
+        const status: Record<string, unknown> = {};
 
-        status.modes = await detectAvailableModes();
+        // Docker health
+        const dockerRunning = await isDockerRunning();
+        status.dockerApi = dockerRunning;
 
+        // Local server health + modes
         try {
-          const health = await fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3000) });
-          const healthCheck = await health.json() as { ok?: boolean };
-          status.api = healthCheck.ok === true;
+          const localHealth = await localApiGet<{ ok: boolean }>("/health");
+          status.localServer = localHealth.ok;
         } catch {
-          status.api = false;
+          status.localServer = false;
         }
 
-        if (status.api) {
+        try {
+          const browserHealth = await localApiGet<{ ok: boolean; alive: boolean; modes: string[] }>("/browser/health");
+          status.browserAlive = browserHealth.alive;
+          status.runningModes = browserHealth.modes;
+        } catch {}
+
+        // Docker session (if running)
+        if (dockerRunning) {
           try {
-            const sessionData = await apiGet<{ active?: boolean; noVncUrl?: string; createdAt?: string; url?: string }>("/interactive/status");
-            status.session = sessionData.active
-              ? { active: true, noVncUrl: sessionData.noVncUrl, createdAt: sessionData.createdAt, url: sessionData.url }
+            const sessionData = await apiGet<{ active?: boolean; noVncUrl?: string }>("/interactive/status");
+            status.dockerSession = sessionData.active
+              ? { active: true, noVncUrl: sessionData.noVncUrl }
               : { active: false };
           } catch {}
         }
 
-        // Credentials live in the single local SQLite database, shared across
-        // every browser mode. Never read them from the Docker API.
+        // Credentials from local store
         try {
-          const iframer = await getIframer();
-          status.credentials = await iframer.listCredentials(LOCAL_USER);
-        } catch {}
+          const credData = await localApiGet<{ ok: boolean; domains?: string[] }>("/credentials");
+          status.credentials = credData.domains || [];
+        } catch {
+          status.credentials = [];
+        }
 
+        // Domain mode memory (filesystem read, no browser dependency)
         try {
-          const { DomainModeStore } = await import("../../lib/domain-modes");
           const domainModes = new DomainModeStore();
           status.domainMemory = domainModes.getSummary();
         } catch {}
