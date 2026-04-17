@@ -452,22 +452,61 @@ if (command === "--cache") {
   args = ["clear", ...args];
 }
 
-// Install router: `iframer install <target>` → dispatch to install-<target>
-if (command === "install" && args.length > 0) {
-  const target = args.shift();
-  if (target === "chromium" || target === "chrome") command = "install-chrome";
-  else if (target === "mcp") command = "install-mcp";
-  else if (target === "deps" || target === "dependencies" || target === "all") command = "install-all";
-  else {
-    console.error(`  Unknown install target: ${target}`);
-    console.error("  Usage: iframer install <chromium|mcp|deps>");
-    process.exit(1);
+// Install router: `iframer install [target]` → dispatch to install-<target>
+if (command === "install") {
+  if (args.length === 0) {
+    command = "install-all";
+  } else {
+    const target = args.shift();
+    if (target === "chromium" || target === "chrome") command = "install-chrome";
+    else if (target === "mcp") command = "install-mcp";
+    else if (target === "deps" || target === "dependencies" || target === "all") command = "install-all";
+    else {
+      console.error(`  Unknown install target: ${target}`);
+      console.error("  Usage: iframer install <chromium|mcp>");
+      process.exit(1);
+    }
+  }
+}
+
+// Remove router: `iframer remove [target]` → dispatch to remove-<target>
+if (command === "remove") {
+  if (args.length === 0) {
+    command = "remove-all";
+  } else {
+    const target = args.shift();
+    if (target === "chromium" || target === "chrome") command = "remove-chrome";
+    else if (target === "mcp") command = "remove-mcp";
+    else {
+      console.error(`  Unknown remove target: ${target}`);
+      console.error("  Usage: iframer remove <chromium|mcp>");
+      process.exit(1);
+    }
   }
 }
 
 async function installChrome() {
   const { downloadChrome } = await import("../src/lib/browser/chrome-downloader.ts");
   await downloadChrome();
+}
+
+function isMcpInstalled(mcpName) {
+  try {
+    const config = JSON.parse(fs.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    return !!(config.mcpServers && config.mcpServers[mcpName]);
+  } catch {
+    return false;
+  }
+}
+
+async function removeChrome() {
+  const chromeDir = path.join(CONFIG_DIR, "chrome");
+  if (!fs.existsSync(chromeDir)) {
+    console.log("  Chrome for Testing not found, nothing to remove.");
+    return;
+  }
+  fs.rmSync(chromeDir, { recursive: true, force: true });
+  console.log(`  Removed ${chromeDir}`);
 }
 
 async function main() {
@@ -593,14 +632,28 @@ async function main() {
     case "install-all": {
       console.log("  Installing iframer-toolkit dependencies...\n");
       console.log("  [1/2] Chrome for Testing");
+      let chromeAlreadyInstalled = false;
       try {
-        await installChrome();
-      } catch (err) {
-        console.error(`  Chrome install failed: ${err.message}`);
-        process.exit(1);
+        const { findChromeForTesting } = await import("../src/lib/browser/chrome-downloader.ts");
+        chromeAlreadyInstalled = !!findChromeForTesting();
+      } catch {}
+      if (chromeAlreadyInstalled) {
+        console.log("  Already installed, skipping.");
+      } else {
+        try {
+          await installChrome();
+        } catch (err) {
+          console.error(`  Chrome install failed: ${err.message}`);
+          process.exit(1);
+        }
       }
       console.log("\n  [2/2] MCP server registration");
-      // Re-dispatch to install-mcp by falling through via command rebind
+      const mcpAlreadyInstalled = isMcpInstalled("iframer");
+      if (mcpAlreadyInstalled) {
+        console.log("  Already installed, skipping.");
+        console.log("\n  All dependencies ready.\n");
+        break;
+      }
       command = "install-mcp";
       return main();
     }
@@ -1156,6 +1209,24 @@ async function main() {
       break;
     }
 
+    // ─── Remove Chrome ───────────────────────────────────────────────
+
+    case "remove-chrome": {
+      await removeChrome();
+      break;
+    }
+
+    // ─── Remove All ──────────────────────────────────────────────────
+
+    case "remove-all": {
+      console.log("  Removing iframer-toolkit dependencies...\n");
+      console.log("  [1/2] Chrome for Testing");
+      await removeChrome();
+      console.log("\n  [2/2] MCP server registration");
+      command = "remove-mcp";
+      return main();
+    }
+
     // ─── Remove MCP ──────────────────────────────────────────────────
 
     case "remove-mcp": {
@@ -1241,9 +1312,12 @@ async function main() {
     act <action> [args...]          Send action to Docker session
 
   Setup:
-    install <chromium|mcp|deps>     Install Chromium, MCP, or both
-    install-mcp [--dev]             Install iframer MCP into Claude Code and Codex
-    remove-mcp [--dev]              Remove iframer MCP from Claude Code and Codex
+    install                         Install everything (Chromium + MCP)
+    install chromium                Download Chrome for Testing
+    install mcp [--dev]             Register iframer MCP in Claude Code and Codex
+    remove                          Remove everything (Chromium + MCP)
+    remove chromium                 Delete downloaded Chrome for Testing
+    remove mcp [--dev]              Unregister iframer MCP from Claude Code and Codex
 
   Environment:
     IFRAMER_URL                     Docker API URL (default: http://localhost:3021)
