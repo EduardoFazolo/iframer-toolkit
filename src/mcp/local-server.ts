@@ -142,23 +142,37 @@ export class LocalServerManager {
   }
 
   private async killExisting(): Promise<void> {
-    // Kill any stale process on our port
     try {
       const res = await fetch(`${this.baseUrl}/health`, {
         signal: AbortSignal.timeout(2000),
       });
-      if (res.ok) {
-        // Server is alive on our port — kill it via shutdown or brute force
-        try {
-          await fetch(`${this.baseUrl}/shutdown`, {
-            method: "POST",
-            signal: AbortSignal.timeout(2000),
-          });
-        } catch {}
-        await sleep(500);
-      }
+      if (!res.ok) return;
     } catch {
-      // Nothing on the port — good
+      return; // Nothing on the port — good
+    }
+
+    // Something is alive on our port — try graceful shutdown first
+    try {
+      await fetch(`${this.baseUrl}/shutdown`, {
+        method: "POST",
+        signal: AbortSignal.timeout(2000),
+      });
+      await sleep(800);
+    } catch {}
+
+    // If port still occupied, kill by PID via lsof
+    const portStillInUse = await this.healthCheck();
+    if (portStillInUse) {
+      try {
+        const { execSync } = require("child_process") as typeof import("child_process");
+        const pid = execSync(`lsof -ti :${PORT}`, { encoding: "utf8" }).trim();
+        if (pid) {
+          for (const p of pid.split("\n")) {
+            try { process.kill(parseInt(p, 10), "SIGKILL"); } catch {}
+          }
+          await sleep(500);
+        }
+      } catch {}
     }
   }
 

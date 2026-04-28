@@ -63,6 +63,7 @@ export class BrowserDaemon {
           return { browser: instance.browser, context, page };
         }
       } catch {}
+      log.info(`Browser for ${mode} disconnected (window closed?), relaunching...`);
       await this.stopMode(mode);
     }
 
