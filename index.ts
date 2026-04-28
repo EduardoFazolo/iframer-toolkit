@@ -18,7 +18,25 @@ app.use(tokenAuth);
 registerRoutes(app);
 app.use(errorHandler);
 
+// Prevent Chrome/patchright CDP socket errors from crashing the server.
+// These fire as unhandled events when Chrome closes unexpectedly.
+process.on("uncaughtException", (err) => {
+  console.error(`[local-server] uncaughtException (survived): ${err?.message}`);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error(`[local-server] unhandledRejection (survived): ${reason}`);
+});
+
 const server = app.listen(PORT, () => console.log(`iframer listening on ${PORT}`));
+
+app.post("/shutdown", (_req, res) => {
+  res.json({ ok: true });
+  setImmediate(async () => {
+    server.close();
+    await iframer.shutdown();
+    process.exit(0);
+  });
+});
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, async () => {
