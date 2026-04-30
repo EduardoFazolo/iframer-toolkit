@@ -90,7 +90,7 @@ export class PipelineRunner {
     const capture = opts.captureApi ? new ApiCapture(page) : null;
     if (capture) capture.start();
 
-    const finishCapture = () => {
+    const finishCapture = async () => {
       if (!capture) return undefined;
       capture.stop();
       return capture.getResults();
@@ -142,7 +142,7 @@ export class PipelineRunner {
             retryable: isRetryable(errorType),
           },
           durationMs: Date.now() - startTime,
-          capturedApi: finishCapture(),
+          capturedApi: await finishCapture(),
         };
       }
 
@@ -183,7 +183,7 @@ export class PipelineRunner {
             retryable: isRetryable(errorType),
           },
           durationMs: Date.now() - startTime,
-          capturedApi: finishCapture(),
+          capturedApi: await finishCapture(),
         };
       }
 
@@ -222,14 +222,14 @@ export class PipelineRunner {
                 retryable: true,
               },
               durationMs: Date.now() - startTime,
-              capturedApi: finishCapture(),
+              capturedApi: await finishCapture(),
             };
           }
         }
       }
     }
 
-    // All steps done
+    const capturedApi = await finishCapture();
     const finalState = await getPageState(page, this.ctx, true);
 
     return {
@@ -240,7 +240,7 @@ export class PipelineRunner {
       obstacles,
       finalState,
       durationMs: Date.now() - startTime,
-      capturedApi: finishCapture(),
+      capturedApi,
     };
   }
 }

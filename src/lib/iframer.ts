@@ -27,6 +27,7 @@ import { mergeKnowledge, normalizeDomain, domainLookupChain, type KnowledgeAuth,
 import { saveScreenshot } from "./screenshot";
 import { createStore, type StorageBackend } from "./storage";
 import { BrowserDaemon } from "./browser/daemon";
+import { ApiCapture } from "./api-capture";
 import { DomainModeStore } from "./domain-modes";
 import { detectBlock } from "./block-detection";
 import { checkModeAvailability } from "./browser/cdp-launcher";
@@ -51,6 +52,7 @@ export class Iframer {
   private daemon: BrowserDaemon;
   private domainModes: DomainModeStore;
   private operatingMode: "docker" | "local";
+  private persistentCaptures = new Map<string, ApiCapture>();
 
   constructor(config: IframerConfig = {}) {
     this.screenshotDir = config.screenshotDir || DEFAULT_SCREENSHOT_DIR;
@@ -616,6 +618,33 @@ export class Iframer {
   }
 
   // ─── Browser lifecycle ───────────────────────────────────────────
+
+  // ─── Persistent Capture ──────────────────────────────────────────
+
+  async startCapture(mode: BrowserMode = "binary-headful"): Promise<{ ok: boolean; message: string }> {
+    const key = mode;
+    if (this.persistentCaptures.has(key)) {
+      return { ok: true, message: `Capture already running on ${mode}. Call capture-stop to flush.` };
+    }
+    const { page } = await this.daemon.ensure(mode);
+    const capture = new ApiCapture(page);
+    capture.start();
+    this.persistentCaptures.set(key, capture);
+    return { ok: true, message: `Capture started on ${mode}. Use 'session capture-stop' when ready to collect results.` };
+  }
+
+  async stopCapture(mode: BrowserMode = "binary-headful"): Promise<{ ok: boolean; capturedApi: import("./types").CapturedApi[] | undefined; message: string }> {
+    const key = mode;
+    const capture = this.persistentCaptures.get(key);
+    if (!capture) {
+      return { ok: false, capturedApi: undefined, message: `No active capture on ${mode}. Start one with 'session capture-start'.` };
+    }
+    capture.stop();
+    this.persistentCaptures.delete(key);
+    const capturedApi = capture.getResults();
+    const total = capturedApi.reduce((n, a) => n + a.endpoints.length, 0);
+    return { ok: true, capturedApi, message: `Capture stopped. ${total} endpoints across ${capturedApi.length} domain(s).` };
+  }
 
   /** Check if any browser is alive and connected. */
   browserHealth(): { alive: boolean; modes: string[] } {

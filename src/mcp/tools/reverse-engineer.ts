@@ -130,7 +130,13 @@ The outputDir defaults to ./<domain>/. Ask the user where to save if unclear.`,
           }
         }
 
-        const content: any[] = [{ type: "text" as const, text: lines.join("\n") }];
+        let text = lines.join("\n");
+        // Cap response to ~80KB — Claude API rejects oversized or surrogate-laden tool results.
+        // Full data is always on disk at the captured-api.json path.
+        if (text.length > 80_000) {
+          text = text.slice(0, 80_000) + "\n\n[... response truncated — read captured-api.json for full data]";
+        }
+        const content: any[] = [{ type: "text" as const, text }];
         if (!captureResult.ok) return { content, isError: true };
         return { content };
       } catch (e: unknown) {
@@ -140,7 +146,7 @@ The outputDir defaults to ./<domain>/. Ask the user where to save if unclear.`,
   );
 }
 
-function formatCapturedApi(lines: string[], capturedApi: any[], params: { outputDir?: string; typed?: boolean }) {
+export function formatCapturedApi(lines: string[], capturedApi: any[], params: { outputDir?: string; typed?: boolean }) {
   for (const api of capturedApi) {
     lines.push(`\n━━━ ${api.domain} (${api.baseUrl}) ━━━`);
 
