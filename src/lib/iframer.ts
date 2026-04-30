@@ -646,6 +646,52 @@ export class Iframer {
     return { ok: true, capturedApi, message: `Capture stopped. ${total} endpoints across ${capturedApi.length} domain(s).` };
   }
 
+  /** Extract all cookies from the browser context via CDP — includes HttpOnly/Secure.
+   *  No JS sandbox restrictions. Pass urls to scope (e.g. ['https://youtube.com']). */
+  async getCookies(mode: BrowserMode = "binary-headful", urls?: string[]): Promise<{ ok: boolean; cookies: any[]; message: string }> {
+    const { context } = await this.daemon.ensure(mode);
+    const cookies = urls && urls.length > 0
+      ? await context.cookies(urls)
+      : await context.cookies();
+    return { ok: true, cookies, message: `${cookies.length} cookies extracted via CDP.` };
+  }
+
+  /** Extract cookies + localStorage + sessionStorage in one shot. */
+  async getFullAuth(mode: BrowserMode = "binary-headful", urls?: string[]): Promise<{ ok: boolean; cookies: any[]; localStorage: Record<string, Record<string, string>>; sessionStorage: Record<string, Record<string, string>>; message: string }> {
+    const { context, page } = await this.daemon.ensure(mode);
+    const cookies = urls && urls.length > 0
+      ? await context.cookies(urls)
+      : await context.cookies();
+
+    const localStorage: Record<string, Record<string, string>> = {};
+    const sessionStorage: Record<string, Record<string, string>> = {};
+    try {
+      const stores = await page.evaluate(() => {
+        const ls: Record<string, string> = {};
+        const ss: Record<string, string> = {};
+        for (let i = 0; i < window.localStorage.length; i++) {
+          const k = window.localStorage.key(i)!;
+          ls[k] = window.localStorage.getItem(k) ?? "";
+        }
+        for (let i = 0; i < window.sessionStorage.length; i++) {
+          const k = window.sessionStorage.key(i)!;
+          ss[k] = window.sessionStorage.getItem(k) ?? "";
+        }
+        return { origin: window.location.origin, ls, ss };
+      });
+      localStorage[stores.origin] = stores.ls;
+      sessionStorage[stores.origin] = stores.ss;
+    } catch {}
+
+    return {
+      ok: true,
+      cookies,
+      localStorage,
+      sessionStorage,
+      message: `${cookies.length} cookies, ${Object.values(localStorage).reduce((n, s) => n + Object.keys(s).length, 0)} localStorage keys, ${Object.values(sessionStorage).reduce((n, s) => n + Object.keys(s).length, 0)} sessionStorage keys.`,
+    };
+  }
+
   /** Check if any browser is alive and connected. */
   browserHealth(): { alive: boolean; modes: string[] } {
     const modes: string[] = [];
