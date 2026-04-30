@@ -17,14 +17,17 @@ Actions:
 - **restart**: kill all running browser instances (local + Docker) and reset state. The next \`execute\` call will launch a fresh browser automatically. Use this when the browser is frozen, crashed, or in a bad state. Credentials and knowledge cache are NOT affected.
 - **capture-start**: attach a persistent XHR/fetch listener to the running browser. Accumulates ALL requests indefinitely — not tied to any pipeline. Use before triggering the action you want to capture (e.g. upload, delete, async mutation).
 - **capture-stop**: stop the persistent listener and return all captured endpoints + save to disk. Call this when you're satisfied you've seen the requests you need.
+- **get-cookies**: extract ALL cookies from the browser context via CDP (including HttpOnly/Secure — below the JS sandbox). Pass urls to scope. Returns name, value, domain, path, httpOnly, secure, expiry.
+- **get-auth**: extract cookies + localStorage + sessionStorage in one shot. Everything needed to replay authenticated requests from Node.js.
 
 Sessions live in the single local SQLite database (~/.iframer/iframer.db), shared across every browser mode.`,
     {
-      action: z.enum(["stop", "clear", "restart", "capture-start", "capture-stop"]).describe("stop | clear | restart | capture-start | capture-stop"),
-      mode: z.enum(["headless", "binary-headful"]).optional().describe("Browser mode for capture-start/capture-stop (default: binary-headful)"),
+      action: z.enum(["stop", "clear", "restart", "capture-start", "capture-stop", "get-cookies", "get-auth"]).describe("stop | clear | restart | capture-start | capture-stop | get-cookies | get-auth"),
+      mode: z.enum(["headless", "binary-headful"]).optional().describe("Browser mode (default: binary-headful)"),
+      urls: z.array(z.string()).optional().describe("URLs to scope cookie extraction (get-cookies/get-auth). Omit for all cookies."),
       outputDir: z.string().optional().describe("Where to save captured-api.json for capture-stop"),
     },
-    async ({ action, mode, outputDir }) => {
+    async ({ action, mode, urls, outputDir }) => {
       try {
         if (action === "stop") {
           const result = await localApiPost<{ ok: boolean; sessionSaved?: boolean }>("/interactive/stop").catch(() => ({ ok: true, sessionSaved: false }));
@@ -90,6 +93,47 @@ Sessions live in the single local SQLite database (~/.iframer/iframer.db), share
 
           let text = lines.join("\n");
           if (text.length > 80_000) text = text.slice(0, 80_000) + "\n\n[truncated — read captured-api.json]";
+          return { content: [{ type: "text" as const, text }] };
+        }
+
+        if (action === "get-cookies") {
+          const result = await localApiPost<{ ok: boolean; cookies: any[]; message: string }>("/auth/cookies", { mode: mode ?? "binary-headful", urls });
+          const lines = [result.message, ""];
+          for (const c of result.cookies) {
+            lines.push(`${c.name}=${c.value}  [domain=${c.domain} path=${c.path} httpOnly=${c.httpOnly} secure=${c.secure}]`);
+          }
+          return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+        }
+
+        if (action === "get-auth") {
+          const result = await localApiPost<{ ok: boolean; cookies: any[]; localStorage: any; sessionStorage: any; message: string }>("/auth/full", { mode: mode ?? "binary-headful", urls });
+          const lines = [result.message, ""];
+          lines.push("=== Cookies ===");
+          for (const c of result.cookies) {
+            lines.push(`${c.name}=${c.value}  [domain=${c.domain} httpOnly=${c.httpOnly}]`);
+          }
+          if (Object.keys(result.localStorage || {}).length > 0) {
+            lines.push("\n=== localStorage ===");
+            for (const [origin, store] of Object.entries(result.localStorage as Record<string, Record<string, string>>)) {
+              lines.push(`[${origin}]`);
+              for (const [k, v] of Object.entries(store)) {
+                const val = String(v);
+                lines.push(`  ${k}: ${val.length > 120 ? val.slice(0, 120) + "…" : val}`);
+              }
+            }
+          }
+          if (Object.keys(result.sessionStorage || {}).length > 0) {
+            lines.push("\n=== sessionStorage ===");
+            for (const [origin, store] of Object.entries(result.sessionStorage as Record<string, Record<string, string>>)) {
+              lines.push(`[${origin}]`);
+              for (const [k, v] of Object.entries(store)) {
+                const val = String(v);
+                lines.push(`  ${k}: ${val.length > 120 ? val.slice(0, 120) + "…" : val}`);
+              }
+            }
+          }
+          let text = lines.join("\n");
+          if (text.length > 80_000) text = text.slice(0, 80_000) + "\n[truncated]";
           return { content: [{ type: "text" as const, text }] };
         }
 

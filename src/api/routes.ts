@@ -39,6 +39,18 @@ export function registerRoutes(app: Express): void {
     res.json({ ok: true, ...result });
   }));
 
+  app.post("/auth/cookies", asyncHandler(async (req: Request, res: Response) => {
+    const { mode, urls } = req.body || {};
+    const result = await iframer.getCookies(mode, urls);
+    res.json(result);
+  }));
+
+  app.post("/auth/full", asyncHandler(async (req: Request, res: Response) => {
+    const { mode, urls } = req.body || {};
+    const result = await iframer.getFullAuth(mode, urls);
+    res.json(result);
+  }));
+
   app.post("/capture/start", asyncHandler(async (req: Request, res: Response) => {
     const { mode } = req.body || {};
     const result = await iframer.startCapture(mode);
