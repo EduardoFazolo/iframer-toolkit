@@ -1,6 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import path from "path";
+import fs from "fs";
 import { localApiPost, localApiDelete, apiPost, isDockerRunning, err, getErrorMessage, localServer } from "../helpers";
+import { formatCapturedApi } from "./reverse-engineer";
+import { getDataDir } from "../../lib/paths";
 
 export function registerSessionTool(server: McpServer) {
   server.tool(
@@ -11,12 +15,16 @@ Actions:
 - **stop**: save cookies/localStorage to the store, then close the browser. Session data persists for the next run.
 - **clear**: wipe all stored session data (cookies/localStorage) from the database. Does NOT kill running browsers.
 - **restart**: kill all running browser instances (local + Docker) and reset state. The next \`execute\` call will launch a fresh browser automatically. Use this when the browser is frozen, crashed, or in a bad state. Credentials and knowledge cache are NOT affected.
+- **capture-start**: attach a persistent XHR/fetch listener to the running browser. Accumulates ALL requests indefinitely — not tied to any pipeline. Use before triggering the action you want to capture (e.g. upload, delete, async mutation).
+- **capture-stop**: stop the persistent listener and return all captured endpoints + save to disk. Call this when you're satisfied you've seen the requests you need.
 
 Sessions live in the single local SQLite database (~/.iframer/iframer.db), shared across every browser mode.`,
     {
-      action: z.enum(["stop", "clear", "restart"]).describe("stop: save session state + close browser | clear: wipe stored session data | restart: kill all browsers, fresh start on next execute"),
+      action: z.enum(["stop", "clear", "restart", "capture-start", "capture-stop"]).describe("stop | clear | restart | capture-start | capture-stop"),
+      mode: z.enum(["headless", "binary-headful"]).optional().describe("Browser mode for capture-start/capture-stop (default: binary-headful)"),
+      outputDir: z.string().optional().describe("Where to save captured-api.json for capture-stop"),
     },
-    async ({ action }) => {
+    async ({ action, mode, outputDir }) => {
       try {
         if (action === "stop") {
           const result = await localApiPost<{ ok: boolean; sessionSaved?: boolean }>("/interactive/stop").catch(() => ({ ok: true, sessionSaved: false }));
@@ -54,6 +62,35 @@ Sessions live in the single local SQLite database (~/.iframer/iframer.db), share
 
           parts.push("Credentials and knowledge cache are untouched. Next execute launches a fresh browser.");
           return { content: [{ type: "text" as const, text: parts.join(" ") }] };
+        }
+
+        if (action === "capture-start") {
+          const result = await localApiPost<{ ok: boolean; message: string }>("/capture/start", { mode: mode ?? "binary-headful" });
+          return { content: [{ type: "text" as const, text: result.message }] };
+        }
+
+        if (action === "capture-stop") {
+          const result = await localApiPost<{ ok: boolean; capturedApi: any[]; message: string }>("/capture/stop", { mode: mode ?? "binary-headful" });
+          const lines: string[] = [result.message];
+
+          if (result.capturedApi && result.capturedApi.length > 0) {
+            formatCapturedApi(lines, result.capturedApi, { outputDir, typed: false });
+
+            // Save to disk
+            const outDir = outputDir || path.join(getDataDir(), "capture");
+            try {
+              fs.mkdirSync(outDir, { recursive: true });
+              const jsonPath = path.join(outDir, "captured-api.json");
+              fs.writeFileSync(jsonPath, JSON.stringify(result.capturedApi, null, 2));
+              lines.push(`\nFull data saved to: ${jsonPath}`);
+            } catch (writeErr) {
+              lines.push(`\n(Could not save: ${writeErr instanceof Error ? writeErr.message : String(writeErr)})`);
+            }
+          }
+
+          let text = lines.join("\n");
+          if (text.length > 80_000) text = text.slice(0, 80_000) + "\n\n[truncated — read captured-api.json]";
+          return { content: [{ type: "text" as const, text }] };
         }
 
         return err("Unknown action");

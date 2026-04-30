@@ -39,6 +39,18 @@ export function registerRoutes(app: Express): void {
     res.json({ ok: true, ...result });
   }));
 
+  app.post("/capture/start", asyncHandler(async (req: Request, res: Response) => {
+    const { mode } = req.body || {};
+    const result = await iframer.startCapture(mode);
+    res.json(result);
+  }));
+
+  app.post("/capture/stop", asyncHandler(async (req: Request, res: Response) => {
+    const { mode } = req.body || {};
+    const result = await iframer.stopCapture(mode);
+    res.json(result);
+  }));
+
   // ─── Pipeline execution (new primary endpoint) ───────────────────
 
   app.post("/execute", asyncHandler(async (req: Request, res: Response) => {

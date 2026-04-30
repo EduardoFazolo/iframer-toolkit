@@ -95,6 +95,24 @@ function tryParseJson(text: string): unknown {
   }
 }
 
+/** Replace lone UTF-16 surrogates that make JSON.stringify throw or produce invalid JSON. */
+function sanitizeString(s: string): string {
+  return s.replace(/[\uD800-\uDFFF]/g, "�");
+}
+
+function sanitizeDeep(val: unknown): unknown {
+  if (typeof val === "string") return sanitizeString(val);
+  if (Array.isArray(val)) return val.map(sanitizeDeep);
+  if (val && typeof val === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+      out[sanitizeString(k)] = sanitizeDeep(v);
+    }
+    return out;
+  }
+  return val;
+}
+
 // ─── Protocol classification ───────────────────────────────────────
 
 function hasGraphQLShape(body: unknown): boolean {
@@ -262,7 +280,8 @@ function buildCurl(
   // Add body
   if (body !== undefined) {
     const bodyStr = typeof body === "string" ? body : JSON.stringify(body);
-    parts.push(`  -d '${bodyStr.replace(/'/g, "'\\''")}'`);
+    const safeBody = bodyStr.length > 10_000 ? bodyStr.slice(0, 10_000) + "...[truncated]" : bodyStr;
+    parts.push(`  -d '${safeBody.replace(/'/g, "'\\''")}'`);
   }
 
   parts.push(`  '${url}'`);
@@ -302,17 +321,35 @@ export class ApiCapture {
 
         let requestBody: unknown = undefined;
         try {
+          const ct = (allHeaders["content-type"] || allHeaders["Content-Type"] || "").toLowerCase();
           const postData = req.postData();
           if (postData) {
-            requestBody = tryParseJson(postData) ?? postData;
+            if (ct.includes("multipart/form-data")) {
+              // Binary upload — extract field names from boundary, skip actual bytes
+              const fields = [...postData.matchAll(/name="([^"]+)"/g)].map(m => m[1]);
+              requestBody = { _type: "multipart/form-data", fields: [...new Set(fields)] };
+            } else if (
+              ct.includes("application/octet-stream") ||
+              ct.startsWith("video/") ||
+              ct.startsWith("image/") ||
+              ct.startsWith("audio/")
+            ) {
+              requestBody = { _type: ct, _size: postData.length };
+            } else if (postData.length < 500_000) {
+              requestBody = sanitizeDeep(tryParseJson(postData) ?? postData);
+            } else {
+              requestBody = `[body truncated — ${postData.length} bytes, content-type: ${ct}]`;
+            }
           }
         } catch {}
 
         let responseBody: unknown = undefined;
         try {
           const resText = await res.text();
-          if (resText && resText.length < 2_000_000) {
-            responseBody = tryParseJson(resText) ?? resText;
+          if (resText && resText.length < 500_000) {
+            responseBody = sanitizeDeep(tryParseJson(resText) ?? resText);
+          } else if (resText) {
+            responseBody = `[response truncated — ${resText.length} bytes]`;
           }
         } catch {}
 
@@ -346,6 +383,18 @@ export class ApiCapture {
   stop() {
     this.page.off("request", this.requestHandler);
     this.page.off("response", this.responseHandler);
+  }
+
+  /** Keep listening for `ms` additional milliseconds, then wait up to `pendingTimeoutMs`
+   *  for any in-flight requests (fired but not yet responded) to complete before stopping.
+   *  Catches async post-step requests like auth re-challenges + delayed mutations. */
+  async drain(ms = 3000, pendingTimeoutMs = 5000): Promise<void> {
+    await new Promise(r => setTimeout(r, ms));
+    // Wait for pending requests to resolve
+    const deadline = Date.now() + pendingTimeoutMs;
+    while (this.pendingRequests.size > 0 && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 100));
+    }
   }
 
   /** Extract shared auth from all requests for a domain */
