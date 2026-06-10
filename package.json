@@ -46,8 +46,8 @@
     "test:crypto": "node tests/crypto.test.js",
     "mcp:install": "node bin/cli.js install-mcp",
     "mcp:remove": "node bin/cli.js remove-mcp",
-    "build:cli": "bun build bin/cli.js --target node --format cjs --outfile dist/cli.js --external better-sqlite3 --external patchright --external fingerprint-generator --external @anthropic-ai/sdk --external @modelcontextprotocol/sdk --external zod",
-    "build:mcp": "bun build src/mcp/server.ts --target node --format cjs --outfile dist/mcp-server.cjs --external better-sqlite3 --external patchright --external fingerprint-generator --external @anthropic-ai/sdk --external @modelcontextprotocol/sdk --external zod",
+    "build:cli": "bun build bin/cli.js --target node --format cjs --outfile dist/cli.js --external better-sqlite3 --external patchright --external fingerprint-generator --external @anthropic-ai/sdk --external @modelcontextprotocol/sdk --external zod --external cloakbrowser --external playwright-core",
+    "build:mcp": "bun build src/mcp/server.ts --target node --format cjs --outfile dist/mcp-server.cjs --external better-sqlite3 --external patchright --external fingerprint-generator --external @anthropic-ai/sdk --external @modelcontextprotocol/sdk --external zod --external cloakbrowser --external playwright-core",
     "build": "bun run build:cli && bun run build:mcp",
     "prepublishOnly": "bun run build"
   },
@@ -58,6 +58,9 @@
     "fingerprint-generator": "^2.1.81",
     "patchright": "^1.58.2",
     "zod": "^4.3.6"
+  },
+  "optionalDependencies": {
+    "cloakbrowser": "^0.3.28"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

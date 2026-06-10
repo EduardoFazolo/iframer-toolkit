@@ -58,6 +58,7 @@ export interface PipelineOptions {
   captureApi?: boolean;           // Default: false — capture XHR/fetch requests during execution
   mode?: BrowserMode;             // Force a specific browser mode (default: auto-select)
   autoEscalate?: boolean;         // Auto-retry with stronger mode if blocked (default: true)
+  instanceId?: string;            // Named browser within this session (default: "default") — run several in parallel, e.g. one per account
 }
 
 // ─── Captured API Types ────────────────────────────────────────────

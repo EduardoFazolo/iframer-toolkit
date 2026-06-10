@@ -17,7 +17,7 @@ import type {
 } from "./types";
 import { PipelineRunner } from "./pipeline";
 import * as sessionManager from "./browser/session-manager";
-import { getBrowserWithFallback } from "./browser/launcher";
+import { getBrowserWithFallback, closeBrowser } from "./browser/launcher";
 import { stealthContextOptions, applyStealthToPage } from "./browser/stealth";
 import { humanClick, humanType, clickRecaptchaCheckbox, clickChallengeTiles, clickChallengeVerify } from "./browser/humanize";
 import { deriveKey, encrypt, decrypt, generateTOTP } from "./auth/crypto";
@@ -26,7 +26,7 @@ import type { SessionData } from "./session/persistence";
 import { mergeKnowledge, normalizeDomain, domainLookupChain, type KnowledgeAuth, type KnowledgeEndpoint } from "./knowledge";
 import { saveScreenshot } from "./screenshot";
 import { createStore, type StorageBackend } from "./storage";
-import { BrowserDaemon } from "./browser/daemon";
+import { BrowserDaemon, DEFAULT_INSTANCE } from "./browser/daemon";
 import { ApiCapture } from "./api-capture";
 import { DomainModeStore } from "./domain-modes";
 import { detectBlock } from "./block-detection";
@@ -217,10 +217,19 @@ export class Iframer {
     return sessionManager.getSession(userId);
   }
 
+  /** Session-store key for a named browser instance. The default instance keeps
+   *  the bare userId (backward compatible); named instances get their own blob
+   *  so parallel browsers can hold independent logins. */
+  private sessionKey(userId: string, instanceId: string = DEFAULT_INSTANCE): string {
+    return instanceId === DEFAULT_INSTANCE ? userId : `${userId}::${instanceId}`;
+  }
+
   async stopSession(userId: string, token: string): Promise<SessionStopResult> {
     let sessionSaved = false;
 
-    // Extract state from any live local daemon instances BEFORE closing them
+    // Extract state from any live local daemon instances BEFORE closing them.
+    // Each named instance is saved under its own key so independent logins
+    // (e.g. per-account browsers) persist separately.
     if (token) {
       const encryptionKey = await deriveKey(token);
       for (const inst of this.daemon.liveInstances()) {
@@ -228,12 +237,11 @@ export class Iframer {
           const data = await extractSession(inst.context, inst.page);
           if (data) {
             const encrypted = encrypt(JSON.stringify(data), encryptionKey);
-            await this.store.setSession(userId, encrypted);
+            await this.store.setSession(this.sessionKey(userId, inst.instanceId), encrypted);
             sessionSaved = true;
-            break; // one context is enough — they share the same logged-in state
           }
         } catch (err) {
-          log.warn(`stopSession: failed to extract daemon state: ${getErrorMessage(err)}`);
+          log.warn(`stopSession: failed to extract daemon state for ${inst.mode}::${inst.instanceId}: ${getErrorMessage(err)}`);
         }
       }
     }
@@ -278,6 +286,7 @@ export class Iframer {
     const opts = pipeline.options || {};
     const forcedMode = opts.mode;
     const autoEscalate = opts.autoEscalate !== false;
+    const instanceId = opts.instanceId || DEFAULT_INSTANCE;
 
     // Extract domain from first navigate step for mode memory
     const firstNav = pipeline.steps.find(s => s.type === "navigate");
@@ -297,7 +306,7 @@ export class Iframer {
     }
 
     // Execute with the chosen mode
-    let result = await this.executeWithMode(userId, token, pipeline, mode);
+    let result = await this.executeWithMode(userId, token, pipeline, mode, instanceId);
 
     // Auto-escalation: if blocked and autoEscalate is on, try next mode
     if (!result.ok && autoEscalate && domain && result.error?.errorType === "bot-blocked") {
@@ -310,10 +319,10 @@ export class Iframer {
 
         // Stop the failed mode's browser
         if (failedMode !== "docker-headful") {
-          await this.daemon.stopMode(failedMode);
+          await this.daemon.stopMode(failedMode, instanceId);
         }
 
-        result = await this.executeWithMode(userId, token, pipeline, nextMode);
+        result = await this.executeWithMode(userId, token, pipeline, nextMode, instanceId);
         result.modeEscalated = true;
         result.modeUsed = nextMode;
 
@@ -327,9 +336,9 @@ export class Iframer {
           if (thirdMode) {
             log.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
             if (nextMode !== "docker-headful") {
-              await this.daemon.stopMode(nextMode);
+              await this.daemon.stopMode(nextMode, instanceId);
             }
-            result = await this.executeWithMode(userId, token, pipeline, thirdMode);
+            result = await this.executeWithMode(userId, token, pipeline, thirdMode, instanceId);
             result.modeEscalated = true;
             result.modeUsed = thirdMode;
 
@@ -346,11 +355,11 @@ export class Iframer {
     return result;
   }
 
-  private async executeWithMode(userId: string, token: string, pipeline: Pipeline, mode: BrowserMode): Promise<PipelineResult> {
+  private async executeWithMode(userId: string, token: string, pipeline: Pipeline, mode: BrowserMode, instanceId: string = DEFAULT_INSTANCE): Promise<PipelineResult> {
     if (mode === "docker-headful") {
       return this.executeDocker(userId, token, pipeline);
     }
-    return this.executeLocal(userId, token, pipeline, mode);
+    return this.executeLocal(userId, token, pipeline, mode, instanceId);
   }
 
   /** Execute via Docker session-manager (existing behavior) */
@@ -399,16 +408,19 @@ export class Iframer {
   }
 
   /** Execute via local Chrome daemon (new behavior for headless + binary-headful) */
-  private async executeLocal(userId: string, token: string, pipeline: Pipeline, mode: BrowserMode): Promise<PipelineResult> {
+  private async executeLocal(userId: string, token: string, pipeline: Pipeline, mode: BrowserMode, instanceId: string = DEFAULT_INSTANCE): Promise<PipelineResult> {
     const startTime = Date.now();
 
     try {
-      // Get or launch Chrome in the requested mode
-      const { page } = await this.daemon.ensure(mode);
+      // Get or launch Chrome in the requested mode + named instance
+      const { page } = await this.daemon.ensure(mode, instanceId);
 
-      // Load stored session (cookies + localStorage + sessionStorage)
+      // Load stored session (cookies + localStorage + sessionStorage).
+      // Named instances get their own session blob so they can hold separate
+      // logins (e.g. one per account); "default" stays keyed by userId.
+      const storeKey = this.sessionKey(userId, instanceId);
       const encryptionKey = await deriveKey(token);
-      const blob = await this.store.getSession(userId);
+      const blob = await this.store.getSession(storeKey);
       let sessionData: SessionData | null = null;
       if (blob && blob.length > 0) {
         try {
@@ -455,7 +467,7 @@ export class Iframer {
         try {
           updatedSession = await extractSession(page.context(), page);
           const encrypted = encrypt(JSON.stringify(updatedSession), encryptionKey);
-          await this.store.setSession(userId, encrypted);
+          await this.store.setSession(storeKey, encrypted);
         } catch {}
       }
 
@@ -621,23 +633,23 @@ export class Iframer {
 
   // ─── Persistent Capture ──────────────────────────────────────────
 
-  async startCapture(mode: BrowserMode = "binary-headful"): Promise<{ ok: boolean; message: string }> {
-    const key = mode;
+  async startCapture(mode: BrowserMode = "binary-headful", instanceId: string = DEFAULT_INSTANCE): Promise<{ ok: boolean; message: string }> {
+    const key = `${mode}::${instanceId}`;
     if (this.persistentCaptures.has(key)) {
-      return { ok: true, message: `Capture already running on ${mode}. Call capture-stop to flush.` };
+      return { ok: true, message: `Capture already running on ${key}. Call capture-stop to flush.` };
     }
-    const { page } = await this.daemon.ensure(mode);
+    const { page } = await this.daemon.ensure(mode, instanceId);
     const capture = new ApiCapture(page);
     capture.start();
     this.persistentCaptures.set(key, capture);
-    return { ok: true, message: `Capture started on ${mode}. Use 'session capture-stop' when ready to collect results.` };
+    return { ok: true, message: `Capture started on ${key}. Use 'session capture-stop' when ready to collect results.` };
   }
 
-  async stopCapture(mode: BrowserMode = "binary-headful"): Promise<{ ok: boolean; capturedApi: import("./types").CapturedApi[] | undefined; message: string }> {
-    const key = mode;
+  async stopCapture(mode: BrowserMode = "binary-headful", instanceId: string = DEFAULT_INSTANCE): Promise<{ ok: boolean; capturedApi: import("./types").CapturedApi[] | undefined; message: string }> {
+    const key = `${mode}::${instanceId}`;
     const capture = this.persistentCaptures.get(key);
     if (!capture) {
-      return { ok: false, capturedApi: undefined, message: `No active capture on ${mode}. Start one with 'session capture-start'.` };
+      return { ok: false, capturedApi: undefined, message: `No active capture on ${key}. Start one with 'session capture-start'.` };
     }
     capture.stop();
     this.persistentCaptures.delete(key);
@@ -648,8 +660,8 @@ export class Iframer {
 
   /** Extract all cookies from the browser context via CDP — includes HttpOnly/Secure.
    *  No JS sandbox restrictions. Pass urls to scope (e.g. ['https://youtube.com']). */
-  async getCookies(mode: BrowserMode = "binary-headful", urls?: string[]): Promise<{ ok: boolean; cookies: any[]; message: string }> {
-    const { context } = await this.daemon.ensure(mode);
+  async getCookies(mode: BrowserMode = "binary-headful", urls?: string[], instanceId: string = DEFAULT_INSTANCE): Promise<{ ok: boolean; cookies: any[]; message: string }> {
+    const { context } = await this.daemon.ensure(mode, instanceId);
     const cookies = urls && urls.length > 0
       ? await context.cookies(urls)
       : await context.cookies();
@@ -657,8 +669,8 @@ export class Iframer {
   }
 
   /** Extract cookies + localStorage + sessionStorage in one shot. */
-  async getFullAuth(mode: BrowserMode = "binary-headful", urls?: string[]): Promise<{ ok: boolean; cookies: any[]; localStorage: Record<string, Record<string, string>>; sessionStorage: Record<string, Record<string, string>>; message: string }> {
-    const { context, page } = await this.daemon.ensure(mode);
+  async getFullAuth(mode: BrowserMode = "binary-headful", urls?: string[], instanceId: string = DEFAULT_INSTANCE): Promise<{ ok: boolean; cookies: any[]; localStorage: Record<string, Record<string, string>>; sessionStorage: Record<string, Record<string, string>>; message: string }> {
+    const { context, page } = await this.daemon.ensure(mode, instanceId);
     const cookies = urls && urls.length > 0
       ? await context.cookies(urls)
       : await context.cookies();
@@ -692,12 +704,9 @@ export class Iframer {
     };
   }
 
-  /** Check if any browser is alive and connected. */
+  /** Check if any browser is alive and connected (across all named instances). */
   browserHealth(): { alive: boolean; modes: string[] } {
-    const modes: string[] = [];
-    for (const m of ["headless", "binary-headful"] as const) {
-      if (this.daemon.isRunning(m)) modes.push(m);
-    }
+    const modes = this.daemon.runningModes();
     return { alive: modes.length > 0, modes };
   }
 
@@ -840,6 +849,7 @@ export class Iframer {
 
   async shutdown(): Promise<void> {
     await this.daemon.stopAll();
+    await closeBrowser();
     await sessionManager.cleanupAllSessions();
     // Close SQLite if the store supports it
     if ("close" in this.store && typeof (this.store as StorageBackend & { close?: () => void }).close === "function") {

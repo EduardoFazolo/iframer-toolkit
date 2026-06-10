@@ -20,12 +20,25 @@ export const BROWSER_ORDER = ["chromium"];
 let cachedBrowser: Browser | null = null;
 
 export async function getBrowser(_name: string = "chromium"): Promise<Browser> {
-  if (cachedBrowser && cachedBrowser.isConnected()) return cachedBrowser;
+  if (cachedBrowser) {
+    if (cachedBrowser.isConnected()) return cachedBrowser;
+    // Stale handle: the CDP connection dropped but the Chrome process may still
+    // be alive. Close it before relaunching, otherwise we orphan a process.
+    try { await cachedBrowser.close(); } catch (e) { log.warn(`stale browser close failed: ${e}`); }
+    cachedBrowser = null;
+  }
   cachedBrowser = await chromium.launch({
     headless: true,
     args: STEALTH_ARGS,
   });
   return cachedBrowser;
+}
+
+/** Close the cached ephemeral browser (used by fetch()). Call on shutdown. */
+export async function closeBrowser(): Promise<void> {
+  if (!cachedBrowser) return;
+  try { await cachedBrowser.close(); } catch (e) { log.warn(`closeBrowser failed: ${e}`); }
+  cachedBrowser = null;
 }
 
 export async function getBrowserWithFallback(_preferred?: string): Promise<{ browser: Browser; name: string }> {

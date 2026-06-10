@@ -34,6 +34,7 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
         captureApi: z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes."),
         mode: z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("DO NOT SET THIS unless user explicitly requests a mode. iframer auto-selects and auto-escalates."),
         autoEscalate: z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)"),
+        instanceId: z.string().optional().describe("Run in a named parallel browser within this session (default: 'default'). Use distinct ids to drive several browsers at once, e.g. one per account — each keeps its own login/session state."),
       }).optional(),
     },
     async (params) => {
