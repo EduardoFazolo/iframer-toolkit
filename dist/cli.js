@@ -2936,6 +2936,23 @@ function tryParseJson(text) {
     return;
   }
 }
+function sanitizeString(s) {
+  return s.replace(/[\uD800-\uDFFF]/g, "�");
+}
+function sanitizeDeep(val) {
+  if (typeof val === "string")
+    return sanitizeString(val);
+  if (Array.isArray(val))
+    return val.map(sanitizeDeep);
+  if (val && typeof val === "object") {
+    const out = {};
+    for (const [k, v] of Object.entries(val)) {
+      out[sanitizeString(k)] = sanitizeDeep(v);
+    }
+    return out;
+  }
+  return val;
+}
 function hasGraphQLShape(body) {
   if (!body || typeof body !== "object")
     return false;
@@ -3083,7 +3100,8 @@ function buildCurl(method, url, headers, auth, body) {
   }
   if (body !== undefined) {
     const bodyStr = typeof body === "string" ? body : JSON.stringify(body);
-    parts.push(`  -d '${bodyStr.replace(/'/g, "'\\''")}'`);
+    const safeBody = bodyStr.length > 1e4 ? bodyStr.slice(0, 1e4) + "...[truncated]" : bodyStr;
+    parts.push(`  -d '${safeBody.replace(/'/g, "'\\''")}'`);
   }
   parts.push(`  '${url}'`);
   return parts.join(" \\\n");
@@ -3123,16 +3141,28 @@ class ApiCapture {
         const allHeaders = req.headers();
         let requestBody = undefined;
         try {
+          const ct = (allHeaders["content-type"] || allHeaders["Content-Type"] || "").toLowerCase();
           const postData = req.postData();
           if (postData) {
-            requestBody = tryParseJson(postData) ?? postData;
+            if (ct.includes("multipart/form-data")) {
+              const fields = [...postData.matchAll(/name="([^"]+)"/g)].map((m) => m[1]);
+              requestBody = { _type: "multipart/form-data", fields: [...new Set(fields)] };
+            } else if (ct.includes("application/octet-stream") || ct.startsWith("video/") || ct.startsWith("image/") || ct.startsWith("audio/")) {
+              requestBody = { _type: ct, _size: postData.length };
+            } else if (postData.length < 500000) {
+              requestBody = sanitizeDeep(tryParseJson(postData) ?? postData);
+            } else {
+              requestBody = `[body truncated — ${postData.length} bytes, content-type: ${ct}]`;
+            }
           }
         } catch {}
         let responseBody = undefined;
         try {
           const resText = await res.text();
-          if (resText && resText.length < 2000000) {
-            responseBody = tryParseJson(resText) ?? resText;
+          if (resText && resText.length < 500000) {
+            responseBody = sanitizeDeep(tryParseJson(resText) ?? resText);
+          } else if (resText) {
+            responseBody = `[response truncated — ${resText.length} bytes]`;
           }
         } catch {}
         this.requests.push({
@@ -3162,6 +3192,13 @@ class ApiCapture {
   stop() {
     this.page.off("request", this.requestHandler);
     this.page.off("response", this.responseHandler);
+  }
+  async drain(ms = 3000, pendingTimeoutMs = 5000) {
+    await new Promise((r) => setTimeout(r, ms));
+    const deadline = Date.now() + pendingTimeoutMs;
+    while (this.pendingRequests.size > 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
   }
   extractAuth(requests) {
     const auth = { cookies: {}, tokens: {} };
@@ -3376,7 +3413,7 @@ class PipelineRunner {
     const capture = opts.captureApi ? new ApiCapture(page) : null;
     if (capture)
       capture.start();
-    const finishCapture = () => {
+    const finishCapture = async () => {
       if (!capture)
         return;
       capture.stop();
@@ -3423,7 +3460,7 @@ class PipelineRunner {
             retryable: isRetryable(errorType)
           },
           durationMs: Date.now() - startTime,
-          capturedApi: finishCapture()
+          capturedApi: await finishCapture()
         };
       }
       if (screenshotAfterEach && stepResult.ok) {
@@ -3453,7 +3490,7 @@ class PipelineRunner {
             retryable: isRetryable(errorType)
           },
           durationMs: Date.now() - startTime,
-          capturedApi: finishCapture()
+          capturedApi: await finishCapture()
         };
       }
       if (step.type === "navigate" && continueOnObstacle) {
@@ -3487,12 +3524,13 @@ class PipelineRunner {
                 retryable: true
               },
               durationMs: Date.now() - startTime,
-              capturedApi: finishCapture()
+              capturedApi: await finishCapture()
             };
           }
         }
       }
     }
+    const capturedApi = await finishCapture();
     const finalState = await getPageState(page, this.ctx, true);
     return {
       ok: true,
@@ -3502,7 +3540,7 @@ class PipelineRunner {
       obstacles,
       finalState,
       durationMs: Date.now() - startTime,
-      capturedApi: finishCapture()
+      capturedApi
     };
   }
 }
@@ -3524,13 +3562,31 @@ function findChromeExecutable() {
   return;
 }
 async function getBrowser(_name = "chromium") {
-  if (cachedBrowser && cachedBrowser.isConnected())
-    return cachedBrowser;
+  if (cachedBrowser) {
+    if (cachedBrowser.isConnected())
+      return cachedBrowser;
+    try {
+      await cachedBrowser.close();
+    } catch (e) {
+      log5.warn(`stale browser close failed: ${e}`);
+    }
+    cachedBrowser = null;
+  }
   cachedBrowser = await import_patchright.chromium.launch({
     headless: true,
     args: STEALTH_ARGS
   });
   return cachedBrowser;
+}
+async function closeBrowser() {
+  if (!cachedBrowser)
+    return;
+  try {
+    await cachedBrowser.close();
+  } catch (e) {
+    log5.warn(`closeBrowser failed: ${e}`);
+  }
+  cachedBrowser = null;
 }
 async function getBrowserWithFallback(_preferred) {
   return { browser: await getBrowser(), name: "chromium" };
@@ -4003,14 +4059,70 @@ var init_chrome_downloader = __esm(() => {
   DEFAULT_INSTALL_DIR = import_path5.default.join(import_os2.default.homedir(), ".iframer", "chrome");
 });
 
+// src/lib/browser/cloak-browser.ts
+async function tryImport() {
+  try {
+    return await import("cloakbrowser");
+  } catch {
+    return null;
+  }
+}
+async function ensureBinary() {
+  const cloak = await tryImport();
+  if (!cloak)
+    return false;
+  try {
+    const info = cloak.binaryInfo();
+    if (!info.installed) {
+      log8.info("Downloading CloakBrowser binary...");
+      await cloak.ensureBinary();
+      log8.info("CloakBrowser ready");
+    }
+    _available = true;
+    return true;
+  } catch (err) {
+    log8.warn(`CloakBrowser setup failed: ${err instanceof Error ? err.message : String(err)}`);
+    _available = false;
+    return false;
+  }
+}
+async function launchCloakBrowser(options) {
+  const cloak = await tryImport();
+  if (!cloak)
+    return null;
+  try {
+    const ok = await ensureBinary();
+    if (!ok)
+      return null;
+    const browser = await cloak.launch({
+      headless: options.headless,
+      args: options.args
+    });
+    log8.info(`CloakBrowser launched (headless=${options.headless})`);
+    return browser;
+  } catch (err) {
+    log8.warn(`CloakBrowser launch failed: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+var log8, _available = null;
+var init_cloak_browser = __esm(() => {
+  init_logger();
+  log8 = createLogger("cloak");
+});
+
 // src/lib/browser/daemon.ts
+function keyOf(mode, instanceId) {
+  return `${mode}::${instanceId}`;
+}
+
 class BrowserDaemon {
   instances = new Map;
   idleTimers = new Map;
   idleTimeout;
   constructor(idleTimeout = DEFAULT_IDLE_TIMEOUT) {
     this.idleTimeout = idleTimeout;
-    const cleanup = () => this.stopAll().catch((err) => log8.warn(`cleanup failed: ${err}`));
+    const cleanup = () => this.stopAll().catch((err) => log9.warn(`cleanup failed: ${err}`));
     process.on("exit", cleanup);
     process.on("SIGINT", () => {
       cleanup();
@@ -4021,11 +4133,12 @@ class BrowserDaemon {
       process.exit(0);
     });
   }
-  async ensure(mode) {
+  async ensure(mode, instanceId = DEFAULT_INSTANCE) {
     if (mode === "docker-headful") {
       throw new Error("Docker mode doesn't use the daemon. Use the Docker API.");
     }
-    let instance = this.instances.get(mode);
+    const key = keyOf(mode, instanceId);
+    let instance = this.instances.get(key);
     if (instance) {
       try {
         if (instance.browser.isConnected()) {
@@ -4034,7 +4147,7 @@ class BrowserDaemon {
           try {
             await page2.evaluate("1");
           } catch {
-            log8.info(`Page for ${mode} is dead, creating fresh context`);
+            log9.info(`Page for ${mode} is dead, creating fresh context`);
             try {
               await context2.close();
             } catch {}
@@ -4043,26 +4156,34 @@ class BrowserDaemon {
             instance.context = context2;
             instance.page = page2;
           }
-          this.resetIdleTimer(mode);
+          this.resetIdleTimer(key);
           return { browser: instance.browser, context: context2, page: page2 };
         }
       } catch {}
-      await this.stopMode(mode);
+      log9.info(`Browser for ${key} disconnected (window closed?), relaunching...`);
+      await this.stopMode(mode, instanceId);
     }
-    const executablePath = await ensureChrome();
-    log8.info(`Launching Chrome for Testing in ${mode} mode: ${executablePath}`);
-    const userDataDir = import_path6.default.join(import_os3.default.homedir(), ".iframer", "chrome-profile", mode);
-    import_fs7.default.mkdirSync(userDataDir, { recursive: true });
-    const browser = await import_patchright2.chromium.launch({
-      executablePath,
-      headless: mode === "headless",
-      args: [
-        "--disable-blink-features=AutomationControlled",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-infobars"
-      ]
-    });
+    let browser;
+    const cloakBrowser = await launchCloakBrowser({ headless: mode === "headless" });
+    if (cloakBrowser) {
+      log9.info(`CloakBrowser ${mode} ready`);
+      browser = cloakBrowser;
+    } else {
+      const executablePath = await ensureChrome();
+      log9.info(`Falling back to Chrome for Testing in ${mode} mode: ${executablePath}`);
+      const userDataDir = import_path6.default.join(import_os3.default.homedir(), ".iframer", "chrome-profile", mode);
+      import_fs7.default.mkdirSync(userDataDir, { recursive: true });
+      browser = await import_patchright2.chromium.launch({
+        executablePath,
+        headless: mode === "headless",
+        args: [
+          "--disable-blink-features=AutomationControlled",
+          "--no-first-run",
+          "--no-default-browser-check",
+          "--disable-infobars"
+        ]
+      });
+    }
     const context = await browser.newContext();
     const page = await context.newPage();
     instance = {
@@ -4070,15 +4191,16 @@ class BrowserDaemon {
       context,
       page,
       mode,
+      instanceId,
       createdAt: new Date
     };
-    this.instances.set(mode, instance);
-    this.resetIdleTimer(mode);
-    log8.info(`Chrome ${mode} ready`);
+    this.instances.set(key, instance);
+    this.resetIdleTimer(key);
+    log9.info(`Chrome ${key} ready`);
     return { browser, context, page };
   }
-  isRunning(mode) {
-    const instance = this.instances.get(mode);
+  isRunning(mode, instanceId = DEFAULT_INSTANCE) {
+    const instance = this.instances.get(keyOf(mode, instanceId));
     if (!instance)
       return false;
     try {
@@ -4086,6 +4208,9 @@ class BrowserDaemon {
     } catch {
       return false;
     }
+  }
+  runningModes() {
+    return [...new Set(this.liveInstances().map((i) => i.mode))];
   }
   liveInstances() {
     return [...this.instances.values()].filter((inst) => {
@@ -4096,46 +4221,50 @@ class BrowserDaemon {
       }
     });
   }
-  async stopMode(mode) {
-    const instance = this.instances.get(mode);
+  async stopMode(mode, instanceId = DEFAULT_INSTANCE) {
+    await this.stopKey(keyOf(mode, instanceId));
+  }
+  async stopKey(key) {
+    const instance = this.instances.get(key);
     if (!instance)
       return;
-    const timer = this.idleTimers.get(mode);
+    const timer = this.idleTimers.get(key);
     if (timer)
       clearTimeout(timer);
-    this.idleTimers.delete(mode);
-    log8.info(`Stopping Chrome ${mode}...`);
+    this.idleTimers.delete(key);
+    log9.info(`Stopping Chrome ${key}...`);
     try {
       await instance.context.close();
     } catch {}
     try {
       await instance.browser.close();
     } catch {}
-    this.instances.delete(mode);
+    this.instances.delete(key);
   }
   async stopAll() {
-    const modes = [...this.instances.keys()];
-    await Promise.all(modes.map((m) => this.stopMode(m)));
+    const keys = [...this.instances.keys()];
+    await Promise.all(keys.map((k) => this.stopKey(k)));
   }
-  resetIdleTimer(mode) {
-    const existing = this.idleTimers.get(mode);
+  resetIdleTimer(key) {
+    const existing = this.idleTimers.get(key);
     if (existing)
       clearTimeout(existing);
-    this.idleTimers.set(mode, setTimeout(() => {
-      log8.info(`Idle timeout for ${mode}, stopping...`);
-      this.stopMode(mode);
+    this.idleTimers.set(key, setTimeout(() => {
+      log9.info(`Idle timeout for ${key}, stopping...`);
+      this.stopKey(key);
     }, this.idleTimeout));
   }
 }
-var import_patchright2, import_os3, import_path6, import_fs7, log8, DEFAULT_IDLE_TIMEOUT;
+var import_patchright2, import_os3, import_path6, import_fs7, log9, DEFAULT_IDLE_TIMEOUT, DEFAULT_INSTANCE = "default";
 var init_daemon = __esm(() => {
   init_chrome_downloader();
+  init_cloak_browser();
   init_logger();
   import_patchright2 = require("patchright");
   import_os3 = __toESM(require("os"));
   import_path6 = __toESM(require("path"));
   import_fs7 = __toESM(require("fs"));
-  log8 = createLogger("daemon");
+  log9 = createLogger("daemon");
   DEFAULT_IDLE_TIMEOUT = 5 * 60 * 1000;
 });
 
@@ -4232,17 +4361,17 @@ class DomainModeStore {
       import_fs8.default.mkdirSync(import_path7.default.dirname(this.filePath), { recursive: true });
       import_fs8.default.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2));
     } catch (err) {
-      log9.error("Failed to save:", err);
+      log10.error("Failed to save:", err);
     }
   }
 }
-var import_fs8, import_path7, log9, TTL_DAYS = 14, ESCALATION_LADDER;
+var import_fs8, import_path7, log10, TTL_DAYS = 14, ESCALATION_LADDER;
 var init_domain_modes = __esm(() => {
   init_logger();
   init_paths();
   import_fs8 = __toESM(require("fs"));
   import_path7 = __toESM(require("path"));
-  log9 = createLogger("domain-modes");
+  log10 = createLogger("domain-modes");
   ESCALATION_LADDER = ["headless", "docker-headful", "binary-headful"];
 });
 
@@ -4266,7 +4395,7 @@ async function detectBlock(page) {
     const hasCfChallenge = await page.evaluate(() => {
       return !!document.querySelector('iframe[src*="challenges.cloudflare.com"]');
     }).catch((err) => {
-      log10.warn(`CF challenge check failed, assuming blocked: ${err}`);
+      log11.warn(`CF challenge check failed, assuming blocked: ${err}`);
       return true;
     });
     if (hasCfChallenge) {
@@ -4285,7 +4414,7 @@ async function detectBlock(page) {
       const hasCaptchaIframe = await page.evaluate(() => {
         return !!(document.querySelector('iframe[src*="recaptcha"]') || document.querySelector('iframe[src*="hcaptcha"]'));
       }).catch((err) => {
-        log10.warn(`captcha iframe check failed, assuming blocked: ${err}`);
+        log11.warn(`captcha iframe check failed, assuming blocked: ${err}`);
         return true;
       });
       if (hasCaptchaIframe) {
@@ -4298,15 +4427,15 @@ async function detectBlock(page) {
     if (!url.includes("about:blank") && bodyText.trim().length < 20 && title.length < 5) {}
     return { blocked: false };
   } catch (err) {
-    log10.warn(`page evaluation failed, assuming blocked: ${err}`);
+    log11.warn(`page evaluation failed, assuming blocked: ${err}`);
     return { blocked: true, reason: "evaluation-failed" };
   }
 }
-var log10;
+var log11;
 var init_block_detection = __esm(() => {
   init_constants();
   init_logger();
-  log10 = createLogger("block-detection");
+  log11 = createLogger("block-detection");
 });
 
 // src/lib/browser/cdp-launcher.ts
@@ -4321,11 +4450,11 @@ function checkModeAvailability() {
     binaryHeadful: hasDisplay()
   };
 }
-var log11;
+var log12;
 var init_cdp_launcher = __esm(() => {
   init_chrome_downloader();
   init_logger();
-  log11 = createLogger("cdp-launcher");
+  log12 = createLogger("cdp-launcher");
 });
 
 // src/lib/iframer.ts
@@ -4346,6 +4475,7 @@ class Iframer {
   daemon;
   domainModes;
   operatingMode;
+  persistentCaptures = new Map;
   constructor(config = {}) {
     this.screenshotDir = config.screenshotDir || DEFAULT_SCREENSHOT_DIR;
     this.publicUrl = config.publicUrl || DEFAULT_PUBLIC_URL;
@@ -4498,6 +4628,9 @@ class Iframer {
   getSession(userId) {
     return getSession(userId);
   }
+  sessionKey(userId, instanceId = DEFAULT_INSTANCE) {
+    return instanceId === DEFAULT_INSTANCE ? userId : `${userId}::${instanceId}`;
+  }
   async stopSession(userId, token) {
     let sessionSaved = false;
     if (token) {
@@ -4507,12 +4640,11 @@ class Iframer {
           const data = await extractSession(inst.context, inst.page);
           if (data) {
             const encrypted = encrypt(JSON.stringify(data), encryptionKey);
-            await this.store.setSession(userId, encrypted);
+            await this.store.setSession(this.sessionKey(userId, inst.instanceId), encrypted);
             sessionSaved = true;
-            break;
           }
         } catch (err) {
-          log12.warn(`stopSession: failed to extract daemon state: ${getErrorMessage2(err)}`);
+          log13.warn(`stopSession: failed to extract daemon state for ${inst.mode}::${inst.instanceId}: ${getErrorMessage2(err)}`);
         }
       }
     }
@@ -4539,6 +4671,7 @@ class Iframer {
     const opts = pipeline.options || {};
     const forcedMode = opts.mode;
     const autoEscalate = opts.autoEscalate !== false;
+    const instanceId = opts.instanceId || DEFAULT_INSTANCE;
     const firstNav = pipeline.steps.find((s) => s.type === "navigate");
     const domain = firstNav ? new URL(firstNav.url).hostname : null;
     const availableModes = this.getAvailableModes();
@@ -4550,18 +4683,18 @@ class Iframer {
     } else {
       mode = availableModes[0] || "headless";
     }
-    let result = await this.executeWithMode(userId, token, pipeline, mode);
+    let result = await this.executeWithMode(userId, token, pipeline, mode, instanceId);
     if (!result.ok && autoEscalate && domain && result.error?.errorType === "bot-blocked") {
       const failedMode = mode;
       if (domain)
         this.domainModes.recordFailure(domain, failedMode, result.error?.message || "blocked");
       const nextMode = this.domainModes.getNextMode(failedMode, availableModes);
       if (nextMode) {
-        log12.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
+        log13.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
         if (failedMode !== "docker-headful") {
-          await this.daemon.stopMode(failedMode);
+          await this.daemon.stopMode(failedMode, instanceId);
         }
-        result = await this.executeWithMode(userId, token, pipeline, nextMode);
+        result = await this.executeWithMode(userId, token, pipeline, nextMode, instanceId);
         result.modeEscalated = true;
         result.modeUsed = nextMode;
         if (result.ok && domain) {
@@ -4570,11 +4703,11 @@ class Iframer {
           this.domainModes.recordFailure(domain, nextMode, result.error?.message || "blocked");
           const thirdMode = this.domainModes.getNextMode(nextMode, availableModes);
           if (thirdMode) {
-            log12.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
+            log13.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
             if (nextMode !== "docker-headful") {
-              await this.daemon.stopMode(nextMode);
+              await this.daemon.stopMode(nextMode, instanceId);
             }
-            result = await this.executeWithMode(userId, token, pipeline, thirdMode);
+            result = await this.executeWithMode(userId, token, pipeline, thirdMode, instanceId);
             result.modeEscalated = true;
             result.modeUsed = thirdMode;
             if (result.ok && domain) {
@@ -4588,11 +4721,11 @@ class Iframer {
     }
     return result;
   }
-  async executeWithMode(userId, token, pipeline, mode) {
+  async executeWithMode(userId, token, pipeline, mode, instanceId = DEFAULT_INSTANCE) {
     if (mode === "docker-headful") {
       return this.executeDocker(userId, token, pipeline);
     }
-    return this.executeLocal(userId, token, pipeline, mode);
+    return this.executeLocal(userId, token, pipeline, mode, instanceId);
   }
   async executeDocker(userId, token, pipeline) {
     let session = getSession(userId);
@@ -4631,12 +4764,13 @@ class Iframer {
     result.modeUsed = "docker-headful";
     return result;
   }
-  async executeLocal(userId, token, pipeline, mode) {
+  async executeLocal(userId, token, pipeline, mode, instanceId = DEFAULT_INSTANCE) {
     const startTime = Date.now();
     try {
-      const { page } = await this.daemon.ensure(mode);
+      const { page } = await this.daemon.ensure(mode, instanceId);
+      const storeKey = this.sessionKey(userId, instanceId);
       const encryptionKey = await deriveKey(token);
-      const blob = await this.store.getSession(userId);
+      const blob = await this.store.getSession(storeKey);
       let sessionData = null;
       if (blob && blob.length > 0) {
         try {
@@ -4676,14 +4810,14 @@ class Iframer {
         try {
           updatedSession = await extractSession(page.context(), page);
           const encrypted = encrypt(JSON.stringify(updatedSession), encryptionKey);
-          await this.store.setSession(userId, encrypted);
+          await this.store.setSession(storeKey, encrypted);
         } catch {}
       }
       if (result.ok) {
         try {
           this.updateKnowledgeFromRun(pipeline, result, updatedSession, mode);
         } catch (err) {
-          log12.warn(`knowledge update failed: ${getErrorMessage2(err)}`);
+          log13.warn(`knowledge update failed: ${getErrorMessage2(err)}`);
         }
       }
       const refs = this.userRefs.get(userId);
@@ -4814,12 +4948,66 @@ class Iframer {
       return { url: "", title: "" };
     }
   }
-  browserHealth() {
-    const modes = [];
-    for (const m of ["headless", "binary-headful"]) {
-      if (this.daemon.isRunning(m))
-        modes.push(m);
+  async startCapture(mode = "binary-headful", instanceId = DEFAULT_INSTANCE) {
+    const key = `${mode}::${instanceId}`;
+    if (this.persistentCaptures.has(key)) {
+      return { ok: true, message: `Capture already running on ${key}. Call capture-stop to flush.` };
     }
+    const { page } = await this.daemon.ensure(mode, instanceId);
+    const capture = new ApiCapture(page);
+    capture.start();
+    this.persistentCaptures.set(key, capture);
+    return { ok: true, message: `Capture started on ${key}. Use 'session capture-stop' when ready to collect results.` };
+  }
+  async stopCapture(mode = "binary-headful", instanceId = DEFAULT_INSTANCE) {
+    const key = `${mode}::${instanceId}`;
+    const capture = this.persistentCaptures.get(key);
+    if (!capture) {
+      return { ok: false, capturedApi: undefined, message: `No active capture on ${key}. Start one with 'session capture-start'.` };
+    }
+    capture.stop();
+    this.persistentCaptures.delete(key);
+    const capturedApi = capture.getResults();
+    const total = capturedApi.reduce((n, a) => n + a.endpoints.length, 0);
+    return { ok: true, capturedApi, message: `Capture stopped. ${total} endpoints across ${capturedApi.length} domain(s).` };
+  }
+  async getCookies(mode = "binary-headful", urls, instanceId = DEFAULT_INSTANCE) {
+    const { context } = await this.daemon.ensure(mode, instanceId);
+    const cookies = urls && urls.length > 0 ? await context.cookies(urls) : await context.cookies();
+    return { ok: true, cookies, message: `${cookies.length} cookies extracted via CDP.` };
+  }
+  async getFullAuth(mode = "binary-headful", urls, instanceId = DEFAULT_INSTANCE) {
+    const { context, page } = await this.daemon.ensure(mode, instanceId);
+    const cookies = urls && urls.length > 0 ? await context.cookies(urls) : await context.cookies();
+    const localStorage = {};
+    const sessionStorage = {};
+    try {
+      const stores = await page.evaluate(() => {
+        const ls = {};
+        const ss = {};
+        for (let i = 0;i < window.localStorage.length; i++) {
+          const k = window.localStorage.key(i);
+          ls[k] = window.localStorage.getItem(k) ?? "";
+        }
+        for (let i = 0;i < window.sessionStorage.length; i++) {
+          const k = window.sessionStorage.key(i);
+          ss[k] = window.sessionStorage.getItem(k) ?? "";
+        }
+        return { origin: window.location.origin, ls, ss };
+      });
+      localStorage[stores.origin] = stores.ls;
+      sessionStorage[stores.origin] = stores.ss;
+    } catch {}
+    return {
+      ok: true,
+      cookies,
+      localStorage,
+      sessionStorage,
+      message: `${cookies.length} cookies, ${Object.values(localStorage).reduce((n, s) => n + Object.keys(s).length, 0)} localStorage keys, ${Object.values(sessionStorage).reduce((n, s) => n + Object.keys(s).length, 0)} sessionStorage keys.`
+    };
+  }
+  browserHealth() {
+    const modes = this.daemon.runningModes();
     return { alive: modes.length > 0, modes };
   }
   async restartBrowser() {
@@ -4924,13 +5112,14 @@ class Iframer {
   }
   async shutdown() {
     await this.daemon.stopAll();
+    await closeBrowser();
     await cleanupAllSessions();
     if ("close" in this.store && typeof this.store.close === "function") {
       this.store.close();
     }
   }
 }
-var import_path8, log12, DEFAULT_SCREENSHOT_DIR, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3 = 20000;
+var import_path8, log13, DEFAULT_SCREENSHOT_DIR, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3 = 20000;
 var init_iframer = __esm(() => {
   init_pipeline();
   init_session_manager();
@@ -4942,13 +5131,14 @@ var init_iframer = __esm(() => {
   init_screenshot();
   init_storage();
   init_daemon();
+  init_api_capture();
   init_domain_modes();
   init_block_detection();
   init_cdp_launcher();
   init_constants();
   init_logger();
   import_path8 = __toESM(require("path"));
-  log12 = createLogger("iframer");
+  log13 = createLogger("iframer");
   DEFAULT_SCREENSHOT_DIR = import_path8.default.join("/Users/eduardoverona/tools/iframer-toolkit/src/lib", "../../.screenshots");
   DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
 });

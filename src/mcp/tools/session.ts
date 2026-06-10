@@ -25,9 +25,10 @@ Sessions live in the single local SQLite database (~/.iframer/iframer.db), share
       action: z.enum(["stop", "clear", "restart", "capture-start", "capture-stop", "get-cookies", "get-auth"]).describe("stop | clear | restart | capture-start | capture-stop | get-cookies | get-auth"),
       mode: z.enum(["headless", "binary-headful"]).optional().describe("Browser mode (default: binary-headful)"),
       urls: z.array(z.string()).optional().describe("URLs to scope cookie extraction (get-cookies/get-auth). Omit for all cookies."),
+      instanceId: z.string().optional().describe("Target a named parallel browser within this session (default: 'default'). Match the instanceId used in execute."),
       outputDir: z.string().optional().describe("Where to save captured-api.json for capture-stop"),
     },
-    async ({ action, mode, urls, outputDir }) => {
+    async ({ action, mode, urls, instanceId, outputDir }) => {
       try {
         if (action === "stop") {
           const result = await localApiPost<{ ok: boolean; sessionSaved?: boolean }>("/interactive/stop").catch(() => ({ ok: true, sessionSaved: false }));
@@ -68,12 +69,12 @@ Sessions live in the single local SQLite database (~/.iframer/iframer.db), share
         }
 
         if (action === "capture-start") {
-          const result = await localApiPost<{ ok: boolean; message: string }>("/capture/start", { mode: mode ?? "binary-headful" });
+          const result = await localApiPost<{ ok: boolean; message: string }>("/capture/start", { mode: mode ?? "binary-headful", instanceId });
           return { content: [{ type: "text" as const, text: result.message }] };
         }
 
         if (action === "capture-stop") {
-          const result = await localApiPost<{ ok: boolean; capturedApi: any[]; message: string }>("/capture/stop", { mode: mode ?? "binary-headful" });
+          const result = await localApiPost<{ ok: boolean; capturedApi: any[]; message: string }>("/capture/stop", { mode: mode ?? "binary-headful", instanceId });
           const lines: string[] = [result.message];
 
           if (result.capturedApi && result.capturedApi.length > 0) {
@@ -97,7 +98,7 @@ Sessions live in the single local SQLite database (~/.iframer/iframer.db), share
         }
 
         if (action === "get-cookies") {
-          const result = await localApiPost<{ ok: boolean; cookies: any[]; message: string }>("/auth/cookies", { mode: mode ?? "binary-headful", urls });
+          const result = await localApiPost<{ ok: boolean; cookies: any[]; message: string }>("/auth/cookies", { mode: mode ?? "binary-headful", urls, instanceId });
           const lines = [result.message, ""];
           for (const c of result.cookies) {
             lines.push(`${c.name}=${c.value}  [domain=${c.domain} path=${c.path} httpOnly=${c.httpOnly} secure=${c.secure}]`);
@@ -106,7 +107,7 @@ Sessions live in the single local SQLite database (~/.iframer/iframer.db), share
         }
 
         if (action === "get-auth") {
-          const result = await localApiPost<{ ok: boolean; cookies: any[]; localStorage: any; sessionStorage: any; message: string }>("/auth/full", { mode: mode ?? "binary-headful", urls });
+          const result = await localApiPost<{ ok: boolean; cookies: any[]; localStorage: any; sessionStorage: any; message: string }>("/auth/full", { mode: mode ?? "binary-headful", urls, instanceId });
           const lines = [result.message, ""];
           lines.push("=== Cookies ===");
           for (const c of result.cookies) {

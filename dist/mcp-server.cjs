@@ -98,23 +98,28 @@ function getLocalToken() {
 
 // src/mcp/local-server.ts
 var import_child_process = require("child_process");
+var import_net = __toESM(require("net"));
 var import_fs2 = __toESM(require("fs"));
 var import_path3 = __toESM(require("path"));
 var __dirname = "/Users/eduardoverona/tools/iframer-toolkit/src/mcp";
-var PORT = parseInt(process.env.IFRAMER_LOCAL_PORT || "3022", 10);
+var BASE_PORT = parseInt(process.env.IFRAMER_LOCAL_PORT || "3022", 10);
+var PORT_SCAN_ATTEMPTS = 200;
 var STARTUP_TIMEOUT_MS = 15000;
 var HEALTH_POLL_MS = 300;
 
 class LocalServerManager {
   child = null;
   startingPromise = null;
-  baseUrl;
+  port = null;
+  baseUrl = "";
   logPath;
   constructor() {
-    this.baseUrl = `http://127.0.0.1:${PORT}`;
     this.logPath = import_path3.default.join(getDataDir(), "local-server.log");
   }
   getBaseUrl() {
+    if (!this.baseUrl) {
+      throw new Error("Local server not started yet — call ensureRunning() first.");
+    }
     return this.baseUrl;
   }
   async ensureRunning() {
@@ -128,16 +133,18 @@ class LocalServerManager {
     return this.startingPromise;
   }
   async doStart() {
-    await this.killExisting();
+    this.port = await findFreePort(BASE_PORT, PORT_SCAN_ATTEMPTS);
+    this.baseUrl = `http://127.0.0.1:${this.port}`;
     const dataDir = getDataDir();
     import_fs2.default.mkdirSync(dataDir, { recursive: true });
     const { command, args } = this.resolveRuntime();
     const logFd = import_fs2.default.openSync(this.logPath, "a");
     const env = {
       ...process.env,
-      PORT: String(PORT),
+      PORT: String(this.port),
       IFRAMER_MODE: "local",
-      IFRAMER_DATA_DIR: dataDir
+      IFRAMER_DATA_DIR: dataDir,
+      IFRAMER_PARENT_PID: String(process.pid)
     };
     if (process.env.IFRAMER_SECRET) {
       env.IFRAMER_SECRET = process.env.IFRAMER_SECRET;
@@ -165,7 +172,7 @@ class LocalServerManager {
     }
     this.kill();
     const logTail = this.readLogTail();
-    throw new Error(`Local iframer server failed to start on port ${PORT} within ${STARTUP_TIMEOUT_MS}ms.
+    throw new Error(`Local iframer server failed to start on port ${this.port} within ${STARTUP_TIMEOUT_MS}ms.
 ` + `Last log lines:
 ${logTail}`);
   }
@@ -207,23 +214,9 @@ ${logTail}`);
     }
     this.child = null;
   }
-  async killExisting() {
-    try {
-      const res = await fetch(`${this.baseUrl}/health`, {
-        signal: AbortSignal.timeout(2000)
-      });
-      if (res.ok) {
-        try {
-          await fetch(`${this.baseUrl}/shutdown`, {
-            method: "POST",
-            signal: AbortSignal.timeout(2000)
-          });
-        } catch {}
-        await sleep(500);
-      }
-    } catch {}
-  }
   async healthCheck() {
+    if (!this.baseUrl)
+      return false;
     try {
       const res = await fetch(`${this.baseUrl}/health`, {
         signal: AbortSignal.timeout(2000)
@@ -248,6 +241,26 @@ ${logTail}`);
 }
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+function findFreePort(start, attempts) {
+  return new Promise((resolve, reject) => {
+    const tryPort = (p) => {
+      if (p >= start + attempts) {
+        reject(new Error(`No free port found in ${start}-${start + attempts}`));
+        return;
+      }
+      const srv = import_net.default.createServer();
+      srv.once("error", () => {
+        srv.close();
+        tryPort(p + 1);
+      });
+      srv.once("listening", () => {
+        srv.close(() => resolve(p));
+      });
+      srv.listen(p, "127.0.0.1");
+    };
+    tryPort(start);
+  });
 }
 
 // src/mcp/helpers.ts
@@ -581,7 +594,8 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
       continueOnError: import_zod3.z.boolean().optional().describe("Continue past failing steps (default: false)"),
       captureApi: import_zod3.z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes."),
       mode: import_zod3.z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("DO NOT SET THIS unless user explicitly requests a mode. iframer auto-selects and auto-escalates."),
-      autoEscalate: import_zod3.z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)")
+      autoEscalate: import_zod3.z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)"),
+      instanceId: import_zod3.z.string().optional().describe("Run in a named parallel browser within this session (default: 'default'). Use distinct ids to drive several browsers at once, e.g. one per account — each keeps its own login/session state.")
     }).optional()
   }, async (params) => {
     try {
@@ -759,345 +773,12 @@ ${api.domain} (${api.baseUrl})`);
 }
 
 // src/mcp/tools/session.ts
-var import_zod4 = require("zod");
-function registerSessionTool(server) {
-  server.tool("session", `Manage the browser session and lifecycle.
-
-Actions:
-- **stop**: save cookies/localStorage to the store, then close the browser. Session data persists for the next run.
-- **clear**: wipe all stored session data (cookies/localStorage) from the database. Does NOT kill running browsers.
-- **restart**: kill all running browser instances (local + Docker) and reset state. The next \`execute\` call will launch a fresh browser automatically. Use this when the browser is frozen, crashed, or in a bad state. Credentials and knowledge cache are NOT affected.
-
-Sessions live in the single local SQLite database (~/.iframer/iframer.db), shared across every browser mode.`, {
-    action: import_zod4.z.enum(["stop", "clear", "restart"]).describe("stop: save session state + close browser | clear: wipe stored session data | restart: kill all browsers, fresh start on next execute")
-  }, async ({ action }) => {
-    try {
-      if (action === "stop") {
-        const result = await localApiPost("/interactive/stop").catch(() => ({ ok: true, sessionSaved: false }));
-        return { content: [{ type: "text", text: `Session stopped. State saved: ${result.sessionSaved ?? false}` }] };
-      }
-      if (action === "clear") {
-        await localApiDelete("/session").catch(() => {});
-        return { content: [{ type: "text", text: "Session data cleared from database." }] };
-      }
-      if (action === "restart") {
-        const parts = [];
-        try {
-          await localApiPost("/browser/restart");
-          parts.push("Local browser restarted.");
-        } catch {
-          try {
-            await localServer.restart();
-            parts.push("Local server respawned.");
-          } catch (e) {
-            parts.push(`Local restart failed: ${e instanceof Error ? e.message : String(e)}`);
-          }
-        }
-        try {
-          if (await isDockerRunning()) {
-            await apiPost("/browser/restart");
-            parts.push("Docker browser restarted.");
-          }
-        } catch {}
-        parts.push("Credentials and knowledge cache are untouched. Next execute launches a fresh browser.");
-        return { content: [{ type: "text", text: parts.join(" ") }] };
-      }
-      return err("Unknown action");
-    } catch (e) {
-      return err(`Error: ${getErrorMessage(e)}`);
-    }
-  });
-}
-
-// src/mcp/tools/credentials.ts
 var import_zod5 = require("zod");
-var import_fs5 = __toESM(require("fs"));
-var import_path7 = __toESM(require("path"));
-
-// src/lib/knowledge.ts
-var import_fs4 = __toESM(require("fs"));
 var import_path6 = __toESM(require("path"));
-var log3 = createLogger("knowledge");
-function getKnowledgeDir() {
-  return import_path6.default.join(getDataDir(), "knowledge");
-}
-function getKnowledgePath(domain) {
-  const safe = sanitizeDomain(domain);
-  return import_path6.default.join(getKnowledgeDir(), `${safe}.md`);
-}
-function normalizeDomain(input) {
-  let d = (input || "").trim().toLowerCase();
-  if (!d)
-    return "";
-  try {
-    if (d.includes("://")) {
-      d = new URL(d).hostname;
-    } else if (d.includes("/")) {
-      d = new URL(`https://${d}`).hostname;
-    }
-  } catch {}
-  d = d.replace(/:\d+$/, "");
-  d = d.replace(/^www\./, "");
-  return d;
-}
-function sanitizeDomain(input) {
-  const normalized = normalizeDomain(input);
-  return normalized.replace(/[^a-z0-9.-]/g, "_");
-}
-function readKnowledge(domain) {
-  const p = getKnowledgePath(domain);
-  try {
-    return import_fs4.default.readFileSync(p, "utf8");
-  } catch {
-    return null;
-  }
-}
-function listKnowledge() {
-  const dir = getKnowledgeDir();
-  let entries = [];
-  try {
-    entries = import_fs4.default.readdirSync(dir);
-  } catch {
-    return [];
-  }
-  const results = [];
-  for (const file of entries) {
-    if (!file.endsWith(".md"))
-      continue;
-    const full = import_path6.default.join(dir, file);
-    try {
-      const stat = import_fs4.default.statSync(full);
-      const raw = import_fs4.default.readFileSync(full, "utf8");
-      const parsed = parseMarkdown(raw);
-      results.push({
-        domain: parsed?.domain ?? file.replace(/\.md$/, ""),
-        lastVerified: parsed?.lastVerified ?? new Date(stat.mtimeMs).toISOString(),
-        lastMode: parsed?.lastMode ?? "unknown",
-        sizeBytes: stat.size
-      });
-    } catch {}
-  }
-  results.sort((a, b) => a.lastVerified < b.lastVerified ? 1 : -1);
-  return results;
-}
-function clearKnowledge(domain) {
-  const dir = getKnowledgeDir();
-  if (domain) {
-    const p = getKnowledgePath(domain);
-    try {
-      import_fs4.default.unlinkSync(p);
-      return { removed: 1 };
-    } catch {
-      return { removed: 0 };
-    }
-  }
-  let removed = 0;
-  try {
-    const entries = import_fs4.default.readdirSync(dir);
-    for (const f of entries) {
-      if (f.endsWith(".md")) {
-        try {
-          import_fs4.default.unlinkSync(import_path6.default.join(dir, f));
-          removed++;
-        } catch {}
-      }
-    }
-  } catch {}
-  return { removed };
-}
-function parseMarkdown(raw) {
-  const frontmatterMatch = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n/);
-  if (!frontmatterMatch)
-    return null;
-  const fm = {};
-  for (const line of frontmatterMatch[1].split(`
-`)) {
-    const m = line.match(/^(\w+):\s*(.*)$/);
-    if (m)
-      fm[m[1]] = m[2].trim();
-  }
-  const body = raw.slice(frontmatterMatch[0].length);
-  const auth = { type: fm.authType ?? "unknown" };
-  const authSection = extractSection(body, "Auth material");
-  if (authSection) {
-    auth.cookieNames = extractBackticks(/\*\*Required cookies:\*\*\s+(.+)/, authSection);
-    auth.localStorageKeys = extractBackticks(/\*\*localStorage keys:\*\*\s+(.+)/, authSection);
-    auth.sessionStorageKeys = extractBackticks(/\*\*sessionStorage keys:\*\*\s+(.+)/, authSection);
-    auth.headers = extractBackticks(/\*\*Request headers:\*\*\s+(.+)/, authSection);
-  }
-  const endpoints = [];
-  const endpointSection = extractSection(body, "Known endpoints");
-  if (endpointSection) {
-    const endpointRegex = /^### (GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\S+)\s*$/gim;
-    let m;
-    while ((m = endpointRegex.exec(endpointSection)) !== null) {
-      endpoints.push({ method: m[1], path: m[2] });
-    }
-  }
-  const notes = [];
-  const notesSection = extractSection(body, "Notes");
-  if (notesSection) {
-    for (const line of notesSection.split(`
-`)) {
-      const m = line.match(/^-\s+(.+)$/);
-      if (m)
-        notes.push(m[1].trim());
-    }
-  }
-  return {
-    domain: fm.domain ?? "",
-    lastVerified: fm.lastVerified ?? "",
-    lastMode: fm.lastMode ?? "unknown",
-    browserRequired: fm.browserRequired !== "false",
-    auth,
-    endpoints,
-    notes
-  };
-}
-function extractSection(body, heading) {
-  const re = new RegExp(`^##\\s+${heading}\\s*$`, "m");
-  const match = body.match(re);
-  if (!match || match.index === undefined)
-    return null;
-  const start = match.index + match[0].length;
-  const nextSection = body.slice(start).match(/^##\s+/m);
-  const end = nextSection?.index != null ? start + nextSection.index : body.length;
-  return body.slice(start, end);
-}
-function extractBackticks(re, text) {
-  const m = text.match(re);
-  if (!m)
-    return;
-  const items = [...m[1].matchAll(/`([^`]+)`/g)].map((x) => x[1]);
-  return items.length > 0 ? items : undefined;
-}
-
-// src/mcp/tools/credentials.ts
-var ELICIT_TIMEOUT_MS = 45000;
-function mcpLog(event, data) {
-  try {
-    const dir = getDataDir();
-    import_fs5.default.mkdirSync(dir, { recursive: true });
-    import_fs5.default.appendFileSync(import_path7.default.join(dir, "mcp.log"), JSON.stringify({ ts: new Date().toISOString(), event, ...data }) + `
-`);
-  } catch {}
-}
-function domainMatches(normalized, stored) {
-  return stored.some((d) => d === normalized || normalized.endsWith("." + d) || d.endsWith("." + normalized));
-}
-function registerCredentialsTool(server) {
-  server.tool("credentials", `Manage stored login credentials. This tool ONLY stores and lists credentials — it does NOT log you into anything. Actual logins happen via the \`execute\` tool with a \`login\` step. Credentials are stored in a single local SQLite database shared by ALL browser modes (headless, binary-headful, docker-headful) — store once, login anywhere.
-
-CORRECT WORKFLOW when the user needs to be logged into a site:
-1. Call \`credentials\` with \`action=list\`. READ THE RESPONSE LITERALLY. If it says "No credentials stored" then NO credentials exist. If it lists domains, those are the only ones stored.
-2. If the target domain IS in the list → skip to step 4. Credentials exist and are valid. Move on.
-3. If the target domain is NOT in the list → call \`credentials\` with \`action=store, domain=<site>\`. This attempts to pop a secure form in the user's UI. The response is either \`Credentials stored for <site>.\` (success) OR a loud error telling you the client doesn't support form elicitation, with instructions for the user to run a CLI command. Relay the error verbatim and STOP — do not proceed with login until the user confirms they ran the command.
-4. Call \`execute\` with \`[{type:"navigate", url:"https://<site>/login"}, {type:"login", domain:"<site>"}]\`. The login step auto-detects the form, fills stored credentials, handles 2FA, submits, and auto-escalates browser modes if blocked.
-
-═══════════════════════════════════════════════════════════════════════
-CRITICAL RULES
-═══════════════════════════════════════════════════════════════════════
-
-1. **NEVER re-store credentials as a recovery from a failed login.** If credentials already exist, the store call will be REJECTED. Login failures are browser-mode / bot-detection / page-structure problems, not credential problems.
-
-2. **NEVER ask the user "do you have credentials?"** — call action=list and read the response.
-
-3. **NEVER confabulate.** If action=list returns "No credentials stored", the database is empty.
-
-4. **NEVER pretend a store call succeeded if the response was an error.**
-
-5. **NEVER ask the user to paste their password in chat.**
-
-6. **\`force: true\` on store is ONLY for explicit password changes.**`, {
-    action: import_zod5.z.enum(["store", "list"]).describe("store: prompt for credentials | list: show stored domains"),
-    domain: import_zod5.z.string().optional().describe("Domain (required for store). Use the bare registrable domain."),
-    force: import_zod5.z.boolean().optional().describe("Overwrite existing. ONLY for explicit password changes.")
-  }, async ({ action, domain, force }) => {
-    try {
-      if (action === "list") {
-        const credData2 = await localApiGet("/credentials");
-        const domains = credData2.domains || [];
-        if (!domains.length) {
-          return { content: [{ type: "text", text: "No credentials stored. Call this tool again with action=store and the domain to prompt the user for credentials now." }] };
-        }
-        return { content: [{ type: "text", text: `Stored credentials for:
-${domains.map((d) => `  - ${d}`).join(`
-`)}` }] };
-      }
-      if (action !== "store")
-        return err("Unknown action");
-      if (!domain)
-        return err("domain is required for action=store");
-      const normalized = normalizeDomain(domain);
-      const credData = await localApiGet("/credentials");
-      const stored = credData.domains || [];
-      if (domainMatches(normalized, stored) && !force) {
-        mcpLog("credentials.store.rejected_already_exists", { domain: normalized });
-        return err(`REFUSING TO RE-STORE: credentials for "${normalized}" already exist. ` + `Login failures are NOT credential problems — retry with a stronger browser mode.
-
-` + `Use \`force: true\` ONLY if the user explicitly says their password changed.`);
-      }
-      mcpLog("credentials.store.attempt", { domain: normalized, force: !!force });
-      let result;
-      try {
-        const elicitPromise = server.server.elicitInput({
-          mode: "form",
-          message: `Enter your login credentials for ${normalized}. These are encrypted and stored locally — the agent never sees them.`,
-          requestedSchema: {
-            type: "object",
-            properties: {
-              username: { type: "string", title: "Username / Email" },
-              password: { type: "string", title: "Password" },
-              totp_secret: { type: "string", title: "TOTP Secret (leave empty if no 2FA)" }
-            },
-            required: ["username", "password"]
-          }
-        });
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error(`elicitation timed out after ${ELICIT_TIMEOUT_MS}ms`)), ELICIT_TIMEOUT_MS));
-        result = await Promise.race([elicitPromise, timeoutPromise]);
-      } catch (elicitErr) {
-        const msg = elicitErr instanceof Error ? elicitErr.message : String(elicitErr);
-        mcpLog("credentials.store.elicit_failed", { domain: normalized, error: msg });
-        return err(`FAILED TO STORE CREDENTIALS for ${normalized}: ${msg}
-
-` + `The user MUST run this command in their terminal:
-
-` + `  iframer-toolkit credentials add ${normalized}
-
-` + `After they run it, retry the login. DO NOT pretend credentials were stored.`);
-      }
-      mcpLog("credentials.store.elicit_result", { domain: normalized, action: result.action, hasContent: !!result.content });
-      if (result.action !== "accept" || !result.content) {
-        return err(`Credential form was ${result.action || "dismissed"}. No credentials saved for ${normalized}.`);
-      }
-      const { username, password, totp_secret } = result.content;
-      if (!username || !password) {
-        return err(`Form submitted but username or password was empty. No credentials saved.`);
-      }
-      try {
-        const storeResult = await localApiPost("/credentials", {
-          domain: normalized,
-          username,
-          password,
-          totp_secret: totp_secret || undefined
-        });
-        if (!storeResult.ok)
-          return err(`Failed to store: ${storeResult.error}`);
-      } catch (storeErr) {
-        const msg = storeErr instanceof Error ? storeErr.message : String(storeErr);
-        mcpLog("credentials.store.write_failed", { domain: normalized, error: msg });
-        return err(`Failed to write credentials: ${msg}`);
-      }
-      mcpLog("credentials.store.success", { domain: normalized });
-      return { content: [{ type: "text", text: `Credentials stored for ${normalized}. Shared across all browser modes.` }] };
-    } catch (e) {
-      return err(`Error: ${getErrorMessage(e)}`);
-    }
-  });
-}
+var import_fs4 = __toESM(require("fs"));
 
 // src/mcp/tools/reverse-engineer.ts
-var import_zod6 = require("zod");
+var import_zod4 = require("zod");
 function registerReverseEngineerTool(server) {
   server.tool("reverse-engineer", `Reverse-engineer a website's API. Navigates to a URL, performs the steps you specify, and captures every XHR/fetch request the page makes — including auth tokens, cookies, headers, request/response bodies, and ready-to-use curl commands.
 
@@ -1142,14 +823,14 @@ Output layout — save as RUNNABLE CODE to <outputDir>/:
 Use capturedApi[i].endpoints[j].protocol, .action, .verb, .functionName directly — iframer already classified them. Put queries (verb=read|list) under queries/, mutations (verb=create|update|delete|action) under mutations/ for GraphQL. For REST, group by verb dir.
 
 The outputDir defaults to ./<domain>/. Ask the user where to save if unclear.`, {
-    steps: import_zod6.z.array(stepSchema).describe("Pipeline steps to execute while capturing API calls"),
-    outputDir: import_zod6.z.string().optional().describe("Directory to save the captured API files. If not provided, ask the user or default to ./<domain>/"),
-    typed: import_zod6.z.boolean().optional().describe("Save as .ts with inferred types instead of .js. Set to true when the user asks for types, typescript, or type inference."),
-    options: import_zod6.z.object({
-      staleTimeoutMs: import_zod6.z.number().optional().describe("Override the 20s stale-state timeout per step"),
-      continueOnObstacle: import_zod6.z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
-      continueOnError: import_zod6.z.boolean().optional().describe("Continue past failing steps (default: false)"),
-      mode: import_zod6.z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("Browser mode override")
+    steps: import_zod4.z.array(stepSchema).describe("Pipeline steps to execute while capturing API calls"),
+    outputDir: import_zod4.z.string().optional().describe("Directory to save the captured API files. If not provided, ask the user or default to ./<domain>/"),
+    typed: import_zod4.z.boolean().optional().describe("Save as .ts with inferred types instead of .js. Set to true when the user asks for types, typescript, or type inference."),
+    options: import_zod4.z.object({
+      staleTimeoutMs: import_zod4.z.number().optional().describe("Override the 20s stale-state timeout per step"),
+      continueOnObstacle: import_zod4.z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
+      continueOnError: import_zod4.z.boolean().optional().describe("Continue past failing steps (default: false)"),
+      mode: import_zod4.z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("Browser mode override")
     }).optional()
   }, async (params) => {
     try {
@@ -1202,11 +883,11 @@ Screenshot saved: ${filePath}`);
         const mainDomain = captureResult.capturedApi[0]?.domain || "api";
         const outDir = params.outputDir || `./${mainDomain}`;
         try {
-          const fs6 = await import("fs");
-          const path8 = await import("path");
-          fs6.mkdirSync(outDir, { recursive: true });
-          const jsonPath = path8.join(outDir, "captured-api.json");
-          fs6.writeFileSync(jsonPath, JSON.stringify(captureResult.capturedApi, null, 2));
+          const fs4 = await import("fs");
+          const path6 = await import("path");
+          fs4.mkdirSync(outDir, { recursive: true });
+          const jsonPath = path6.join(outDir, "captured-api.json");
+          fs4.writeFileSync(jsonPath, JSON.stringify(captureResult.capturedApi, null, 2));
           lines.push(`
 Full captured data saved to: ${jsonPath}`);
           lines.push("Read this file for complete curl commands, request/response bodies, and auth data.");
@@ -1215,8 +896,14 @@ Full captured data saved to: ${jsonPath}`);
 (Could not save captured JSON: ${writeErr instanceof Error ? writeErr.message : String(writeErr)})`);
         }
       }
-      const content = [{ type: "text", text: lines.join(`
-`) }];
+      let text = lines.join(`
+`);
+      if (text.length > 80000) {
+        text = text.slice(0, 80000) + `
+
+[... response truncated — read captured-api.json for full data]`;
+      }
+      const content = [{ type: "text", text }];
       if (!captureResult.ok)
         return { content, isError: true };
       return { content };
@@ -1350,6 +1037,425 @@ function extractSignalKeys(body) {
     }
   }
   return signalEntries.length > 0 ? signalEntries.join(", ") : null;
+}
+
+// src/mcp/tools/session.ts
+function registerSessionTool(server) {
+  server.tool("session", `Manage the browser session and lifecycle.
+
+Actions:
+- **stop**: save cookies/localStorage to the store, then close the browser. Session data persists for the next run.
+- **clear**: wipe all stored session data (cookies/localStorage) from the database. Does NOT kill running browsers.
+- **restart**: kill all running browser instances (local + Docker) and reset state. The next \`execute\` call will launch a fresh browser automatically. Use this when the browser is frozen, crashed, or in a bad state. Credentials and knowledge cache are NOT affected.
+- **capture-start**: attach a persistent XHR/fetch listener to the running browser. Accumulates ALL requests indefinitely — not tied to any pipeline. Use before triggering the action you want to capture (e.g. upload, delete, async mutation).
+- **capture-stop**: stop the persistent listener and return all captured endpoints + save to disk. Call this when you're satisfied you've seen the requests you need.
+- **get-cookies**: extract ALL cookies from the browser context via CDP (including HttpOnly/Secure — below the JS sandbox). Pass urls to scope. Returns name, value, domain, path, httpOnly, secure, expiry.
+- **get-auth**: extract cookies + localStorage + sessionStorage in one shot. Everything needed to replay authenticated requests from Node.js.
+
+Sessions live in the single local SQLite database (~/.iframer/iframer.db), shared across every browser mode.`, {
+    action: import_zod5.z.enum(["stop", "clear", "restart", "capture-start", "capture-stop", "get-cookies", "get-auth"]).describe("stop | clear | restart | capture-start | capture-stop | get-cookies | get-auth"),
+    mode: import_zod5.z.enum(["headless", "binary-headful"]).optional().describe("Browser mode (default: binary-headful)"),
+    urls: import_zod5.z.array(import_zod5.z.string()).optional().describe("URLs to scope cookie extraction (get-cookies/get-auth). Omit for all cookies."),
+    instanceId: import_zod5.z.string().optional().describe("Target a named parallel browser within this session (default: 'default'). Match the instanceId used in execute."),
+    outputDir: import_zod5.z.string().optional().describe("Where to save captured-api.json for capture-stop")
+  }, async ({ action, mode, urls, instanceId, outputDir }) => {
+    try {
+      if (action === "stop") {
+        const result = await localApiPost("/interactive/stop").catch(() => ({ ok: true, sessionSaved: false }));
+        return { content: [{ type: "text", text: `Session stopped. State saved: ${result.sessionSaved ?? false}` }] };
+      }
+      if (action === "clear") {
+        await localApiDelete("/session").catch(() => {});
+        return { content: [{ type: "text", text: "Session data cleared from database." }] };
+      }
+      if (action === "restart") {
+        const parts = [];
+        try {
+          await localApiPost("/browser/restart");
+          parts.push("Local browser restarted.");
+        } catch {
+          try {
+            await localServer.restart();
+            parts.push("Local server respawned.");
+          } catch (e) {
+            parts.push(`Local restart failed: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
+        try {
+          if (await isDockerRunning()) {
+            await apiPost("/browser/restart");
+            parts.push("Docker browser restarted.");
+          }
+        } catch {}
+        parts.push("Credentials and knowledge cache are untouched. Next execute launches a fresh browser.");
+        return { content: [{ type: "text", text: parts.join(" ") }] };
+      }
+      if (action === "capture-start") {
+        const result = await localApiPost("/capture/start", { mode: mode ?? "binary-headful", instanceId });
+        return { content: [{ type: "text", text: result.message }] };
+      }
+      if (action === "capture-stop") {
+        const result = await localApiPost("/capture/stop", { mode: mode ?? "binary-headful", instanceId });
+        const lines = [result.message];
+        if (result.capturedApi && result.capturedApi.length > 0) {
+          formatCapturedApi(lines, result.capturedApi, { outputDir, typed: false });
+          const outDir = outputDir || import_path6.default.join(getDataDir(), "capture");
+          try {
+            import_fs4.default.mkdirSync(outDir, { recursive: true });
+            const jsonPath = import_path6.default.join(outDir, "captured-api.json");
+            import_fs4.default.writeFileSync(jsonPath, JSON.stringify(result.capturedApi, null, 2));
+            lines.push(`
+Full data saved to: ${jsonPath}`);
+          } catch (writeErr) {
+            lines.push(`
+(Could not save: ${writeErr instanceof Error ? writeErr.message : String(writeErr)})`);
+          }
+        }
+        let text = lines.join(`
+`);
+        if (text.length > 80000)
+          text = text.slice(0, 80000) + `
+
+[truncated — read captured-api.json]`;
+        return { content: [{ type: "text", text }] };
+      }
+      if (action === "get-cookies") {
+        const result = await localApiPost("/auth/cookies", { mode: mode ?? "binary-headful", urls, instanceId });
+        const lines = [result.message, ""];
+        for (const c of result.cookies) {
+          lines.push(`${c.name}=${c.value}  [domain=${c.domain} path=${c.path} httpOnly=${c.httpOnly} secure=${c.secure}]`);
+        }
+        return { content: [{ type: "text", text: lines.join(`
+`) }] };
+      }
+      if (action === "get-auth") {
+        const result = await localApiPost("/auth/full", { mode: mode ?? "binary-headful", urls, instanceId });
+        const lines = [result.message, ""];
+        lines.push("=== Cookies ===");
+        for (const c of result.cookies) {
+          lines.push(`${c.name}=${c.value}  [domain=${c.domain} httpOnly=${c.httpOnly}]`);
+        }
+        if (Object.keys(result.localStorage || {}).length > 0) {
+          lines.push(`
+=== localStorage ===`);
+          for (const [origin, store] of Object.entries(result.localStorage)) {
+            lines.push(`[${origin}]`);
+            for (const [k, v] of Object.entries(store)) {
+              const val = String(v);
+              lines.push(`  ${k}: ${val.length > 120 ? val.slice(0, 120) + "…" : val}`);
+            }
+          }
+        }
+        if (Object.keys(result.sessionStorage || {}).length > 0) {
+          lines.push(`
+=== sessionStorage ===`);
+          for (const [origin, store] of Object.entries(result.sessionStorage)) {
+            lines.push(`[${origin}]`);
+            for (const [k, v] of Object.entries(store)) {
+              const val = String(v);
+              lines.push(`  ${k}: ${val.length > 120 ? val.slice(0, 120) + "…" : val}`);
+            }
+          }
+        }
+        let text = lines.join(`
+`);
+        if (text.length > 80000)
+          text = text.slice(0, 80000) + `
+[truncated]`;
+        return { content: [{ type: "text", text }] };
+      }
+      return err("Unknown action");
+    } catch (e) {
+      return err(`Error: ${getErrorMessage(e)}`);
+    }
+  });
+}
+
+// src/mcp/tools/credentials.ts
+var import_zod6 = require("zod");
+var import_fs6 = __toESM(require("fs"));
+var import_path8 = __toESM(require("path"));
+
+// src/lib/knowledge.ts
+var import_fs5 = __toESM(require("fs"));
+var import_path7 = __toESM(require("path"));
+var log3 = createLogger("knowledge");
+function getKnowledgeDir() {
+  return import_path7.default.join(getDataDir(), "knowledge");
+}
+function getKnowledgePath(domain) {
+  const safe = sanitizeDomain(domain);
+  return import_path7.default.join(getKnowledgeDir(), `${safe}.md`);
+}
+function normalizeDomain(input) {
+  let d = (input || "").trim().toLowerCase();
+  if (!d)
+    return "";
+  try {
+    if (d.includes("://")) {
+      d = new URL(d).hostname;
+    } else if (d.includes("/")) {
+      d = new URL(`https://${d}`).hostname;
+    }
+  } catch {}
+  d = d.replace(/:\d+$/, "");
+  d = d.replace(/^www\./, "");
+  return d;
+}
+function sanitizeDomain(input) {
+  const normalized = normalizeDomain(input);
+  return normalized.replace(/[^a-z0-9.-]/g, "_");
+}
+function readKnowledge(domain) {
+  const p = getKnowledgePath(domain);
+  try {
+    return import_fs5.default.readFileSync(p, "utf8");
+  } catch {
+    return null;
+  }
+}
+function listKnowledge() {
+  const dir = getKnowledgeDir();
+  let entries = [];
+  try {
+    entries = import_fs5.default.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const results = [];
+  for (const file of entries) {
+    if (!file.endsWith(".md"))
+      continue;
+    const full = import_path7.default.join(dir, file);
+    try {
+      const stat = import_fs5.default.statSync(full);
+      const raw = import_fs5.default.readFileSync(full, "utf8");
+      const parsed = parseMarkdown(raw);
+      results.push({
+        domain: parsed?.domain ?? file.replace(/\.md$/, ""),
+        lastVerified: parsed?.lastVerified ?? new Date(stat.mtimeMs).toISOString(),
+        lastMode: parsed?.lastMode ?? "unknown",
+        sizeBytes: stat.size
+      });
+    } catch {}
+  }
+  results.sort((a, b) => a.lastVerified < b.lastVerified ? 1 : -1);
+  return results;
+}
+function clearKnowledge(domain) {
+  const dir = getKnowledgeDir();
+  if (domain) {
+    const p = getKnowledgePath(domain);
+    try {
+      import_fs5.default.unlinkSync(p);
+      return { removed: 1 };
+    } catch {
+      return { removed: 0 };
+    }
+  }
+  let removed = 0;
+  try {
+    const entries = import_fs5.default.readdirSync(dir);
+    for (const f of entries) {
+      if (f.endsWith(".md")) {
+        try {
+          import_fs5.default.unlinkSync(import_path7.default.join(dir, f));
+          removed++;
+        } catch {}
+      }
+    }
+  } catch {}
+  return { removed };
+}
+function parseMarkdown(raw) {
+  const frontmatterMatch = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n/);
+  if (!frontmatterMatch)
+    return null;
+  const fm = {};
+  for (const line of frontmatterMatch[1].split(`
+`)) {
+    const m = line.match(/^(\w+):\s*(.*)$/);
+    if (m)
+      fm[m[1]] = m[2].trim();
+  }
+  const body = raw.slice(frontmatterMatch[0].length);
+  const auth = { type: fm.authType ?? "unknown" };
+  const authSection = extractSection(body, "Auth material");
+  if (authSection) {
+    auth.cookieNames = extractBackticks(/\*\*Required cookies:\*\*\s+(.+)/, authSection);
+    auth.localStorageKeys = extractBackticks(/\*\*localStorage keys:\*\*\s+(.+)/, authSection);
+    auth.sessionStorageKeys = extractBackticks(/\*\*sessionStorage keys:\*\*\s+(.+)/, authSection);
+    auth.headers = extractBackticks(/\*\*Request headers:\*\*\s+(.+)/, authSection);
+  }
+  const endpoints = [];
+  const endpointSection = extractSection(body, "Known endpoints");
+  if (endpointSection) {
+    const endpointRegex = /^### (GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\S+)\s*$/gim;
+    let m;
+    while ((m = endpointRegex.exec(endpointSection)) !== null) {
+      endpoints.push({ method: m[1], path: m[2] });
+    }
+  }
+  const notes = [];
+  const notesSection = extractSection(body, "Notes");
+  if (notesSection) {
+    for (const line of notesSection.split(`
+`)) {
+      const m = line.match(/^-\s+(.+)$/);
+      if (m)
+        notes.push(m[1].trim());
+    }
+  }
+  return {
+    domain: fm.domain ?? "",
+    lastVerified: fm.lastVerified ?? "",
+    lastMode: fm.lastMode ?? "unknown",
+    browserRequired: fm.browserRequired !== "false",
+    auth,
+    endpoints,
+    notes
+  };
+}
+function extractSection(body, heading) {
+  const re = new RegExp(`^##\\s+${heading}\\s*$`, "m");
+  const match = body.match(re);
+  if (!match || match.index === undefined)
+    return null;
+  const start = match.index + match[0].length;
+  const nextSection = body.slice(start).match(/^##\s+/m);
+  const end = nextSection?.index != null ? start + nextSection.index : body.length;
+  return body.slice(start, end);
+}
+function extractBackticks(re, text) {
+  const m = text.match(re);
+  if (!m)
+    return;
+  const items = [...m[1].matchAll(/`([^`]+)`/g)].map((x) => x[1]);
+  return items.length > 0 ? items : undefined;
+}
+
+// src/mcp/tools/credentials.ts
+var ELICIT_TIMEOUT_MS = 45000;
+function mcpLog(event, data) {
+  try {
+    const dir = getDataDir();
+    import_fs6.default.mkdirSync(dir, { recursive: true });
+    import_fs6.default.appendFileSync(import_path8.default.join(dir, "mcp.log"), JSON.stringify({ ts: new Date().toISOString(), event, ...data }) + `
+`);
+  } catch {}
+}
+function domainMatches(normalized, stored) {
+  return stored.some((d) => d === normalized || normalized.endsWith("." + d) || d.endsWith("." + normalized));
+}
+function registerCredentialsTool(server) {
+  server.tool("credentials", `Manage stored login credentials. This tool ONLY stores and lists credentials — it does NOT log you into anything. Actual logins happen via the \`execute\` tool with a \`login\` step. Credentials are stored in a single local SQLite database shared by ALL browser modes (headless, binary-headful, docker-headful) — store once, login anywhere.
+
+CORRECT WORKFLOW when the user needs to be logged into a site:
+1. Call \`credentials\` with \`action=list\`. READ THE RESPONSE LITERALLY. If it says "No credentials stored" then NO credentials exist. If it lists domains, those are the only ones stored.
+2. If the target domain IS in the list → skip to step 4. Credentials exist and are valid. Move on.
+3. If the target domain is NOT in the list → call \`credentials\` with \`action=store, domain=<site>\`. This attempts to pop a secure form in the user's UI. The response is either \`Credentials stored for <site>.\` (success) OR a loud error telling you the client doesn't support form elicitation, with instructions for the user to run a CLI command. Relay the error verbatim and STOP — do not proceed with login until the user confirms they ran the command.
+4. Call \`execute\` with \`[{type:"navigate", url:"https://<site>/login"}, {type:"login", domain:"<site>"}]\`. The login step auto-detects the form, fills stored credentials, handles 2FA, submits, and auto-escalates browser modes if blocked.
+
+═══════════════════════════════════════════════════════════════════════
+CRITICAL RULES
+═══════════════════════════════════════════════════════════════════════
+
+1. **NEVER re-store credentials as a recovery from a failed login.** If credentials already exist, the store call will be REJECTED. Login failures are browser-mode / bot-detection / page-structure problems, not credential problems.
+
+2. **NEVER ask the user "do you have credentials?"** — call action=list and read the response.
+
+3. **NEVER confabulate.** If action=list returns "No credentials stored", the database is empty.
+
+4. **NEVER pretend a store call succeeded if the response was an error.**
+
+5. **NEVER ask the user to paste their password in chat.**
+
+6. **\`force: true\` on store is ONLY for explicit password changes.**`, {
+    action: import_zod6.z.enum(["store", "list"]).describe("store: prompt for credentials | list: show stored domains"),
+    domain: import_zod6.z.string().optional().describe("Domain (required for store). Use the bare registrable domain."),
+    force: import_zod6.z.boolean().optional().describe("Overwrite existing. ONLY for explicit password changes.")
+  }, async ({ action, domain, force }) => {
+    try {
+      if (action === "list") {
+        const credData2 = await localApiGet("/credentials");
+        const domains = credData2.domains || [];
+        if (!domains.length) {
+          return { content: [{ type: "text", text: "No credentials stored. Call this tool again with action=store and the domain to prompt the user for credentials now." }] };
+        }
+        return { content: [{ type: "text", text: `Stored credentials for:
+${domains.map((d) => `  - ${d}`).join(`
+`)}` }] };
+      }
+      if (action !== "store")
+        return err("Unknown action");
+      if (!domain)
+        return err("domain is required for action=store");
+      const normalized = normalizeDomain(domain);
+      const credData = await localApiGet("/credentials");
+      const stored = credData.domains || [];
+      if (domainMatches(normalized, stored) && !force) {
+        mcpLog("credentials.store.rejected_already_exists", { domain: normalized });
+        return err(`REFUSING TO RE-STORE: credentials for "${normalized}" already exist. ` + `Login failures are NOT credential problems — retry with a stronger browser mode.
+
+` + `Use \`force: true\` ONLY if the user explicitly says their password changed.`);
+      }
+      mcpLog("credentials.store.attempt", { domain: normalized, force: !!force });
+      let result;
+      try {
+        const elicitPromise = server.server.elicitInput({
+          mode: "form",
+          message: `Enter your login credentials for ${normalized}. These are encrypted and stored locally — the agent never sees them.`,
+          requestedSchema: {
+            type: "object",
+            properties: {
+              username: { type: "string", title: "Username / Email" },
+              password: { type: "string", title: "Password" },
+              totp_secret: { type: "string", title: "TOTP Secret (leave empty if no 2FA)" }
+            },
+            required: ["username", "password"]
+          }
+        });
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error(`elicitation timed out after ${ELICIT_TIMEOUT_MS}ms`)), ELICIT_TIMEOUT_MS));
+        result = await Promise.race([elicitPromise, timeoutPromise]);
+      } catch (elicitErr) {
+        const msg = elicitErr instanceof Error ? elicitErr.message : String(elicitErr);
+        mcpLog("credentials.store.elicit_failed", { domain: normalized, error: msg });
+        return err(`FAILED TO STORE CREDENTIALS for ${normalized}: ${msg}
+
+` + `The user MUST run this command in their terminal:
+
+` + `  iframer-toolkit credentials add ${normalized}
+
+` + `After they run it, retry the login. DO NOT pretend credentials were stored.`);
+      }
+      mcpLog("credentials.store.elicit_result", { domain: normalized, action: result.action, hasContent: !!result.content });
+      if (result.action !== "accept" || !result.content) {
+        return err(`Credential form was ${result.action || "dismissed"}. No credentials saved for ${normalized}.`);
+      }
+      const { username, password, totp_secret } = result.content;
+      if (!username || !password) {
+        return err(`Form submitted but username or password was empty. No credentials saved.`);
+      }
+      try {
+        const storeResult = await localApiPost("/credentials", {
+          domain: normalized,
+          username,
+          password,
+          totp_secret: totp_secret || undefined
+        });
+        if (!storeResult.ok)
+          return err(`Failed to store: ${storeResult.error}`);
+      } catch (storeErr) {
+        const msg = storeErr instanceof Error ? storeErr.message : String(storeErr);
+        mcpLog("credentials.store.write_failed", { domain: normalized, error: msg });
+        return err(`Failed to write credentials: ${msg}`);
+      }
+      mcpLog("credentials.store.success", { domain: normalized });
+      return { content: [{ type: "text", text: `Credentials stored for ${normalized}. Shared across all browser modes.` }] };
+    } catch (e) {
+      return err(`Error: ${getErrorMessage(e)}`);
+    }
+  });
 }
 
 // src/mcp/tools/knowledge.ts

@@ -40,26 +40,26 @@ export function registerRoutes(app: Express): void {
   }));
 
   app.post("/auth/cookies", asyncHandler(async (req: Request, res: Response) => {
-    const { mode, urls } = req.body || {};
-    const result = await iframer.getCookies(mode, urls);
+    const { mode, urls, instanceId } = req.body || {};
+    const result = await iframer.getCookies(mode, urls, instanceId);
     res.json(result);
   }));
 
   app.post("/auth/full", asyncHandler(async (req: Request, res: Response) => {
-    const { mode, urls } = req.body || {};
-    const result = await iframer.getFullAuth(mode, urls);
+    const { mode, urls, instanceId } = req.body || {};
+    const result = await iframer.getFullAuth(mode, urls, instanceId);
     res.json(result);
   }));
 
   app.post("/capture/start", asyncHandler(async (req: Request, res: Response) => {
-    const { mode } = req.body || {};
-    const result = await iframer.startCapture(mode);
+    const { mode, instanceId } = req.body || {};
+    const result = await iframer.startCapture(mode, instanceId);
     res.json(result);
   }));
 
   app.post("/capture/stop", asyncHandler(async (req: Request, res: Response) => {
-    const { mode } = req.body || {};
-    const result = await iframer.stopCapture(mode);
+    const { mode, instanceId } = req.body || {};
+    const result = await iframer.stopCapture(mode, instanceId);
     res.json(result);
   }));
 

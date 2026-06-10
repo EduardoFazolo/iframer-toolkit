@@ -1,6 +1,7 @@
 import { chromium } from "patchright";
 import type { Browser, BrowserContext, Page } from "patchright";
 import { ensureChrome } from "./chrome-downloader";
+import { launchCloakBrowser } from "./cloak-browser";
 import type { BrowserMode } from "../types";
 import { createLogger } from "../logger";
 
@@ -14,14 +15,22 @@ export interface DaemonInstance {
   context: BrowserContext;
   page: Page;
   mode: BrowserMode;
+  instanceId: string;
   createdAt: Date;
 }
 
 const DEFAULT_IDLE_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+export const DEFAULT_INSTANCE = "default";
+
+/** Composite map key: a session may hold several named browsers per mode
+ *  (e.g. one per account). instanceId="default" preserves single-browser use. */
+function keyOf(mode: BrowserMode, instanceId: string): string {
+  return `${mode}::${instanceId}`;
+}
 
 export class BrowserDaemon {
-  private instances = new Map<BrowserMode, DaemonInstance>();
-  private idleTimers = new Map<BrowserMode, ReturnType<typeof setTimeout>>();
+  private instances = new Map<string, DaemonInstance>();
+  private idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private idleTimeout: number;
 
   constructor(idleTimeout = DEFAULT_IDLE_TIMEOUT) {
@@ -33,12 +42,13 @@ export class BrowserDaemon {
     process.on("SIGTERM", () => { cleanup(); process.exit(0); });
   }
 
-  async ensure(mode: BrowserMode): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
+  async ensure(mode: BrowserMode, instanceId: string = DEFAULT_INSTANCE): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
     if (mode === "docker-headful") {
       throw new Error("Docker mode doesn't use the daemon. Use the Docker API.");
     }
 
-    let instance = this.instances.get(mode);
+    const key = keyOf(mode, instanceId);
+    let instance = this.instances.get(key);
 
     // Check if existing instance is still alive
     if (instance) {
@@ -59,33 +69,38 @@ export class BrowserDaemon {
             instance.context = context;
             instance.page = page;
           }
-          this.resetIdleTimer(mode);
+          this.resetIdleTimer(key);
           return { browser: instance.browser, context, page };
         }
       } catch {}
-      log.info(`Browser for ${mode} disconnected (window closed?), relaunching...`);
-      await this.stopMode(mode);
+      log.info(`Browser for ${key} disconnected (window closed?), relaunching...`);
+      await this.stopMode(mode, instanceId);
     }
 
-    // Ensure Chrome for Testing is available
-    const executablePath = await ensureChrome();
-    log.info(`Launching Chrome for Testing in ${mode} mode: ${executablePath}`);
+    // Try CloakBrowser first (C++-level fingerprint patches), fall back to Chrome for Testing + patchright
+    let browser: Browser;
+    const cloakBrowser = await launchCloakBrowser({ headless: mode === "headless" });
+    if (cloakBrowser) {
+      log.info(`CloakBrowser ${mode} ready`);
+      browser = cloakBrowser;
+    } else {
+      const executablePath = await ensureChrome();
+      log.info(`Falling back to Chrome for Testing in ${mode} mode: ${executablePath}`);
 
-    // Use a dedicated profile dir to avoid conflicts with user's Chrome
-    const userDataDir = path.join(os.homedir(), ".iframer", "chrome-profile", mode);
-    fs.mkdirSync(userDataDir, { recursive: true });
+      const userDataDir = path.join(os.homedir(), ".iframer", "chrome-profile", mode);
+      fs.mkdirSync(userDataDir, { recursive: true });
 
-    // Launch via patchright (stealth-patched Playwright) using Chrome for Testing
-    const browser = await chromium.launch({
-      executablePath,
-      headless: mode === "headless",
-      args: [
-        "--disable-blink-features=AutomationControlled",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-infobars",
-      ],
-    });
+      browser = await chromium.launch({
+        executablePath,
+        headless: mode === "headless",
+        args: [
+          "--disable-blink-features=AutomationControlled",
+          "--no-first-run",
+          "--no-default-browser-check",
+          "--disable-infobars",
+        ],
+      });
+    }
 
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -95,24 +110,30 @@ export class BrowserDaemon {
       context,
       page,
       mode,
+      instanceId,
       createdAt: new Date(),
     };
 
-    this.instances.set(mode, instance);
-    this.resetIdleTimer(mode);
+    this.instances.set(key, instance);
+    this.resetIdleTimer(key);
 
-    log.info(`Chrome ${mode} ready`);
+    log.info(`Chrome ${key} ready`);
     return { browser, context, page };
   }
 
-  isRunning(mode: BrowserMode): boolean {
-    const instance = this.instances.get(mode);
+  isRunning(mode: BrowserMode, instanceId: string = DEFAULT_INSTANCE): boolean {
+    const instance = this.instances.get(keyOf(mode, instanceId));
     if (!instance) return false;
     try {
       return instance.browser.isConnected();
     } catch {
       return false;
     }
+  }
+
+  /** Distinct modes that currently have at least one live instance. */
+  runningModes(): BrowserMode[] {
+    return [...new Set(this.liveInstances().map((i) => i.mode))];
   }
 
   /** Return all currently-live instances (for extracting session state before teardown) */
@@ -126,36 +147,40 @@ export class BrowserDaemon {
     });
   }
 
-  async stopMode(mode: BrowserMode): Promise<void> {
-    const instance = this.instances.get(mode);
+  async stopMode(mode: BrowserMode, instanceId: string = DEFAULT_INSTANCE): Promise<void> {
+    await this.stopKey(keyOf(mode, instanceId));
+  }
+
+  private async stopKey(key: string): Promise<void> {
+    const instance = this.instances.get(key);
     if (!instance) return;
 
-    const timer = this.idleTimers.get(mode);
+    const timer = this.idleTimers.get(key);
     if (timer) clearTimeout(timer);
-    this.idleTimers.delete(mode);
+    this.idleTimers.delete(key);
 
-    log.info(`Stopping Chrome ${mode}...`);
+    log.info(`Stopping Chrome ${key}...`);
 
     try { await instance.context.close(); } catch {}
     try { await instance.browser.close(); } catch {}
 
-    this.instances.delete(mode);
+    this.instances.delete(key);
   }
 
   async stopAll(): Promise<void> {
-    const modes = [...this.instances.keys()];
-    await Promise.all(modes.map((m) => this.stopMode(m)));
+    const keys = [...this.instances.keys()];
+    await Promise.all(keys.map((k) => this.stopKey(k)));
   }
 
-  private resetIdleTimer(mode: BrowserMode): void {
-    const existing = this.idleTimers.get(mode);
+  private resetIdleTimer(key: string): void {
+    const existing = this.idleTimers.get(key);
     if (existing) clearTimeout(existing);
 
     this.idleTimers.set(
-      mode,
+      key,
       setTimeout(() => {
-        log.info(`Idle timeout for ${mode}, stopping...`);
-        this.stopMode(mode);
+        log.info(`Idle timeout for ${key}, stopping...`);
+        this.stopKey(key);
       }, this.idleTimeout)
     );
   }

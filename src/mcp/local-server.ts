@@ -1,10 +1,15 @@
 import { spawn, type ChildProcess } from "child_process";
+import net from "net";
 import fs from "fs";
 import path from "path";
 import os from "os";
 import { getDataDir } from "../lib/paths";
 
-const PORT = parseInt(process.env.IFRAMER_LOCAL_PORT || "3022", 10);
+// Base port to scan up from. Each MCP process (= one Claude session) grabs the
+// FIRST FREE port at/above this base, so sessions never share a local server.
+// Sharing a single fixed port made sessions kill each other's browser on start.
+const BASE_PORT = parseInt(process.env.IFRAMER_LOCAL_PORT || "3022", 10);
+const PORT_SCAN_ATTEMPTS = 200;
 const STARTUP_TIMEOUT_MS = 15_000;
 const HEALTH_POLL_MS = 300;
 
@@ -16,15 +21,18 @@ const HEALTH_POLL_MS = 300;
 export class LocalServerManager {
   private child: ChildProcess | null = null;
   private startingPromise: Promise<void> | null = null;
-  private baseUrl: string;
+  private port: number | null = null;
+  private baseUrl: string = "";
   private logPath: string;
 
   constructor() {
-    this.baseUrl = `http://127.0.0.1:${PORT}`;
     this.logPath = path.join(getDataDir(), "local-server.log");
   }
 
   getBaseUrl(): string {
+    if (!this.baseUrl) {
+      throw new Error("Local server not started yet — call ensureRunning() first.");
+    }
     return this.baseUrl;
   }
 
@@ -41,8 +49,10 @@ export class LocalServerManager {
   }
 
   private async doStart(): Promise<void> {
-    // Kill any stale process
-    await this.killExisting();
+    // Grab a fresh free port up from BASE_PORT. Each session owns its own port,
+    // so there is no stale foreign process to kill — no cross-session stomping.
+    this.port = await findFreePort(BASE_PORT, PORT_SCAN_ATTEMPTS);
+    this.baseUrl = `http://127.0.0.1:${this.port}`;
 
     const dataDir = getDataDir();
     fs.mkdirSync(dataDir, { recursive: true });
@@ -54,9 +64,13 @@ export class LocalServerManager {
 
     const env: Record<string, string> = {
       ...process.env as Record<string, string>,
-      PORT: String(PORT),
+      PORT: String(this.port),
       IFRAMER_MODE: "local",
       IFRAMER_DATA_DIR: dataDir,
+      // The child watches this PID — when this MCP process dies (even via
+      // SIGKILL, which leaves the child orphaned), the child self-terminates
+      // instead of lingering as a zombie owning a Chrome process.
+      IFRAMER_PARENT_PID: String(process.pid),
     };
     if (process.env.IFRAMER_SECRET) {
       env.IFRAMER_SECRET = process.env.IFRAMER_SECRET;
@@ -91,7 +105,7 @@ export class LocalServerManager {
     this.kill();
     const logTail = this.readLogTail();
     throw new Error(
-      `Local iframer server failed to start on port ${PORT} within ${STARTUP_TIMEOUT_MS}ms.\n` +
+      `Local iframer server failed to start on port ${this.port} within ${STARTUP_TIMEOUT_MS}ms.\n` +
       `Last log lines:\n${logTail}`
     );
   }
@@ -141,42 +155,8 @@ export class LocalServerManager {
     this.child = null;
   }
 
-  private async killExisting(): Promise<void> {
-    try {
-      const res = await fetch(`${this.baseUrl}/health`, {
-        signal: AbortSignal.timeout(2000),
-      });
-      if (!res.ok) return;
-    } catch {
-      return; // Nothing on the port — good
-    }
-
-    // Something is alive on our port — try graceful shutdown first
-    try {
-      await fetch(`${this.baseUrl}/shutdown`, {
-        method: "POST",
-        signal: AbortSignal.timeout(2000),
-      });
-      await sleep(800);
-    } catch {}
-
-    // If port still occupied, kill by PID via lsof
-    const portStillInUse = await this.healthCheck();
-    if (portStillInUse) {
-      try {
-        const { execSync } = require("child_process") as typeof import("child_process");
-        const pid = execSync(`lsof -ti :${PORT}`, { encoding: "utf8" }).trim();
-        if (pid) {
-          for (const p of pid.split("\n")) {
-            try { process.kill(parseInt(p, 10), "SIGKILL"); } catch {}
-          }
-          await sleep(500);
-        }
-      } catch {}
-    }
-  }
-
   private async healthCheck(): Promise<boolean> {
+    if (!this.baseUrl) return false;
     try {
       const res = await fetch(`${this.baseUrl}/health`, {
         signal: AbortSignal.timeout(2000),
@@ -201,4 +181,27 @@ export class LocalServerManager {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Find the first free TCP port at/above `start`, scanning up to `attempts`
+ *  ports. Binds to 127.0.0.1 to probe, then releases it for the child. */
+function findFreePort(start: number, attempts: number): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const tryPort = (p: number) => {
+      if (p >= start + attempts) {
+        reject(new Error(`No free port found in ${start}-${start + attempts}`));
+        return;
+      }
+      const srv = net.createServer();
+      srv.once("error", () => {
+        srv.close();
+        tryPort(p + 1);
+      });
+      srv.once("listening", () => {
+        srv.close(() => resolve(p));
+      });
+      srv.listen(p, "127.0.0.1");
+    };
+    tryPort(start);
+  });
 }
