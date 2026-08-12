@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import type { FetchResult } from "../../lib/types";
 import { localApiPost, err, getErrorMessage } from "../helpers";
 
 export function registerBrowseTool(server: McpServer) {
@@ -23,7 +24,7 @@ PRE-FLIGHT: Call \`knowledge get <domain>\` first. If the cache shows a direct-A
     },
     async (params) => {
       try {
-        const fetchResult: any = await localApiPost("/fetch", params);
+        const fetchResult = await localApiPost<FetchResult>("/fetch", params);
         if (!fetchResult.ok) return err(`Error: ${fetchResult.error}`);
         const { html, ...rest } = fetchResult;
         const text = html

@@ -1,7 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import type { PipelineResult, CapturedApi, CapturedEndpoint, ApiProtocol } from "../../lib/types";
 import { localApiPost, apiPost, isDockerRunning, resolveScreenshotPath, err, getErrorMessage } from "../helpers";
 import { stepSchema } from "./step-schema";
+
+type TextContent = { type: "text"; text: string };
 
 export function registerReverseEngineerTool(server: McpServer) {
   server.tool(
@@ -70,8 +73,8 @@ The outputDir defaults to ./<domain>/. Ask the user where to save if unclear.`,
         const mode = params.options?.mode;
         const dockerRunning = await isDockerRunning();
         const captureResult = (mode === "docker-headful" && dockerRunning)
-          ? await apiPost<any>("/execute", execParams)
-          : await localApiPost<any>("/execute", execParams);
+          ? await apiPost<PipelineResult>("/execute", execParams)
+          : await localApiPost<PipelineResult>("/execute", execParams);
 
         const lines: string[] = [];
         lines.push(`ok: ${captureResult.ok}`);
@@ -136,7 +139,7 @@ The outputDir defaults to ./<domain>/. Ask the user where to save if unclear.`,
         if (text.length > 80_000) {
           text = text.slice(0, 80_000) + "\n\n[... response truncated — read captured-api.json for full data]";
         }
-        const content: any[] = [{ type: "text" as const, text }];
+        const content: TextContent[] = [{ type: "text", text }];
         if (!captureResult.ok) return { content, isError: true };
         return { content };
       } catch (e: unknown) {
@@ -146,7 +149,7 @@ The outputDir defaults to ./<domain>/. Ask the user where to save if unclear.`,
   );
 }
 
-export function formatCapturedApi(lines: string[], capturedApi: any[], params: { outputDir?: string; typed?: boolean }) {
+export function formatCapturedApi(lines: string[], capturedApi: CapturedApi[], params: { outputDir?: string; typed?: boolean }) {
   for (const api of capturedApi) {
     lines.push(`\n━━━ ${api.domain} (${api.baseUrl}) ━━━`);
 
@@ -163,7 +166,7 @@ export function formatCapturedApi(lines: string[], capturedApi: any[], params: {
       for (const part of authParts) lines.push(`  ${part}`);
     }
 
-    const byProtocol = new Map<string, any[]>();
+    const byProtocol = new Map<ApiProtocol, CapturedEndpoint[]>();
     for (const ep of api.endpoints) {
       const p = ep.protocol || "rest";
       if (!byProtocol.has(p)) byProtocol.set(p, []);

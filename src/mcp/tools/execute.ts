@@ -1,7 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import type { PipelineResult } from "../../lib/types";
 import { apiPost, localApiPost, isDockerRunning, resolveScreenshotPath, err, getErrorMessage, log, localServer } from "../helpers";
 import { stepSchema } from "./step-schema";
+
+type TextContent = { type: "text"; text: string };
 
 export function registerExecuteTool(server: McpServer) {
   server.tool(
@@ -41,7 +44,7 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
       try {
         const dockerRunning = await isDockerRunning();
 
-        async function runWithMode(mode?: string): Promise<any> {
+        async function runWithMode(mode?: string): Promise<PipelineResult> {
           // docker-headful is the only mode that goes through the Docker API.
           // Every other mode runs on the local background server so CLI, MCP,
           // and all browser modes share one credential / session / knowledge store.
@@ -61,7 +64,7 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
                 },
               };
             }
-            return apiPost("/execute", {
+            return apiPost<PipelineResult>("/execute", {
               steps: params.steps,
               options: { ...params.options, mode: "docker-headful", autoEscalate: false },
             });
@@ -69,7 +72,7 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
 
           // headless, binary-headful, and auto-select all go to the local
           // background server. Auto-escalation stays enabled.
-          return localApiPost("/execute", {
+          return localApiPost<PipelineResult>("/execute", {
             steps: params.steps,
             options: { ...params.options, mode: mode || undefined },
           });
@@ -77,7 +80,7 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
 
         // Run with crash recovery: if the local server dies mid-pipeline,
         // restart it and retry once.
-        let execResult: any;
+        let execResult: PipelineResult;
         try {
           execResult = await runWithMode(params.options?.mode);
         } catch (execErr: unknown) {
@@ -136,7 +139,7 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
           }
         }
 
-        const content: any[] = [{ type: "text" as const, text: lines.join("\n") }];
+        const content: TextContent[] = [{ type: "text", text: lines.join("\n") }];
         if (!execResult.ok) return { content, isError: true };
         return { content };
       } catch (e: unknown) {

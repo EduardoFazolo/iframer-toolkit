@@ -49,6 +49,10 @@ function isLikelyId(segment: string): boolean {
   return ID_PATTERNS.some(p => p.test(segment));
 }
 
+function isRecord(x: unknown): x is Record<string, unknown> {
+  return typeof x === "object" && x !== null && !Array.isArray(x);
+}
+
 function parameterizePath(path: string): string {
   const parts = path.split("/");
   let idCount = 0;
@@ -194,7 +198,7 @@ function inferVerb(protocol: ApiProtocol, action: string, method: string, respon
     if (m === "DELETE") return "delete";
     if (m === "POST") return "create";
     if (m === "PUT" || m === "PATCH") return "update";
-    if (m === "GET") return Array.isArray(responseBody) || Array.isArray((responseBody as any)?.data) ? "list" : "read";
+    if (m === "GET") return Array.isArray(responseBody) || (isRecord(responseBody) && Array.isArray(responseBody.data)) ? "list" : "read";
     return "action";
   }
 
@@ -205,7 +209,7 @@ function inferVerb(protocol: ApiProtocol, action: string, method: string, respon
   if (/\b(get|fetch|load|read|query|view|show|profile|info|detail|me)\b/.test(lower)) return "read";
 
   if (protocol === "graphql") {
-    const q = (responseBody as any)?.query;
+    const q = isRecord(responseBody) ? responseBody.query : undefined;
     if (typeof q === "string" && /^\s*mutation\b/.test(q)) return "action";
     return "read";
   }
