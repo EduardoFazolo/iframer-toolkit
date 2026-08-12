@@ -115,15 +115,14 @@ export interface CapturedEndpoint {
 
 // ─── Pipeline Results ───────────────────────────────────────────────
 
-export interface StepResult {
-  stepIndex: number;
-  step: PipelineStep;
-  ok: boolean;
-  result?: unknown;
-  durationMs: number;
-  error?: string;
-  screenshotUrl?: string;
-}
+// StepResult is a distributed discriminated union defined alongside the step
+// handler registry (src/lib/actions/types.ts) so narrowing on `.step.type`
+// narrows `.result` to that step's concrete shape. Imported for local use
+// (PipelineResult below) and re-exported because many consumers import it from
+// "./types". Type-only, so the import cycle with actions/types.ts (which imports
+// PipelineStep from here) is safe.
+import type { StepResult } from "./actions/types";
+export type { StepResult };
 
 export interface PageState {
   url: string;
