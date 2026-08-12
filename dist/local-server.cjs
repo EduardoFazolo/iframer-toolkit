@@ -908,11 +908,66 @@ function generateTOTP(secret, period = 30, digits = 6) {
 // src/lib/screenshot.ts
 var import_fs4 = __toESM(require("fs"));
 var import_path3 = __toESM(require("path"));
+var log3 = createLogger("screenshot");
+var MAX_AGE_MS = parseInt(process.env.IFRAMER_SCREENSHOT_MAX_AGE_MS || String(24 * 60 * 60 * 1000), 10);
+var MAX_FILES = parseInt(process.env.IFRAMER_SCREENSHOT_MAX_FILES || "500", 10);
+var PRUNE_THROTTLE_MS = 5 * 60 * 1000;
+var lastPruneAt = 0;
 function saveScreenshot(buffer, filename, screenshotDir, publicUrl) {
   import_fs4.default.mkdirSync(screenshotDir, { recursive: true });
   const filePath = import_path3.default.join(screenshotDir, filename);
   import_fs4.default.writeFileSync(filePath, buffer);
+  maybePrune(screenshotDir);
   return `${publicUrl}/screenshots/${filename}`;
+}
+function maybePrune(dir) {
+  const now = Date.now();
+  if (now - lastPruneAt < PRUNE_THROTTLE_MS)
+    return;
+  lastPruneAt = now;
+  pruneScreenshots(dir);
+}
+function pruneScreenshots(dir, opts = {}) {
+  const maxAgeMs = opts.maxAgeMs ?? MAX_AGE_MS;
+  const maxFiles = opts.maxFiles ?? MAX_FILES;
+  const now = opts.now ?? Date.now();
+  try {
+    const entries = import_fs4.default.readdirSync(dir).filter((f) => f.endsWith(".jpg") || f.endsWith(".jpeg") || f.endsWith(".png")).map((f) => {
+      const full = import_path3.default.join(dir, f);
+      try {
+        return { full, mtimeMs: import_fs4.default.statSync(full).mtimeMs };
+      } catch {
+        return null;
+      }
+    }).filter((e) => e !== null);
+    let removed = 0;
+    const survivors = [];
+    for (const e of entries) {
+      if (now - e.mtimeMs > maxAgeMs) {
+        try {
+          import_fs4.default.unlinkSync(e.full);
+          removed++;
+        } catch {}
+      } else {
+        survivors.push(e);
+      }
+    }
+    if (survivors.length > maxFiles) {
+      survivors.sort((a, b) => a.mtimeMs - b.mtimeMs);
+      for (const e of survivors.slice(0, survivors.length - maxFiles)) {
+        try {
+          import_fs4.default.unlinkSync(e.full);
+          removed++;
+        } catch {}
+      }
+    }
+    if (removed > 0)
+      log3.debug(`pruned ${removed} old screenshot(s) from ${dir}`);
+    return removed;
+  } catch (err) {
+    log3.warn(`screenshot prune failed: ${err instanceof Error ? err.message : String(err)}`);
+    return 0;
+  }
 }
 
 // src/lib/session/sqlite-store.ts
@@ -1030,7 +1085,7 @@ var import_fs6 = __toESM(require("fs"));
 var import_path5 = __toESM(require("path"));
 var import_os2 = __toESM(require("os"));
 var import_child_process2 = require("child_process");
-var log3 = createLogger("chrome");
+var log4 = createLogger("chrome");
 var CHROME_VERSIONS_URL = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json";
 var DEFAULT_INSTALL_DIR = import_path5.default.join(import_os2.default.homedir(), ".iframer", "chrome");
 function getPlatform() {
@@ -1064,7 +1119,7 @@ function getChromeExecutablePath(installDir) {
   throw new Error(`Unsupported platform: ${platform}`);
 }
 async function downloadChrome(installDir = DEFAULT_INSTALL_DIR) {
-  log3.info("Downloading Chrome for Testing (first time only)...");
+  log4.info("Downloading Chrome for Testing (first time only)...");
   const res = await fetch(CHROME_VERSIONS_URL);
   if (!res.ok)
     throw new Error(`Failed to fetch Chrome versions: ${res.status}`);
@@ -1078,8 +1133,8 @@ async function downloadChrome(installDir = DEFAULT_INSTALL_DIR) {
     throw new Error(`No Chrome for Testing download for platform: ${platform}`);
   const url = download.url;
   const version = channel.version;
-  log3.debug(`Version ${version} for ${platform}`);
-  log3.debug(`URL: ${url}`);
+  log4.debug(`Version ${version} for ${platform}`);
+  log4.debug(`URL: ${url}`);
   import_fs6.default.mkdirSync(installDir, { recursive: true });
   const zipPath = import_path5.default.join(installDir, "chrome.zip");
   const dlRes = await fetch(url);
@@ -1087,7 +1142,7 @@ async function downloadChrome(installDir = DEFAULT_INSTALL_DIR) {
     throw new Error(`Download failed: ${dlRes.status}`);
   const buf = Buffer.from(await dlRes.arrayBuffer());
   import_fs6.default.writeFileSync(zipPath, buf);
-  log3.info(`Downloaded ${(buf.length / 1024 / 1024).toFixed(1)}MB`);
+  log4.info(`Downloaded ${(buf.length / 1024 / 1024).toFixed(1)}MB`);
   import_child_process2.execSync(`unzip -o -q "${zipPath}" -d "${installDir}"`, { stdio: "inherit" });
   import_fs6.default.unlinkSync(zipPath);
   const execPath = getChromeExecutablePath(installDir);
@@ -1098,7 +1153,7 @@ async function downloadChrome(installDir = DEFAULT_INSTALL_DIR) {
     import_fs6.default.chmodSync(execPath, 493);
   }
   import_fs6.default.writeFileSync(import_path5.default.join(installDir, "version.json"), JSON.stringify({ version, platform, downloadedAt: new Date().toISOString() }));
-  log3.info(`Installed at: ${execPath}`);
+  log4.info(`Installed at: ${execPath}`);
   return execPath;
 }
 function findChromeForTesting() {
@@ -1151,10 +1206,10 @@ async function ensureChrome() {
   try {
     return await downloadChrome();
   } catch (err) {
-    log3.error(`Failed to download Chrome for Testing: ${err instanceof Error ? err.message : String(err)}`);
+    log4.error(`Failed to download Chrome for Testing: ${err instanceof Error ? err.message : String(err)}`);
     const system = findChrome();
     if (system) {
-      log3.warn(`Falling back to system Chrome: ${system}`);
+      log4.warn(`Falling back to system Chrome: ${system}`);
       return system;
     }
     throw new Error("No Chrome found. Download failed and no system Chrome available.");
@@ -1162,7 +1217,7 @@ async function ensureChrome() {
 }
 
 // src/lib/browser/cloak-browser.ts
-var log4 = createLogger("cloak");
+var log5 = createLogger("cloak");
 var _available = null;
 async function tryImport() {
   try {
@@ -1178,14 +1233,14 @@ async function ensureBinary() {
   try {
     const info = cloak.binaryInfo();
     if (!info.installed) {
-      log4.info("Downloading CloakBrowser binary...");
+      log5.info("Downloading CloakBrowser binary...");
       await cloak.ensureBinary();
-      log4.info("CloakBrowser ready");
+      log5.info("CloakBrowser ready");
     }
     _available = true;
     return true;
   } catch (err) {
-    log4.warn(`CloakBrowser setup failed: ${err instanceof Error ? err.message : String(err)}`);
+    log5.warn(`CloakBrowser setup failed: ${err instanceof Error ? err.message : String(err)}`);
     _available = false;
     return false;
   }
@@ -1202,10 +1257,10 @@ async function launchCloakBrowser(options) {
       headless: options.headless,
       args: options.args
     });
-    log4.info(`CloakBrowser launched (headless=${options.headless})`);
+    log5.info(`CloakBrowser launched (headless=${options.headless})`);
     return browser;
   } catch (err) {
-    log4.warn(`CloakBrowser launch failed: ${err instanceof Error ? err.message : String(err)}`);
+    log5.warn(`CloakBrowser launch failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -1214,7 +1269,7 @@ async function launchCloakBrowser(options) {
 var import_fs7 = __toESM(require("fs"));
 var import_path6 = __toESM(require("path"));
 var import_child_process3 = require("child_process");
-var log5 = createLogger("registry");
+var log6 = createLogger("registry");
 function browsersDir() {
   const dir = import_path6.default.join(getDataDir(), "browsers");
   import_fs7.default.mkdirSync(dir, { recursive: true });
@@ -1259,7 +1314,7 @@ function registerBrowser(rec) {
   try {
     import_fs7.default.writeFileSync(import_path6.default.join(browsersDir(), `${rec.chromePid}.json`), JSON.stringify(rec, null, 2));
   } catch (err) {
-    log5.warn(`failed to write browser record for pid ${rec.chromePid}: ${err}`);
+    log6.warn(`failed to write browser record for pid ${rec.chromePid}: ${err}`);
   }
 }
 function unregisterBrowser(chromePid) {
@@ -1315,14 +1370,14 @@ async function reapOrphanBrowsers() {
       skipped++;
       continue;
     }
-    log5.info(`reaping orphan Chrome pid=${rec.chromePid} (${rec.key}), owner ${rec.ownerPid} is dead`);
+    log6.info(`reaping orphan Chrome pid=${rec.chromePid} (${rec.key}), owner ${rec.ownerPid} is dead`);
     if (await forceKillBrowser(rec)) {
       try {
         import_fs7.default.unlinkSync(full);
       } catch {}
       reaped++;
     } else {
-      log5.warn(`failed to kill orphan Chrome pid=${rec.chromePid} — leaving record for next sweep`);
+      log6.warn(`failed to kill orphan Chrome pid=${rec.chromePid} — leaving record for next sweep`);
     }
   }
   return { reaped, skipped };
@@ -1350,7 +1405,7 @@ function clearServerInfo(pid) {
 }
 
 // src/lib/browser/daemon.ts
-var log6 = createLogger("daemon");
+var log7 = createLogger("daemon");
 var DEFAULT_IDLE_TIMEOUT = 5 * 60 * 1000;
 var CLOSE_GRACE_MS = 5000;
 var DEFAULT_INSTANCE = "default";
@@ -1380,11 +1435,11 @@ class BrowserDaemon {
           try {
             await page2.evaluate("1");
           } catch {
-            log6.info(`Page for ${mode} is dead, creating fresh context`);
+            log7.info(`Page for ${mode} is dead, creating fresh context`);
             try {
               await context2.close();
             } catch (err) {
-              log6.warn(`dead-page context close failed: ${err}`);
+              log7.warn(`dead-page context close failed: ${err}`);
             }
             context2 = await instance.browser.newContext();
             page2 = await context2.newPage();
@@ -1395,18 +1450,18 @@ class BrowserDaemon {
           return { browser: instance.browser, context: context2, page: page2 };
         }
       } catch {}
-      log6.info(`Browser for ${key} disconnected (window closed?), relaunching...`);
+      log7.info(`Browser for ${key} disconnected (window closed?), relaunching...`);
       await this.stopMode(mode, instanceId);
     }
     const marker = `--iframer-key=${key}-${import_crypto2.randomUUID()}`;
     let browser;
     const cloakBrowser = await launchCloakBrowser({ headless: mode === "headless", args: [marker] });
     if (cloakBrowser) {
-      log6.info(`CloakBrowser ${mode} ready`);
+      log7.info(`CloakBrowser ${mode} ready`);
       browser = cloakBrowser;
     } else {
       const executablePath = await ensureChrome();
-      log6.info(`Falling back to Chrome for Testing in ${mode} mode: ${executablePath}`);
+      log7.info(`Falling back to Chrome for Testing in ${mode} mode: ${executablePath}`);
       browser = await import_patchright2.chromium.launch({
         executablePath,
         headless: mode === "headless",
@@ -1429,7 +1484,7 @@ class BrowserDaemon {
         launchedAt: new Date().toISOString()
       });
     } else {
-      log6.warn(`could not resolve Chrome PID for ${key} — force-kill unavailable for this instance`);
+      log7.warn(`could not resolve Chrome PID for ${key} — force-kill unavailable for this instance`);
     }
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -1446,7 +1501,7 @@ class BrowserDaemon {
     };
     this.instances.set(key, instance);
     this.resetIdleTimer(key);
-    log6.info(`Chrome ${key} ready (pid=${chromePid ?? "unknown"})`);
+    log7.info(`Chrome ${key} ready (pid=${chromePid ?? "unknown"})`);
     return { browser, context, page };
   }
   acquire(mode, instanceId = DEFAULT_INSTANCE) {
@@ -1496,17 +1551,17 @@ class BrowserDaemon {
     if (timer)
       clearTimeout(timer);
     this.idleTimers.delete(key);
-    log6.info(`Stopping Chrome ${key} (pid=${instance.chromePid ?? "unknown"})...`);
+    log7.info(`Stopping Chrome ${key} (pid=${instance.chromePid ?? "unknown"})...`);
     const politeClose = (async () => {
       try {
         await instance.context.close();
       } catch (err) {
-        log6.warn(`context.close failed for ${key}: ${err}`);
+        log7.warn(`context.close failed for ${key}: ${err}`);
       }
       try {
         await instance.browser.close();
       } catch (err) {
-        log6.warn(`browser.close failed for ${key}: ${err}`);
+        log7.warn(`browser.close failed for ${key}: ${err}`);
       }
     })();
     const closedInTime = await Promise.race([
@@ -1514,20 +1569,20 @@ class BrowserDaemon {
       sleep2(CLOSE_GRACE_MS).then(() => false)
     ]);
     if (!closedInTime) {
-      log6.warn(`polite close timed out after ${CLOSE_GRACE_MS}ms for ${key}, force-killing`);
+      log7.warn(`polite close timed out after ${CLOSE_GRACE_MS}ms for ${key}, force-killing`);
     }
     if (instance.chromePid !== null) {
       const dead = await forceKillBrowser({ chromePid: instance.chromePid, marker: instance.marker });
       if (dead) {
         unregisterBrowser(instance.chromePid);
       } else {
-        log6.warn(`Chrome pid=${instance.chromePid} survived SIGKILL?! leaving registry record for reaper`);
+        log7.warn(`Chrome pid=${instance.chromePid} survived SIGKILL?! leaving registry record for reaper`);
       }
     } else if (!closedInTime) {
-      log6.warn(`no PID recorded for ${key} and polite close hung — this Chrome may leak until the next reap`);
+      log7.warn(`no PID recorded for ${key} and polite close hung — this Chrome may leak until the next reap`);
     }
     this.instances.delete(key);
-    log6.info(`Stopped Chrome ${key}`);
+    log7.info(`Stopped Chrome ${key}`);
   }
   async stopAll(force = false) {
     const keys = [...this.instances.entries()].filter(([, inst]) => force || inst.active === 0).map(([k]) => k);
@@ -1543,8 +1598,8 @@ class BrowserDaemon {
         this.resetIdleTimer(key);
         return;
       }
-      log6.info(`Idle timeout for ${key}, stopping...`);
-      this.stopKey(key).catch((err) => log6.warn(`idle stop failed for ${key}: ${err}`));
+      log7.info(`Idle timeout for ${key}, stopping...`);
+      this.stopKey(key).catch((err) => log7.warn(`idle stop failed for ${key}: ${err}`));
     }, this.idleTimeout));
   }
   hasLiveProcesses() {
@@ -1555,7 +1610,7 @@ class BrowserDaemon {
 // src/lib/domain-modes.ts
 var import_fs8 = __toESM(require("fs"));
 var import_path7 = __toESM(require("path"));
-var log7 = createLogger("domain-modes");
+var log8 = createLogger("domain-modes");
 function defaultFile() {
   return import_path7.default.join(getDataDir(), "domain-modes.json");
 }
@@ -1650,7 +1705,7 @@ class DomainModeStore {
       import_fs8.default.mkdirSync(import_path7.default.dirname(this.filePath), { recursive: true });
       import_fs8.default.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2));
     } catch (err) {
-      log7.error("Failed to save:", err);
+      log8.error("Failed to save:", err);
     }
   }
 }
@@ -1931,7 +1986,7 @@ function resolveSelector(selector, ctx) {
 }
 
 // src/lib/actions/handlers/navigation.ts
-var log8 = createLogger("actions");
+var log9 = createLogger("actions");
 async function navigate(page, step, ctx) {
   await page.goto(step.url, {
     waitUntil: step.waitUntil || "domcontentloaded",
@@ -1941,13 +1996,13 @@ async function navigate(page, step, ctx) {
   try {
     await page.evaluate(stealthScript);
   } catch (err) {
-    log8.warn(`stealth injection failed: ${err}`);
+    log9.warn(`stealth injection failed: ${err}`);
   }
   if (ctx.sessionData) {
     try {
       await injectStorage(page, ctx.sessionData);
     } catch (err) {
-      log8.warn(`storage injection after navigate failed: ${err}`);
+      log9.warn(`storage injection after navigate failed: ${err}`);
     }
   }
 }
@@ -2463,7 +2518,7 @@ async function snapshot(page, step, ctx) {
 
 // src/lib/captcha/recaptcha.ts
 var import_sdk = __toESM(require("@anthropic-ai/sdk"));
-var log9 = createLogger("captcha-solver");
+var log10 = createLogger("captcha-solver");
 var MAX_ROUNDS = 8;
 var MAX_DURATION_MS = 45000;
 var TILE_SETTLE_MS = TIMING.TILE_SETTLE;
@@ -2504,7 +2559,7 @@ async function screenshotFullGrid(page, challengeInfo) {
     const buf = await page.screenshot({ type: "jpeg", quality: 85, clip: gridClip });
     return buf.toString("base64");
   } catch (err) {
-    log9.error(`full grid screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
+    log10.error(`full grid screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -2567,10 +2622,10 @@ Does this tile contain a ${target}? Reply ONLY "yes" or "no".`
       const answer = (response.content[0].text ?? "").toLowerCase().trim();
       const match = answer.startsWith("yes");
       if (match)
-        log9.debug(`tile ${tile.index} (r${tileRow}c${tileCol}): YES`);
+        log10.debug(`tile ${tile.index} (r${tileRow}c${tileCol}): YES`);
       return { index: tile.index, match };
     } catch (err) {
-      log9.error(`tile ${tile.index} classification failed: ${err instanceof Error ? err.message : String(err)}`);
+      log10.error(`tile ${tile.index} classification failed: ${err instanceof Error ? err.message : String(err)}`);
       return { index: tile.index, match: false };
     }
   }));
@@ -2592,7 +2647,7 @@ async function submitForm(page) {
       if (el) {
         const visible = await el.isVisible();
         if (visible) {
-          log9.info(`Submitting form via: ${selector}`);
+          log10.info(`Submitting form via: ${selector}`);
           await new Promise((r) => setTimeout(r, 500));
           await humanClick(page, selector);
           await new Promise((r) => setTimeout(r, 2000));
@@ -2601,7 +2656,7 @@ async function submitForm(page) {
       }
     } catch {}
   }
-  log9.info("No submit button found — skipping form submission");
+  log10.info("No submit button found — skipping form submission");
   return false;
 }
 async function solveRecaptcha(page, monitor) {
@@ -2627,7 +2682,7 @@ async function solveRecaptcha(page, monitor) {
       return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge info lost" };
     }
     const target = extractTarget(challengeInfo.prompt);
-    log9.info(`Round ${rounds}: looking for "${target}" in ${challengeInfo.rows}x${challengeInfo.cols} grid`);
+    log10.info(`Round ${rounds}: looking for "${target}" in ${challengeInfo.rows}x${challengeInfo.cols} grid`);
     const [fullGridImage, tileImages] = await Promise.all([
       screenshotFullGrid(page, challengeInfo),
       screenshotTiles(page, challengeInfo)
@@ -2637,7 +2692,7 @@ async function solveRecaptcha(page, monitor) {
     }
     monitor?.reportActivity();
     const matchingIndices = await classifyTiles(client, fullGridImage, tileImages, target, challengeInfo.rows, challengeInfo.cols);
-    log9.info(`Round ${rounds}: matched tiles [${matchingIndices.join(", ")}]`);
+    log10.info(`Round ${rounds}: matched tiles [${matchingIndices.join(", ")}]`);
     monitor?.reportActivity();
     if (matchingIndices.length > 0) {
       await clickChallengeTiles(page, matchingIndices);
@@ -2656,7 +2711,7 @@ async function solveRecaptcha(page, monitor) {
               monitor?.reportActivity();
               const newMatches = await classifyTiles(client, newFullGrid, replacedTiles, target, newInfo.rows, newInfo.cols);
               if (newMatches.length > 0) {
-                log9.info(`Round ${rounds}: dynamic tiles matched [${newMatches.join(", ")}]`);
+                log10.info(`Round ${rounds}: dynamic tiles matched [${newMatches.join(", ")}]`);
                 await clickChallengeTiles(page, newMatches);
                 await new Promise((r) => setTimeout(r, TILE_SETTLE_MS));
               }
@@ -2668,7 +2723,7 @@ async function solveRecaptcha(page, monitor) {
     const verifyResult = await clickChallengeVerify(page);
     monitor?.reportActivity();
     if (verifyResult.solved) {
-      log9.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
+      log10.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
       const submitted = await submitForm(page);
       return { solved: true, rounds, durationMs: Date.now() - startTime, submitted };
     }
@@ -2676,14 +2731,14 @@ async function solveRecaptcha(page, monitor) {
     if (!challengeInfo) {
       return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge disappeared after verify" };
     }
-    log9.info(`Round ${rounds}: not solved, new challenge appeared`);
+    log10.info(`Round ${rounds}: not solved, new challenge appeared`);
   }
   return { solved: false, rounds, durationMs: Date.now() - startTime, reason: `Max rounds (${MAX_ROUNDS}) exceeded` };
 }
 
 // src/lib/captcha/hcaptcha.ts
 var import_sdk2 = __toESM(require("@anthropic-ai/sdk"));
-var log10 = createLogger("hcaptcha-solver");
+var log11 = createLogger("hcaptcha-solver");
 var MAX_ROUNDS2 = 8;
 var MAX_DURATION_MS2 = 60000;
 var MODEL2 = "claude-haiku-4-5-20251001";
@@ -2781,7 +2836,7 @@ async function getChallengeInfo2(page) {
     return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
   }).catch(() => null);
   const verifyButton = verifyBtnBox ? { x: Math.round(frameBox.x + verifyBtnBox.x), y: Math.round(frameBox.y + verifyBtnBox.y) } : { x: Math.round(frameBox.x + frameBox.width - 55), y: Math.round(frameBox.y + frameBox.height - 30) };
-  log10.info(`Round challenge: "${info.prompt}" (${info.rows}x${info.cols})`);
+  log11.info(`Round challenge: "${info.prompt}" (${info.rows}x${info.cols})`);
   return { prompt: info.prompt, rows: info.rows, cols: info.cols, tiles, verifyButton, frameBox };
 }
 async function screenshotChallenge(page, challenge) {
@@ -2797,7 +2852,7 @@ async function screenshotChallenge(page, challenge) {
     }
     return buf.toString("base64");
   } catch (err) {
-    log10.error(`screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
+    log11.error(`screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -2818,12 +2873,12 @@ async function classifyTiles2(client, screenshotBase64, challenge) {
       }]
     });
     const text = (response.content[0].text ?? "").trim();
-    log10.debug(`classify response: "${text}"`);
+    log11.debug(`classify response: "${text}"`);
     if (text.toLowerCase().startsWith("none"))
       return [];
     return text.split(/[,\s]+/).map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n) && n >= 0 && n < total);
   } catch (err) {
-    log10.error(`classification failed: ${err instanceof Error ? err.message : String(err)}`);
+    log11.error(`classification failed: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 }
@@ -2850,7 +2905,7 @@ async function solveHCaptcha(page, monitor) {
     return { solved: false, rounds: 0, durationMs: Date.now() - startTime, reason: err instanceof Error ? err.message : String(err) };
   }
   if (solvedOnCheckbox) {
-    log10.info("Solved on checkbox click (no challenge)");
+    log11.info("Solved on checkbox click (no challenge)");
     return { solved: true, rounds: 0, durationMs: Date.now() - startTime };
   }
   while (rounds < MAX_ROUNDS2) {
@@ -2861,7 +2916,7 @@ async function solveHCaptcha(page, monitor) {
     monitor?.reportActivity();
     const challenge = await getChallengeInfo2(page);
     if (!challenge) {
-      log10.info("Challenge frame gone — assuming solved");
+      log11.info("Challenge frame gone — assuming solved");
       return { solved: true, rounds, durationMs: Date.now() - startTime };
     }
     const screenshotBase64 = await screenshotChallenge(page, challenge);
@@ -2870,7 +2925,7 @@ async function solveHCaptcha(page, monitor) {
     }
     monitor?.reportActivity();
     const matchingIndices = await classifyTiles2(client, screenshotBase64, challenge);
-    log10.info(`Round ${rounds}: clicking tiles [${matchingIndices.join(", ")}]`);
+    log11.info(`Round ${rounds}: clicking tiles [${matchingIndices.join(", ")}]`);
     monitor?.reportActivity();
     for (const idx of matchingIndices) {
       const tile = challenge.tiles[idx];
@@ -2883,17 +2938,17 @@ async function solveHCaptcha(page, monitor) {
     const solved = await clickVerify(page, challenge);
     monitor?.reportActivity();
     if (solved) {
-      log10.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
+      log11.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
       return { solved: true, rounds, durationMs: Date.now() - startTime };
     }
-    log10.info(`Round ${rounds}: not solved, retrying`);
+    log11.info(`Round ${rounds}: not solved, retrying`);
     await sleep4(rand2(500, 1000));
   }
   return { solved: false, rounds, durationMs: Date.now() - startTime, reason: `Max rounds (${MAX_ROUNDS2}) exceeded` };
 }
 
 // src/lib/actions/handlers/captcha.ts
-var log11 = createLogger("actions");
+var log12 = createLogger("actions");
 async function screenshotTiles2(page, ci) {
   const tileSize = ci.bframeBox ? Math.round((ci.bframeBox.width - CAPTCHA_GRID.GRID_PADDING) / ci.cols) : CAPTCHA_GRID.DEFAULT_TILE_SIZE;
   const tiles = [];
@@ -2956,10 +3011,10 @@ async function solveCaptcha(page, _step, _ctx, monitor) {
       return src.includes("hcaptcha.com") || title.includes("hcaptcha") || !!document.querySelector("[data-hcaptcha-widget-id]");
     });
   }).catch((err) => {
-    log11.warn(`captcha detection failed: ${err}`);
+    log12.warn(`captcha detection failed: ${err}`);
     return false;
   });
-  log11.info(`detected: ${isHCaptcha ? "hCaptcha" : "reCAPTCHA"}`);
+  log12.info(`detected: ${isHCaptcha ? "hCaptcha" : "reCAPTCHA"}`);
   return isHCaptcha ? await solveHCaptcha(page, monitor) : await solveRecaptcha(page, monitor);
 }
 
@@ -3022,7 +3077,7 @@ async function findSubmitButton(page, opts) {
 // src/lib/knowledge.ts
 var import_fs9 = __toESM(require("fs"));
 var import_path8 = __toESM(require("path"));
-var log12 = createLogger("knowledge");
+var log13 = createLogger("knowledge");
 function getKnowledgeDir() {
   return import_path8.default.join(getDataDir(), "knowledge");
 }
@@ -3092,7 +3147,7 @@ function mergeKnowledge(domain, updates) {
   };
   const md = renderMarkdown(merged);
   import_fs9.default.writeFileSync(getKnowledgePath(domain), md, "utf8");
-  log12.info(`knowledge updated: ${merged.domain} (${merged.endpoints.length} endpoints)`);
+  log13.info(`knowledge updated: ${merged.domain} (${merged.endpoints.length} endpoints)`);
 }
 function dedupeEndpoints(endpoints) {
   const seen = new Map;
@@ -3321,7 +3376,7 @@ var EMAIL_FORM_ANCHOR = 'input[type="email"], input[name*="email" i], input[type
 var PASSWORD_FORM_ANCHOR = PASSWORD_SELECTOR;
 
 // src/lib/actions/handlers/login/index.ts
-var log13 = createLogger("actions");
+var log14 = createLogger("actions");
 async function login(page, step, ctx) {
   const resolved = await resolveCredential(ctx.store, ctx.userId, ctx.token, step.domain);
   if (!resolved) {
@@ -3331,7 +3386,7 @@ async function login(page, step, ctx) {
   }
   const { credential, matchedDomain } = resolved;
   if (matchedDomain !== normalizeDomain(step.domain)) {
-    log13.info(`login: credentials for ${step.domain} resolved via parent domain ${matchedDomain}`);
+    log14.info(`login: credentials for ${step.domain} resolved via parent domain ${matchedDomain}`);
   }
   const beforeUrl = page.url();
   const hasExplicitSelectors = !!(step.usernameSelector || step.passwordSelector || step.submitSelector);
@@ -3364,7 +3419,7 @@ async function runExplicitFlow(page, step, ctx, credential) {
   }
 }
 async function runAutoDetect(page, step, ctx, credential, beforeUrl) {
-  log13.info(`login: auto-detecting form on ${beforeUrl}`);
+  log14.info(`login: auto-detecting form on ${beforeUrl}`);
   await page.waitForLoadState("domcontentloaded").catch(() => {});
   await page.waitForTimeout(500);
   const initialCheck = await page.evaluate((pwdSel) => {
@@ -3373,7 +3428,7 @@ async function runAutoDetect(page, step, ctx, credential, beforeUrl) {
     return { url: location.href, title: document.title, pwdVisible };
   }, PASSWORD_SELECTOR).catch(() => ({ url: page.url(), title: "", pwdVisible: false }));
   if (!initialCheck.pwdVisible && !LOGIN_URL_RE.test(initialCheck.url)) {
-    log13.info(`login: already logged in (no password field, URL=${initialCheck.url})`);
+    log14.info(`login: already logged in (no password field, URL=${initialCheck.url})`);
     return {
       loggedIn: true,
       alreadyLoggedIn: true,
@@ -3393,7 +3448,7 @@ async function runAutoDetect(page, step, ctx, credential, beforeUrl) {
 async function runNoPasswordBranch(page, step, ctx, credential, beforeUrl) {
   const currentUrl = page.url();
   if (!LOGIN_URL_RE.test(currentUrl)) {
-    log13.info(`login: no password field and URL left login area (${currentUrl}) — treating as success`);
+    log14.info(`login: no password field and URL left login area (${currentUrl}) — treating as success`);
     return {
       loggedIn: true,
       alreadyLoggedIn: true,
@@ -3421,7 +3476,7 @@ async function runNoPasswordBranch(page, step, ctx, credential, beforeUrl) {
     const hasCloudflare = !!document.querySelector('[class*="cf-" i], iframe[src*="challenges.cloudflare"]');
     return { title: document.title, visibleText, inputCount, hiddenPassword, hasCaptcha, hasCloudflare };
   }).catch(() => ({ title: "", visibleText: "", inputCount: 0, hiddenPassword: false, hasCaptcha: false, hasCloudflare: false }));
-  log13.warn(`login: no visible password or email field on ${currentUrl} — title="${pageDiag.title}", inputs=${pageDiag.inputCount}`);
+  log14.warn(`login: no visible password or email field on ${currentUrl} — title="${pageDiag.title}", inputs=${pageDiag.inputCount}`);
   const indicators = [];
   if (pageDiag.hasCaptcha)
     indicators.push("CAPTCHA detected");
@@ -3436,7 +3491,7 @@ async function runNoPasswordBranch(page, step, ctx, credential, beforeUrl) {
 }
 async function runEmailFirstFlow(page, credential, beforeUrl, emailEl) {
   const currentUrl = page.url();
-  log13.info(`login: no password field but found email input — running email-first flow on ${currentUrl}`);
+  log14.info(`login: no password field but found email input — running email-first flow on ${currentUrl}`);
   await fillHandleNative(page, emailEl, credential.username);
   const submitEl = await findSubmitButton(page, {
     formAnchor: EMAIL_FORM_ANCHOR,
@@ -3449,7 +3504,7 @@ async function runEmailFirstFlow(page, credential, beforeUrl, emailEl) {
       await submitEl.evaluate((el) => el.click());
     });
   } else {
-    log13.warn("login: email-first flow, no submit button found — pressing Enter");
+    log14.warn("login: email-first flow, no submit button found — pressing Enter");
     await emailEl.press("Enter").catch(() => {});
   }
   await page.waitForLoadState("domcontentloaded").catch(() => {});
@@ -3460,7 +3515,7 @@ async function runEmailFirstFlow(page, credential, beforeUrl, emailEl) {
   ]);
   const laterPasswordHandle = await page.$(PASSWORD_SELECTOR);
   if (laterPasswordHandle && credential.password) {
-    log13.info("login: password field appeared after email submit — filling it");
+    log14.info("login: password field appeared after email submit — filling it");
     await fillHandleNative(page, laterPasswordHandle, credential.password);
     const laterSubmit = await page.$('button[type="submit"]:not([disabled])');
     if (laterSubmit) {
@@ -3497,7 +3552,7 @@ async function runPasswordFlow(page, credential, beforeUrl, passwordHandle) {
   if (usernameEl && credential.username) {
     await fillHandleNative(page, usernameEl, credential.username);
   } else if (!usernameEl) {
-    log13.warn("login: no username field detected, proceeding with password only");
+    log14.warn("login: no username field detected, proceeding with password only");
   }
   if (credential.password) {
     await fillHandleNative(page, passwordHandle, credential.password);
@@ -3513,7 +3568,7 @@ async function runPasswordFlow(page, credential, beforeUrl, passwordHandle) {
       await submitEl.evaluate((el) => el.click());
     });
   } else {
-    log13.warn("login: no submit button detected, pressing Enter in password field");
+    log14.warn("login: no submit button detected, pressing Enter in password field");
     await passwordHandle.press("Enter").catch(() => {});
   }
   await page.waitForLoadState("domcontentloaded").catch(() => {});
@@ -3529,13 +3584,13 @@ async function handleOtp(page, step, ctx, credential, beforeUrl) {
   let code = null;
   if (credential.totp_secret) {
     code = generateTOTP(credential.totp_secret);
-    log13.info(`login: generated TOTP from stored secret for ${step.domain}`);
+    log14.info(`login: generated TOTP from stored secret for ${step.domain}`);
   } else if (ctx.elicitOtp) {
-    log13.info(`login: prompting user for OTP for ${step.domain}`);
+    log14.info(`login: prompting user for OTP for ${step.domain}`);
     try {
       code = await ctx.elicitOtp(step.domain);
     } catch (err) {
-      log13.warn(`login: OTP elicitation failed: ${err instanceof Error ? err.message : String(err)}`);
+      log14.warn(`login: OTP elicitation failed: ${err instanceof Error ? err.message : String(err)}`);
     }
     if (!code) {
       throw new Error(`login: OTP required but user did not provide one for ${step.domain}`);
@@ -4534,7 +4589,7 @@ class PipelineRunner {
   }
 }
 // src/lib/block-detection.ts
-var log14 = createLogger("block-detection");
+var log15 = createLogger("block-detection");
 async function detectBlock(page) {
   try {
     const [title, url, bodyText] = await Promise.all([
@@ -4554,7 +4609,7 @@ async function detectBlock(page) {
     const hasCfChallenge = await page.evaluate(() => {
       return !!document.querySelector('iframe[src*="challenges.cloudflare.com"]');
     }).catch((err) => {
-      log14.warn(`CF challenge check failed, assuming blocked: ${err}`);
+      log15.warn(`CF challenge check failed, assuming blocked: ${err}`);
       return true;
     });
     if (hasCfChallenge) {
@@ -4573,7 +4628,7 @@ async function detectBlock(page) {
       const hasCaptchaIframe = await page.evaluate(() => {
         return !!(document.querySelector('iframe[src*="recaptcha"]') || document.querySelector('iframe[src*="hcaptcha"]'));
       }).catch((err) => {
-        log14.warn(`captcha iframe check failed, assuming blocked: ${err}`);
+        log15.warn(`captcha iframe check failed, assuming blocked: ${err}`);
         return true;
       });
       if (hasCaptchaIframe) {
@@ -4586,7 +4641,7 @@ async function detectBlock(page) {
     if (!url.includes("about:blank") && bodyText.trim().length < 20 && title.length < 5) {}
     return { blocked: false };
   } catch (err) {
-    log14.warn(`page evaluation failed, assuming blocked: ${err}`);
+    log15.warn(`page evaluation failed, assuming blocked: ${err}`);
     return { blocked: true, reason: "evaluation-failed" };
   }
 }
@@ -4684,7 +4739,7 @@ function extractKnowledgeFromRun(pipeline, result, sessionData, mode) {
 }
 
 // src/lib/execution/pipeline-executor.ts
-var log15 = createLogger("iframer");
+var log16 = createLogger("iframer");
 
 class PipelineExecutor {
   deps;
@@ -4723,7 +4778,7 @@ class PipelineExecutor {
         this.deps.domainModes.recordFailure(domain, failedMode, result.error?.message || "blocked");
       const nextMode = this.deps.domainModes.getNextMode(failedMode, availableModes);
       if (nextMode) {
-        log15.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
+        log16.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
         if (failedMode !== "docker-headful") {
           await this.deps.daemon.stopMode(failedMode, instanceId);
         }
@@ -4736,7 +4791,7 @@ class PipelineExecutor {
           this.deps.domainModes.recordFailure(domain, nextMode, result.error?.message || "blocked");
           const thirdMode = this.deps.domainModes.getNextMode(nextMode, availableModes);
           if (thirdMode) {
-            log15.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
+            log16.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
             if (nextMode !== "docker-headful") {
               await this.deps.daemon.stopMode(nextMode, instanceId);
             }
@@ -4851,7 +4906,7 @@ class PipelineExecutor {
         try {
           extractKnowledgeFromRun(pipeline, result, updatedSession, mode);
         } catch (err) {
-          log15.warn(`knowledge update failed: ${getErrorMessage(err)}`);
+          log16.warn(`knowledge update failed: ${getErrorMessage(err)}`);
         }
       }
       this.deps.refStore.sync(userId, ctx);
@@ -5099,7 +5154,7 @@ class CredentialStore {
 }
 
 // src/lib/iframer.ts
-var log16 = createLogger("iframer");
+var log17 = createLogger("iframer");
 var DEFAULT_SCREENSHOT_DIR = import_path9.default.join(import_path9.default.dirname(import_url.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/src/lib/iframer.ts")), "../../.screenshots");
 var DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
 var DEFAULT_STALE_TIMEOUT_MS3 = 20000;
@@ -5211,7 +5266,7 @@ class Iframer {
             sessionSaved = true;
           }
         } catch (err) {
-          log16.warn(`stopSession: failed to extract daemon state for ${inst.mode}::${inst.instanceId}: ${getErrorMessage(err)}`);
+          log17.warn(`stopSession: failed to extract daemon state for ${inst.mode}::${inst.instanceId}: ${getErrorMessage(err)}`);
         }
       }
     }
