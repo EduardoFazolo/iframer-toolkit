@@ -35,7 +35,7 @@ var import_mcp = require("@modelcontextprotocol/sdk/server/mcp.js");
 var import_stdio = require("@modelcontextprotocol/sdk/server/stdio.js");
 
 // src/mcp/helpers.ts
-var import_path4 = __toESM(require("path"));
+var import_path5 = __toESM(require("path"));
 var import_os2 = __toESM(require("os"));
 
 // src/lib/logger.ts
@@ -99,22 +99,51 @@ function getLocalToken() {
 // src/mcp/local-server.ts
 var import_child_process = require("child_process");
 var import_net = __toESM(require("net"));
+var import_fs3 = __toESM(require("fs"));
+var import_path4 = __toESM(require("path"));
+
+// src/lib/browser/registry.ts
 var import_fs2 = __toESM(require("fs"));
 var import_path3 = __toESM(require("path"));
+var log = createLogger("registry");
+function serverInfoPath() {
+  return import_path3.default.join(getDataDir(), "server.json");
+}
+function isPidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 1)
+    return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function readServerInfo() {
+  try {
+    const info = JSON.parse(import_fs2.default.readFileSync(serverInfoPath(), "utf8"));
+    if (!Number.isInteger(info.pid) || !Number.isInteger(info.port))
+      return null;
+    return info;
+  } catch {
+    return null;
+  }
+}
+
+// src/mcp/local-server.ts
 var __dirname = "/Users/eduardoverona/tools/iframer-toolkit/src/mcp";
 var BASE_PORT = parseInt(process.env.IFRAMER_LOCAL_PORT || "3022", 10);
 var PORT_SCAN_ATTEMPTS = 200;
 var STARTUP_TIMEOUT_MS = 15000;
 var HEALTH_POLL_MS = 300;
+var SPAWN_LOCK_STALE_MS = 20000;
 
 class LocalServerManager {
-  child = null;
   startingPromise = null;
-  port = null;
   baseUrl = "";
   logPath;
   constructor() {
-    this.logPath = import_path3.default.join(getDataDir(), "local-server.log");
+    this.logPath = import_path4.default.join(getDataDir(), "local-server.log");
   }
   getBaseUrl() {
     if (!this.baseUrl) {
@@ -123,113 +152,148 @@ class LocalServerManager {
     return this.baseUrl;
   }
   async ensureRunning() {
-    if (this.child && !this.child.killed && await this.healthCheck())
-      return;
     if (this.startingPromise)
       return this.startingPromise;
-    this.startingPromise = this.doStart().finally(() => {
+    if (await this.adoptExisting())
+      return;
+    this.startingPromise = this.startShared().finally(() => {
       this.startingPromise = null;
     });
     return this.startingPromise;
   }
-  async doStart() {
-    this.port = await findFreePort(BASE_PORT, PORT_SCAN_ATTEMPTS);
-    this.baseUrl = `http://127.0.0.1:${this.port}`;
+  async adoptExisting() {
+    const info = readServerInfo();
+    if (!info || !isPidAlive(info.pid))
+      return false;
+    const url = `http://127.0.0.1:${info.port}`;
+    if (await healthCheck(url)) {
+      this.baseUrl = url;
+      return true;
+    }
+    return false;
+  }
+  async startShared() {
     const dataDir = getDataDir();
-    import_fs2.default.mkdirSync(dataDir, { recursive: true });
-    const { command, args } = this.resolveRuntime();
-    const logFd = import_fs2.default.openSync(this.logPath, "a");
-    const env = {
-      ...process.env,
-      PORT: String(this.port),
-      IFRAMER_MODE: "local",
-      IFRAMER_DATA_DIR: dataDir,
-      IFRAMER_PARENT_PID: String(process.pid)
-    };
-    if (process.env.IFRAMER_SECRET) {
-      env.IFRAMER_SECRET = process.env.IFRAMER_SECRET;
-    } else {
-      try {
-        const secret = import_fs2.default.readFileSync(import_path3.default.join(dataDir, "secret"), "utf8").trim();
-        if (secret)
-          env.IFRAMER_SECRET = secret;
-      } catch {}
+    import_fs3.default.mkdirSync(dataDir, { recursive: true });
+    const lockDir = import_path4.default.join(dataDir, "server.spawn-lock");
+    let holdingLock = false;
+    try {
+      import_fs3.default.mkdirSync(lockDir);
+      holdingLock = true;
+    } catch {
+      const stale = (() => {
+        try {
+          return Date.now() - import_fs3.default.statSync(lockDir).mtimeMs > SPAWN_LOCK_STALE_MS;
+        } catch {
+          return true;
+        }
+      })();
+      if (stale) {
+        try {
+          import_fs3.default.rmdirSync(lockDir);
+          import_fs3.default.mkdirSync(lockDir);
+          holdingLock = true;
+        } catch {}
+      }
     }
-    this.child = import_child_process.spawn(command, args, {
-      env,
-      stdio: ["ignore", logFd, logFd],
-      detached: false
-    });
-    import_fs2.default.closeSync(logFd);
-    this.child.on("exit", (code) => {
-      this.child = null;
-    });
-    const deadline = Date.now() + STARTUP_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      if (await this.healthCheck())
+    try {
+      if (!holdingLock) {
+        const deadline2 = Date.now() + STARTUP_TIMEOUT_MS;
+        while (Date.now() < deadline2) {
+          if (await this.adoptExisting())
+            return;
+          await sleep(HEALTH_POLL_MS);
+        }
+        throw new Error("Timed out waiting for another session to start the shared iframer server.");
+      }
+      if (await this.adoptExisting())
         return;
-      await sleep(HEALTH_POLL_MS);
-    }
-    this.kill();
-    const logTail = this.readLogTail();
-    throw new Error(`Local iframer server failed to start on port ${this.port} within ${STARTUP_TIMEOUT_MS}ms.
+      const port = await findFreePort(BASE_PORT, PORT_SCAN_ATTEMPTS);
+      const url = `http://127.0.0.1:${port}`;
+      const { command, args } = this.resolveRuntime();
+      const logFd = import_fs3.default.openSync(this.logPath, "a");
+      const env = {
+        ...process.env,
+        PORT: String(port),
+        IFRAMER_MODE: "local",
+        IFRAMER_DATA_DIR: dataDir
+      };
+      if (process.env.IFRAMER_SECRET) {
+        env.IFRAMER_SECRET = process.env.IFRAMER_SECRET;
+      } else {
+        try {
+          const secret = import_fs3.default.readFileSync(import_path4.default.join(dataDir, "secret"), "utf8").trim();
+          if (secret)
+            env.IFRAMER_SECRET = secret;
+        } catch {}
+      }
+      const child = import_child_process.spawn(command, args, {
+        env,
+        stdio: ["ignore", logFd, logFd],
+        detached: true
+      });
+      child.unref();
+      import_fs3.default.closeSync(logFd);
+      const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+      while (Date.now() < deadline) {
+        if (await healthCheck(url)) {
+          this.baseUrl = url;
+          return;
+        }
+        await sleep(HEALTH_POLL_MS);
+      }
+      try {
+        child.kill("SIGKILL");
+      } catch {}
+      throw new Error(`Local iframer server failed to start on port ${port} within ${STARTUP_TIMEOUT_MS}ms.
 ` + `Last log lines:
-${logTail}`);
+${this.readLogTail()}`);
+    } finally {
+      if (holdingLock) {
+        try {
+          import_fs3.default.rmdirSync(lockDir);
+        } catch {}
+      }
+    }
   }
   resolveRuntime() {
     try {
       const bunPath = require("child_process").execSync("which bun", { encoding: "utf8" }).trim();
-      const serverTs2 = import_path3.default.join(__dirname, "..", "..", "index.ts");
-      if (import_fs2.default.existsSync(serverTs2)) {
+      const serverTs2 = import_path4.default.join(__dirname, "..", "..", "index.ts");
+      if (import_fs3.default.existsSync(serverTs2)) {
         return { command: bunPath, args: ["run", serverTs2] };
       }
     } catch {}
-    const serverCjs = import_path3.default.join(__dirname, "..", "..", "dist", "local-server.cjs");
-    if (import_fs2.default.existsSync(serverCjs)) {
+    const serverCjs = import_path4.default.join(__dirname, "..", "..", "dist", "local-server.cjs");
+    if (import_fs3.default.existsSync(serverCjs)) {
       return { command: "node", args: [serverCjs] };
     }
-    const serverTs = import_path3.default.join(__dirname, "..", "..", "index.ts");
+    const serverTs = import_path4.default.join(__dirname, "..", "..", "index.ts");
     return { command: "node", args: ["--import", "tsx", serverTs] };
   }
   async restart() {
-    this.kill();
-    await sleep(500);
+    const info = readServerInfo();
+    if (info && this.baseUrl) {
+      try {
+        await fetch(`${this.baseUrl}/shutdown`, { method: "POST", signal: AbortSignal.timeout(3000) });
+      } catch {}
+      const deadline = Date.now() + 12000;
+      while (Date.now() < deadline && isPidAlive(info.pid)) {
+        await sleep(200);
+      }
+      if (isPidAlive(info.pid)) {
+        try {
+          process.kill(info.pid, "SIGKILL");
+        } catch {}
+      }
+    }
+    this.baseUrl = "";
     await this.ensureRunning();
   }
-  shutdown() {
-    this.kill();
-  }
-  kill() {
-    if (this.child && !this.child.killed) {
-      try {
-        this.child.kill("SIGTERM");
-      } catch {}
-      const c = this.child;
-      setTimeout(() => {
-        try {
-          if (!c.killed)
-            c.kill("SIGKILL");
-        } catch {}
-      }, 2000);
-    }
-    this.child = null;
-  }
-  async healthCheck() {
-    if (!this.baseUrl)
-      return false;
-    try {
-      const res = await fetch(`${this.baseUrl}/health`, {
-        signal: AbortSignal.timeout(2000)
-      });
-      const data = await res.json();
-      return data.ok === true;
-    } catch {
-      return false;
-    }
-  }
+  shutdown() {}
   readLogTail() {
     try {
-      const content = import_fs2.default.readFileSync(this.logPath, "utf8");
+      const content = import_fs3.default.readFileSync(this.logPath, "utf8");
       const lines = content.trim().split(`
 `);
       return lines.slice(-10).join(`
@@ -241,6 +305,15 @@ ${logTail}`);
 }
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+async function healthCheck(baseUrl) {
+  try {
+    const res = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(2000) });
+    const data = await res.json();
+    return data.ok === true;
+  } catch {
+    return false;
+  }
 }
 function findFreePort(start, attempts) {
   return new Promise((resolve, reject) => {
@@ -264,7 +337,7 @@ function findFreePort(start, attempts) {
 }
 
 // src/mcp/helpers.ts
-var log = createLogger("mcp");
+var log2 = createLogger("mcp");
 var BASE_URL = process.env.IFRAMER_URL || "http://localhost:3021";
 var IFRAMER_SECRET = process.env.IFRAMER_SECRET;
 var IFRAMER_MODE = process.env.IFRAMER_MODE;
@@ -330,8 +403,8 @@ async function resolveScreenshotPath(url) {
     if (url.startsWith("file://")) {
       const { fileURLToPath } = await import("url");
       const filePath2 = fileURLToPath(url);
-      const fs4 = await import("fs");
-      if (fs4.existsSync(filePath2))
+      const fs5 = await import("fs");
+      if (fs5.existsSync(filePath2))
         return filePath2;
       return null;
     }
@@ -339,11 +412,11 @@ async function resolveScreenshotPath(url) {
     if (!res.ok)
       return null;
     const buf = Buffer.from(await res.arrayBuffer());
-    const fs3 = await import("fs");
-    const dir = import_path4.default.join(import_os2.default.tmpdir(), "iframer-screenshots", "screenshots");
-    fs3.mkdirSync(dir, { recursive: true });
-    const filePath = import_path4.default.join(dir, `docker-${Date.now()}.jpg`);
-    fs3.writeFileSync(filePath, buf);
+    const fs4 = await import("fs");
+    const dir = import_path5.default.join(import_os2.default.tmpdir(), "iframer-screenshots", "screenshots");
+    fs4.mkdirSync(dir, { recursive: true });
+    const filePath = import_path5.default.join(dir, `docker-${Date.now()}.jpg`);
+    fs4.writeFileSync(filePath, buf);
     return filePath;
   } catch {
     return null;
@@ -357,11 +430,11 @@ function getErrorMessage(err2) {
 }
 
 // src/lib/domain-modes.ts
-var import_fs3 = __toESM(require("fs"));
-var import_path5 = __toESM(require("path"));
-var log2 = createLogger("domain-modes");
+var import_fs4 = __toESM(require("fs"));
+var import_path6 = __toESM(require("path"));
+var log3 = createLogger("domain-modes");
 function defaultFile() {
-  return import_path5.default.join(getDataDir(), "domain-modes.json");
+  return import_path6.default.join(getDataDir(), "domain-modes.json");
 }
 var TTL_DAYS = 14;
 var ESCALATION_LADDER = ["headless", "docker-headful", "binary-headful"];
@@ -442,8 +515,8 @@ class DomainModeStore {
   }
   load() {
     try {
-      if (import_fs3.default.existsSync(this.filePath)) {
-        this.data = JSON.parse(import_fs3.default.readFileSync(this.filePath, "utf-8"));
+      if (import_fs4.default.existsSync(this.filePath)) {
+        this.data = JSON.parse(import_fs4.default.readFileSync(this.filePath, "utf-8"));
       }
     } catch {
       this.data = {};
@@ -451,10 +524,10 @@ class DomainModeStore {
   }
   save() {
     try {
-      import_fs3.default.mkdirSync(import_path5.default.dirname(this.filePath), { recursive: true });
-      import_fs3.default.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2));
+      import_fs4.default.mkdirSync(import_path6.default.dirname(this.filePath), { recursive: true });
+      import_fs4.default.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2));
     } catch (err2) {
-      log2.error("Failed to save:", err2);
+      log3.error("Failed to save:", err2);
     }
   }
 }
@@ -638,9 +711,9 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
         execResult = await runWithMode(params.options?.mode);
       } catch (execErr) {
         const msg = execErr instanceof Error ? execErr.message : String(execErr);
-        const isCrash = /connect|ECONNREFUSED|EPIPE|closed|timed out|abort|fetch failed/i.test(msg);
+        const isCrash = /ECONNREFUSED|ECONNRESET|EPIPE|socket hang up|fetch failed/i.test(msg);
         if (isCrash) {
-          log.info(`Execute crashed (${msg.slice(0, 80)}), restarting local server and retrying...`);
+          log2.info(`Execute crashed (${msg.slice(0, 80)}), restarting local server and retrying...`);
           try {
             await localServer.restart();
           } catch {}
@@ -663,7 +736,7 @@ Retry: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}
         for (const nextMode of escalation) {
           if (nextMode === "docker-headful" && !dockerRunning)
             continue;
-          log.info(`Auto-escalating to ${nextMode}`);
+          log2.info(`Auto-escalating to ${nextMode}`);
           execResult = await runWithMode(nextMode);
           if (execResult.ok)
             break;
@@ -774,8 +847,8 @@ ${api.domain} (${api.baseUrl})`);
 
 // src/mcp/tools/session.ts
 var import_zod5 = require("zod");
-var import_path6 = __toESM(require("path"));
-var import_fs4 = __toESM(require("fs"));
+var import_path7 = __toESM(require("path"));
+var import_fs5 = __toESM(require("fs"));
 
 // src/mcp/tools/reverse-engineer.ts
 var import_zod4 = require("zod");
@@ -883,11 +956,11 @@ Screenshot saved: ${filePath}`);
         const mainDomain = captureResult.capturedApi[0]?.domain || "api";
         const outDir = params.outputDir || `./${mainDomain}`;
         try {
-          const fs4 = await import("fs");
-          const path6 = await import("path");
-          fs4.mkdirSync(outDir, { recursive: true });
-          const jsonPath = path6.join(outDir, "captured-api.json");
-          fs4.writeFileSync(jsonPath, JSON.stringify(captureResult.capturedApi, null, 2));
+          const fs5 = await import("fs");
+          const path7 = await import("path");
+          fs5.mkdirSync(outDir, { recursive: true });
+          const jsonPath = path7.join(outDir, "captured-api.json");
+          fs5.writeFileSync(jsonPath, JSON.stringify(captureResult.capturedApi, null, 2));
           lines.push(`
 Full captured data saved to: ${jsonPath}`);
           lines.push("Read this file for complete curl commands, request/response bodies, and auth data.");
@@ -1099,11 +1172,11 @@ Sessions live in the single local SQLite database (~/.iframer/iframer.db), share
         const lines = [result.message];
         if (result.capturedApi && result.capturedApi.length > 0) {
           formatCapturedApi(lines, result.capturedApi, { outputDir, typed: false });
-          const outDir = outputDir || import_path6.default.join(getDataDir(), "capture");
+          const outDir = outputDir || import_path7.default.join(getDataDir(), "capture");
           try {
-            import_fs4.default.mkdirSync(outDir, { recursive: true });
-            const jsonPath = import_path6.default.join(outDir, "captured-api.json");
-            import_fs4.default.writeFileSync(jsonPath, JSON.stringify(result.capturedApi, null, 2));
+            import_fs5.default.mkdirSync(outDir, { recursive: true });
+            const jsonPath = import_path7.default.join(outDir, "captured-api.json");
+            import_fs5.default.writeFileSync(jsonPath, JSON.stringify(result.capturedApi, null, 2));
             lines.push(`
 Full data saved to: ${jsonPath}`);
           } catch (writeErr) {
@@ -1173,19 +1246,19 @@ Full data saved to: ${jsonPath}`);
 
 // src/mcp/tools/credentials.ts
 var import_zod6 = require("zod");
-var import_fs6 = __toESM(require("fs"));
-var import_path8 = __toESM(require("path"));
+var import_fs7 = __toESM(require("fs"));
+var import_path9 = __toESM(require("path"));
 
 // src/lib/knowledge.ts
-var import_fs5 = __toESM(require("fs"));
-var import_path7 = __toESM(require("path"));
-var log3 = createLogger("knowledge");
+var import_fs6 = __toESM(require("fs"));
+var import_path8 = __toESM(require("path"));
+var log4 = createLogger("knowledge");
 function getKnowledgeDir() {
-  return import_path7.default.join(getDataDir(), "knowledge");
+  return import_path8.default.join(getDataDir(), "knowledge");
 }
 function getKnowledgePath(domain) {
   const safe = sanitizeDomain(domain);
-  return import_path7.default.join(getKnowledgeDir(), `${safe}.md`);
+  return import_path8.default.join(getKnowledgeDir(), `${safe}.md`);
 }
 function normalizeDomain(input) {
   let d = (input || "").trim().toLowerCase();
@@ -1209,7 +1282,7 @@ function sanitizeDomain(input) {
 function readKnowledge(domain) {
   const p = getKnowledgePath(domain);
   try {
-    return import_fs5.default.readFileSync(p, "utf8");
+    return import_fs6.default.readFileSync(p, "utf8");
   } catch {
     return null;
   }
@@ -1218,7 +1291,7 @@ function listKnowledge() {
   const dir = getKnowledgeDir();
   let entries = [];
   try {
-    entries = import_fs5.default.readdirSync(dir);
+    entries = import_fs6.default.readdirSync(dir);
   } catch {
     return [];
   }
@@ -1226,10 +1299,10 @@ function listKnowledge() {
   for (const file of entries) {
     if (!file.endsWith(".md"))
       continue;
-    const full = import_path7.default.join(dir, file);
+    const full = import_path8.default.join(dir, file);
     try {
-      const stat = import_fs5.default.statSync(full);
-      const raw = import_fs5.default.readFileSync(full, "utf8");
+      const stat = import_fs6.default.statSync(full);
+      const raw = import_fs6.default.readFileSync(full, "utf8");
       const parsed = parseMarkdown(raw);
       results.push({
         domain: parsed?.domain ?? file.replace(/\.md$/, ""),
@@ -1247,7 +1320,7 @@ function clearKnowledge(domain) {
   if (domain) {
     const p = getKnowledgePath(domain);
     try {
-      import_fs5.default.unlinkSync(p);
+      import_fs6.default.unlinkSync(p);
       return { removed: 1 };
     } catch {
       return { removed: 0 };
@@ -1255,11 +1328,11 @@ function clearKnowledge(domain) {
   }
   let removed = 0;
   try {
-    const entries = import_fs5.default.readdirSync(dir);
+    const entries = import_fs6.default.readdirSync(dir);
     for (const f of entries) {
       if (f.endsWith(".md")) {
         try {
-          import_fs5.default.unlinkSync(import_path7.default.join(dir, f));
+          import_fs6.default.unlinkSync(import_path8.default.join(dir, f));
           removed++;
         } catch {}
       }
@@ -1339,8 +1412,8 @@ var ELICIT_TIMEOUT_MS = 45000;
 function mcpLog(event, data) {
   try {
     const dir = getDataDir();
-    import_fs6.default.mkdirSync(dir, { recursive: true });
-    import_fs6.default.appendFileSync(import_path8.default.join(dir, "mcp.log"), JSON.stringify({ ts: new Date().toISOString(), event, ...data }) + `
+    import_fs7.default.mkdirSync(dir, { recursive: true });
+    import_fs7.default.appendFileSync(import_path9.default.join(dir, "mcp.log"), JSON.stringify({ ts: new Date().toISOString(), event, ...data }) + `
 `);
   } catch {}
 }
@@ -1562,6 +1635,7 @@ CRITICAL RULES:
 5. ALWAYS check "knowledge get <domain>" before launching a browser. Skip the browser if the cache has what you need.
 6. If execute fails, read the FULL error. It tells you the step, error type, and suggestion.
 7. If the browser crashes, call "session restart" and retry. Don't panic.
+8. ALWAYS call "session" action=stop when you are done with browser work. It saves session state and frees the browser. Idle browsers are auto-reclaimed, but don't rely on that.
 
 BROWSER MODES: Don't specify options.mode — iframer auto-selects and auto-escalates (headless → binary-headful). Only set a mode if the user explicitly asks.
 
@@ -1576,18 +1650,8 @@ registerSessionTool(server);
 registerCredentialsTool(server);
 registerReverseEngineerTool(server);
 registerKnowledgeTool(server);
-function cleanup() {
-  localServer.shutdown();
-}
-process.on("exit", cleanup);
-process.on("SIGTERM", () => {
-  cleanup();
-  process.exit(0);
-});
-process.on("SIGINT", () => {
-  cleanup();
-  process.exit(0);
-});
+process.on("SIGTERM", () => process.exit(0));
+process.on("SIGINT", () => process.exit(0));
 process.on("uncaughtException", (err2) => {
   try {
     console.error(`[mcp] uncaughtException: ${err2?.message}`);

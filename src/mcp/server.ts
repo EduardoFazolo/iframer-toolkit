@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { BASE_URL, localServer } from "./helpers";
+import { BASE_URL } from "./helpers";
 import { registerStatusTool } from "./tools/status";
 import { registerBrowseTool } from "./tools/browse";
 import { registerExecuteTool } from "./tools/execute";
@@ -36,6 +36,7 @@ CRITICAL RULES:
 5. ALWAYS check "knowledge get <domain>" before launching a browser. Skip the browser if the cache has what you need.
 6. If execute fails, read the FULL error. It tells you the step, error type, and suggestion.
 7. If the browser crashes, call "session restart" and retry. Don't panic.
+8. ALWAYS call "session" action=stop when you are done with browser work. It saves session state and frees the browser. Idle browsers are auto-reclaimed, but don't rely on that.
 
 BROWSER MODES: Don't specify options.mode — iframer auto-selects and auto-escalates (headless → binary-headful). Only set a mode if the user explicitly asks.
 
@@ -60,16 +61,13 @@ registerKnowledgeTool(server);
 
 // ─── Lifecycle ───────────────────────────────────────────────────────
 
-// Kill the local background server when the MCP server exits.
-// The MCP server itself NEVER runs Chrome — Chrome lives in the local
-// background server (a separate process). If that process crashes, the
-// MCP server survives and can respawn it on the next tool call.
-function cleanup() {
-  localServer.shutdown();
-}
-process.on("exit", cleanup);
-process.on("SIGTERM", () => { cleanup(); process.exit(0); });
-process.on("SIGINT", () => { cleanup(); process.exit(0); });
+// The MCP server itself NEVER runs Chrome — Chrome lives in the SHARED
+// local background server (a separate, detached process used by every
+// session). We deliberately do NOT kill it on exit: other sessions may be
+// using it, and its own idle-exit + browser-registry reaper govern its
+// lifetime. Nothing leaks if this process dies — even via SIGKILL.
+process.on("SIGTERM", () => process.exit(0));
+process.on("SIGINT", () => process.exit(0));
 
 // Safety net for any JS-level errors that somehow slip through. The MCP
 // server should never crash — it's just an HTTP client + stdio JSON-RPC.

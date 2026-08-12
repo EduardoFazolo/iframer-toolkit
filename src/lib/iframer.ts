@@ -1,4 +1,5 @@
 import path from "path";
+import { fileURLToPath } from "url";
 import type { Browser, Page } from "patchright";
 import type {
   IframerConfig,
@@ -39,7 +40,7 @@ function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-const DEFAULT_SCREENSHOT_DIR = path.join(import.meta.dir, "../../.screenshots");
+const DEFAULT_SCREENSHOT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../.screenshots");
 const DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
 const DEFAULT_STALE_TIMEOUT_MS = 20_000;
 
@@ -255,7 +256,9 @@ export class Iframer {
       sessionSaved = true;
     }
 
-    // Now tear down local daemon browsers
+    // Tear down idle local daemon browsers. Busy instances (another agent's
+    // pipeline mid-run on the shared server) are left alone — their own idle
+    // timer reclaims them when they finish.
     await this.daemon.stopAll();
 
     return { ok: true, sessionSaved };
@@ -411,9 +414,13 @@ export class Iframer {
   private async executeLocal(userId: string, token: string, pipeline: Pipeline, mode: BrowserMode, instanceId: string = DEFAULT_INSTANCE): Promise<PipelineResult> {
     const startTime = Date.now();
 
+    let acquired = false;
     try {
       // Get or launch Chrome in the requested mode + named instance
       const { page } = await this.daemon.ensure(mode, instanceId);
+      // Mark busy so the idle timer can't kill the browser mid-pipeline
+      this.daemon.acquire(mode, instanceId);
+      acquired = true;
 
       // Load stored session (cookies + localStorage + sessionStorage).
       // Named instances get their own session blob so they can hold separate
@@ -507,6 +514,8 @@ export class Iframer {
         durationMs: Date.now() - startTime,
         modeUsed: mode,
       };
+    } finally {
+      if (acquired) this.daemon.release(mode, instanceId);
     }
   }
 
@@ -714,7 +723,7 @@ export class Iframer {
    *  launch a fresh browser automatically — no manual restart needed. */
   async restartBrowser(): Promise<{ killed: string[]; message: string }> {
     const health = this.browserHealth();
-    await this.daemon.stopAll();
+    await this.daemon.stopAll(true); // crash-recovery hammer: kill even busy instances
     await sessionManager.cleanupAllSessions();
     return {
       killed: health.modes,
@@ -848,7 +857,7 @@ export class Iframer {
   // ─── Lifecycle ───────────────────────────────────────────────────
 
   async shutdown(): Promise<void> {
-    await this.daemon.stopAll();
+    await this.daemon.stopAll(true);
     await closeBrowser();
     await sessionManager.cleanupAllSessions();
     // Close SQLite if the store supports it

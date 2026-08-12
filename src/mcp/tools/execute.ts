@@ -82,7 +82,11 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
           execResult = await runWithMode(params.options?.mode);
         } catch (execErr: unknown) {
           const msg = execErr instanceof Error ? execErr.message : String(execErr);
-          const isCrash = /connect|ECONNREFUSED|EPIPE|closed|timed out|abort|fetch failed/i.test(msg);
+          // Connection-level failures only. Deliberately EXCLUDES abort/timeout:
+          // AbortSignal.timeout(180s) on a slow-but-healthy pipeline used to
+          // match here, restart the server, and re-run the whole pipeline —
+          // double-executing non-idempotent steps (form submits, purchases).
+          const isCrash = /ECONNREFUSED|ECONNRESET|EPIPE|socket hang up|fetch failed/i.test(msg);
           if (isCrash) {
             log.info(`Execute crashed (${msg.slice(0, 80)}), restarting local server and retrying...`);
             try { await localServer.restart(); } catch {}

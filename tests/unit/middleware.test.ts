@@ -34,7 +34,7 @@ describe("tokenAuth", () => {
     const req = mockReq();
     const next = mock(() => {});
     tokenAuth(req, mockRes(), next as unknown as NextFunction);
-    expect((req as AuthRequest).userId).toBe("default");
+    expect((req as AuthRequest).userId).toBe("iframer-local");
     expect(next).toHaveBeenCalled();
   });
 

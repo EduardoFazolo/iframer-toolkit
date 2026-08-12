@@ -1,27 +1,25 @@
-import { spawn, type ChildProcess } from "child_process";
+import { spawn } from "child_process";
 import net from "net";
 import fs from "fs";
 import path from "path";
-import os from "os";
 import { getDataDir } from "../lib/paths";
+import { readServerInfo, isPidAlive } from "../lib/browser/registry";
 
-// Base port to scan up from. Each MCP process (= one Claude session) grabs the
-// FIRST FREE port at/above this base, so sessions never share a local server.
-// Sharing a single fixed port made sessions kill each other's browser on start.
+// One SHARED local server per machine, discovered via ~/.iframer/server.json.
+// MCP processes (one per Claude session) are thin clients: they adopt a
+// healthy running server, or spawn one — detached, so it outlives them.
+// Browsers are isolated per agent via instanceId, not per process.
+//
+// The old model (one server per MCP session, killed with its parent) leaked
+// a Chrome every time a session was interrupted, forgotten, or left behind.
 const BASE_PORT = parseInt(process.env.IFRAMER_LOCAL_PORT || "3022", 10);
 const PORT_SCAN_ATTEMPTS = 200;
 const STARTUP_TIMEOUT_MS = 15_000;
 const HEALTH_POLL_MS = 300;
+const SPAWN_LOCK_STALE_MS = 20_000;
 
-/**
- * Manages a local background HTTP server that owns the browser. The MCP
- * server talks to it via HTTP — if Chrome crashes, only the child process
- * dies. The MCP server survives, respawns the child, and retries.
- */
 export class LocalServerManager {
-  private child: ChildProcess | null = null;
   private startingPromise: Promise<void> | null = null;
-  private port: number | null = null;
   private baseUrl: string = "";
   private logPath: string;
 
@@ -36,78 +34,116 @@ export class LocalServerManager {
     return this.baseUrl;
   }
 
-  /** Ensure the local server is running. Idempotent — concurrent callers
-   *  await the same startup promise. */
+  /** Ensure a shared local server is reachable. Idempotent — concurrent
+   *  callers await the same startup promise. */
   async ensureRunning(): Promise<void> {
-    if (this.child && !this.child.killed && await this.healthCheck()) return;
     if (this.startingPromise) return this.startingPromise;
+    if (await this.adoptExisting()) return;
 
-    this.startingPromise = this.doStart().finally(() => {
+    this.startingPromise = this.startShared().finally(() => {
       this.startingPromise = null;
     });
     return this.startingPromise;
   }
 
-  private async doStart(): Promise<void> {
-    // Grab a fresh free port up from BASE_PORT. Each session owns its own port,
-    // so there is no stale foreign process to kill — no cross-session stomping.
-    this.port = await findFreePort(BASE_PORT, PORT_SCAN_ATTEMPTS);
-    this.baseUrl = `http://127.0.0.1:${this.port}`;
+  /** Adopt the advertised shared server if its process is alive and healthy. */
+  private async adoptExisting(): Promise<boolean> {
+    const info = readServerInfo();
+    if (!info || !isPidAlive(info.pid)) return false;
+    const url = `http://127.0.0.1:${info.port}`;
+    if (await healthCheck(url)) {
+      this.baseUrl = url;
+      return true;
+    }
+    return false;
+  }
 
+  private async startShared(): Promise<void> {
     const dataDir = getDataDir();
     fs.mkdirSync(dataDir, { recursive: true });
+    const lockDir = path.join(dataDir, "server.spawn-lock");
 
-    // Resolve the server entrypoint — dev (bun + source) or built (node + cjs)
-    const { command, args } = this.resolveRuntime();
-
-    const logFd = fs.openSync(this.logPath, "a");
-
-    const env: Record<string, string> = {
-      ...process.env as Record<string, string>,
-      PORT: String(this.port),
-      IFRAMER_MODE: "local",
-      IFRAMER_DATA_DIR: dataDir,
-      // The child watches this PID — when this MCP process dies (even via
-      // SIGKILL, which leaves the child orphaned), the child self-terminates
-      // instead of lingering as a zombie owning a Chrome process.
-      IFRAMER_PARENT_PID: String(process.pid),
-    };
-    if (process.env.IFRAMER_SECRET) {
-      env.IFRAMER_SECRET = process.env.IFRAMER_SECRET;
-    } else {
-      // Read the shared secret file so the local server encrypts with the same key
-      try {
-        const secret = fs.readFileSync(path.join(dataDir, "secret"), "utf8").trim();
-        if (secret) env.IFRAMER_SECRET = secret;
-      } catch {}
+    // Cross-process spawn lock (mkdir is atomic). Whoever holds it spawns;
+    // everyone else polls for the winner's server.json.
+    let holdingLock = false;
+    try {
+      fs.mkdirSync(lockDir);
+      holdingLock = true;
+    } catch {
+      const stale = (() => {
+        try { return Date.now() - fs.statSync(lockDir).mtimeMs > SPAWN_LOCK_STALE_MS; } catch { return true; }
+      })();
+      if (stale) {
+        try { fs.rmdirSync(lockDir); fs.mkdirSync(lockDir); holdingLock = true; } catch {}
+      }
     }
 
-    this.child = spawn(command, args, {
-      env,
-      stdio: ["ignore", logFd, logFd],
-      detached: false,
-    });
+    try {
+      if (!holdingLock) {
+        // Another MCP process is spawning the server — wait for it.
+        const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+        while (Date.now() < deadline) {
+          if (await this.adoptExisting()) return;
+          await sleep(HEALTH_POLL_MS);
+        }
+        throw new Error("Timed out waiting for another session to start the shared iframer server.");
+      }
 
-    fs.closeSync(logFd);
+      // Double-check under the lock — the previous holder may have finished.
+      if (await this.adoptExisting()) return;
 
-    this.child.on("exit", (code) => {
-      this.child = null;
-    });
+      const port = await findFreePort(BASE_PORT, PORT_SCAN_ATTEMPTS);
+      const url = `http://127.0.0.1:${port}`;
+      const { command, args } = this.resolveRuntime();
+      const logFd = fs.openSync(this.logPath, "a");
 
-    // Wait for health check to pass
-    const deadline = Date.now() + STARTUP_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      if (await this.healthCheck()) return;
-      await sleep(HEALTH_POLL_MS);
+      const env: Record<string, string> = {
+        ...process.env as Record<string, string>,
+        PORT: String(port),
+        IFRAMER_MODE: "local",
+        IFRAMER_DATA_DIR: dataDir,
+      };
+      if (process.env.IFRAMER_SECRET) {
+        env.IFRAMER_SECRET = process.env.IFRAMER_SECRET;
+      } else {
+        // Read the shared secret file so the local server encrypts with the same key
+        try {
+          const secret = fs.readFileSync(path.join(dataDir, "secret"), "utf8").trim();
+          if (secret) env.IFRAMER_SECRET = secret;
+        } catch {}
+      }
+
+      // Detached + unref: the server is SHARED infrastructure. It must
+      // survive this MCP process; its own idle-exit + the browser registry
+      // reaper handle its lifetime.
+      const child = spawn(command, args, {
+        env,
+        stdio: ["ignore", logFd, logFd],
+        detached: true,
+      });
+      child.unref();
+      fs.closeSync(logFd);
+
+      // Wait for health
+      const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+      while (Date.now() < deadline) {
+        if (await healthCheck(url)) {
+          this.baseUrl = url;
+          return;
+        }
+        await sleep(HEALTH_POLL_MS);
+      }
+
+      try { child.kill("SIGKILL"); } catch {}
+      throw new Error(
+        `Local iframer server failed to start on port ${port} within ${STARTUP_TIMEOUT_MS}ms.\n` +
+        `Last log lines:\n${this.readLogTail()}`
+      );
+    } finally {
+      if (holdingLock) {
+        try { fs.rmdirSync(lockDir); } catch {}
+      }
     }
-
-    // Startup failed
-    this.kill();
-    const logTail = this.readLogTail();
-    throw new Error(
-      `Local iframer server failed to start on port ${this.port} within ${STARTUP_TIMEOUT_MS}ms.\n` +
-      `Last log lines:\n${logTail}`
-    );
   }
 
   private resolveRuntime(): { command: string; args: string[] } {
@@ -133,40 +169,30 @@ export class LocalServerManager {
     return { command: "node", args: ["--import", "tsx", serverTs] };
   }
 
+  /** Ask the shared server to exit (it kills its browsers with a hard
+   *  deadline), then start a fresh one. Used for crash recovery. */
   async restart(): Promise<void> {
-    this.kill();
-    await sleep(500);
+    const info = readServerInfo();
+    if (info && this.baseUrl) {
+      try {
+        await fetch(`${this.baseUrl}/shutdown`, { method: "POST", signal: AbortSignal.timeout(3000) });
+      } catch {}
+      // Wait for the process to actually die (its shutdown deadline is 10s)
+      const deadline = Date.now() + 12_000;
+      while (Date.now() < deadline && isPidAlive(info.pid)) {
+        await sleep(200);
+      }
+      if (isPidAlive(info.pid)) {
+        try { process.kill(info.pid, "SIGKILL"); } catch {}
+      }
+    }
+    this.baseUrl = "";
     await this.ensureRunning();
   }
 
-  shutdown(): void {
-    this.kill();
-  }
-
-  private kill(): void {
-    if (this.child && !this.child.killed) {
-      try { this.child.kill("SIGTERM"); } catch {}
-      // Force kill after 2s
-      const c = this.child;
-      setTimeout(() => {
-        try { if (!c.killed) c.kill("SIGKILL"); } catch {}
-      }, 2000);
-    }
-    this.child = null;
-  }
-
-  private async healthCheck(): Promise<boolean> {
-    if (!this.baseUrl) return false;
-    try {
-      const res = await fetch(`${this.baseUrl}/health`, {
-        signal: AbortSignal.timeout(2000),
-      });
-      const data = await res.json() as { ok?: boolean };
-      return data.ok === true;
-    } catch {
-      return false;
-    }
-  }
+  /** MCP process exiting. The shared server intentionally stays up —
+   *  other sessions may be using it; idle-exit + reaper govern its life. */
+  shutdown(): void {}
 
   private readLogTail(): string {
     try {
@@ -181,6 +207,16 @@ export class LocalServerManager {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+async function healthCheck(baseUrl: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(2000) });
+    const data = await res.json() as { ok?: boolean };
+    return data.ok === true;
+  } catch {
+    return false;
+  }
 }
 
 /** Find the first free TCP port at/above `start`, scanning up to `attempts`
