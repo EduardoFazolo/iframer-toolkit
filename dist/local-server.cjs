@@ -1656,7 +1656,6 @@ class DomainModeStore {
 }
 
 // src/lib/browser/cdp-launcher.ts
-var log8 = createLogger("cdp-launcher");
 function hasDisplay() {
   if (process.platform === "darwin" || process.platform === "win32")
     return true;
@@ -1932,7 +1931,7 @@ function resolveSelector(selector, ctx) {
 }
 
 // src/lib/actions/handlers/navigation.ts
-var log9 = createLogger("actions");
+var log8 = createLogger("actions");
 async function navigate(page, step, ctx) {
   await page.goto(step.url, {
     waitUntil: step.waitUntil || "domcontentloaded",
@@ -1942,13 +1941,13 @@ async function navigate(page, step, ctx) {
   try {
     await page.evaluate(stealthScript);
   } catch (err) {
-    log9.warn(`stealth injection failed: ${err}`);
+    log8.warn(`stealth injection failed: ${err}`);
   }
   if (ctx.sessionData) {
     try {
       await injectStorage(page, ctx.sessionData);
     } catch (err) {
-      log9.warn(`storage injection after navigate failed: ${err}`);
+      log8.warn(`storage injection after navigate failed: ${err}`);
     }
   }
 }
@@ -2464,7 +2463,7 @@ async function snapshot(page, step, ctx) {
 
 // src/lib/captcha/recaptcha.ts
 var import_sdk = __toESM(require("@anthropic-ai/sdk"));
-var log10 = createLogger("captcha-solver");
+var log9 = createLogger("captcha-solver");
 var MAX_ROUNDS = 8;
 var MAX_DURATION_MS = 45000;
 var TILE_SETTLE_MS = TIMING.TILE_SETTLE;
@@ -2505,7 +2504,7 @@ async function screenshotFullGrid(page, challengeInfo) {
     const buf = await page.screenshot({ type: "jpeg", quality: 85, clip: gridClip });
     return buf.toString("base64");
   } catch (err) {
-    log10.error(`full grid screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
+    log9.error(`full grid screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -2568,10 +2567,10 @@ Does this tile contain a ${target}? Reply ONLY "yes" or "no".`
       const answer = (response.content[0].text ?? "").toLowerCase().trim();
       const match = answer.startsWith("yes");
       if (match)
-        log10.debug(`tile ${tile.index} (r${tileRow}c${tileCol}): YES`);
+        log9.debug(`tile ${tile.index} (r${tileRow}c${tileCol}): YES`);
       return { index: tile.index, match };
     } catch (err) {
-      log10.error(`tile ${tile.index} classification failed: ${err instanceof Error ? err.message : String(err)}`);
+      log9.error(`tile ${tile.index} classification failed: ${err instanceof Error ? err.message : String(err)}`);
       return { index: tile.index, match: false };
     }
   }));
@@ -2593,7 +2592,7 @@ async function submitForm(page) {
       if (el) {
         const visible = await el.isVisible();
         if (visible) {
-          log10.info(`Submitting form via: ${selector}`);
+          log9.info(`Submitting form via: ${selector}`);
           await new Promise((r) => setTimeout(r, 500));
           await humanClick(page, selector);
           await new Promise((r) => setTimeout(r, 2000));
@@ -2602,7 +2601,7 @@ async function submitForm(page) {
       }
     } catch {}
   }
-  log10.info("No submit button found — skipping form submission");
+  log9.info("No submit button found — skipping form submission");
   return false;
 }
 async function solveRecaptcha(page, monitor) {
@@ -2628,7 +2627,7 @@ async function solveRecaptcha(page, monitor) {
       return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge info lost" };
     }
     const target = extractTarget(challengeInfo.prompt);
-    log10.info(`Round ${rounds}: looking for "${target}" in ${challengeInfo.rows}x${challengeInfo.cols} grid`);
+    log9.info(`Round ${rounds}: looking for "${target}" in ${challengeInfo.rows}x${challengeInfo.cols} grid`);
     const [fullGridImage, tileImages] = await Promise.all([
       screenshotFullGrid(page, challengeInfo),
       screenshotTiles(page, challengeInfo)
@@ -2638,7 +2637,7 @@ async function solveRecaptcha(page, monitor) {
     }
     monitor?.reportActivity();
     const matchingIndices = await classifyTiles(client, fullGridImage, tileImages, target, challengeInfo.rows, challengeInfo.cols);
-    log10.info(`Round ${rounds}: matched tiles [${matchingIndices.join(", ")}]`);
+    log9.info(`Round ${rounds}: matched tiles [${matchingIndices.join(", ")}]`);
     monitor?.reportActivity();
     if (matchingIndices.length > 0) {
       await clickChallengeTiles(page, matchingIndices);
@@ -2657,7 +2656,7 @@ async function solveRecaptcha(page, monitor) {
               monitor?.reportActivity();
               const newMatches = await classifyTiles(client, newFullGrid, replacedTiles, target, newInfo.rows, newInfo.cols);
               if (newMatches.length > 0) {
-                log10.info(`Round ${rounds}: dynamic tiles matched [${newMatches.join(", ")}]`);
+                log9.info(`Round ${rounds}: dynamic tiles matched [${newMatches.join(", ")}]`);
                 await clickChallengeTiles(page, newMatches);
                 await new Promise((r) => setTimeout(r, TILE_SETTLE_MS));
               }
@@ -2669,7 +2668,7 @@ async function solveRecaptcha(page, monitor) {
     const verifyResult = await clickChallengeVerify(page);
     monitor?.reportActivity();
     if (verifyResult.solved) {
-      log10.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
+      log9.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
       const submitted = await submitForm(page);
       return { solved: true, rounds, durationMs: Date.now() - startTime, submitted };
     }
@@ -2677,14 +2676,14 @@ async function solveRecaptcha(page, monitor) {
     if (!challengeInfo) {
       return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge disappeared after verify" };
     }
-    log10.info(`Round ${rounds}: not solved, new challenge appeared`);
+    log9.info(`Round ${rounds}: not solved, new challenge appeared`);
   }
   return { solved: false, rounds, durationMs: Date.now() - startTime, reason: `Max rounds (${MAX_ROUNDS}) exceeded` };
 }
 
 // src/lib/captcha/hcaptcha.ts
 var import_sdk2 = __toESM(require("@anthropic-ai/sdk"));
-var log11 = createLogger("hcaptcha-solver");
+var log10 = createLogger("hcaptcha-solver");
 var MAX_ROUNDS2 = 8;
 var MAX_DURATION_MS2 = 60000;
 var MODEL2 = "claude-haiku-4-5-20251001";
@@ -2782,7 +2781,7 @@ async function getChallengeInfo2(page) {
     return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
   }).catch(() => null);
   const verifyButton = verifyBtnBox ? { x: Math.round(frameBox.x + verifyBtnBox.x), y: Math.round(frameBox.y + verifyBtnBox.y) } : { x: Math.round(frameBox.x + frameBox.width - 55), y: Math.round(frameBox.y + frameBox.height - 30) };
-  log11.info(`Round challenge: "${info.prompt}" (${info.rows}x${info.cols})`);
+  log10.info(`Round challenge: "${info.prompt}" (${info.rows}x${info.cols})`);
   return { prompt: info.prompt, rows: info.rows, cols: info.cols, tiles, verifyButton, frameBox };
 }
 async function screenshotChallenge(page, challenge) {
@@ -2798,7 +2797,7 @@ async function screenshotChallenge(page, challenge) {
     }
     return buf.toString("base64");
   } catch (err) {
-    log11.error(`screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
+    log10.error(`screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -2819,12 +2818,12 @@ async function classifyTiles2(client, screenshotBase64, challenge) {
       }]
     });
     const text = (response.content[0].text ?? "").trim();
-    log11.debug(`classify response: "${text}"`);
+    log10.debug(`classify response: "${text}"`);
     if (text.toLowerCase().startsWith("none"))
       return [];
     return text.split(/[,\s]+/).map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n) && n >= 0 && n < total);
   } catch (err) {
-    log11.error(`classification failed: ${err instanceof Error ? err.message : String(err)}`);
+    log10.error(`classification failed: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 }
@@ -2851,7 +2850,7 @@ async function solveHCaptcha(page, monitor) {
     return { solved: false, rounds: 0, durationMs: Date.now() - startTime, reason: err instanceof Error ? err.message : String(err) };
   }
   if (solvedOnCheckbox) {
-    log11.info("Solved on checkbox click (no challenge)");
+    log10.info("Solved on checkbox click (no challenge)");
     return { solved: true, rounds: 0, durationMs: Date.now() - startTime };
   }
   while (rounds < MAX_ROUNDS2) {
@@ -2862,7 +2861,7 @@ async function solveHCaptcha(page, monitor) {
     monitor?.reportActivity();
     const challenge = await getChallengeInfo2(page);
     if (!challenge) {
-      log11.info("Challenge frame gone — assuming solved");
+      log10.info("Challenge frame gone — assuming solved");
       return { solved: true, rounds, durationMs: Date.now() - startTime };
     }
     const screenshotBase64 = await screenshotChallenge(page, challenge);
@@ -2871,7 +2870,7 @@ async function solveHCaptcha(page, monitor) {
     }
     monitor?.reportActivity();
     const matchingIndices = await classifyTiles2(client, screenshotBase64, challenge);
-    log11.info(`Round ${rounds}: clicking tiles [${matchingIndices.join(", ")}]`);
+    log10.info(`Round ${rounds}: clicking tiles [${matchingIndices.join(", ")}]`);
     monitor?.reportActivity();
     for (const idx of matchingIndices) {
       const tile = challenge.tiles[idx];
@@ -2884,17 +2883,17 @@ async function solveHCaptcha(page, monitor) {
     const solved = await clickVerify(page, challenge);
     monitor?.reportActivity();
     if (solved) {
-      log11.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
+      log10.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
       return { solved: true, rounds, durationMs: Date.now() - startTime };
     }
-    log11.info(`Round ${rounds}: not solved, retrying`);
+    log10.info(`Round ${rounds}: not solved, retrying`);
     await sleep4(rand2(500, 1000));
   }
   return { solved: false, rounds, durationMs: Date.now() - startTime, reason: `Max rounds (${MAX_ROUNDS2}) exceeded` };
 }
 
 // src/lib/actions/handlers/captcha.ts
-var log12 = createLogger("actions");
+var log11 = createLogger("actions");
 async function screenshotTiles2(page, ci) {
   const tileSize = ci.bframeBox ? Math.round((ci.bframeBox.width - CAPTCHA_GRID.GRID_PADDING) / ci.cols) : CAPTCHA_GRID.DEFAULT_TILE_SIZE;
   const tiles = [];
@@ -2957,10 +2956,10 @@ async function solveCaptcha(page, _step, _ctx, monitor) {
       return src.includes("hcaptcha.com") || title.includes("hcaptcha") || !!document.querySelector("[data-hcaptcha-widget-id]");
     });
   }).catch((err) => {
-    log12.warn(`captcha detection failed: ${err}`);
+    log11.warn(`captcha detection failed: ${err}`);
     return false;
   });
-  log12.info(`detected: ${isHCaptcha ? "hCaptcha" : "reCAPTCHA"}`);
+  log11.info(`detected: ${isHCaptcha ? "hCaptcha" : "reCAPTCHA"}`);
   return isHCaptcha ? await solveHCaptcha(page, monitor) : await solveRecaptcha(page, monitor);
 }
 
@@ -3023,7 +3022,7 @@ async function findSubmitButton(page, opts) {
 // src/lib/knowledge.ts
 var import_fs9 = __toESM(require("fs"));
 var import_path8 = __toESM(require("path"));
-var log13 = createLogger("knowledge");
+var log12 = createLogger("knowledge");
 function getKnowledgeDir() {
   return import_path8.default.join(getDataDir(), "knowledge");
 }
@@ -3093,7 +3092,7 @@ function mergeKnowledge(domain, updates) {
   };
   const md = renderMarkdown(merged);
   import_fs9.default.writeFileSync(getKnowledgePath(domain), md, "utf8");
-  log13.info(`knowledge updated: ${merged.domain} (${merged.endpoints.length} endpoints)`);
+  log12.info(`knowledge updated: ${merged.domain} (${merged.endpoints.length} endpoints)`);
 }
 function dedupeEndpoints(endpoints) {
   const seen = new Map;
@@ -3322,7 +3321,7 @@ var EMAIL_FORM_ANCHOR = 'input[type="email"], input[name*="email" i], input[type
 var PASSWORD_FORM_ANCHOR = PASSWORD_SELECTOR;
 
 // src/lib/actions/handlers/login/index.ts
-var log14 = createLogger("actions");
+var log13 = createLogger("actions");
 async function login(page, step, ctx) {
   const resolved = await resolveCredential(ctx.store, ctx.userId, ctx.token, step.domain);
   if (!resolved) {
@@ -3332,7 +3331,7 @@ async function login(page, step, ctx) {
   }
   const { credential, matchedDomain } = resolved;
   if (matchedDomain !== normalizeDomain(step.domain)) {
-    log14.info(`login: credentials for ${step.domain} resolved via parent domain ${matchedDomain}`);
+    log13.info(`login: credentials for ${step.domain} resolved via parent domain ${matchedDomain}`);
   }
   const beforeUrl = page.url();
   const hasExplicitSelectors = !!(step.usernameSelector || step.passwordSelector || step.submitSelector);
@@ -3365,7 +3364,7 @@ async function runExplicitFlow(page, step, ctx, credential) {
   }
 }
 async function runAutoDetect(page, step, ctx, credential, beforeUrl) {
-  log14.info(`login: auto-detecting form on ${beforeUrl}`);
+  log13.info(`login: auto-detecting form on ${beforeUrl}`);
   await page.waitForLoadState("domcontentloaded").catch(() => {});
   await page.waitForTimeout(500);
   const initialCheck = await page.evaluate((pwdSel) => {
@@ -3374,7 +3373,7 @@ async function runAutoDetect(page, step, ctx, credential, beforeUrl) {
     return { url: location.href, title: document.title, pwdVisible };
   }, PASSWORD_SELECTOR).catch(() => ({ url: page.url(), title: "", pwdVisible: false }));
   if (!initialCheck.pwdVisible && !LOGIN_URL_RE.test(initialCheck.url)) {
-    log14.info(`login: already logged in (no password field, URL=${initialCheck.url})`);
+    log13.info(`login: already logged in (no password field, URL=${initialCheck.url})`);
     return {
       loggedIn: true,
       alreadyLoggedIn: true,
@@ -3394,7 +3393,7 @@ async function runAutoDetect(page, step, ctx, credential, beforeUrl) {
 async function runNoPasswordBranch(page, step, ctx, credential, beforeUrl) {
   const currentUrl = page.url();
   if (!LOGIN_URL_RE.test(currentUrl)) {
-    log14.info(`login: no password field and URL left login area (${currentUrl}) — treating as success`);
+    log13.info(`login: no password field and URL left login area (${currentUrl}) — treating as success`);
     return {
       loggedIn: true,
       alreadyLoggedIn: true,
@@ -3422,7 +3421,7 @@ async function runNoPasswordBranch(page, step, ctx, credential, beforeUrl) {
     const hasCloudflare = !!document.querySelector('[class*="cf-" i], iframe[src*="challenges.cloudflare"]');
     return { title: document.title, visibleText, inputCount, hiddenPassword, hasCaptcha, hasCloudflare };
   }).catch(() => ({ title: "", visibleText: "", inputCount: 0, hiddenPassword: false, hasCaptcha: false, hasCloudflare: false }));
-  log14.warn(`login: no visible password or email field on ${currentUrl} — title="${pageDiag.title}", inputs=${pageDiag.inputCount}`);
+  log13.warn(`login: no visible password or email field on ${currentUrl} — title="${pageDiag.title}", inputs=${pageDiag.inputCount}`);
   const indicators = [];
   if (pageDiag.hasCaptcha)
     indicators.push("CAPTCHA detected");
@@ -3437,7 +3436,7 @@ async function runNoPasswordBranch(page, step, ctx, credential, beforeUrl) {
 }
 async function runEmailFirstFlow(page, credential, beforeUrl, emailEl) {
   const currentUrl = page.url();
-  log14.info(`login: no password field but found email input — running email-first flow on ${currentUrl}`);
+  log13.info(`login: no password field but found email input — running email-first flow on ${currentUrl}`);
   await fillHandleNative(page, emailEl, credential.username);
   const submitEl = await findSubmitButton(page, {
     formAnchor: EMAIL_FORM_ANCHOR,
@@ -3450,7 +3449,7 @@ async function runEmailFirstFlow(page, credential, beforeUrl, emailEl) {
       await submitEl.evaluate((el) => el.click());
     });
   } else {
-    log14.warn("login: email-first flow, no submit button found — pressing Enter");
+    log13.warn("login: email-first flow, no submit button found — pressing Enter");
     await emailEl.press("Enter").catch(() => {});
   }
   await page.waitForLoadState("domcontentloaded").catch(() => {});
@@ -3461,7 +3460,7 @@ async function runEmailFirstFlow(page, credential, beforeUrl, emailEl) {
   ]);
   const laterPasswordHandle = await page.$(PASSWORD_SELECTOR);
   if (laterPasswordHandle && credential.password) {
-    log14.info("login: password field appeared after email submit — filling it");
+    log13.info("login: password field appeared after email submit — filling it");
     await fillHandleNative(page, laterPasswordHandle, credential.password);
     const laterSubmit = await page.$('button[type="submit"]:not([disabled])');
     if (laterSubmit) {
@@ -3498,7 +3497,7 @@ async function runPasswordFlow(page, credential, beforeUrl, passwordHandle) {
   if (usernameEl && credential.username) {
     await fillHandleNative(page, usernameEl, credential.username);
   } else if (!usernameEl) {
-    log14.warn("login: no username field detected, proceeding with password only");
+    log13.warn("login: no username field detected, proceeding with password only");
   }
   if (credential.password) {
     await fillHandleNative(page, passwordHandle, credential.password);
@@ -3514,7 +3513,7 @@ async function runPasswordFlow(page, credential, beforeUrl, passwordHandle) {
       await submitEl.evaluate((el) => el.click());
     });
   } else {
-    log14.warn("login: no submit button detected, pressing Enter in password field");
+    log13.warn("login: no submit button detected, pressing Enter in password field");
     await passwordHandle.press("Enter").catch(() => {});
   }
   await page.waitForLoadState("domcontentloaded").catch(() => {});
@@ -3530,13 +3529,13 @@ async function handleOtp(page, step, ctx, credential, beforeUrl) {
   let code = null;
   if (credential.totp_secret) {
     code = generateTOTP(credential.totp_secret);
-    log14.info(`login: generated TOTP from stored secret for ${step.domain}`);
+    log13.info(`login: generated TOTP from stored secret for ${step.domain}`);
   } else if (ctx.elicitOtp) {
-    log14.info(`login: prompting user for OTP for ${step.domain}`);
+    log13.info(`login: prompting user for OTP for ${step.domain}`);
     try {
       code = await ctx.elicitOtp(step.domain);
     } catch (err) {
-      log14.warn(`login: OTP elicitation failed: ${err instanceof Error ? err.message : String(err)}`);
+      log13.warn(`login: OTP elicitation failed: ${err instanceof Error ? err.message : String(err)}`);
     }
     if (!code) {
       throw new Error(`login: OTP required but user did not provide one for ${step.domain}`);
@@ -3610,7 +3609,6 @@ class StaleStateMonitor {
   timeoutMs;
   timer = null;
   lastActivity = Date.now();
-  abortController = null;
   constructor(page, timeoutMs = DEFAULT_STALE_TIMEOUT_MS) {
     this.page = page;
     this.timeoutMs = timeoutMs;
@@ -3664,7 +3662,6 @@ class StaleStateMonitor {
   }
   async withMonitoring(fn) {
     this.lastActivity = Date.now();
-    this.abortController = new AbortController;
     const beforeSnapshot = await this.snapshot();
     return new Promise((resolve, reject) => {
       let resolved = false;
@@ -3676,7 +3673,6 @@ class StaleStateMonitor {
         if (this.timer)
           clearTimeout(this.timer);
         this.timer = null;
-        this.abortController = null;
       };
       checkInterval = setInterval(async () => {
         if (resolved)
@@ -4538,7 +4534,7 @@ class PipelineRunner {
   }
 }
 // src/lib/block-detection.ts
-var log15 = createLogger("block-detection");
+var log14 = createLogger("block-detection");
 async function detectBlock(page) {
   try {
     const [title, url, bodyText] = await Promise.all([
@@ -4558,7 +4554,7 @@ async function detectBlock(page) {
     const hasCfChallenge = await page.evaluate(() => {
       return !!document.querySelector('iframe[src*="challenges.cloudflare.com"]');
     }).catch((err) => {
-      log15.warn(`CF challenge check failed, assuming blocked: ${err}`);
+      log14.warn(`CF challenge check failed, assuming blocked: ${err}`);
       return true;
     });
     if (hasCfChallenge) {
@@ -4577,7 +4573,7 @@ async function detectBlock(page) {
       const hasCaptchaIframe = await page.evaluate(() => {
         return !!(document.querySelector('iframe[src*="recaptcha"]') || document.querySelector('iframe[src*="hcaptcha"]'));
       }).catch((err) => {
-        log15.warn(`captcha iframe check failed, assuming blocked: ${err}`);
+        log14.warn(`captcha iframe check failed, assuming blocked: ${err}`);
         return true;
       });
       if (hasCaptchaIframe) {
@@ -4590,7 +4586,7 @@ async function detectBlock(page) {
     if (!url.includes("about:blank") && bodyText.trim().length < 20 && title.length < 5) {}
     return { blocked: false };
   } catch (err) {
-    log15.warn(`page evaluation failed, assuming blocked: ${err}`);
+    log14.warn(`page evaluation failed, assuming blocked: ${err}`);
     return { blocked: true, reason: "evaluation-failed" };
   }
 }
@@ -4688,7 +4684,7 @@ function extractKnowledgeFromRun(pipeline, result, sessionData, mode) {
 }
 
 // src/lib/execution/pipeline-executor.ts
-var log16 = createLogger("iframer");
+var log15 = createLogger("iframer");
 
 class PipelineExecutor {
   deps;
@@ -4727,7 +4723,7 @@ class PipelineExecutor {
         this.deps.domainModes.recordFailure(domain, failedMode, result.error?.message || "blocked");
       const nextMode = this.deps.domainModes.getNextMode(failedMode, availableModes);
       if (nextMode) {
-        log16.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
+        log15.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
         if (failedMode !== "docker-headful") {
           await this.deps.daemon.stopMode(failedMode, instanceId);
         }
@@ -4740,7 +4736,7 @@ class PipelineExecutor {
           this.deps.domainModes.recordFailure(domain, nextMode, result.error?.message || "blocked");
           const thirdMode = this.deps.domainModes.getNextMode(nextMode, availableModes);
           if (thirdMode) {
-            log16.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
+            log15.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
             if (nextMode !== "docker-headful") {
               await this.deps.daemon.stopMode(nextMode, instanceId);
             }
@@ -4855,7 +4851,7 @@ class PipelineExecutor {
         try {
           extractKnowledgeFromRun(pipeline, result, updatedSession, mode);
         } catch (err) {
-          log16.warn(`knowledge update failed: ${getErrorMessage(err)}`);
+          log15.warn(`knowledge update failed: ${getErrorMessage(err)}`);
         }
       }
       this.deps.refStore.sync(userId, ctx);
@@ -5103,7 +5099,7 @@ class CredentialStore {
 }
 
 // src/lib/iframer.ts
-var log17 = createLogger("iframer");
+var log16 = createLogger("iframer");
 var DEFAULT_SCREENSHOT_DIR = import_path9.default.join(import_path9.default.dirname(import_url.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/src/lib/iframer.ts")), "../../.screenshots");
 var DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
 var DEFAULT_STALE_TIMEOUT_MS3 = 20000;
@@ -5215,7 +5211,7 @@ class Iframer {
             sessionSaved = true;
           }
         } catch (err) {
-          log17.warn(`stopSession: failed to extract daemon state for ${inst.mode}::${inst.instanceId}: ${getErrorMessage(err)}`);
+          log16.warn(`stopSession: failed to extract daemon state for ${inst.mode}::${inst.instanceId}: ${getErrorMessage(err)}`);
         }
       }
     }
