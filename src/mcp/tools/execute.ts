@@ -1,10 +1,20 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { PipelineResult } from "../../lib/types";
+import type { PipelineResult, PipelineStep, StepResult } from "../../lib/types";
+import type { StepResultMap } from "../../lib/actions/types";
 import { apiPost, localApiPost, isDockerRunning, resolveScreenshotPath, err, getErrorMessage, log, localServer } from "../helpers";
 import { stepSchema } from "./step-schema";
 
 type TextContent = { type: "text"; text: string };
+
+/**
+ * Read a step's result at its registry-guaranteed type. TS can't narrow the
+ * nested `r.step.type` discriminant onto `r.result`, so this bridges the gap
+ * with a single assertion justified by the StepHandlerRegistry invariant.
+ */
+function resultOf<K extends PipelineStep["type"]>(r: StepResult, _type: K): StepResultMap[K] | undefined {
+  return r.result as StepResultMap[K] | undefined;
+}
 
 export function registerExecuteTool(server: McpServer) {
   server.tool(
@@ -149,7 +159,7 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
   );
 }
 
-export function formatExecuteResult(data: any): string[] {
+export function formatExecuteResult(data: PipelineResult): string[] {
   const lines: string[] = [];
   lines.push(`ok: ${data.ok}`);
   lines.push(`steps: ${data.completedSteps}/${data.totalSteps}`);
@@ -169,16 +179,25 @@ export function formatExecuteResult(data: any): string[] {
     } catch {}
   }
 
-  const meaningful = (data.results || []).filter((r: any) => r.ok && r.result !== undefined && r.result !== null);
+  const meaningful = (data.results || []).filter((r) => r.ok && r.result !== undefined && r.result !== null);
   for (const r of meaningful) {
-    if (r.step?.type === "snapshot" && r.result?.snapshot) {
-      lines.push(`\n--- Snapshot (${r.result.elementCount} elements) ---`);
-      lines.push(r.result.snapshot);
-    } else if (r.step?.type === "find" && r.result?.ref) {
-      lines.push(`\nFound: ${r.result.ref} ${r.result.role} "${r.result.name}" (${r.result.matchCount} match${r.result.matchCount > 1 ? "es" : ""})`);
-    } else if (r.step?.type === "screenshot" && r.result?.refs) {
-      lines.push(`\n--- Annotated screenshot refs ---`);
-      lines.push(r.result.refs);
+    if (r.step.type === "snapshot") {
+      const res = resultOf(r, "snapshot");
+      if (res?.snapshot) {
+        lines.push(`\n--- Snapshot (${res.elementCount} elements) ---`);
+        lines.push(res.snapshot);
+      }
+    } else if (r.step.type === "find") {
+      const res = resultOf(r, "find");
+      if (res?.ref) {
+        lines.push(`\nFound: ${res.ref} ${res.role} "${res.name}" (${res.matchCount} match${res.matchCount > 1 ? "es" : ""})`);
+      }
+    } else if (r.step.type === "screenshot") {
+      const res = resultOf(r, "screenshot");
+      if (res?.refs) {
+        lines.push(`\n--- Annotated screenshot refs ---`);
+        lines.push(res.refs);
+      }
     } else if (r.result !== undefined && r.result !== null) {
       lines.push(`\nstep ${r.stepIndex}: ${JSON.stringify(r.result)}`);
     }

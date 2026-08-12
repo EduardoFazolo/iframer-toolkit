@@ -9,7 +9,7 @@ import type {
   ErrorContext,
   ExecutionContext,
 } from "./types";
-import { executeAction } from "./actions";
+import { executeAction, failedStepResult } from "./actions";
 import { StaleStateMonitor, StaleStateError } from "./stale-monitor";
 import { detectObstacles, resolveObstacle } from "./obstacles";
 import { saveScreenshot } from "./screenshot";
@@ -99,13 +99,7 @@ export class PipelineRunner {
         const errorType = classifyError(asError, step);
         const pageState = await capturePageState(page, this.ctx, { screenshot: true });
 
-        stepResult = {
-          stepIndex: i,
-          step,
-          ok: false,
-          error: asError.message,
-          durationMs: Date.now() - startTime,
-        };
+        stepResult = failedStepResult(step, asError.message, Date.now() - startTime, i);
 
         results.push(stepResult);
 
