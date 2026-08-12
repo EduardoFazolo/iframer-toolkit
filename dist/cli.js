@@ -432,6 +432,108 @@ var init_stealth = __esm(() => {
   ];
 });
 
+// src/lib/logger.ts
+function createLogger(tag) {
+  const prefix = `[${tag}]`;
+  return {
+    debug: (...args) => {
+      if (LEVELS[currentLevel] <= 0)
+        console.log(prefix, ...args);
+    },
+    info: (...args) => {
+      if (LEVELS[currentLevel] <= 1)
+        console.log(prefix, ...args);
+    },
+    warn: (...args) => {
+      if (LEVELS[currentLevel] <= 2)
+        console.warn(prefix, ...args);
+    },
+    error: (...args) => {
+      if (LEVELS[currentLevel] <= 3)
+        console.error(prefix, ...args);
+    }
+  };
+}
+var LEVELS, currentLevel;
+var init_logger = __esm(() => {
+  LEVELS = { debug: 0, info: 1, warn: 2, error: 3, silent: 4 };
+  currentLevel = process.env.LOG_LEVEL || "info";
+});
+
+// src/lib/browser/launcher.ts
+function findChromeExecutable() {
+  if (process.env.CHROME_EXECUTABLE)
+    return process.env.CHROME_EXECUTABLE;
+  if (import_fs.default.existsSync("/usr/bin/google-chrome-stable"))
+    return "/usr/bin/google-chrome-stable";
+  return;
+}
+async function getBrowser(_name = "chromium") {
+  if (cachedBrowser) {
+    if (cachedBrowser.isConnected())
+      return cachedBrowser;
+    try {
+      await cachedBrowser.close();
+    } catch (e) {
+      log.warn(`stale browser close failed: ${e}`);
+    }
+    cachedBrowser = null;
+  }
+  cachedBrowser = await import_patchright.chromium.launch({
+    headless: true,
+    args: STEALTH_ARGS
+  });
+  return cachedBrowser;
+}
+async function closeBrowser() {
+  if (!cachedBrowser)
+    return;
+  try {
+    await cachedBrowser.close();
+  } catch (e) {
+    log.warn(`closeBrowser failed: ${e}`);
+  }
+  cachedBrowser = null;
+}
+async function getBrowserWithFallback(_preferred) {
+  return { browser: await getBrowser(), name: "chromium" };
+}
+async function launchHeadful(displayNum) {
+  const executablePath = findChromeExecutable();
+  const hasExtensions = import_fs.default.existsSync(UBLOCK_PATH);
+  const args = [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-blink-features=AutomationControlled",
+    "--disable-features=IsolateOrigins,site-per-process",
+    "--disable-infobars",
+    "--window-size=1920,1080",
+    "--force-device-scale-factor=1.25",
+    "--use-gl=angle",
+    "--use-angle=swiftshader"
+  ];
+  if (hasExtensions)
+    args.push(`--load-extension=${UBLOCK_PATH}`);
+  const launchOpts = {
+    headless: false,
+    args,
+    env: { ...process.env, DISPLAY: `:${displayNum}` }
+  };
+  if (executablePath)
+    launchOpts.executablePath = executablePath;
+  log.debug(`headful: ${executablePath || "patchright chromium"}, extensions: ${hasExtensions}`);
+  return import_patchright.chromium.launch(launchOpts);
+}
+var import_fs, import_patchright, log, UBLOCK_PATH = "/extensions/uBlock0.chromium", cachedBrowser = null;
+var init_launcher = __esm(() => {
+  init_stealth();
+  init_logger();
+  import_fs = __toESM(require("fs"));
+  import_patchright = require("patchright");
+  log = createLogger("launcher");
+});
+
 // src/lib/constants.ts
 var TIMING, CAPTCHA_GRID, SCREEN_DEFAULTS, THRESHOLDS, TIMEOUTS, CHROME_MIN_VERSION = 130;
 var init_constants = __esm(() => {
@@ -495,6 +597,1087 @@ var init_constants = __esm(() => {
   };
 });
 
+// src/lib/browser/fingerprint.ts
+function generateWindowsFingerprint() {
+  const fp = generator.getFingerprint();
+  const { navigator: nav, screen } = fp.fingerprint;
+  const dprOptions = [1.25, 1.5, 1.25, 1.5, 1];
+  const dpr = dprOptions[Math.floor(Math.random() * dprOptions.length)];
+  const w = screen.width || SCREEN_DEFAULTS.WIDTH;
+  const h = screen.height || SCREEN_DEFAULTS.HEIGHT;
+  return {
+    userAgent: nav.userAgent,
+    platform: "Win32",
+    screenWidth: w,
+    screenHeight: h,
+    screenAvailHeight: h - 40,
+    colorDepth: 24,
+    deviceScaleFactor: dpr,
+    hardwareConcurrency: nav.hardwareConcurrency || 8,
+    deviceMemory: nav.deviceMemory || 8,
+    languages: nav.languages || ["en-US", "en"],
+    uaData: nav.userAgentData
+  };
+}
+var import_fingerprint_generator, generator;
+var init_fingerprint = __esm(() => {
+  init_constants();
+  import_fingerprint_generator = require("fingerprint-generator");
+  generator = new import_fingerprint_generator.FingerprintGenerator({
+    browsers: [{ name: "chrome", minVersion: CHROME_MIN_VERSION }],
+    operatingSystems: ["windows"],
+    devices: ["desktop"],
+    locales: ["en-US"]
+  });
+});
+
+// src/lib/session/persistence.ts
+var exports_persistence = {};
+__export(exports_persistence, {
+  injectStorage: () => injectStorage,
+  injectCookies: () => injectCookies,
+  extractSession: () => extractSession
+});
+async function extractSession(context, page) {
+  const cookies = await context.cookies();
+  const { localStorage, sessionStorage } = await page.evaluate(() => {
+    const ls = {};
+    const ss = {};
+    for (let i = 0;i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      ls[key] = window.localStorage.getItem(key);
+    }
+    for (let i = 0;i < window.sessionStorage.length; i++) {
+      const key = window.sessionStorage.key(i);
+      ss[key] = window.sessionStorage.getItem(key);
+    }
+    return { localStorage: ls, sessionStorage: ss };
+  });
+  const origin = new URL(page.url()).origin;
+  return {
+    cookies,
+    localStorage: { [origin]: localStorage },
+    sessionStorage: { [origin]: sessionStorage },
+    extractedAt: new Date().toISOString()
+  };
+}
+async function injectCookies(context, sessionData) {
+  if (sessionData?.cookies?.length > 0) {
+    await context.addCookies(sessionData.cookies);
+  }
+}
+async function injectStorage(page, sessionData) {
+  if (!sessionData)
+    return;
+  const origin = new URL(page.url()).origin;
+  const ls = sessionData.localStorage?.[origin];
+  const ss = sessionData.sessionStorage?.[origin];
+  if (ls && Object.keys(ls).length > 0) {
+    await page.evaluate((data) => {
+      for (const [key, value] of Object.entries(data)) {
+        window.localStorage.setItem(key, value);
+      }
+    }, ls);
+  }
+  if (ss && Object.keys(ss).length > 0) {
+    await page.evaluate((data) => {
+      for (const [key, value] of Object.entries(data)) {
+        window.sessionStorage.setItem(key, value);
+      }
+    }, ss);
+  }
+}
+
+// src/lib/browser/session-manager.ts
+function allocateDisplay() {
+  for (let i = 0;i < MAX_SESSIONS; i++) {
+    const num = BASE_DISPLAY + i;
+    if (!usedDisplays.has(num)) {
+      usedDisplays.add(num);
+      return num;
+    }
+  }
+  throw new Error("No available displays. Max concurrent sessions reached.");
+}
+function freeDisplay(num) {
+  usedDisplays.delete(num);
+}
+function waitForSocket(displayNum, timeoutMs = 5000) {
+  const socketPath = `/tmp/.X11-unix/X${displayNum}`;
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const check = () => {
+      if (import_fs2.default.existsSync(socketPath))
+        return resolve();
+      if (Date.now() - start > timeoutMs)
+        return reject(new Error(`Xvfb socket not ready after ${timeoutMs}ms`));
+      setTimeout(check, 100);
+    };
+    check();
+  });
+}
+function killProcess(proc) {
+  if (proc && !proc.killed) {
+    try {
+      proc.kill("SIGTERM");
+    } catch {}
+  }
+}
+async function startSession(userId) {
+  if (sessions.has(userId)) {
+    return sessions.get(userId);
+  }
+  const displayNum = allocateDisplay();
+  const vncPort = 5900 + displayNum;
+  const wsPort = 6080 + (displayNum - BASE_DISPLAY);
+  const xvfb = import_child_process.spawn("Xvfb", [`:${displayNum}`, "-screen", "0", "1920x1080x24", "-ac"], {
+    stdio: "ignore"
+  });
+  await waitForSocket(displayNum);
+  const x11vnc = import_child_process.spawn("x11vnc", ["-display", `:${displayNum}`, "-nopw", "-listen", "localhost", "-rfbport", String(vncPort), "-shared", "-forever"], { stdio: "ignore" });
+  const noVncPath = import_fs2.default.existsSync("/usr/share/novnc") ? "/usr/share/novnc" : "/usr/share/noVNC";
+  const websockify = import_child_process.spawn("websockify", ["--web", noVncPath, String(wsPort), `localhost:${vncPort}`], {
+    stdio: "ignore"
+  });
+  await new Promise((r) => setTimeout(r, 500));
+  const browser = await launchHeadful(displayNum);
+  const fingerprint = generateWindowsFingerprint();
+  const ctxOpts = stealthContextOptions({}, userId, fingerprint);
+  const context = await browser.newContext(ctxOpts);
+  const stealthScript = buildStealthScript(fingerprint);
+  contextStealthScripts.set(context, stealthScript);
+  const page = await context.newPage();
+  log2.debug(`fingerprint: ${fingerprint.userAgent.slice(0, 60)}... DPR=${fingerprint.deviceScaleFactor} screen=${fingerprint.screenWidth}x${fingerprint.screenHeight}`);
+  const session = {
+    displayNum,
+    vncPort,
+    wsPort,
+    xvfb,
+    x11vnc,
+    websockify,
+    browser,
+    context,
+    page,
+    createdAt: new Date,
+    timeoutTimer: null
+  };
+  session.timeoutTimer = setTimeout(() => stopSession(userId), SESSION_TIMEOUT);
+  sessions.set(userId, session);
+  return session;
+}
+function resetTimeout(userId) {
+  const session = sessions.get(userId);
+  if (session) {
+    clearTimeout(session.timeoutTimer);
+    session.timeoutTimer = setTimeout(() => stopSession(userId), SESSION_TIMEOUT);
+  }
+}
+function getSession(userId) {
+  return sessions.get(userId) || null;
+}
+async function stopSession(userId) {
+  const session = sessions.get(userId);
+  if (!session)
+    return null;
+  clearTimeout(session.timeoutTimer);
+  let sessionData = null;
+  try {
+    const { extractSession: extractSession2 } = await Promise.resolve().then(() => exports_persistence);
+    sessionData = await extractSession2(session.context, session.page);
+  } catch {}
+  contextStealthScripts.delete(session.context);
+  try {
+    await session.context.close();
+  } catch {}
+  try {
+    await session.browser.close();
+  } catch {}
+  killProcess(session.websockify);
+  killProcess(session.x11vnc);
+  killProcess(session.xvfb);
+  await new Promise((r) => setTimeout(r, 1000));
+  try {
+    import_fs2.default.unlinkSync(`/tmp/.X11-unix/X${session.displayNum}`);
+  } catch {}
+  freeDisplay(session.displayNum);
+  sessions.delete(userId);
+  return sessionData;
+}
+async function cleanupAllSessions() {
+  const userIds = [...sessions.keys()];
+  await Promise.all(userIds.map((id) => stopSession(id)));
+}
+var import_child_process, import_fs2, log2, BASE_DISPLAY, MAX_SESSIONS, SESSION_TIMEOUT, sessions, usedDisplays;
+var init_session_manager = __esm(() => {
+  init_launcher();
+  init_stealth();
+  init_logger();
+  init_fingerprint();
+  import_child_process = require("child_process");
+  import_fs2 = __toESM(require("fs"));
+  log2 = createLogger("session");
+  BASE_DISPLAY = parseInt(process.env.VNC_BASE_DISPLAY || "99", 10);
+  MAX_SESSIONS = parseInt(process.env.VNC_MAX_SESSIONS || "20", 10);
+  SESSION_TIMEOUT = parseInt(process.env.VNC_SESSION_TIMEOUT_MS || "300000", 10);
+  sessions = new Map;
+  usedDisplays = new Set;
+});
+
+// src/lib/paths.ts
+function getDataDir() {
+  return process.env.IFRAMER_DATA_DIR || import_path.default.join(import_os.default.homedir(), ".iframer");
+}
+var import_path, import_os;
+var init_paths = __esm(() => {
+  import_path = __toESM(require("path"));
+  import_os = __toESM(require("os"));
+});
+
+// src/lib/auth/crypto.ts
+function deriveKey(token, purpose = INFO) {
+  return new Promise((resolve, reject) => {
+    import_crypto.default.hkdf("sha256", token, SALT, purpose, KEY_LENGTH, (err, key) => {
+      if (err)
+        return reject(err);
+      resolve(Buffer.from(key));
+    });
+  });
+}
+function encrypt(plaintext, key) {
+  const iv = import_crypto.default.randomBytes(IV_LENGTH);
+  const cipher = import_crypto.default.createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, tag, encrypted]);
+}
+function decrypt(blob, key) {
+  const iv = blob.subarray(0, IV_LENGTH);
+  const tag = blob.subarray(IV_LENGTH, IV_LENGTH + TAG_LENGTH);
+  const ciphertext = blob.subarray(IV_LENGTH + TAG_LENGTH);
+  const decipher = import_crypto.default.createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(tag);
+  return decipher.update(ciphertext, undefined, "utf8") + decipher.final("utf8");
+}
+function generateTOTP(secret, period = 30, digits = 6) {
+  const base32Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const cleanSecret = secret.replace(/[\s=-]/g, "").toUpperCase();
+  let bits = "";
+  for (const c of cleanSecret) {
+    const val = base32Chars.indexOf(c);
+    if (val === -1)
+      continue;
+    bits += val.toString(2).padStart(5, "0");
+  }
+  const keyBytes = [];
+  for (let i = 0;i + 8 <= bits.length; i += 8) {
+    keyBytes.push(parseInt(bits.substring(i, i + 8), 2));
+  }
+  const key = Buffer.from(keyBytes);
+  const time = Math.floor(Date.now() / 1000 / period);
+  const timeBuffer = Buffer.alloc(8);
+  timeBuffer.writeUInt32BE(Math.floor(time / 4294967296), 0);
+  timeBuffer.writeUInt32BE(time & 4294967295, 4);
+  const hmac = import_crypto.default.createHmac("sha1", key).update(timeBuffer).digest();
+  const offset = hmac[hmac.length - 1] & 15;
+  const code = ((hmac[offset] & 127) << 24 | (hmac[offset + 1] & 255) << 16 | (hmac[offset + 2] & 255) << 8 | hmac[offset + 3] & 255) % Math.pow(10, digits);
+  return code.toString().padStart(digits, "0");
+}
+var import_crypto, SALT = "iframer-session", INFO = "encryption", KEY_LENGTH = 32, IV_LENGTH = 12, TAG_LENGTH = 16;
+var init_crypto = __esm(() => {
+  init_paths();
+  import_crypto = __toESM(require("crypto"));
+});
+
+// src/lib/screenshot.ts
+function saveScreenshot(buffer, filename, screenshotDir, publicUrl) {
+  import_fs3.default.mkdirSync(screenshotDir, { recursive: true });
+  const filePath = import_path2.default.join(screenshotDir, filename);
+  import_fs3.default.writeFileSync(filePath, buffer);
+  return `${publicUrl}/screenshots/${filename}`;
+}
+var import_fs3, import_path2;
+var init_screenshot = __esm(() => {
+  import_fs3 = __toESM(require("fs"));
+  import_path2 = __toESM(require("path"));
+});
+
+// src/lib/session/sqlite-store.ts
+function createBunDb(dbPath) {
+  const { Database } = require("bun:sqlite");
+  const db = new Database(dbPath);
+  db.run("PRAGMA journal_mode = WAL");
+  return {
+    queryGet: (sql, ...params) => db.query(sql).get(...params),
+    queryAll: (sql, ...params) => db.query(sql).all(...params),
+    run: (sql, ...params) => {
+      if (params.length > 0) {
+        db.query(sql).run(...params);
+      } else {
+        db.run(sql);
+      }
+    },
+    close: () => db.close()
+  };
+}
+function createNodeDb(dbPath) {
+  const Database = require("better-sqlite3");
+  const db = new Database(dbPath);
+  db.pragma("journal_mode = WAL");
+  return {
+    queryGet: (sql, ...params) => db.prepare(sql).get(...params),
+    queryAll: (sql, ...params) => db.prepare(sql).all(...params),
+    run: (sql, ...params) => {
+      if (params.length > 0) {
+        db.prepare(sql).run(...params);
+      } else {
+        db.exec(sql);
+      }
+    },
+    close: () => db.close()
+  };
+}
+
+class SqliteStore {
+  db;
+  constructor(dataDir) {
+    import_fs4.default.mkdirSync(dataDir, { recursive: true });
+    const dbPath = import_path3.default.join(dataDir, "iframer.db");
+    this.db = IS_BUN ? createBunDb(dbPath) : createNodeDb(dbPath);
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        user_id TEXT PRIMARY KEY,
+        blob    BLOB NOT NULL
+      )
+    `);
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS credentials (
+        user_id TEXT NOT NULL,
+        domain  TEXT NOT NULL,
+        blob    BLOB NOT NULL,
+        PRIMARY KEY (user_id, domain)
+      )
+    `);
+    this.migrateLegacyUserIds();
+  }
+  migrateLegacyUserIds() {
+    const CANONICAL = "iframer-local";
+    const LEGACY = ["cli-user", "mcp-user", "default"];
+    for (const legacy of LEGACY) {
+      this.db.run(`INSERT OR IGNORE INTO credentials (user_id, domain, blob)
+         SELECT ?, domain, blob FROM credentials WHERE user_id = ?`, CANONICAL, legacy);
+      this.db.run(`INSERT OR IGNORE INTO sessions (user_id, blob)
+         SELECT ?, blob FROM sessions WHERE user_id = ?`, CANONICAL, legacy);
+    }
+  }
+  async getSession(userId) {
+    const row = this.db.queryGet("SELECT blob FROM sessions WHERE user_id = ?", userId);
+    return row ? Buffer.from(row.blob) : null;
+  }
+  async setSession(userId, blob) {
+    this.db.run("INSERT OR REPLACE INTO sessions (user_id, blob) VALUES (?, ?)", userId, blob);
+  }
+  async deleteSession(userId) {
+    this.db.run("DELETE FROM sessions WHERE user_id = ?", userId);
+  }
+  async setCredential(userId, domain, encryptedBlob) {
+    this.db.run("INSERT OR REPLACE INTO credentials (user_id, domain, blob) VALUES (?, ?, ?)", userId, domain, encryptedBlob);
+  }
+  async getCredential(userId, domain) {
+    const row = this.db.queryGet("SELECT blob FROM credentials WHERE user_id = ? AND domain = ?", userId, domain);
+    return row ? Buffer.from(row.blob) : null;
+  }
+  async deleteCredential(userId, domain) {
+    this.db.run("DELETE FROM credentials WHERE user_id = ? AND domain = ?", userId, domain);
+  }
+  async listCredentialDomains(userId) {
+    const rows = this.db.queryAll("SELECT domain FROM credentials WHERE user_id = ?", userId);
+    return rows.map((r) => r.domain);
+  }
+  close() {
+    this.db.close();
+  }
+}
+var import_path3, import_fs4, IS_BUN;
+var init_sqlite_store = __esm(() => {
+  import_path3 = __toESM(require("path"));
+  import_fs4 = __toESM(require("fs"));
+  IS_BUN = typeof globalThis.Bun !== "undefined";
+});
+
+// src/lib/storage.ts
+function createStore(options = {}) {
+  const dataDir = options.dataDir || getDataDir();
+  return new SqliteStore(dataDir);
+}
+var init_storage = __esm(() => {
+  init_sqlite_store();
+  init_paths();
+});
+
+// src/lib/browser/chrome-downloader.ts
+var exports_chrome_downloader = {};
+__export(exports_chrome_downloader, {
+  isChromiumInstalled: () => isChromiumInstalled,
+  findChromeForTesting: () => findChromeForTesting,
+  findChrome: () => findChrome,
+  ensureChrome: () => ensureChrome,
+  downloadChrome: () => downloadChrome
+});
+function getPlatform() {
+  const arch = process.arch;
+  const platform = process.platform;
+  if (platform === "darwin")
+    return arch === "arm64" ? "mac-arm64" : "mac-x64";
+  if (platform === "linux")
+    return arch === "arm64" ? "linux-arm64" : "linux64";
+  if (platform === "win32")
+    return "win64";
+  throw new Error(`Unsupported platform: ${platform}-${arch}`);
+}
+function getChromeExecutablePath(installDir) {
+  const platform = process.platform;
+  if (platform === "darwin") {
+    const entries = import_fs5.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
+    const dir = entries[0] || "chrome-mac-arm64";
+    return import_path4.default.join(installDir, dir, "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing");
+  }
+  if (platform === "linux") {
+    const entries = import_fs5.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
+    const dir = entries[0] || "chrome-linux64";
+    return import_path4.default.join(installDir, dir, "chrome");
+  }
+  if (platform === "win32") {
+    const entries = import_fs5.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
+    const dir = entries[0] || "chrome-win64";
+    return import_path4.default.join(installDir, dir, "chrome.exe");
+  }
+  throw new Error(`Unsupported platform: ${platform}`);
+}
+async function downloadChrome(installDir = DEFAULT_INSTALL_DIR) {
+  log3.info("Downloading Chrome for Testing (first time only)...");
+  const res = await fetch(CHROME_VERSIONS_URL);
+  if (!res.ok)
+    throw new Error(`Failed to fetch Chrome versions: ${res.status}`);
+  const data = await res.json();
+  const channel = data.channels?.Stable;
+  if (!channel)
+    throw new Error("No Stable channel found in Chrome for Testing versions");
+  const platform = getPlatform();
+  const download = channel.downloads?.chrome?.find((d) => d.platform === platform);
+  if (!download)
+    throw new Error(`No Chrome for Testing download for platform: ${platform}`);
+  const url = download.url;
+  const version = channel.version;
+  log3.debug(`Version ${version} for ${platform}`);
+  log3.debug(`URL: ${url}`);
+  import_fs5.default.mkdirSync(installDir, { recursive: true });
+  const zipPath = import_path4.default.join(installDir, "chrome.zip");
+  const dlRes = await fetch(url);
+  if (!dlRes.ok)
+    throw new Error(`Download failed: ${dlRes.status}`);
+  const buf = Buffer.from(await dlRes.arrayBuffer());
+  import_fs5.default.writeFileSync(zipPath, buf);
+  log3.info(`Downloaded ${(buf.length / 1024 / 1024).toFixed(1)}MB`);
+  import_child_process2.execSync(`unzip -o -q "${zipPath}" -d "${installDir}"`, { stdio: "inherit" });
+  import_fs5.default.unlinkSync(zipPath);
+  const execPath = getChromeExecutablePath(installDir);
+  if (!import_fs5.default.existsSync(execPath)) {
+    throw new Error(`Chrome executable not found after extraction: ${execPath}`);
+  }
+  if (process.platform !== "win32") {
+    import_fs5.default.chmodSync(execPath, 493);
+  }
+  import_fs5.default.writeFileSync(import_path4.default.join(installDir, "version.json"), JSON.stringify({ version, platform, downloadedAt: new Date().toISOString() }));
+  log3.info(`Installed at: ${execPath}`);
+  return execPath;
+}
+function findChromeForTesting() {
+  if (process.env.CHROME_EXECUTABLE) {
+    if (import_fs5.default.existsSync(process.env.CHROME_EXECUTABLE))
+      return process.env.CHROME_EXECUTABLE;
+  }
+  try {
+    const execPath = getChromeExecutablePath(DEFAULT_INSTALL_DIR);
+    if (import_fs5.default.existsSync(execPath))
+      return execPath;
+  } catch {}
+  return null;
+}
+function findChrome() {
+  const cft = findChromeForTesting();
+  if (cft)
+    return cft;
+  const systemPaths = process.platform === "darwin" ? [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium"
+  ] : process.platform === "linux" ? [
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/chromium",
+    ...(() => {
+      try {
+        const dirs = import_fs5.default.readdirSync("/ms-playwright").filter((d) => d.startsWith("chromium-")).sort().reverse();
+        return dirs.map((d) => import_path4.default.join("/ms-playwright", d, "chrome-linux", "chrome"));
+      } catch {
+        return [];
+      }
+    })()
+  ] : [
+    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
+  ];
+  for (const p of systemPaths) {
+    if (import_fs5.default.existsSync(p))
+      return p;
+  }
+  return null;
+}
+function isChromiumInstalled() {
+  return findChrome() !== null;
+}
+async function ensureChrome() {
+  const cft = findChromeForTesting();
+  if (cft)
+    return cft;
+  try {
+    return await downloadChrome();
+  } catch (err) {
+    log3.error(`Failed to download Chrome for Testing: ${err instanceof Error ? err.message : String(err)}`);
+    const system = findChrome();
+    if (system) {
+      log3.warn(`Falling back to system Chrome: ${system}`);
+      return system;
+    }
+    throw new Error("No Chrome found. Download failed and no system Chrome available.");
+  }
+}
+var import_fs5, import_path4, import_os2, import_child_process2, log3, CHROME_VERSIONS_URL = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json", DEFAULT_INSTALL_DIR;
+var init_chrome_downloader = __esm(() => {
+  init_logger();
+  import_fs5 = __toESM(require("fs"));
+  import_path4 = __toESM(require("path"));
+  import_os2 = __toESM(require("os"));
+  import_child_process2 = require("child_process");
+  log3 = createLogger("chrome");
+  DEFAULT_INSTALL_DIR = import_path4.default.join(import_os2.default.homedir(), ".iframer", "chrome");
+});
+
+// src/lib/browser/cloak-browser.ts
+async function tryImport() {
+  try {
+    return await import("cloakbrowser");
+  } catch {
+    return null;
+  }
+}
+async function ensureBinary() {
+  const cloak = await tryImport();
+  if (!cloak)
+    return false;
+  try {
+    const info = cloak.binaryInfo();
+    if (!info.installed) {
+      log4.info("Downloading CloakBrowser binary...");
+      await cloak.ensureBinary();
+      log4.info("CloakBrowser ready");
+    }
+    _available = true;
+    return true;
+  } catch (err) {
+    log4.warn(`CloakBrowser setup failed: ${err instanceof Error ? err.message : String(err)}`);
+    _available = false;
+    return false;
+  }
+}
+async function launchCloakBrowser(options) {
+  const cloak = await tryImport();
+  if (!cloak)
+    return null;
+  try {
+    const ok = await ensureBinary();
+    if (!ok)
+      return null;
+    const browser = await cloak.launch({
+      headless: options.headless,
+      args: options.args
+    });
+    log4.info(`CloakBrowser launched (headless=${options.headless})`);
+    return browser;
+  } catch (err) {
+    log4.warn(`CloakBrowser launch failed: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+var log4, _available = null;
+var init_cloak_browser = __esm(() => {
+  init_logger();
+  log4 = createLogger("cloak");
+});
+
+// src/lib/browser/registry.ts
+function browsersDir() {
+  const dir = import_path5.default.join(getDataDir(), "browsers");
+  import_fs6.default.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+function isPidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 1)
+    return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function pidMatchesMarker(pid, marker) {
+  if (!isPidAlive(pid))
+    return false;
+  try {
+    const cmd = import_child_process3.execSync(`ps -o command= -p ${pid}`, { encoding: "utf8" });
+    return cmd.includes(marker);
+  } catch {
+    return false;
+  }
+}
+function findChromePidByMarker(marker) {
+  try {
+    const out = import_child_process3.execSync(`pgrep -f -- "${marker}"`, { encoding: "utf8" }).trim();
+    const pids = out.split(`
+`).map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n !== process.pid);
+    if (pids.length === 0)
+      return null;
+    return Math.min(...pids);
+  } catch {
+    return null;
+  }
+}
+function registerBrowser(rec) {
+  try {
+    import_fs6.default.writeFileSync(import_path5.default.join(browsersDir(), `${rec.chromePid}.json`), JSON.stringify(rec, null, 2));
+  } catch (err) {
+    log5.warn(`failed to write browser record for pid ${rec.chromePid}: ${err}`);
+  }
+}
+function unregisterBrowser(chromePid) {
+  try {
+    import_fs6.default.unlinkSync(import_path5.default.join(browsersDir(), `${chromePid}.json`));
+  } catch {}
+}
+async function forceKillBrowser(rec) {
+  if (!isPidAlive(rec.chromePid))
+    return true;
+  if (!pidMatchesMarker(rec.chromePid, rec.marker)) {
+    return true;
+  }
+  try {
+    process.kill(rec.chromePid, "SIGKILL");
+  } catch {}
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline) {
+    if (!isPidAlive(rec.chromePid))
+      return true;
+    await sleep(100);
+  }
+  return !isPidAlive(rec.chromePid);
+}
+var import_fs6, import_path5, import_child_process3, log5, sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+var init_registry = __esm(() => {
+  init_paths();
+  init_logger();
+  import_fs6 = __toESM(require("fs"));
+  import_path5 = __toESM(require("path"));
+  import_child_process3 = require("child_process");
+  log5 = createLogger("registry");
+});
+
+// src/lib/browser/daemon.ts
+function keyOf(mode, instanceId) {
+  return `${mode}::${instanceId}`;
+}
+
+class BrowserDaemon {
+  instances = new Map;
+  idleTimers = new Map;
+  idleTimeout;
+  constructor(idleTimeout = DEFAULT_IDLE_TIMEOUT) {
+    this.idleTimeout = idleTimeout;
+  }
+  async ensure(mode, instanceId = DEFAULT_INSTANCE) {
+    if (mode === "docker-headful") {
+      throw new Error("Docker mode doesn't use the daemon. Use the Docker API.");
+    }
+    const key = keyOf(mode, instanceId);
+    let instance = this.instances.get(key);
+    if (instance) {
+      try {
+        if (instance.browser.isConnected()) {
+          let page2 = instance.page;
+          let context2 = instance.context;
+          try {
+            await page2.evaluate("1");
+          } catch {
+            log6.info(`Page for ${mode} is dead, creating fresh context`);
+            try {
+              await context2.close();
+            } catch (err) {
+              log6.warn(`dead-page context close failed: ${err}`);
+            }
+            context2 = await instance.browser.newContext();
+            page2 = await context2.newPage();
+            instance.context = context2;
+            instance.page = page2;
+          }
+          this.resetIdleTimer(key);
+          return { browser: instance.browser, context: context2, page: page2 };
+        }
+      } catch {}
+      log6.info(`Browser for ${key} disconnected (window closed?), relaunching...`);
+      await this.stopMode(mode, instanceId);
+    }
+    const marker = `--iframer-key=${key}-${import_crypto2.randomUUID()}`;
+    let browser;
+    const cloakBrowser = await launchCloakBrowser({ headless: mode === "headless", args: [marker] });
+    if (cloakBrowser) {
+      log6.info(`CloakBrowser ${mode} ready`);
+      browser = cloakBrowser;
+    } else {
+      const executablePath = await ensureChrome();
+      log6.info(`Falling back to Chrome for Testing in ${mode} mode: ${executablePath}`);
+      browser = await import_patchright2.chromium.launch({
+        executablePath,
+        headless: mode === "headless",
+        args: [
+          "--disable-blink-features=AutomationControlled",
+          "--no-first-run",
+          "--no-default-browser-check",
+          "--disable-infobars",
+          marker
+        ]
+      });
+    }
+    const chromePid = findChromePidByMarker(marker);
+    if (chromePid) {
+      registerBrowser({
+        key,
+        chromePid,
+        ownerPid: process.pid,
+        marker,
+        launchedAt: new Date().toISOString()
+      });
+    } else {
+      log6.warn(`could not resolve Chrome PID for ${key} — force-kill unavailable for this instance`);
+    }
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    instance = {
+      browser,
+      context,
+      page,
+      mode,
+      instanceId,
+      createdAt: new Date,
+      chromePid,
+      marker,
+      active: 0
+    };
+    this.instances.set(key, instance);
+    this.resetIdleTimer(key);
+    log6.info(`Chrome ${key} ready (pid=${chromePid ?? "unknown"})`);
+    return { browser, context, page };
+  }
+  acquire(mode, instanceId = DEFAULT_INSTANCE) {
+    const instance = this.instances.get(keyOf(mode, instanceId));
+    if (instance)
+      instance.active++;
+  }
+  release(mode, instanceId = DEFAULT_INSTANCE) {
+    const key = keyOf(mode, instanceId);
+    const instance = this.instances.get(key);
+    if (!instance)
+      return;
+    instance.active = Math.max(0, instance.active - 1);
+    if (instance.active === 0)
+      this.resetIdleTimer(key);
+  }
+  isRunning(mode, instanceId = DEFAULT_INSTANCE) {
+    const instance = this.instances.get(keyOf(mode, instanceId));
+    if (!instance)
+      return false;
+    try {
+      return instance.browser.isConnected();
+    } catch {
+      return false;
+    }
+  }
+  runningModes() {
+    return [...new Set(this.liveInstances().map((i) => i.mode))];
+  }
+  liveInstances() {
+    return [...this.instances.values()].filter((inst) => {
+      try {
+        return inst.browser.isConnected();
+      } catch {
+        return false;
+      }
+    });
+  }
+  async stopMode(mode, instanceId = DEFAULT_INSTANCE) {
+    await this.stopKey(keyOf(mode, instanceId));
+  }
+  async stopKey(key) {
+    const instance = this.instances.get(key);
+    if (!instance)
+      return;
+    const timer = this.idleTimers.get(key);
+    if (timer)
+      clearTimeout(timer);
+    this.idleTimers.delete(key);
+    log6.info(`Stopping Chrome ${key} (pid=${instance.chromePid ?? "unknown"})...`);
+    const politeClose = (async () => {
+      try {
+        await instance.context.close();
+      } catch (err) {
+        log6.warn(`context.close failed for ${key}: ${err}`);
+      }
+      try {
+        await instance.browser.close();
+      } catch (err) {
+        log6.warn(`browser.close failed for ${key}: ${err}`);
+      }
+    })();
+    const closedInTime = await Promise.race([
+      politeClose.then(() => true),
+      sleep2(CLOSE_GRACE_MS).then(() => false)
+    ]);
+    if (!closedInTime) {
+      log6.warn(`polite close timed out after ${CLOSE_GRACE_MS}ms for ${key}, force-killing`);
+    }
+    if (instance.chromePid !== null) {
+      const dead = await forceKillBrowser({ chromePid: instance.chromePid, marker: instance.marker });
+      if (dead) {
+        unregisterBrowser(instance.chromePid);
+      } else {
+        log6.warn(`Chrome pid=${instance.chromePid} survived SIGKILL?! leaving registry record for reaper`);
+      }
+    } else if (!closedInTime) {
+      log6.warn(`no PID recorded for ${key} and polite close hung — this Chrome may leak until the next reap`);
+    }
+    this.instances.delete(key);
+    log6.info(`Stopped Chrome ${key}`);
+  }
+  async stopAll(force = false) {
+    const keys = [...this.instances.entries()].filter(([, inst]) => force || inst.active === 0).map(([k]) => k);
+    await Promise.all(keys.map((k) => this.stopKey(k)));
+  }
+  resetIdleTimer(key) {
+    const existing = this.idleTimers.get(key);
+    if (existing)
+      clearTimeout(existing);
+    this.idleTimers.set(key, setTimeout(() => {
+      const instance = this.instances.get(key);
+      if (instance && instance.active > 0) {
+        this.resetIdleTimer(key);
+        return;
+      }
+      log6.info(`Idle timeout for ${key}, stopping...`);
+      this.stopKey(key).catch((err) => log6.warn(`idle stop failed for ${key}: ${err}`));
+    }, this.idleTimeout));
+  }
+  hasLiveProcesses() {
+    return [...this.instances.values()].some((inst) => inst.chromePid !== null && isPidAlive(inst.chromePid));
+  }
+}
+var import_patchright2, import_crypto2, log6, DEFAULT_IDLE_TIMEOUT, CLOSE_GRACE_MS = 5000, DEFAULT_INSTANCE = "default", sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
+var init_daemon = __esm(() => {
+  init_chrome_downloader();
+  init_cloak_browser();
+  init_logger();
+  init_registry();
+  import_patchright2 = require("patchright");
+  import_crypto2 = require("crypto");
+  log6 = createLogger("daemon");
+  DEFAULT_IDLE_TIMEOUT = 5 * 60 * 1000;
+});
+
+// src/lib/domain-modes.ts
+function defaultFile() {
+  return import_path6.default.join(getDataDir(), "domain-modes.json");
+}
+
+class DomainModeStore {
+  data = {};
+  filePath;
+  constructor(filePath = defaultFile()) {
+    this.filePath = filePath;
+    this.load();
+  }
+  getMode(domain) {
+    const entry = this.data[domain];
+    if (!entry)
+      return null;
+    if (this.isExpired(entry))
+      return null;
+    return entry.mode;
+  }
+  recordSuccess(domain, mode) {
+    const now = new Date().toISOString();
+    const existing = this.data[domain];
+    this.data[domain] = {
+      mode,
+      lastSuccess: now,
+      attempts: {
+        ...existing?.attempts || {},
+        [mode]: { result: "success", lastTried: now }
+      }
+    };
+    this.save();
+  }
+  recordFailure(domain, mode, reason) {
+    const now = new Date().toISOString();
+    const existing = this.data[domain];
+    this.data[domain] = {
+      mode: existing?.mode || mode,
+      lastSuccess: existing?.lastSuccess || "",
+      attempts: {
+        ...existing?.attempts || {},
+        [mode]: { result: "blocked", reason, lastTried: now }
+      }
+    };
+    this.save();
+  }
+  getNextMode(failedMode, availableModes) {
+    const idx = ESCALATION_LADDER.indexOf(failedMode);
+    for (let i = idx + 1;i < ESCALATION_LADDER.length; i++) {
+      if (availableModes.includes(ESCALATION_LADDER[i])) {
+        return ESCALATION_LADDER[i];
+      }
+    }
+    return null;
+  }
+  getBestMode(domain, availableModes) {
+    const remembered = this.getMode(domain);
+    if (remembered && availableModes.includes(remembered)) {
+      return remembered;
+    }
+    for (const mode of ESCALATION_LADDER) {
+      if (availableModes.includes(mode))
+        return mode;
+    }
+    return "headless";
+  }
+  getSummary() {
+    const entries = Object.entries(this.data).filter(([, e]) => !this.isExpired(e)).sort(([, a], [, b]) => b.lastSuccess.localeCompare(a.lastSuccess));
+    return {
+      totalDomains: entries.length,
+      recentDomains: entries.slice(0, 5).map(([d, e]) => `${d} (${e.mode})`)
+    };
+  }
+  isExpired(entry) {
+    if (!entry.lastSuccess)
+      return true;
+    const age = Date.now() - new Date(entry.lastSuccess).getTime();
+    return age > TTL_DAYS * 24 * 60 * 60 * 1000;
+  }
+  load() {
+    try {
+      if (import_fs7.default.existsSync(this.filePath)) {
+        this.data = JSON.parse(import_fs7.default.readFileSync(this.filePath, "utf-8"));
+      }
+    } catch {
+      this.data = {};
+    }
+  }
+  save() {
+    try {
+      import_fs7.default.mkdirSync(import_path6.default.dirname(this.filePath), { recursive: true });
+      import_fs7.default.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2));
+    } catch (err) {
+      log7.error("Failed to save:", err);
+    }
+  }
+}
+var import_fs7, import_path6, log7, TTL_DAYS = 14, ESCALATION_LADDER;
+var init_domain_modes = __esm(() => {
+  init_logger();
+  init_paths();
+  import_fs7 = __toESM(require("fs"));
+  import_path6 = __toESM(require("path"));
+  log7 = createLogger("domain-modes");
+  ESCALATION_LADDER = ["headless", "docker-headful", "binary-headful"];
+});
+
+// src/lib/browser/cdp-launcher.ts
+function hasDisplay() {
+  if (process.platform === "darwin" || process.platform === "win32")
+    return true;
+  return !!process.env.DISPLAY;
+}
+function checkModeAvailability() {
+  return {
+    headless: true,
+    binaryHeadful: hasDisplay()
+  };
+}
+var log8;
+var init_cdp_launcher = __esm(() => {
+  init_chrome_downloader();
+  init_logger();
+  log8 = createLogger("cdp-launcher");
+});
+
+// src/lib/errors.ts
+function getErrorMessage(err) {
+  return err instanceof Error ? err.message : String(err);
+}
+
+// src/lib/execution/config.ts
+function sessionStoreKey(userId, instanceId = DEFAULT_INSTANCE) {
+  return instanceId === DEFAULT_INSTANCE ? userId : `${userId}::${instanceId}`;
+}
+var init_config = __esm(() => {
+  init_daemon();
+});
+
+// src/lib/execution/ref-store.ts
+class RefStore {
+  store;
+  config;
+  userRefs = new Map;
+  constructor(store, config) {
+    this.store = store;
+    this.config = config;
+  }
+  makeContext(userId, token) {
+    if (!this.userRefs.has(userId)) {
+      this.userRefs.set(userId, { refMap: new Map, nextRefId: 1 });
+    }
+    const refs = this.userRefs.get(userId);
+    return {
+      userId,
+      token,
+      screenshotDir: this.config.screenshotDir,
+      publicUrl: this.config.publicUrl,
+      staleTimeoutMs: this.config.staleTimeoutMs,
+      refMap: refs.refMap,
+      nextRefId: refs.nextRefId,
+      store: this.store
+    };
+  }
+  sync(userId, ctx) {
+    const refs = this.userRefs.get(userId);
+    if (refs)
+      refs.nextRefId = ctx.nextRefId;
+  }
+}
+
+// src/lib/actions/types.ts
+function failedStepResult(step, error, durationMs, stepIndex = -1) {
+  return { stepIndex, step, ok: false, error, durationMs };
+}
+
 // src/lib/browser/humanize.ts
 function rand(min, max) {
   return Math.random() * (max - min) + min;
@@ -531,10 +1714,10 @@ async function humanMove(page, toX, toY) {
   const lastPos = mousePositions.get(page);
   const fromX = lastPos?.x ?? randRange(TIMING.IDLE_MOUSE_X);
   const fromY = lastPos?.y ?? randRange(TIMING.IDLE_MOUSE_Y);
-  const path = generatePath(fromX, fromY, toX, toY);
-  for (const point of path) {
+  const path7 = generatePath(fromX, fromY, toX, toY);
+  for (const point of path7) {
     await mouse.move(point.x, point.y);
-    await sleep(rand(2, 12));
+    await sleep3(rand(2, 12));
   }
   mousePositions.set(page, { x: toX, y: toY });
 }
@@ -548,28 +1731,28 @@ async function humanClick(page, selector) {
   const targetX = box.x + box.width * rand(0.3, 0.7);
   const targetY = box.y + box.height * rand(0.3, 0.7);
   await humanMove(page, targetX, targetY);
-  await sleep(randRange(TIMING.MOUSE_MOVE));
+  await sleep3(randRange(TIMING.MOUSE_MOVE));
   await page.mouse.down();
-  await sleep(randRange(TIMING.CLICK_HOLD));
+  await sleep3(randRange(TIMING.CLICK_HOLD));
   await page.mouse.up();
-  await sleep(randRange(TIMING.POST_CLICK));
+  await sleep3(randRange(TIMING.POST_CLICK));
 }
 async function humanClickXY(page, x, y) {
   await humanMove(page, x, y);
-  await sleep(randRange(TIMING.MOUSE_MOVE));
+  await sleep3(randRange(TIMING.MOUSE_MOVE));
   await page.mouse.down();
-  await sleep(randRange(TIMING.CLICK_HOLD));
+  await sleep3(randRange(TIMING.CLICK_HOLD));
   await page.mouse.up();
-  await sleep(randRange(TIMING.POST_CLICK));
+  await sleep3(randRange(TIMING.POST_CLICK));
 }
 async function humanType(page, selector, text) {
   await humanClick(page, selector);
-  await sleep(randRange(TIMING.POST_CLICK));
+  await sleep3(randRange(TIMING.POST_CLICK));
   for (const char of text) {
     await page.keyboard.type(char);
-    await sleep(randRange(TIMING.CHAR_DELAY));
+    await sleep3(randRange(TIMING.CHAR_DELAY));
     if (Math.random() < 0.05) {
-      await sleep(randRange(TIMING.WORD_PAUSE));
+      await sleep3(randRange(TIMING.WORD_PAUSE));
     }
   }
 }
@@ -587,9 +1770,9 @@ async function clickRecaptchaCheckbox(page) {
   const checkboxX = recaptchaBox.x + rand(20, 35);
   const checkboxY = recaptchaBox.y + recaptchaBox.height * rand(0.35, 0.65);
   await humanMove(page, randRange(TIMING.PRE_CHECKBOX_X), randRange(TIMING.PRE_CHECKBOX_Y));
-  await sleep(randRange(TIMING.PRE_CHECKBOX_WAIT));
+  await sleep3(randRange(TIMING.PRE_CHECKBOX_WAIT));
   await humanClickXY(page, checkboxX, checkboxY);
-  await sleep(TIMING.POST_CHECKBOX_WAIT);
+  await sleep3(TIMING.POST_CHECKBOX_WAIT);
   try {
     const checked = await frame.evaluate(() => {
       const anchor = document.querySelector("#recaptcha-anchor");
@@ -665,7 +1848,7 @@ async function clickChallengeTiles(page, tileIndices) {
     if (!tile)
       continue;
     await humanClickXY(page, tile.centerX, tile.centerY);
-    await sleep(randRange(TIMING.TILE_CLICK_DELAY));
+    await sleep3(randRange(TIMING.TILE_CLICK_DELAY));
     clicked.push(idx);
   }
   return { clicked, challengeInfo };
@@ -675,7 +1858,7 @@ async function clickChallengeVerify(page) {
   if (!challengeInfo)
     throw new Error("No active reCAPTCHA challenge found");
   await humanClickXY(page, challengeInfo.verifyButton.x, challengeInfo.verifyButton.y);
-  await sleep(TIMING.POST_VERIFY_WAIT);
+  await sleep3(TIMING.POST_VERIFY_WAIT);
   const anchorFrame = await page.waitForSelector('iframe[title*="reCAPTCHA"], iframe[src*="recaptcha/api2/anchor"]', { timeout: TIMEOUTS.CHALLENGE_FRAME_WAIT }).catch(() => null);
   if (anchorFrame) {
     const frame = await anchorFrame.contentFrame();
@@ -693,7 +1876,7 @@ async function clickChallengeVerify(page) {
   const newInfo = await getChallengeInfo(page);
   return { solved: false, challengeInfo: newInfo };
 }
-function sleep(ms) {
+function sleep3(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 var mousePositions;
@@ -702,918 +1885,177 @@ var init_humanize = __esm(() => {
   mousePositions = new WeakMap;
 });
 
-// src/lib/logger.ts
-function createLogger(tag) {
-  const prefix = `[${tag}]`;
-  return {
-    debug: (...args) => {
-      if (LEVELS[currentLevel] <= 0)
-        console.log(prefix, ...args);
-    },
-    info: (...args) => {
-      if (LEVELS[currentLevel] <= 1)
-        console.log(prefix, ...args);
-    },
-    warn: (...args) => {
-      if (LEVELS[currentLevel] <= 2)
-        console.warn(prefix, ...args);
-    },
-    error: (...args) => {
-      if (LEVELS[currentLevel] <= 3)
-        console.error(prefix, ...args);
+// src/lib/actions/resolve-selector.ts
+function resolveSelector(selector, ctx) {
+  if (selector.startsWith("@e")) {
+    const ref = ctx.refMap.get(selector);
+    if (!ref) {
+      const available = Array.from(ctx.refMap.keys()).join(", ");
+      throw new Error(`Unknown ref: ${selector}. ${available ? `Available refs: ${available}` : "No refs available — run a snapshot or annotated screenshot step first."}`);
     }
-  };
-}
-var LEVELS, currentLevel;
-var init_logger = __esm(() => {
-  LEVELS = { debug: 0, info: 1, warn: 2, error: 3, silent: 4 };
-  currentLevel = process.env.LOG_LEVEL || "info";
-});
-
-// src/lib/captcha/recaptcha.ts
-function getClient() {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey)
-    throw new Error("ANTHROPIC_API_KEY not set — required for captcha auto-solve");
-  return new import_sdk.default({ apiKey });
-}
-function extractTarget(prompt) {
-  const lines = prompt.split(`
-`).map((l) => l.trim()).filter(Boolean);
-  for (let i = 0;i < lines.length; i++) {
-    if (/select all (images|squares) with/i.test(lines[i])) {
-      const afterWith = lines[i].replace(/.*with\s*/i, "").trim();
-      if (afterWith && afterWith.length > 1 && !/click/i.test(afterWith)) {
-        return afterWith.replace(/^a\s+/i, "").trim();
-      }
-      if (i + 1 < lines.length && !/click/i.test(lines[i + 1])) {
-        return lines[i + 1].replace(/^a\s+/i, "").trim();
-      }
-    }
+    return ref.selector;
   }
-  return lines[1] || prompt;
+  return selector;
 }
-async function screenshotFullGrid(page, challengeInfo) {
-  const { bframeBox, rows, cols } = challengeInfo;
-  if (!bframeBox || rows === 0 || cols === 0)
-    return null;
-  const gridClip = {
-    x: bframeBox.x + 14,
-    y: bframeBox.y + 112,
-    width: bframeBox.width - 28,
-    height: bframeBox.width - 28
-  };
+
+// src/lib/actions/handlers/navigation.ts
+async function navigate(page, step, ctx) {
+  await page.goto(step.url, {
+    waitUntil: step.waitUntil || "domcontentloaded",
+    timeout: TIMEOUTS.NAVIGATION
+  });
+  const stealthScript = contextStealthScripts.get(page.context()) ?? STEALTH_SCRIPT;
   try {
-    const buf = await page.screenshot({ type: "jpeg", quality: 85, clip: gridClip });
-    return buf.toString("base64");
+    await page.evaluate(stealthScript);
   } catch (err) {
-    log.error(`full grid screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
-    return null;
+    log9.warn(`stealth injection failed: ${err}`);
   }
-}
-async function screenshotTiles(page, challengeInfo) {
-  const { bframeBox, rows, cols } = challengeInfo;
-  if (!bframeBox)
-    return [];
-  const gridX = bframeBox.x + 14;
-  const gridY = bframeBox.y + 112;
-  const gridSize = bframeBox.width - 28;
-  const tileW = gridSize / cols;
-  const tileH = gridSize / rows;
-  const tiles = [];
-  for (let r = 0;r < rows; r++) {
-    for (let c = 0;c < cols; c++) {
-      const clip = {
-        x: gridX + c * tileW + 2,
-        y: gridY + r * tileH + 2,
-        width: tileW - 4,
-        height: tileH - 4
-      };
-      try {
-        const buf = await page.screenshot({ type: "jpeg", quality: 85, clip });
-        tiles.push({ index: r * cols + c, imageBase64: buf.toString("base64") });
-      } catch {}
-    }
-  }
-  return tiles;
-}
-async function classifyTiles(client, fullGridBase64, tiles, target, rows, cols) {
-  const results = await Promise.all(tiles.map(async (tile) => {
-    const tileRow = Math.floor(tile.index / cols) + 1;
-    const tileCol = tile.index % cols + 1;
+  if (ctx.sessionData) {
     try {
-      const response = await client.messages.create({
-        model: MODEL,
-        max_tokens: 10,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "image",
-                source: { type: "base64", media_type: "image/jpeg", data: fullGridBase64 }
-              },
-              {
-                type: "image",
-                source: { type: "base64", media_type: "image/jpeg", data: tile.imageBase64 }
-              },
-              {
-                type: "text",
-                text: `Image 1 is a full picture divided into a ${rows}x${cols} grid. Image 2 is the tile at row ${tileRow}, column ${tileCol} of that grid.
-
-Does this tile contain a ${target}? Reply ONLY "yes" or "no".`
-              }
-            ]
-          }
-        ]
-      });
-      const answer = (response.content[0].text ?? "").toLowerCase().trim();
-      const match = answer.startsWith("yes");
-      if (match)
-        log.debug(`tile ${tile.index} (r${tileRow}c${tileCol}): YES`);
-      return { index: tile.index, match };
+      await injectStorage(page, ctx.sessionData);
     } catch (err) {
-      log.error(`tile ${tile.index} classification failed: ${err instanceof Error ? err.message : String(err)}`);
-      return { index: tile.index, match: false };
-    }
-  }));
-  return results.filter((r) => r.match).map((r) => r.index);
-}
-async function submitForm(page) {
-  const selectors = [
-    'form:has([data-sitekey]) [type="submit"]',
-    'form:has(.g-recaptcha) [type="submit"]',
-    'form:has(iframe[src*="recaptcha"]) [type="submit"]',
-    'form [type="submit"]',
-    'form button:not([type="button"]):not([type="reset"])',
-    'input[type="submit"]',
-    'button[type="submit"]'
-  ];
-  for (const selector of selectors) {
-    try {
-      const el = await page.$(selector);
-      if (el) {
-        const visible = await el.isVisible();
-        if (visible) {
-          log.info(`Submitting form via: ${selector}`);
-          await new Promise((r) => setTimeout(r, 500));
-          await humanClick(page, selector);
-          await new Promise((r) => setTimeout(r, 2000));
-          return true;
-        }
-      }
-    } catch {}
-  }
-  log.info("No submit button found — skipping form submission");
-  return false;
-}
-async function solveRecaptcha(page, monitor) {
-  const startTime = Date.now();
-  const client = getClient();
-  let rounds = 0;
-  const checkboxResult = await clickRecaptchaCheckbox(page);
-  if (checkboxResult.solved) {
-    const submitted = await submitForm(page);
-    return { solved: true, rounds: 0, durationMs: Date.now() - startTime, submitted };
-  }
-  if (!checkboxResult.challengeInfo) {
-    return { solved: false, rounds: 0, durationMs: Date.now() - startTime, reason: "No challenge appeared after clicking checkbox" };
-  }
-  let challengeInfo = checkboxResult.challengeInfo;
-  while (rounds < MAX_ROUNDS) {
-    if (Date.now() - startTime > MAX_DURATION_MS) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Timeout exceeded" };
-    }
-    rounds++;
-    monitor?.reportActivity();
-    if (!challengeInfo) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge info lost" };
-    }
-    const target = extractTarget(challengeInfo.prompt);
-    log.info(`Round ${rounds}: looking for "${target}" in ${challengeInfo.rows}x${challengeInfo.cols} grid`);
-    const [fullGridImage, tileImages] = await Promise.all([
-      screenshotFullGrid(page, challengeInfo),
-      screenshotTiles(page, challengeInfo)
-    ]);
-    if (!fullGridImage || tileImages.length === 0) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Failed to screenshot challenge" };
-    }
-    monitor?.reportActivity();
-    const matchingIndices = await classifyTiles(client, fullGridImage, tileImages, target, challengeInfo.rows, challengeInfo.cols);
-    log.info(`Round ${rounds}: matched tiles [${matchingIndices.join(", ")}]`);
-    monitor?.reportActivity();
-    if (matchingIndices.length > 0) {
-      await clickChallengeTiles(page, matchingIndices);
-      const isDynamic = challengeInfo.prompt.toLowerCase().includes("none left");
-      if (isDynamic) {
-        await new Promise((r) => setTimeout(r, TILE_SETTLE_MS));
-        const newInfo = await getChallengeInfo(page);
-        if (newInfo) {
-          const [newFullGrid, newTiles] = await Promise.all([
-            screenshotFullGrid(page, newInfo),
-            screenshotTiles(page, newInfo)
-          ]);
-          if (newFullGrid && newTiles.length > 0) {
-            const replacedTiles = newTiles.filter((t) => matchingIndices.includes(t.index));
-            if (replacedTiles.length > 0) {
-              monitor?.reportActivity();
-              const newMatches = await classifyTiles(client, newFullGrid, replacedTiles, target, newInfo.rows, newInfo.cols);
-              if (newMatches.length > 0) {
-                log.info(`Round ${rounds}: dynamic tiles matched [${newMatches.join(", ")}]`);
-                await clickChallengeTiles(page, newMatches);
-                await new Promise((r) => setTimeout(r, TILE_SETTLE_MS));
-              }
-            }
-          }
-        }
-      }
-    }
-    const verifyResult = await clickChallengeVerify(page);
-    monitor?.reportActivity();
-    if (verifyResult.solved) {
-      log.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
-      const submitted = await submitForm(page);
-      return { solved: true, rounds, durationMs: Date.now() - startTime, submitted };
-    }
-    challengeInfo = verifyResult.challengeInfo || null;
-    if (!challengeInfo) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge disappeared after verify" };
-    }
-    log.info(`Round ${rounds}: not solved, new challenge appeared`);
-  }
-  return { solved: false, rounds, durationMs: Date.now() - startTime, reason: `Max rounds (${MAX_ROUNDS}) exceeded` };
-}
-var import_sdk, log, MAX_ROUNDS = 8, MAX_DURATION_MS = 45000, TILE_SETTLE_MS, MODEL = "claude-haiku-4-5-20251001";
-var init_recaptcha = __esm(() => {
-  init_humanize();
-  init_constants();
-  init_logger();
-  import_sdk = __toESM(require("@anthropic-ai/sdk"));
-  log = createLogger("captcha-solver");
-  TILE_SETTLE_MS = TIMING.TILE_SETTLE;
-});
-
-// src/lib/captcha/hcaptcha.ts
-function getClient2() {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey)
-    throw new Error("ANTHROPIC_API_KEY not set — required for captcha auto-solve");
-  return new import_sdk2.default({ apiKey });
-}
-function rand2(min, max) {
-  return Math.random() * (max - min) + min;
-}
-function sleep2(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-async function clickCheckbox(page) {
-  const checkboxFrame = await page.waitForSelector('iframe[src*="hcaptcha.com"], iframe[data-hcaptcha-widget-id], iframe[title*="hCaptcha"]', { timeout: 1e4 }).catch(() => null);
-  if (!checkboxFrame)
-    throw new Error("hCaptcha checkbox iframe not found");
-  const box = await checkboxFrame.boundingBox();
-  if (!box)
-    throw new Error("hCaptcha iframe not visible");
-  await humanMove(page, rand2(200, 500), rand2(150, 400));
-  await sleep2(rand2(300, 700));
-  const cx = box.x + box.width * rand2(0.15, 0.35);
-  const cy = box.y + box.height * rand2(0.3, 0.7);
-  await humanClickXY(page, cx, cy);
-  await sleep2(2500);
-  const frame = await checkboxFrame.contentFrame();
-  if (frame) {
-    try {
-      const checked = await frame.evaluate(() => {
-        const cb = document.querySelector("#checkbox");
-        return cb?.getAttribute("aria-checked") === "true";
-      });
-      if (checked)
-        return true;
-    } catch {}
-  }
-  return false;
-}
-async function getChallengeInfo2(page) {
-  const challengeFrame = await page.waitForSelector('iframe[title="hCaptcha challenge"], iframe[title*="hcaptcha challenge" i]', { timeout: 8000 }).catch(() => null);
-  if (!challengeFrame)
-    return null;
-  const frameBox = await challengeFrame.boundingBox();
-  if (!frameBox)
-    return null;
-  const frame = await challengeFrame.contentFrame();
-  if (!frame)
-    return null;
-  const info = await frame.evaluate(() => {
-    const promptEl = document.querySelector(".prompt-text, .task-instructions, [class*='prompt'], [class*='task-description']");
-    const prompt = promptEl ? promptEl.innerText.trim() : "";
-    const tileEls = document.querySelectorAll(".task-image, [class*='task-grid'] > *, [class*='challenge-container'] .image-wrapper, .image-wrapper");
-    const count = tileEls.length;
-    let rows = 3, cols = 3;
-    if (count === 16) {
-      rows = 4;
-      cols = 4;
-    } else if (count === 9) {
-      rows = 3;
-      cols = 3;
-    } else if (count === 6) {
-      rows = 2;
-      cols = 3;
-    }
-    return { prompt, count, rows, cols };
-  }).catch(() => ({ prompt: "", count: 0, rows: 3, cols: 3 }));
-  if (!info.prompt && info.count === 0)
-    return null;
-  const gridPadTop = 150;
-  const gridPadLeft = 20;
-  const gridPadRight = 20;
-  const gridPadBottom = 80;
-  const gridWidth = frameBox.width - gridPadLeft - gridPadRight;
-  const gridHeight = frameBox.height - gridPadTop - gridPadBottom;
-  const tileW = gridWidth / info.cols;
-  const tileH = gridHeight / info.rows;
-  const tiles = [];
-  for (let r = 0;r < info.rows; r++) {
-    for (let c = 0;c < info.cols; c++) {
-      tiles.push({
-        index: r * info.cols + c,
-        centerX: Math.round(frameBox.x + gridPadLeft + c * tileW + tileW / 2),
-        centerY: Math.round(frameBox.y + gridPadTop + r * tileH + tileH / 2)
-      });
+      log9.warn(`storage injection after navigate failed: ${err}`);
     }
   }
-  const verifyBtnBox = await frame.evaluate(() => {
-    const btn = document.querySelector('.button-submit.button, [aria-label="Verify"], [aria-label="Skip Challenge"]');
-    if (!btn)
-      return null;
-    const r = btn.getBoundingClientRect();
-    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-  }).catch(() => null);
-  const verifyButton = verifyBtnBox ? { x: Math.round(frameBox.x + verifyBtnBox.x), y: Math.round(frameBox.y + verifyBtnBox.y) } : { x: Math.round(frameBox.x + frameBox.width - 55), y: Math.round(frameBox.y + frameBox.height - 30) };
-  log2.info(`Round challenge: "${info.prompt}" (${info.rows}x${info.cols})`);
-  return { prompt: info.prompt, rows: info.rows, cols: info.cols, tiles, verifyButton, frameBox };
 }
-async function screenshotChallenge(page, challenge) {
-  const { frameBox } = challenge;
-  try {
-    await sleep2(1000);
-    const challengeEl = await page.$('iframe[title="hCaptcha challenge"], iframe[title*="hcaptcha challenge" i]').catch(() => null);
-    let buf;
-    if (challengeEl) {
-      buf = Buffer.from(await challengeEl.screenshot({ type: "jpeg", quality: 85 }));
-    } else {
-      buf = await page.screenshot({ type: "jpeg", quality: 85, clip: frameBox });
-    }
-    return buf.toString("base64");
-  } catch (err) {
-    log2.error(`screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
-    return null;
-  }
+async function click(page, step, ctx) {
+  await page.click(resolveSelector(step.selector, ctx));
 }
-async function classifyTiles2(client, screenshotBase64, challenge) {
-  const { prompt, rows, cols } = challenge;
-  const total = rows * cols;
-  try {
-    const response = await client.messages.create({
-      model: MODEL2,
-      max_tokens: 30,
-      system: `Output ONLY a comma-separated list of tile numbers or "none". Valid examples: "0,3,5" or "2" or "none". Output nothing else.`,
-      messages: [{
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: screenshotBase64 } },
-          { type: "text", text: `Task: "${prompt}". Tiles 0-${total - 1} left-to-right top-to-bottom in a ${rows}×${cols} grid. Which tiles match? Reply ONLY with numbers or "none".` }
-        ]
-      }]
-    });
-    const text = (response.content[0].text ?? "").trim();
-    log2.debug(`classify response: "${text}"`);
-    if (text.toLowerCase().startsWith("none"))
-      return [];
-    return text.split(/[,\s]+/).map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n) && n >= 0 && n < total);
-  } catch (err) {
-    log2.error(`classification failed: ${err instanceof Error ? err.message : String(err)}`);
-    return [];
-  }
+async function fill(page, step, ctx) {
+  await page.fill(resolveSelector(step.selector, ctx), step.value);
 }
-async function isSolved(page) {
-  const el = await page.$('iframe[title="hCaptcha challenge"], iframe[title*="hcaptcha challenge" i]').catch(() => null);
-  if (!el)
-    return true;
-  const visible = await el.isVisible().catch(() => false);
-  return !visible;
-}
-async function clickVerify(page, challenge) {
-  await humanClickXY(page, challenge.verifyButton.x, challenge.verifyButton.y);
-  await sleep2(2500);
-  return isSolved(page);
-}
-async function solveHCaptcha(page, monitor) {
-  const startTime = Date.now();
-  const client = getClient2();
-  let rounds = 0;
-  let solvedOnCheckbox = false;
-  try {
-    solvedOnCheckbox = await clickCheckbox(page);
-  } catch (err) {
-    return { solved: false, rounds: 0, durationMs: Date.now() - startTime, reason: err instanceof Error ? err.message : String(err) };
-  }
-  if (solvedOnCheckbox) {
-    log2.info("Solved on checkbox click (no challenge)");
-    return { solved: true, rounds: 0, durationMs: Date.now() - startTime };
-  }
-  while (rounds < MAX_ROUNDS2) {
-    if (Date.now() - startTime > MAX_DURATION_MS2) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Timeout exceeded" };
-    }
-    rounds++;
-    monitor?.reportActivity();
-    const challenge = await getChallengeInfo2(page);
-    if (!challenge) {
-      log2.info("Challenge frame gone — assuming solved");
-      return { solved: true, rounds, durationMs: Date.now() - startTime };
-    }
-    const screenshotBase64 = await screenshotChallenge(page, challenge);
-    if (!screenshotBase64) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Failed to screenshot challenge" };
-    }
-    monitor?.reportActivity();
-    const matchingIndices = await classifyTiles2(client, screenshotBase64, challenge);
-    log2.info(`Round ${rounds}: clicking tiles [${matchingIndices.join(", ")}]`);
-    monitor?.reportActivity();
-    for (const idx of matchingIndices) {
-      const tile = challenge.tiles[idx];
-      if (!tile)
-        continue;
-      await humanClickXY(page, tile.centerX + rand2(-5, 5), tile.centerY + rand2(-5, 5));
-      await sleep2(rand2(150, 400));
-    }
-    await sleep2(rand2(500, 1000));
-    const solved = await clickVerify(page, challenge);
-    monitor?.reportActivity();
-    if (solved) {
-      log2.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
-      return { solved: true, rounds, durationMs: Date.now() - startTime };
-    }
-    log2.info(`Round ${rounds}: not solved, retrying`);
-    await sleep2(rand2(500, 1000));
-  }
-  return { solved: false, rounds, durationMs: Date.now() - startTime, reason: `Max rounds (${MAX_ROUNDS2}) exceeded` };
-}
-var import_sdk2, log2, MAX_ROUNDS2 = 8, MAX_DURATION_MS2 = 60000, MODEL2 = "claude-haiku-4-5-20251001";
-var init_hcaptcha = __esm(() => {
-  init_humanize();
-  init_logger();
-  import_sdk2 = __toESM(require("@anthropic-ai/sdk"));
-  log2 = createLogger("hcaptcha-solver");
-});
-
-// src/lib/paths.ts
-function getDataDir() {
-  return process.env.IFRAMER_DATA_DIR || import_path.default.join(import_os.default.homedir(), ".iframer");
-}
-var import_path, import_os;
-var init_paths = __esm(() => {
-  import_path = __toESM(require("path"));
-  import_os = __toESM(require("os"));
-});
-
-// src/lib/auth/crypto.ts
-function deriveKey(token, purpose = INFO) {
-  return new Promise((resolve, reject) => {
-    import_crypto.default.hkdf("sha256", token, SALT, purpose, KEY_LENGTH, (err, key) => {
-      if (err)
-        return reject(err);
-      resolve(Buffer.from(key));
-    });
-  });
-}
-function encrypt(plaintext, key) {
-  const iv = import_crypto.default.randomBytes(IV_LENGTH);
-  const cipher = import_crypto.default.createCipheriv("aes-256-gcm", key, iv);
-  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return Buffer.concat([iv, tag, encrypted]);
-}
-function decrypt(blob, key) {
-  const iv = blob.subarray(0, IV_LENGTH);
-  const tag = blob.subarray(IV_LENGTH, IV_LENGTH + TAG_LENGTH);
-  const ciphertext = blob.subarray(IV_LENGTH + TAG_LENGTH);
-  const decipher = import_crypto.default.createDecipheriv("aes-256-gcm", key, iv);
-  decipher.setAuthTag(tag);
-  return decipher.update(ciphertext, undefined, "utf8") + decipher.final("utf8");
-}
-function generateTOTP(secret, period = 30, digits = 6) {
-  const base32Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  const cleanSecret = secret.replace(/[\s=-]/g, "").toUpperCase();
-  let bits = "";
-  for (const c of cleanSecret) {
-    const val = base32Chars.indexOf(c);
-    if (val === -1)
-      continue;
-    bits += val.toString(2).padStart(5, "0");
-  }
-  const keyBytes = [];
-  for (let i = 0;i + 8 <= bits.length; i += 8) {
-    keyBytes.push(parseInt(bits.substring(i, i + 8), 2));
-  }
-  const key = Buffer.from(keyBytes);
-  const time = Math.floor(Date.now() / 1000 / period);
-  const timeBuffer = Buffer.alloc(8);
-  timeBuffer.writeUInt32BE(Math.floor(time / 4294967296), 0);
-  timeBuffer.writeUInt32BE(time & 4294967295, 4);
-  const hmac = import_crypto.default.createHmac("sha1", key).update(timeBuffer).digest();
-  const offset = hmac[hmac.length - 1] & 15;
-  const code = ((hmac[offset] & 127) << 24 | (hmac[offset + 1] & 255) << 16 | (hmac[offset + 2] & 255) << 8 | hmac[offset + 3] & 255) % Math.pow(10, digits);
-  return code.toString().padStart(digits, "0");
-}
-var import_crypto, SALT = "iframer-session", INFO = "encryption", KEY_LENGTH = 32, IV_LENGTH = 12, TAG_LENGTH = 16;
-var init_crypto = __esm(() => {
-  init_paths();
-  import_crypto = __toESM(require("crypto"));
-});
-
-// src/lib/knowledge.ts
-var exports_knowledge = {};
-__export(exports_knowledge, {
-  sanitizeDomain: () => sanitizeDomain,
-  readKnowledge: () => readKnowledge,
-  parseKnowledge: () => parseKnowledge,
-  normalizeDomain: () => normalizeDomain,
-  mergeKnowledge: () => mergeKnowledge,
-  listKnowledge: () => listKnowledge,
-  getKnowledgePath: () => getKnowledgePath,
-  getKnowledgeDir: () => getKnowledgeDir,
-  domainLookupChain: () => domainLookupChain,
-  clearKnowledge: () => clearKnowledge
-});
-function getKnowledgeDir() {
-  return import_path2.default.join(getDataDir(), "knowledge");
-}
-function getKnowledgePath(domain) {
-  const safe = sanitizeDomain(domain);
-  return import_path2.default.join(getKnowledgeDir(), `${safe}.md`);
-}
-function normalizeDomain(input) {
-  let d = (input || "").trim().toLowerCase();
-  if (!d)
-    return "";
-  try {
-    if (d.includes("://")) {
-      d = new URL(d).hostname;
-    } else if (d.includes("/")) {
-      d = new URL(`https://${d}`).hostname;
-    }
-  } catch {}
-  d = d.replace(/:\d+$/, "");
-  d = d.replace(/^www\./, "");
-  return d;
-}
-function domainLookupChain(input) {
-  const normalized = normalizeDomain(input);
-  if (!normalized)
-    return [];
-  const chain = [normalized];
-  const parts = normalized.split(".");
-  while (parts.length > 2) {
-    parts.shift();
-    chain.push(parts.join("."));
-  }
-  return chain;
-}
-function sanitizeDomain(input) {
-  const normalized = normalizeDomain(input);
-  return normalized.replace(/[^a-z0-9.-]/g, "_");
-}
-function ensureDir() {
-  import_fs.default.mkdirSync(getKnowledgeDir(), { recursive: true });
-}
-function readKnowledge(domain) {
-  const p = getKnowledgePath(domain);
-  try {
-    return import_fs.default.readFileSync(p, "utf8");
-  } catch {
-    return null;
-  }
-}
-function parseKnowledge(domain) {
-  const raw = readKnowledge(domain);
-  if (!raw)
-    return null;
-  return parseMarkdown(raw);
-}
-function listKnowledge() {
-  const dir = getKnowledgeDir();
-  let entries = [];
-  try {
-    entries = import_fs.default.readdirSync(dir);
-  } catch {
-    return [];
-  }
-  const results = [];
-  for (const file of entries) {
-    if (!file.endsWith(".md"))
-      continue;
-    const full = import_path2.default.join(dir, file);
-    try {
-      const stat = import_fs.default.statSync(full);
-      const raw = import_fs.default.readFileSync(full, "utf8");
-      const parsed = parseMarkdown(raw);
-      results.push({
-        domain: parsed?.domain ?? file.replace(/\.md$/, ""),
-        lastVerified: parsed?.lastVerified ?? new Date(stat.mtimeMs).toISOString(),
-        lastMode: parsed?.lastMode ?? "unknown",
-        sizeBytes: stat.size
-      });
-    } catch {}
-  }
-  results.sort((a, b) => a.lastVerified < b.lastVerified ? 1 : -1);
-  return results;
-}
-function clearKnowledge(domain) {
-  const dir = getKnowledgeDir();
-  if (domain) {
-    const p = getKnowledgePath(domain);
-    try {
-      import_fs.default.unlinkSync(p);
-      return { removed: 1 };
-    } catch {
-      return { removed: 0 };
-    }
-  }
-  let removed = 0;
-  try {
-    const entries = import_fs.default.readdirSync(dir);
-    for (const f of entries) {
-      if (f.endsWith(".md")) {
-        try {
-          import_fs.default.unlinkSync(import_path2.default.join(dir, f));
-          removed++;
-        } catch {}
-      }
-    }
-  } catch {}
-  return { removed };
-}
-function mergeKnowledge(domain, updates) {
-  ensureDir();
-  const existing = parseKnowledge(domain);
-  const merged = {
-    domain: sanitizeDomain(domain),
-    lastVerified: updates.lastVerified ?? new Date().toISOString(),
-    lastMode: updates.lastMode ?? existing?.lastMode ?? "unknown",
-    browserRequired: updates.browserRequired ?? existing?.browserRequired ?? true,
-    auth: updates.auth ?? existing?.auth ?? { type: "unknown" },
-    endpoints: dedupeEndpoints([...existing?.endpoints ?? [], ...updates.endpoints ?? []]),
-    notes: dedupeNotes([...existing?.notes ?? [], ...updates.notes ?? []])
-  };
-  const md = renderMarkdown(merged);
-  import_fs.default.writeFileSync(getKnowledgePath(domain), md, "utf8");
-  log3.info(`knowledge updated: ${merged.domain} (${merged.endpoints.length} endpoints)`);
-}
-function dedupeEndpoints(endpoints) {
-  const seen = new Map;
-  for (const ep of endpoints) {
-    const key = `${ep.method.toUpperCase()} ${ep.path}`;
-    const existing = seen.get(key);
-    if (!existing) {
-      seen.set(key, ep);
-    } else {
-      seen.set(key, {
-        ...existing,
-        description: ep.description || existing.description,
-        example: ep.example || existing.example,
-        firstSeen: existing.firstSeen || ep.firstSeen
-      });
-    }
-  }
-  return [...seen.values()].sort((a, b) => {
-    if (a.path !== b.path)
-      return a.path < b.path ? -1 : 1;
-    return a.method < b.method ? -1 : 1;
-  });
-}
-function dedupeNotes(notes) {
-  const seen = new Set;
-  const out = [];
-  for (const note of notes) {
-    const n = note.trim();
-    if (n && !seen.has(n)) {
-      seen.add(n);
-      out.push(n);
-    }
-  }
-  return out;
-}
-function renderMarkdown(data) {
-  const lines = [];
-  lines.push("---");
-  lines.push(`domain: ${data.domain}`);
-  lines.push(`lastVerified: ${data.lastVerified}`);
-  lines.push(`lastMode: ${data.lastMode}`);
-  lines.push(`browserRequired: ${data.browserRequired}`);
-  lines.push(`authType: ${data.auth.type}`);
-  lines.push("---");
-  lines.push("");
-  lines.push(`# ${data.domain}`);
-  lines.push("");
-  lines.push(`Last verified: **${data.lastVerified}** via \`${data.lastMode}\` mode.`);
-  lines.push("");
-  lines.push("## Auth material");
-  lines.push("");
-  lines.push(`**Type:** ${data.auth.type}`);
-  if (data.auth.cookieNames?.length) {
-    lines.push(`**Required cookies:** ${data.auth.cookieNames.map((n) => `\`${n}\``).join(", ")}`);
-  }
-  if (data.auth.localStorageKeys?.length) {
-    lines.push(`**localStorage keys:** ${data.auth.localStorageKeys.map((n) => `\`${n}\``).join(", ")}`);
-  }
-  if (data.auth.sessionStorageKeys?.length) {
-    lines.push(`**sessionStorage keys:** ${data.auth.sessionStorageKeys.map((n) => `\`${n}\``).join(", ")}`);
-  }
-  if (data.auth.headers?.length) {
-    lines.push(`**Request headers:** ${data.auth.headers.map((n) => `\`${n}\``).join(", ")}`);
-  }
-  lines.push("");
-  lines.push("> _Structure only — actual values are stored encrypted in the session store._");
-  lines.push("");
-  if (data.endpoints.length > 0) {
-    lines.push("## Known endpoints");
-    lines.push("");
-    lines.push("The agent can call these directly (with the auth material above) instead of launching a browser.");
-    lines.push("");
-    for (const ep of data.endpoints) {
-      lines.push(`### ${ep.method.toUpperCase()} ${ep.path}`);
-      if (ep.description)
-        lines.push("");
-      if (ep.description)
-        lines.push(ep.description);
-      if (ep.example) {
-        lines.push("");
-        lines.push("```");
-        lines.push(ep.example);
-        lines.push("```");
-      }
-      lines.push("");
-    }
+async function humanClickStep(page, step, ctx) {
+  if (step.selector) {
+    await humanClick(page, resolveSelector(step.selector, ctx));
+  } else if (step.x !== undefined && step.y !== undefined) {
+    await humanClickXY(page, step.x, step.y);
   } else {
-    lines.push("## Known endpoints");
-    lines.push("");
-    lines.push("_None captured yet. Enable `captureApi: true` on the next `execute` run to populate this section._");
-    lines.push("");
+    throw new Error("human-click requires selector or x/y coordinates");
   }
-  if (data.notes.length > 0) {
-    lines.push("## Notes");
-    lines.push("");
-    for (const n of data.notes)
-      lines.push(`- ${n}`);
-    lines.push("");
-  }
-  return lines.join(`
-`);
 }
-function parseMarkdown(raw) {
-  const frontmatterMatch = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n/);
-  if (!frontmatterMatch)
-    return null;
-  const fm = {};
-  for (const line of frontmatterMatch[1].split(`
-`)) {
-    const m = line.match(/^(\w+):\s*(.*)$/);
-    if (m)
-      fm[m[1]] = m[2].trim();
+async function rightClick(page, step, ctx) {
+  if (step.selector) {
+    await page.click(resolveSelector(step.selector, ctx), { button: "right" });
+  } else if (step.x !== undefined && step.y !== undefined) {
+    await page.mouse.click(step.x, step.y, { button: "right" });
+  } else {
+    throw new Error("right-click requires selector or x/y coordinates");
   }
-  const body = raw.slice(frontmatterMatch[0].length);
-  const auth = { type: fm.authType ?? "unknown" };
-  const authSection = extractSection(body, "Auth material");
-  if (authSection) {
-    auth.cookieNames = extractBackticks(/\*\*Required cookies:\*\*\s+(.+)/, authSection);
-    auth.localStorageKeys = extractBackticks(/\*\*localStorage keys:\*\*\s+(.+)/, authSection);
-    auth.sessionStorageKeys = extractBackticks(/\*\*sessionStorage keys:\*\*\s+(.+)/, authSection);
-    auth.headers = extractBackticks(/\*\*Request headers:\*\*\s+(.+)/, authSection);
-  }
-  const endpoints = [];
-  const endpointSection = extractSection(body, "Known endpoints");
-  if (endpointSection) {
-    const endpointRegex = /^### (GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\S+)\s*$/gim;
-    let m;
-    while ((m = endpointRegex.exec(endpointSection)) !== null) {
-      endpoints.push({ method: m[1], path: m[2] });
-    }
-  }
-  const notes = [];
-  const notesSection = extractSection(body, "Notes");
-  if (notesSection) {
-    for (const line of notesSection.split(`
-`)) {
-      const m = line.match(/^-\s+(.+)$/);
-      if (m)
-        notes.push(m[1].trim());
-    }
-  }
-  return {
-    domain: fm.domain ?? "",
-    lastVerified: fm.lastVerified ?? "",
-    lastMode: fm.lastMode ?? "unknown",
-    browserRequired: fm.browserRequired !== "false",
-    auth,
-    endpoints,
-    notes
-  };
 }
-function extractSection(body, heading) {
-  const re = new RegExp(`^##\\s+${heading}\\s*$`, "m");
-  const match = body.match(re);
-  if (!match || match.index === undefined)
-    return null;
-  const start = match.index + match[0].length;
-  const nextSection = body.slice(start).match(/^##\s+/m);
-  const end = nextSection?.index != null ? start + nextSection.index : body.length;
-  return body.slice(start, end);
+async function humanTypeStep(page, step, ctx) {
+  await humanType(page, resolveSelector(step.selector, ctx), step.value);
 }
-function extractBackticks(re, text) {
-  const m = text.match(re);
-  if (!m)
-    return;
-  const items = [...m[1].matchAll(/`([^`]+)`/g)].map((x) => x[1]);
-  return items.length > 0 ? items : undefined;
+async function evaluate(page, step) {
+  return page.evaluate(step.expression);
 }
-var import_fs, import_path2, log3;
-var init_knowledge = __esm(() => {
+async function extract(page, step) {
+  return page.evaluate(step.expression);
+}
+async function wait(page, step) {
+  await page.waitForTimeout(step.ms);
+}
+async function waitFor(page, step, ctx) {
+  await page.waitForSelector(resolveSelector(step.selector, ctx), { timeout: step.timeout || TIMEOUTS.SELECTOR_WAIT });
+}
+async function scroll(page, step) {
+  await page.evaluate((dy) => window.scrollBy(0, dy || document.body.scrollHeight), step.deltaY ?? 0);
+}
+async function keyboard(page, step) {
+  await page.keyboard.press(step.key);
+}
+async function typeCode(page, step, ctx) {
+  const code = String(step.value || "");
+  const selector = step.selector ? resolveSelector(step.selector, ctx) : 'input[type="tel"]';
+  const firstInput = await page.waitForSelector(selector, { timeout: TIMEOUTS.TOTP_INPUT });
+  if (!firstInput)
+    throw new Error(`Input not found: ${selector}`);
+  await firstInput.click();
+  await page.waitForTimeout(TIMING.POST_FORM_CLICK);
+  for (const digit of code) {
+    await page.keyboard.press(digit);
+    await page.waitForTimeout(TIMING.DIGIT_DELAY_BASE + Math.random() * TIMING.DIGIT_DELAY_RANGE);
+  }
+  return { typed: code.length };
+}
+var log9;
+var init_navigation = __esm(() => {
+  init_stealth();
+  init_humanize();
   init_logger();
-  init_paths();
-  import_fs = __toESM(require("fs"));
-  import_path2 = __toESM(require("path"));
-  log3 = createLogger("knowledge");
+  init_constants();
+  log9 = createLogger("actions");
 });
 
-// src/lib/session/persistence.ts
-var exports_persistence = {};
-__export(exports_persistence, {
-  injectStorage: () => injectStorage,
-  injectCookies: () => injectCookies,
-  extractSession: () => extractSession
-});
-async function extractSession(context, page) {
-  const cookies = await context.cookies();
-  const { localStorage, sessionStorage } = await page.evaluate(() => {
-    const ls = {};
-    const ss = {};
-    for (let i = 0;i < window.localStorage.length; i++) {
-      const key = window.localStorage.key(i);
-      ls[key] = window.localStorage.getItem(key);
+// src/lib/actions/handlers/find.ts
+async function find(page, step, ctx) {
+  if (!step.role && !step.name && !step.text && !step.placeholder && !step.label) {
+    throw new Error("find requires at least one of: role, name, text, placeholder, label");
+  }
+  let locator;
+  if (step.role) {
+    const opts = {};
+    if (step.name)
+      opts.name = step.exact ? step.name : new RegExp(step.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    if (step.exact !== undefined)
+      opts.exact = step.exact;
+    locator = page.getByRole(step.role, opts);
+  } else if (step.label) {
+    locator = page.getByLabel(step.label, { exact: step.exact });
+  } else if (step.placeholder) {
+    locator = page.getByPlaceholder(step.placeholder, { exact: step.exact });
+  } else if (step.text) {
+    locator = page.getByText(step.text, { exact: step.exact });
+  } else {
+    locator = page.locator(`[aria-label="${step.name}"], [title="${step.name}"]`);
+  }
+  const count = await locator.count();
+  if (count === 0) {
+    throw new Error(`No element found matching: ${JSON.stringify({ role: step.role, name: step.name, text: step.text, placeholder: step.placeholder, label: step.label })}`);
+  }
+  const element = locator.first();
+  const box = await element.boundingBox();
+  const elInfo = await element.evaluate((el) => {
+    const tag = el.tagName.toLowerCase();
+    const text = (el.textContent?.trim() || "").slice(0, 60);
+    const path7 = [];
+    let current = el;
+    while (current && current !== document.body && current !== document.documentElement) {
+      let seg = current.tagName.toLowerCase();
+      if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
+        path7.unshift(`#${current.id}`);
+        break;
+      }
+      const parent = current.parentElement;
+      if (parent && current) {
+        const currentTag = current.tagName;
+        const siblings = Array.from(parent.children).filter((c) => c.tagName === currentTag);
+        if (siblings.length > 1) {
+          const idx = siblings.indexOf(current) + 1;
+          seg += `:nth-of-type(${idx})`;
+        }
+      }
+      path7.unshift(seg);
+      current = parent;
     }
-    for (let i = 0;i < window.sessionStorage.length; i++) {
-      const key = window.sessionStorage.key(i);
-      ss[key] = window.sessionStorage.getItem(key);
-    }
-    return { localStorage: ls, sessionStorage: ss };
+    return { tag, text, selector: path7.join(" > ") };
   });
-  const origin = new URL(page.url()).origin;
+  const ref = `@e${ctx.nextRefId++}`;
+  const displayRole = step.role || elInfo.tag;
+  ctx.refMap.set(ref, {
+    ref,
+    role: displayRole,
+    name: elInfo.text,
+    selector: elInfo.selector
+  });
   return {
-    cookies,
-    localStorage: { [origin]: localStorage },
-    sessionStorage: { [origin]: sessionStorage },
-    extractedAt: new Date().toISOString()
+    ref,
+    role: displayRole,
+    name: elInfo.text,
+    tag: elInfo.tag,
+    boundingBox: box,
+    matchCount: count
   };
 }
-async function injectCookies(context, sessionData) {
-  if (sessionData?.cookies?.length > 0) {
-    await context.addCookies(sessionData.cookies);
-  }
-}
-async function injectStorage(page, sessionData) {
-  if (!sessionData)
-    return;
-  const origin = new URL(page.url()).origin;
-  const ls = sessionData.localStorage?.[origin];
-  const ss = sessionData.sessionStorage?.[origin];
-  if (ls && Object.keys(ls).length > 0) {
-    await page.evaluate((data) => {
-      for (const [key, value] of Object.entries(data)) {
-        window.localStorage.setItem(key, value);
-      }
-    }, ls);
-  }
-  if (ss && Object.keys(ss).length > 0) {
-    await page.evaluate((data) => {
-      for (const [key, value] of Object.entries(data)) {
-        window.sessionStorage.setItem(key, value);
-      }
-    }, ss);
-  }
-}
-
-// src/lib/screenshot.ts
-function saveScreenshot(buffer, filename, screenshotDir, publicUrl) {
-  import_fs2.default.mkdirSync(screenshotDir, { recursive: true });
-  const filePath = import_path3.default.join(screenshotDir, filename);
-  import_fs2.default.writeFileSync(filePath, buffer);
-  return `${publicUrl}/screenshots/${filename}`;
-}
-var import_fs2, import_path3;
-var init_screenshot = __esm(() => {
-  import_fs2 = __toESM(require("fs"));
-  import_path3 = __toESM(require("path"));
-});
 
 // src/lib/snapshot.ts
 async function takeSnapshot(page, ctx, options) {
@@ -1667,12 +2109,12 @@ async function takeSnapshot(page, ctx, options) {
       return true;
     }
     function buildSelector(el) {
-      const path4 = [];
+      const path7 = [];
       let current = el;
       while (current && current !== document.body && current !== document.documentElement) {
         let seg = current.tagName.toLowerCase();
         if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-          path4.unshift(`#${current.id}`);
+          path7.unshift(`#${current.id}`);
           break;
         }
         const parent = current.parentElement;
@@ -1684,10 +2126,10 @@ async function takeSnapshot(page, ctx, options) {
             seg += `:nth-of-type(${idx})`;
           }
         }
-        path4.unshift(seg);
+        path7.unshift(seg);
         current = parent;
       }
-      return path4.join(" > ");
+      return path7.join(" > ");
     }
     function getName(el) {
       const ariaLabel = el.getAttribute("aria-label");
@@ -1861,12 +2303,12 @@ async function annotatedScreenshot(page, ctx) {
       return true;
     }
     function buildSelector(el) {
-      const path4 = [];
+      const path7 = [];
       let current = el;
       while (current && current !== document.body && current !== document.documentElement) {
         let seg = current.tagName.toLowerCase();
         if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-          path4.unshift(`#${current.id}`);
+          path7.unshift(`#${current.id}`);
           break;
         }
         const parent = current.parentElement;
@@ -1878,10 +2320,10 @@ async function annotatedScreenshot(page, ctx) {
             seg += `:nth-of-type(${idx})`;
           }
         }
-        path4.unshift(seg);
+        path7.unshift(seg);
         current = parent;
       }
-      return path4.join(" > ");
+      return path7.join(" > ");
     }
     function getName(el) {
       const ariaLabel = el.getAttribute("aria-label");
@@ -1980,42 +2422,468 @@ var init_annotate = __esm(() => {
   init_screenshot();
 });
 
-// src/lib/actions.ts
-function getErrorMessage(err) {
-  return err instanceof Error ? err.message : String(err);
+// src/lib/actions/handlers/screenshot.ts
+async function screenshot(page, step, ctx) {
+  if (step.annotate) {
+    const annotated = await annotatedScreenshot(page, ctx);
+    const refLines = annotated.refs.map((r) => `  ${r.ref} ${r.role} "${r.name}"`).join(`
+`);
+    return { screenshotUrl: annotated.screenshotUrl, refs: refLines };
+  }
+  const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
+  const url = saveScreenshot(buf, `step-${Date.now()}.jpg`, ctx.screenshotDir, ctx.publicUrl);
+  return { screenshotUrl: url };
 }
-function resolveSelector(selector, ctx) {
-  if (selector.startsWith("@e")) {
-    const ref = ctx.refMap.get(selector);
-    if (!ref) {
-      const available = Array.from(ctx.refMap.keys()).join(", ");
-      throw new Error(`Unknown ref: ${selector}. ${available ? `Available refs: ${available}` : "No refs available — run a snapshot or annotated screenshot step first."}`);
+async function snapshot(page, step, ctx) {
+  const snap = await takeSnapshot(page, ctx, {
+    interactiveOnly: step.interactiveOnly,
+    maxElements: step.maxElements
+  });
+  return { elementCount: snap.nodes.length, snapshot: snap.text };
+}
+var init_screenshot2 = __esm(() => {
+  init_screenshot();
+  init_snapshot();
+  init_annotate();
+});
+
+// src/lib/captcha/recaptcha.ts
+function getClient() {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey)
+    throw new Error("ANTHROPIC_API_KEY not set — required for captcha auto-solve");
+  return new import_sdk.default({ apiKey });
+}
+function extractTarget(prompt) {
+  const lines = prompt.split(`
+`).map((l) => l.trim()).filter(Boolean);
+  for (let i = 0;i < lines.length; i++) {
+    if (/select all (images|squares) with/i.test(lines[i])) {
+      const afterWith = lines[i].replace(/.*with\s*/i, "").trim();
+      if (afterWith && afterWith.length > 1 && !/click/i.test(afterWith)) {
+        return afterWith.replace(/^a\s+/i, "").trim();
+      }
+      if (i + 1 < lines.length && !/click/i.test(lines[i + 1])) {
+        return lines[i + 1].replace(/^a\s+/i, "").trim();
+      }
     }
-    return ref.selector;
   }
-  return selector;
+  return lines[1] || prompt;
 }
-async function handleRecaptchaSolve(page) {
-  const solveResult = await clickRecaptchaCheckbox(page);
-  if (solveResult.solved)
-    return { solved: true };
-  const ci = solveResult.challengeInfo;
-  if (ci && ci.tiles && ci.tiles.length > 0) {
-    return { solved: false, prompt: ci.prompt, rows: ci.rows, cols: ci.cols, tiles: await screenshotTiles2(page, ci) };
+async function screenshotFullGrid(page, challengeInfo) {
+  const { bframeBox, rows, cols } = challengeInfo;
+  if (!bframeBox || rows === 0 || cols === 0)
+    return null;
+  const gridClip = {
+    x: bframeBox.x + 14,
+    y: bframeBox.y + 112,
+    width: bframeBox.width - 28,
+    height: bframeBox.width - 28
+  };
+  try {
+    const buf = await page.screenshot({ type: "jpeg", quality: 85, clip: gridClip });
+    return buf.toString("base64");
+  } catch (err) {
+    log10.error(`full grid screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
   }
-  return { solved: false, prompt: "", tiles: [] };
 }
-async function handleRecaptchaAnswer(page, tiles) {
-  await clickChallengeTiles(page, tiles);
-  const verifyResult = await clickChallengeVerify(page);
-  if (verifyResult.solved)
-    return { solved: true };
-  const ci = verifyResult.challengeInfo;
-  if (ci && ci.tiles && ci.tiles.length > 0) {
-    return { solved: false, prompt: ci.prompt, rows: ci.rows, cols: ci.cols, tiles: await screenshotTiles2(page, ci) };
+async function screenshotTiles(page, challengeInfo) {
+  const { bframeBox, rows, cols } = challengeInfo;
+  if (!bframeBox)
+    return [];
+  const gridX = bframeBox.x + 14;
+  const gridY = bframeBox.y + 112;
+  const gridSize = bframeBox.width - 28;
+  const tileW = gridSize / cols;
+  const tileH = gridSize / rows;
+  const tiles = [];
+  for (let r = 0;r < rows; r++) {
+    for (let c = 0;c < cols; c++) {
+      const clip = {
+        x: gridX + c * tileW + 2,
+        y: gridY + r * tileH + 2,
+        width: tileW - 4,
+        height: tileH - 4
+      };
+      try {
+        const buf = await page.screenshot({ type: "jpeg", quality: 85, clip });
+        tiles.push({ index: r * cols + c, imageBase64: buf.toString("base64") });
+      } catch {}
+    }
   }
-  return { solved: false, tiles: [] };
+  return tiles;
 }
+async function classifyTiles(client, fullGridBase64, tiles, target, rows, cols) {
+  const results = await Promise.all(tiles.map(async (tile) => {
+    const tileRow = Math.floor(tile.index / cols) + 1;
+    const tileCol = tile.index % cols + 1;
+    try {
+      const response = await client.messages.create({
+        model: MODEL,
+        max_tokens: 10,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: { type: "base64", media_type: "image/jpeg", data: fullGridBase64 }
+              },
+              {
+                type: "image",
+                source: { type: "base64", media_type: "image/jpeg", data: tile.imageBase64 }
+              },
+              {
+                type: "text",
+                text: `Image 1 is a full picture divided into a ${rows}x${cols} grid. Image 2 is the tile at row ${tileRow}, column ${tileCol} of that grid.
+
+Does this tile contain a ${target}? Reply ONLY "yes" or "no".`
+              }
+            ]
+          }
+        ]
+      });
+      const answer = (response.content[0].text ?? "").toLowerCase().trim();
+      const match = answer.startsWith("yes");
+      if (match)
+        log10.debug(`tile ${tile.index} (r${tileRow}c${tileCol}): YES`);
+      return { index: tile.index, match };
+    } catch (err) {
+      log10.error(`tile ${tile.index} classification failed: ${err instanceof Error ? err.message : String(err)}`);
+      return { index: tile.index, match: false };
+    }
+  }));
+  return results.filter((r) => r.match).map((r) => r.index);
+}
+async function submitForm(page) {
+  const selectors = [
+    'form:has([data-sitekey]) [type="submit"]',
+    'form:has(.g-recaptcha) [type="submit"]',
+    'form:has(iframe[src*="recaptcha"]) [type="submit"]',
+    'form [type="submit"]',
+    'form button:not([type="button"]):not([type="reset"])',
+    'input[type="submit"]',
+    'button[type="submit"]'
+  ];
+  for (const selector of selectors) {
+    try {
+      const el = await page.$(selector);
+      if (el) {
+        const visible = await el.isVisible();
+        if (visible) {
+          log10.info(`Submitting form via: ${selector}`);
+          await new Promise((r) => setTimeout(r, 500));
+          await humanClick(page, selector);
+          await new Promise((r) => setTimeout(r, 2000));
+          return true;
+        }
+      }
+    } catch {}
+  }
+  log10.info("No submit button found — skipping form submission");
+  return false;
+}
+async function solveRecaptcha(page, monitor) {
+  const startTime = Date.now();
+  const client = getClient();
+  let rounds = 0;
+  const checkboxResult = await clickRecaptchaCheckbox(page);
+  if (checkboxResult.solved) {
+    const submitted = await submitForm(page);
+    return { solved: true, rounds: 0, durationMs: Date.now() - startTime, submitted };
+  }
+  if (!checkboxResult.challengeInfo) {
+    return { solved: false, rounds: 0, durationMs: Date.now() - startTime, reason: "No challenge appeared after clicking checkbox" };
+  }
+  let challengeInfo = checkboxResult.challengeInfo;
+  while (rounds < MAX_ROUNDS) {
+    if (Date.now() - startTime > MAX_DURATION_MS) {
+      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Timeout exceeded" };
+    }
+    rounds++;
+    monitor?.reportActivity();
+    if (!challengeInfo) {
+      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge info lost" };
+    }
+    const target = extractTarget(challengeInfo.prompt);
+    log10.info(`Round ${rounds}: looking for "${target}" in ${challengeInfo.rows}x${challengeInfo.cols} grid`);
+    const [fullGridImage, tileImages] = await Promise.all([
+      screenshotFullGrid(page, challengeInfo),
+      screenshotTiles(page, challengeInfo)
+    ]);
+    if (!fullGridImage || tileImages.length === 0) {
+      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Failed to screenshot challenge" };
+    }
+    monitor?.reportActivity();
+    const matchingIndices = await classifyTiles(client, fullGridImage, tileImages, target, challengeInfo.rows, challengeInfo.cols);
+    log10.info(`Round ${rounds}: matched tiles [${matchingIndices.join(", ")}]`);
+    monitor?.reportActivity();
+    if (matchingIndices.length > 0) {
+      await clickChallengeTiles(page, matchingIndices);
+      const isDynamic = challengeInfo.prompt.toLowerCase().includes("none left");
+      if (isDynamic) {
+        await new Promise((r) => setTimeout(r, TILE_SETTLE_MS));
+        const newInfo = await getChallengeInfo(page);
+        if (newInfo) {
+          const [newFullGrid, newTiles] = await Promise.all([
+            screenshotFullGrid(page, newInfo),
+            screenshotTiles(page, newInfo)
+          ]);
+          if (newFullGrid && newTiles.length > 0) {
+            const replacedTiles = newTiles.filter((t) => matchingIndices.includes(t.index));
+            if (replacedTiles.length > 0) {
+              monitor?.reportActivity();
+              const newMatches = await classifyTiles(client, newFullGrid, replacedTiles, target, newInfo.rows, newInfo.cols);
+              if (newMatches.length > 0) {
+                log10.info(`Round ${rounds}: dynamic tiles matched [${newMatches.join(", ")}]`);
+                await clickChallengeTiles(page, newMatches);
+                await new Promise((r) => setTimeout(r, TILE_SETTLE_MS));
+              }
+            }
+          }
+        }
+      }
+    }
+    const verifyResult = await clickChallengeVerify(page);
+    monitor?.reportActivity();
+    if (verifyResult.solved) {
+      log10.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
+      const submitted = await submitForm(page);
+      return { solved: true, rounds, durationMs: Date.now() - startTime, submitted };
+    }
+    challengeInfo = verifyResult.challengeInfo || null;
+    if (!challengeInfo) {
+      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge disappeared after verify" };
+    }
+    log10.info(`Round ${rounds}: not solved, new challenge appeared`);
+  }
+  return { solved: false, rounds, durationMs: Date.now() - startTime, reason: `Max rounds (${MAX_ROUNDS}) exceeded` };
+}
+var import_sdk, log10, MAX_ROUNDS = 8, MAX_DURATION_MS = 45000, TILE_SETTLE_MS, MODEL = "claude-haiku-4-5-20251001";
+var init_recaptcha = __esm(() => {
+  init_humanize();
+  init_constants();
+  init_logger();
+  import_sdk = __toESM(require("@anthropic-ai/sdk"));
+  log10 = createLogger("captcha-solver");
+  TILE_SETTLE_MS = TIMING.TILE_SETTLE;
+});
+
+// src/lib/captcha/hcaptcha.ts
+function getClient2() {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey)
+    throw new Error("ANTHROPIC_API_KEY not set — required for captcha auto-solve");
+  return new import_sdk2.default({ apiKey });
+}
+function rand2(min, max) {
+  return Math.random() * (max - min) + min;
+}
+function sleep4(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+async function clickCheckbox(page) {
+  const checkboxFrame = await page.waitForSelector('iframe[src*="hcaptcha.com"], iframe[data-hcaptcha-widget-id], iframe[title*="hCaptcha"]', { timeout: 1e4 }).catch(() => null);
+  if (!checkboxFrame)
+    throw new Error("hCaptcha checkbox iframe not found");
+  const box = await checkboxFrame.boundingBox();
+  if (!box)
+    throw new Error("hCaptcha iframe not visible");
+  await humanMove(page, rand2(200, 500), rand2(150, 400));
+  await sleep4(rand2(300, 700));
+  const cx = box.x + box.width * rand2(0.15, 0.35);
+  const cy = box.y + box.height * rand2(0.3, 0.7);
+  await humanClickXY(page, cx, cy);
+  await sleep4(2500);
+  const frame = await checkboxFrame.contentFrame();
+  if (frame) {
+    try {
+      const checked = await frame.evaluate(() => {
+        const cb = document.querySelector("#checkbox");
+        return cb?.getAttribute("aria-checked") === "true";
+      });
+      if (checked)
+        return true;
+    } catch {}
+  }
+  return false;
+}
+async function getChallengeInfo2(page) {
+  const challengeFrame = await page.waitForSelector('iframe[title="hCaptcha challenge"], iframe[title*="hcaptcha challenge" i]', { timeout: 8000 }).catch(() => null);
+  if (!challengeFrame)
+    return null;
+  const frameBox = await challengeFrame.boundingBox();
+  if (!frameBox)
+    return null;
+  const frame = await challengeFrame.contentFrame();
+  if (!frame)
+    return null;
+  const info = await frame.evaluate(() => {
+    const promptEl = document.querySelector(".prompt-text, .task-instructions, [class*='prompt'], [class*='task-description']");
+    const prompt = promptEl ? promptEl.innerText.trim() : "";
+    const tileEls = document.querySelectorAll(".task-image, [class*='task-grid'] > *, [class*='challenge-container'] .image-wrapper, .image-wrapper");
+    const count = tileEls.length;
+    let rows = 3, cols = 3;
+    if (count === 16) {
+      rows = 4;
+      cols = 4;
+    } else if (count === 9) {
+      rows = 3;
+      cols = 3;
+    } else if (count === 6) {
+      rows = 2;
+      cols = 3;
+    }
+    return { prompt, count, rows, cols };
+  }).catch(() => ({ prompt: "", count: 0, rows: 3, cols: 3 }));
+  if (!info.prompt && info.count === 0)
+    return null;
+  const gridPadTop = 150;
+  const gridPadLeft = 20;
+  const gridPadRight = 20;
+  const gridPadBottom = 80;
+  const gridWidth = frameBox.width - gridPadLeft - gridPadRight;
+  const gridHeight = frameBox.height - gridPadTop - gridPadBottom;
+  const tileW = gridWidth / info.cols;
+  const tileH = gridHeight / info.rows;
+  const tiles = [];
+  for (let r = 0;r < info.rows; r++) {
+    for (let c = 0;c < info.cols; c++) {
+      tiles.push({
+        index: r * info.cols + c,
+        centerX: Math.round(frameBox.x + gridPadLeft + c * tileW + tileW / 2),
+        centerY: Math.round(frameBox.y + gridPadTop + r * tileH + tileH / 2)
+      });
+    }
+  }
+  const verifyBtnBox = await frame.evaluate(() => {
+    const btn = document.querySelector('.button-submit.button, [aria-label="Verify"], [aria-label="Skip Challenge"]');
+    if (!btn)
+      return null;
+    const r = btn.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  }).catch(() => null);
+  const verifyButton = verifyBtnBox ? { x: Math.round(frameBox.x + verifyBtnBox.x), y: Math.round(frameBox.y + verifyBtnBox.y) } : { x: Math.round(frameBox.x + frameBox.width - 55), y: Math.round(frameBox.y + frameBox.height - 30) };
+  log11.info(`Round challenge: "${info.prompt}" (${info.rows}x${info.cols})`);
+  return { prompt: info.prompt, rows: info.rows, cols: info.cols, tiles, verifyButton, frameBox };
+}
+async function screenshotChallenge(page, challenge) {
+  const { frameBox } = challenge;
+  try {
+    await sleep4(1000);
+    const challengeEl = await page.$('iframe[title="hCaptcha challenge"], iframe[title*="hcaptcha challenge" i]').catch(() => null);
+    let buf;
+    if (challengeEl) {
+      buf = Buffer.from(await challengeEl.screenshot({ type: "jpeg", quality: 85 }));
+    } else {
+      buf = await page.screenshot({ type: "jpeg", quality: 85, clip: frameBox });
+    }
+    return buf.toString("base64");
+  } catch (err) {
+    log11.error(`screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+async function classifyTiles2(client, screenshotBase64, challenge) {
+  const { prompt, rows, cols } = challenge;
+  const total = rows * cols;
+  try {
+    const response = await client.messages.create({
+      model: MODEL2,
+      max_tokens: 30,
+      system: `Output ONLY a comma-separated list of tile numbers or "none". Valid examples: "0,3,5" or "2" or "none". Output nothing else.`,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: screenshotBase64 } },
+          { type: "text", text: `Task: "${prompt}". Tiles 0-${total - 1} left-to-right top-to-bottom in a ${rows}×${cols} grid. Which tiles match? Reply ONLY with numbers or "none".` }
+        ]
+      }]
+    });
+    const text = (response.content[0].text ?? "").trim();
+    log11.debug(`classify response: "${text}"`);
+    if (text.toLowerCase().startsWith("none"))
+      return [];
+    return text.split(/[,\s]+/).map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n) && n >= 0 && n < total);
+  } catch (err) {
+    log11.error(`classification failed: ${err instanceof Error ? err.message : String(err)}`);
+    return [];
+  }
+}
+async function isSolved(page) {
+  const el = await page.$('iframe[title="hCaptcha challenge"], iframe[title*="hcaptcha challenge" i]').catch(() => null);
+  if (!el)
+    return true;
+  const visible = await el.isVisible().catch(() => false);
+  return !visible;
+}
+async function clickVerify(page, challenge) {
+  await humanClickXY(page, challenge.verifyButton.x, challenge.verifyButton.y);
+  await sleep4(2500);
+  return isSolved(page);
+}
+async function solveHCaptcha(page, monitor) {
+  const startTime = Date.now();
+  const client = getClient2();
+  let rounds = 0;
+  let solvedOnCheckbox = false;
+  try {
+    solvedOnCheckbox = await clickCheckbox(page);
+  } catch (err) {
+    return { solved: false, rounds: 0, durationMs: Date.now() - startTime, reason: err instanceof Error ? err.message : String(err) };
+  }
+  if (solvedOnCheckbox) {
+    log11.info("Solved on checkbox click (no challenge)");
+    return { solved: true, rounds: 0, durationMs: Date.now() - startTime };
+  }
+  while (rounds < MAX_ROUNDS2) {
+    if (Date.now() - startTime > MAX_DURATION_MS2) {
+      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Timeout exceeded" };
+    }
+    rounds++;
+    monitor?.reportActivity();
+    const challenge = await getChallengeInfo2(page);
+    if (!challenge) {
+      log11.info("Challenge frame gone — assuming solved");
+      return { solved: true, rounds, durationMs: Date.now() - startTime };
+    }
+    const screenshotBase64 = await screenshotChallenge(page, challenge);
+    if (!screenshotBase64) {
+      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Failed to screenshot challenge" };
+    }
+    monitor?.reportActivity();
+    const matchingIndices = await classifyTiles2(client, screenshotBase64, challenge);
+    log11.info(`Round ${rounds}: clicking tiles [${matchingIndices.join(", ")}]`);
+    monitor?.reportActivity();
+    for (const idx of matchingIndices) {
+      const tile = challenge.tiles[idx];
+      if (!tile)
+        continue;
+      await humanClickXY(page, tile.centerX + rand2(-5, 5), tile.centerY + rand2(-5, 5));
+      await sleep4(rand2(150, 400));
+    }
+    await sleep4(rand2(500, 1000));
+    const solved = await clickVerify(page, challenge);
+    monitor?.reportActivity();
+    if (solved) {
+      log11.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
+      return { solved: true, rounds, durationMs: Date.now() - startTime };
+    }
+    log11.info(`Round ${rounds}: not solved, retrying`);
+    await sleep4(rand2(500, 1000));
+  }
+  return { solved: false, rounds, durationMs: Date.now() - startTime, reason: `Max rounds (${MAX_ROUNDS2}) exceeded` };
+}
+var import_sdk2, log11, MAX_ROUNDS2 = 8, MAX_DURATION_MS2 = 60000, MODEL2 = "claude-haiku-4-5-20251001";
+var init_hcaptcha = __esm(() => {
+  init_humanize();
+  init_logger();
+  import_sdk2 = __toESM(require("@anthropic-ai/sdk"));
+  log11 = createLogger("hcaptcha-solver");
+});
+
+// src/lib/actions/handlers/captcha.ts
 async function screenshotTiles2(page, ci) {
   const tileSize = ci.bframeBox ? Math.round((ci.bframeBox.width - CAPTCHA_GRID.GRID_PADDING) / ci.cols) : CAPTCHA_GRID.DEFAULT_TILE_SIZE;
   const tiles = [];
@@ -2035,7 +2903,40 @@ async function screenshotTiles2(page, ci) {
   }
   return tiles;
 }
-async function handleSolveCaptcha(page, monitor) {
+function recaptchaClick(page) {
+  return clickRecaptchaCheckbox(page);
+}
+function recaptchaSelect(page, step) {
+  return clickChallengeTiles(page, step.tiles);
+}
+function recaptchaVerify(page) {
+  return clickChallengeVerify(page);
+}
+function recaptchaInfo(page) {
+  return getChallengeInfo(page);
+}
+async function recaptchaSolve(page) {
+  const solveResult = await clickRecaptchaCheckbox(page);
+  if (solveResult.solved)
+    return { solved: true };
+  const ci = solveResult.challengeInfo;
+  if (ci && ci.tiles && ci.tiles.length > 0) {
+    return { solved: false, prompt: ci.prompt, rows: ci.rows, cols: ci.cols, tiles: await screenshotTiles2(page, ci) };
+  }
+  return { solved: false, prompt: "", tiles: [] };
+}
+async function recaptchaAnswer(page, step) {
+  await clickChallengeTiles(page, step.tiles);
+  const verifyResult = await clickChallengeVerify(page);
+  if (verifyResult.solved)
+    return { solved: true };
+  const ci = verifyResult.challengeInfo;
+  if (ci && ci.tiles && ci.tiles.length > 0) {
+    return { solved: false, prompt: ci.prompt, rows: ci.rows, cols: ci.cols, tiles: await screenshotTiles2(page, ci) };
+  }
+  return { solved: false, tiles: [] };
+}
+async function solveCaptcha(page, _step, _ctx, monitor) {
   await page.waitForTimeout(TIMING.CAPTCHA_DETECT_WAIT);
   const isHCaptcha = await page.evaluate(() => {
     const iframes = Array.from(document.querySelectorAll("iframe"));
@@ -2045,557 +2946,755 @@ async function handleSolveCaptcha(page, monitor) {
       return src.includes("hcaptcha.com") || title.includes("hcaptcha") || !!document.querySelector("[data-hcaptcha-widget-id]");
     });
   }).catch((err) => {
-    log4.warn(`captcha detection failed: ${err}`);
+    log12.warn(`captcha detection failed: ${err}`);
     return false;
   });
-  log4.info(`detected: ${isHCaptcha ? "hCaptcha" : "reCAPTCHA"}`);
+  log12.info(`detected: ${isHCaptcha ? "hCaptcha" : "reCAPTCHA"}`);
   return isHCaptcha ? await solveHCaptcha(page, monitor) : await solveRecaptcha(page, monitor);
 }
-async function handleFind(page, step, ctx) {
-  if (!step.role && !step.name && !step.text && !step.placeholder && !step.label) {
-    throw new Error("find requires at least one of: role, name, text, placeholder, label");
-  }
-  let locator;
-  if (step.role) {
-    const opts = {};
-    if (step.name)
-      opts.name = step.exact ? step.name : new RegExp(step.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-    if (step.exact !== undefined)
-      opts.exact = step.exact;
-    locator = page.getByRole(step.role, opts);
-  } else if (step.label) {
-    locator = page.getByLabel(step.label, { exact: step.exact });
-  } else if (step.placeholder) {
-    locator = page.getByPlaceholder(step.placeholder, { exact: step.exact });
-  } else if (step.text) {
-    locator = page.getByText(step.text, { exact: step.exact });
-  } else {
-    locator = page.locator(`[aria-label="${step.name}"], [title="${step.name}"]`);
-  }
-  const count = await locator.count();
-  if (count === 0) {
-    throw new Error(`No element found matching: ${JSON.stringify({ role: step.role, name: step.name, text: step.text, placeholder: step.placeholder, label: step.label })}`);
-  }
-  const element = locator.first();
-  const box = await element.boundingBox();
-  const elInfo = await element.evaluate((el) => {
-    const tag = el.tagName.toLowerCase();
-    const text = (el.textContent?.trim() || "").slice(0, 60);
-    const path4 = [];
-    let current = el;
-    while (current && current !== document.body && current !== document.documentElement) {
-      let seg = current.tagName.toLowerCase();
-      if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-        path4.unshift(`#${current.id}`);
-        break;
-      }
-      const parent = current.parentElement;
-      if (parent && current) {
-        const currentTag = current.tagName;
-        const siblings = Array.from(parent.children).filter((c) => c.tagName === currentTag);
-        if (siblings.length > 1) {
-          const idx = siblings.indexOf(current) + 1;
-          seg += `:nth-of-type(${idx})`;
-        }
-      }
-      path4.unshift(seg);
-      current = parent;
+var log12;
+var init_captcha = __esm(() => {
+  init_humanize();
+  init_recaptcha();
+  init_hcaptcha();
+  init_logger();
+  init_constants();
+  log12 = createLogger("actions");
+});
+
+// src/lib/browser/form-fill.ts
+function applyNativeValue(el, val) {
+  const input = el;
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  setter?.call(input, val);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+function humanDelay(page) {
+  return page.waitForTimeout(TIMING.PRE_NAVIGATE[0] + Math.random() * (TIMING.PRE_NAVIGATE[1] - TIMING.PRE_NAVIGATE[0]));
+}
+async function setValueNative(handle, value) {
+  await handle.evaluate(applyNativeValue, value);
+}
+async function fillHandleNative(page, handle, value, opts = {}) {
+  await handle.scrollIntoViewIfNeeded().catch(() => {});
+  await handle.click({ delay: 40 }).catch(() => {});
+  await handle.evaluate(applyNativeValue, value);
+  if (opts.delay !== false)
+    await humanDelay(page);
+}
+async function fillSelectorNative(page, selector, value) {
+  await page.click(selector);
+  await page.waitForTimeout(TIMING.SCROLL_DELAY);
+  await page.evaluate(([sel, val]) => {
+    const el = document.querySelector(sel);
+    if (!el)
+      return;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    setter?.call(el, val);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }, [selector, value]);
+  await humanDelay(page);
+}
+async function findSubmitButton(page, opts) {
+  const handle = await page.evaluateHandle(({ formAnchor, reSource, reFlags }) => {
+    const re = new RegExp(reSource, reFlags);
+    const pick = (scope) => {
+      const typed = scope.querySelector('button[type="submit"]:not([disabled]), input[type="submit"]:not([disabled])');
+      if (typed)
+        return typed;
+      const buttons = Array.from(scope.querySelectorAll('button:not([disabled]), [role="button"]:not([disabled])'));
+      return buttons.find((b) => re.test(b.textContent || "") && b.offsetParent !== null) || null;
+    };
+    const form = document.querySelector(formAnchor)?.closest("form");
+    if (form) {
+      const found = pick(form);
+      if (found)
+        return found;
     }
-    return { tag, text, selector: path4.join(" > ") };
+    return pick(document);
+  }, opts);
+  return handle.asElement();
+}
+var init_form_fill = __esm(() => {
+  init_constants();
+});
+
+// src/lib/knowledge.ts
+var exports_knowledge = {};
+__export(exports_knowledge, {
+  sanitizeDomain: () => sanitizeDomain,
+  readKnowledge: () => readKnowledge,
+  parseKnowledge: () => parseKnowledge,
+  normalizeDomain: () => normalizeDomain,
+  mergeKnowledge: () => mergeKnowledge,
+  listKnowledge: () => listKnowledge,
+  getKnowledgePath: () => getKnowledgePath,
+  getKnowledgeDir: () => getKnowledgeDir,
+  domainLookupChain: () => domainLookupChain,
+  clearKnowledge: () => clearKnowledge
+});
+function getKnowledgeDir() {
+  return import_path7.default.join(getDataDir(), "knowledge");
+}
+function getKnowledgePath(domain) {
+  const safe = sanitizeDomain(domain);
+  return import_path7.default.join(getKnowledgeDir(), `${safe}.md`);
+}
+function normalizeDomain(input) {
+  let d = (input || "").trim().toLowerCase();
+  if (!d)
+    return "";
+  try {
+    if (d.includes("://")) {
+      d = new URL(d).hostname;
+    } else if (d.includes("/")) {
+      d = new URL(`https://${d}`).hostname;
+    }
+  } catch {}
+  d = d.replace(/:\d+$/, "");
+  d = d.replace(/^www\./, "");
+  return d;
+}
+function domainLookupChain(input) {
+  const normalized = normalizeDomain(input);
+  if (!normalized)
+    return [];
+  const chain = [normalized];
+  const parts = normalized.split(".");
+  while (parts.length > 2) {
+    parts.shift();
+    chain.push(parts.join("."));
+  }
+  return chain;
+}
+function sanitizeDomain(input) {
+  const normalized = normalizeDomain(input);
+  return normalized.replace(/[^a-z0-9.-]/g, "_");
+}
+function ensureDir() {
+  import_fs8.default.mkdirSync(getKnowledgeDir(), { recursive: true });
+}
+function readKnowledge(domain) {
+  const p = getKnowledgePath(domain);
+  try {
+    return import_fs8.default.readFileSync(p, "utf8");
+  } catch {
+    return null;
+  }
+}
+function parseKnowledge(domain) {
+  const raw = readKnowledge(domain);
+  if (!raw)
+    return null;
+  return parseMarkdown(raw);
+}
+function listKnowledge() {
+  const dir = getKnowledgeDir();
+  let entries = [];
+  try {
+    entries = import_fs8.default.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const results = [];
+  for (const file of entries) {
+    if (!file.endsWith(".md"))
+      continue;
+    const full = import_path7.default.join(dir, file);
+    try {
+      const stat = import_fs8.default.statSync(full);
+      const raw = import_fs8.default.readFileSync(full, "utf8");
+      const parsed = parseMarkdown(raw);
+      results.push({
+        domain: parsed?.domain ?? file.replace(/\.md$/, ""),
+        lastVerified: parsed?.lastVerified ?? new Date(stat.mtimeMs).toISOString(),
+        lastMode: parsed?.lastMode ?? "unknown",
+        sizeBytes: stat.size
+      });
+    } catch {}
+  }
+  results.sort((a, b) => a.lastVerified < b.lastVerified ? 1 : -1);
+  return results;
+}
+function clearKnowledge(domain) {
+  const dir = getKnowledgeDir();
+  if (domain) {
+    const p = getKnowledgePath(domain);
+    try {
+      import_fs8.default.unlinkSync(p);
+      return { removed: 1 };
+    } catch {
+      return { removed: 0 };
+    }
+  }
+  let removed = 0;
+  try {
+    const entries = import_fs8.default.readdirSync(dir);
+    for (const f of entries) {
+      if (f.endsWith(".md")) {
+        try {
+          import_fs8.default.unlinkSync(import_path7.default.join(dir, f));
+          removed++;
+        } catch {}
+      }
+    }
+  } catch {}
+  return { removed };
+}
+function mergeKnowledge(domain, updates) {
+  ensureDir();
+  const existing = parseKnowledge(domain);
+  const merged = {
+    domain: sanitizeDomain(domain),
+    lastVerified: updates.lastVerified ?? new Date().toISOString(),
+    lastMode: updates.lastMode ?? existing?.lastMode ?? "unknown",
+    browserRequired: updates.browserRequired ?? existing?.browserRequired ?? true,
+    auth: updates.auth ?? existing?.auth ?? { type: "unknown" },
+    endpoints: dedupeEndpoints([...existing?.endpoints ?? [], ...updates.endpoints ?? []]),
+    notes: dedupeNotes([...existing?.notes ?? [], ...updates.notes ?? []])
+  };
+  const md = renderMarkdown(merged);
+  import_fs8.default.writeFileSync(getKnowledgePath(domain), md, "utf8");
+  log13.info(`knowledge updated: ${merged.domain} (${merged.endpoints.length} endpoints)`);
+}
+function dedupeEndpoints(endpoints) {
+  const seen = new Map;
+  for (const ep of endpoints) {
+    const key = `${ep.method.toUpperCase()} ${ep.path}`;
+    const existing = seen.get(key);
+    if (!existing) {
+      seen.set(key, ep);
+    } else {
+      seen.set(key, {
+        ...existing,
+        description: ep.description || existing.description,
+        example: ep.example || existing.example,
+        firstSeen: existing.firstSeen || ep.firstSeen
+      });
+    }
+  }
+  return [...seen.values()].sort((a, b) => {
+    if (a.path !== b.path)
+      return a.path < b.path ? -1 : 1;
+    return a.method < b.method ? -1 : 1;
   });
-  const ref = `@e${ctx.nextRefId++}`;
-  const displayRole = step.role || elInfo.tag;
-  ctx.refMap.set(ref, {
-    ref,
-    role: displayRole,
-    name: elInfo.text,
-    selector: elInfo.selector
-  });
+}
+function dedupeNotes(notes) {
+  const seen = new Set;
+  const out = [];
+  for (const note of notes) {
+    const n = note.trim();
+    if (n && !seen.has(n)) {
+      seen.add(n);
+      out.push(n);
+    }
+  }
+  return out;
+}
+function renderMarkdown(data) {
+  const lines = [];
+  lines.push("---");
+  lines.push(`domain: ${data.domain}`);
+  lines.push(`lastVerified: ${data.lastVerified}`);
+  lines.push(`lastMode: ${data.lastMode}`);
+  lines.push(`browserRequired: ${data.browserRequired}`);
+  lines.push(`authType: ${data.auth.type}`);
+  lines.push("---");
+  lines.push("");
+  lines.push(`# ${data.domain}`);
+  lines.push("");
+  lines.push(`Last verified: **${data.lastVerified}** via \`${data.lastMode}\` mode.`);
+  lines.push("");
+  lines.push("## Auth material");
+  lines.push("");
+  lines.push(`**Type:** ${data.auth.type}`);
+  if (data.auth.cookieNames?.length) {
+    lines.push(`**Required cookies:** ${data.auth.cookieNames.map((n) => `\`${n}\``).join(", ")}`);
+  }
+  if (data.auth.localStorageKeys?.length) {
+    lines.push(`**localStorage keys:** ${data.auth.localStorageKeys.map((n) => `\`${n}\``).join(", ")}`);
+  }
+  if (data.auth.sessionStorageKeys?.length) {
+    lines.push(`**sessionStorage keys:** ${data.auth.sessionStorageKeys.map((n) => `\`${n}\``).join(", ")}`);
+  }
+  if (data.auth.headers?.length) {
+    lines.push(`**Request headers:** ${data.auth.headers.map((n) => `\`${n}\``).join(", ")}`);
+  }
+  lines.push("");
+  lines.push("> _Structure only — actual values are stored encrypted in the session store._");
+  lines.push("");
+  if (data.endpoints.length > 0) {
+    lines.push("## Known endpoints");
+    lines.push("");
+    lines.push("The agent can call these directly (with the auth material above) instead of launching a browser.");
+    lines.push("");
+    for (const ep of data.endpoints) {
+      lines.push(`### ${ep.method.toUpperCase()} ${ep.path}`);
+      if (ep.description)
+        lines.push("");
+      if (ep.description)
+        lines.push(ep.description);
+      if (ep.example) {
+        lines.push("");
+        lines.push("```");
+        lines.push(ep.example);
+        lines.push("```");
+      }
+      lines.push("");
+    }
+  } else {
+    lines.push("## Known endpoints");
+    lines.push("");
+    lines.push("_None captured yet. Enable `captureApi: true` on the next `execute` run to populate this section._");
+    lines.push("");
+  }
+  if (data.notes.length > 0) {
+    lines.push("## Notes");
+    lines.push("");
+    for (const n of data.notes)
+      lines.push(`- ${n}`);
+    lines.push("");
+  }
+  return lines.join(`
+`);
+}
+function parseMarkdown(raw) {
+  const frontmatterMatch = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n/);
+  if (!frontmatterMatch)
+    return null;
+  const fm = {};
+  for (const line of frontmatterMatch[1].split(`
+`)) {
+    const m = line.match(/^(\w+):\s*(.*)$/);
+    if (m)
+      fm[m[1]] = m[2].trim();
+  }
+  const body = raw.slice(frontmatterMatch[0].length);
+  const auth = { type: fm.authType ?? "unknown" };
+  const authSection = extractSection(body, "Auth material");
+  if (authSection) {
+    auth.cookieNames = extractBackticks(/\*\*Required cookies:\*\*\s+(.+)/, authSection);
+    auth.localStorageKeys = extractBackticks(/\*\*localStorage keys:\*\*\s+(.+)/, authSection);
+    auth.sessionStorageKeys = extractBackticks(/\*\*sessionStorage keys:\*\*\s+(.+)/, authSection);
+    auth.headers = extractBackticks(/\*\*Request headers:\*\*\s+(.+)/, authSection);
+  }
+  const endpoints = [];
+  const endpointSection = extractSection(body, "Known endpoints");
+  if (endpointSection) {
+    const endpointRegex = /^### (GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\S+)\s*$/gim;
+    let m;
+    while ((m = endpointRegex.exec(endpointSection)) !== null) {
+      endpoints.push({ method: m[1], path: m[2] });
+    }
+  }
+  const notes = [];
+  const notesSection = extractSection(body, "Notes");
+  if (notesSection) {
+    for (const line of notesSection.split(`
+`)) {
+      const m = line.match(/^-\s+(.+)$/);
+      if (m)
+        notes.push(m[1].trim());
+    }
+  }
   return {
-    ref,
-    role: displayRole,
-    name: elInfo.text,
-    tag: elInfo.tag,
-    boundingBox: box,
-    matchCount: count
+    domain: fm.domain ?? "",
+    lastVerified: fm.lastVerified ?? "",
+    lastMode: fm.lastMode ?? "unknown",
+    browserRequired: fm.browserRequired !== "false",
+    auth,
+    endpoints,
+    notes
   };
 }
-async function handleLogin(page, step, ctx) {
-  const credKey = await deriveKey(ctx.token, "credentials");
+function extractSection(body, heading) {
+  const re = new RegExp(`^##\\s+${heading}\\s*$`, "m");
+  const match = body.match(re);
+  if (!match || match.index === undefined)
+    return null;
+  const start = match.index + match[0].length;
+  const nextSection = body.slice(start).match(/^##\s+/m);
+  const end = nextSection?.index != null ? start + nextSection.index : body.length;
+  return body.slice(start, end);
+}
+function extractBackticks(re, text) {
+  const m = text.match(re);
+  if (!m)
+    return;
+  const items = [...m[1].matchAll(/`([^`]+)`/g)].map((x) => x[1]);
+  return items.length > 0 ? items : undefined;
+}
+var import_fs8, import_path7, log13;
+var init_knowledge = __esm(() => {
+  init_logger();
+  init_paths();
+  import_fs8 = __toESM(require("fs"));
+  import_path7 = __toESM(require("path"));
+  log13 = createLogger("knowledge");
+});
+
+// src/lib/auth/credential-resolver.ts
+async function resolveCredential(store, userId, token, domain) {
+  const credKey = await deriveKey(token, "credentials");
   let blob = null;
   let matchedDomain = "";
-  for (const candidate of domainLookupChain(step.domain)) {
-    const b = await ctx.store.getCredential(ctx.userId, candidate);
+  for (const candidate of domainLookupChain(domain)) {
+    const b = await store.getCredential(userId, candidate);
     if (b && b.length > 0) {
       blob = b;
       matchedDomain = candidate;
       break;
     }
   }
-  if (!blob) {
+  if (!blob)
+    return null;
+  try {
+    const credential = JSON.parse(decrypt(blob, credKey));
+    return { credential, matchedDomain };
+  } catch (err) {
+    throw new CredentialDecryptError(matchedDomain, err instanceof Error ? err.message : String(err));
+  }
+}
+var CredentialDecryptError;
+var init_credential_resolver = __esm(() => {
+  init_crypto();
+  init_knowledge();
+  CredentialDecryptError = class CredentialDecryptError extends Error {
+    domain;
+    cause;
+    constructor(domain, cause) {
+      super(`Credentials for ${domain} exist in the store but cannot be decrypted (${cause}). ` + `This usually means the encryption key (~/.iframer/secret or IFRAMER_SECRET) ` + `changed since the row was written, orphaning the old blob. ` + `Fix: ask the user to re-store the credentials by running in their terminal:
+
+` + `  iframer-toolkit credentials add ${normalizeDomain(domain)}
+
+` + `After they confirm it ran, retry.`);
+      this.domain = domain;
+      this.cause = cause;
+      this.name = "CredentialDecryptError";
+    }
+  };
+});
+
+// src/lib/actions/handlers/login/selectors.ts
+var EMAIL_CANDIDATES, PASSWORD_SELECTOR = 'input[type="password"]:not([disabled]):not([readonly])', OTP_SELECTOR = 'input[autocomplete="one-time-code"]:not([disabled]), input[inputmode="numeric"]:not([disabled]), input[name*="otp" i]:not([disabled]), input[name*="code" i]:not([disabled]), input[aria-label*="code" i]:not([disabled])', LOGIN_URL_RE, EMAIL_FIRST_SUBMIT_RE, PASSWORD_SUBMIT_RE, EMAIL_FORM_ANCHOR = 'input[type="email"], input[name*="email" i], input[type="text"]', PASSWORD_FORM_ANCHOR;
+var init_selectors = __esm(() => {
+  EMAIL_CANDIDATES = [
+    'input[type="email"]:not([disabled]):not([readonly])',
+    'input[autocomplete="username"]:not([disabled]):not([readonly])',
+    'input[autocomplete="email"]:not([disabled]):not([readonly])',
+    'input[name*="email" i]:not([disabled]):not([readonly])',
+    'input[name*="user" i]:not([disabled]):not([readonly])',
+    'input[name*="login" i]:not([disabled]):not([readonly])',
+    'input[id*="email" i]:not([disabled]):not([readonly])',
+    'input[id*="user" i]:not([disabled]):not([readonly])',
+    'input[type="text"]:not([disabled]):not([readonly])',
+    "input:not([type]):not([disabled]):not([readonly])"
+  ];
+  LOGIN_URL_RE = /\b(login|signin|sign-in|auth|oauth)\b/i;
+  EMAIL_FIRST_SUBMIT_RE = /\b(log\s*in|sign\s*in|continue|submit|enter|next|send.*code|email.*me)\b/i;
+  PASSWORD_SUBMIT_RE = /\b(log\s*in|sign\s*in|continue|submit|enter|next)\b/i;
+  PASSWORD_FORM_ANCHOR = PASSWORD_SELECTOR;
+});
+
+// src/lib/actions/handlers/login/index.ts
+async function login(page, step, ctx) {
+  const resolved = await resolveCredential(ctx.store, ctx.userId, ctx.token, step.domain);
+  if (!resolved) {
     const stored = await ctx.store.listCredentialDomains(ctx.userId);
     const storedList = stored.length > 0 ? stored.join(", ") : "(none)";
     throw new Error(`No credentials stored for ${normalizeDomain(step.domain)}. Stored domains: ${storedList}. ` + `If you stored credentials under a different domain name, retry the login step with that domain. ` + `If no credentials are stored at all, call the \`credentials\` tool with action=store first.`);
   }
-  let credential;
-  try {
-    credential = JSON.parse(decrypt(blob, credKey));
-  } catch (decryptErr) {
-    const errMsg = decryptErr instanceof Error ? decryptErr.message : String(decryptErr);
-    throw new Error(`Credentials for ${matchedDomain} exist in the store but cannot be decrypted ` + `(${errMsg}). This usually means the encryption key (~/.iframer/secret or IFRAMER_SECRET) ` + `changed since the row was written, orphaning the old blob. ` + `Fix: ask the user to re-store the credentials by running in their terminal:
-
-` + `  iframer-toolkit credentials add ${normalizeDomain(step.domain)}
-
-` + `After they confirm it ran, retry the login step.`);
-  }
+  const { credential, matchedDomain } = resolved;
   if (matchedDomain !== normalizeDomain(step.domain)) {
-    log4.info(`login: credentials for ${step.domain} resolved via parent domain ${matchedDomain}`);
+    log14.info(`login: credentials for ${step.domain} resolved via parent domain ${matchedDomain}`);
   }
   const beforeUrl = page.url();
-  const reactFillSelector = async (selector, value) => {
-    await page.click(selector);
-    await page.waitForTimeout(TIMING.SCROLL_DELAY);
-    await page.evaluate(([sel, val]) => {
-      const el = document.querySelector(sel);
-      if (!el)
-        return;
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setter?.call(el, val);
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-    }, [selector, value]);
-    await page.waitForTimeout(TIMING.PRE_NAVIGATE[0] + Math.random() * (TIMING.PRE_NAVIGATE[1] - TIMING.PRE_NAVIGATE[0]));
-  };
   const hasExplicitSelectors = !!(step.usernameSelector || step.passwordSelector || step.submitSelector);
   if (hasExplicitSelectors) {
-    if (step.usernameSelector && credential.username) {
-      await reactFillSelector(resolveSelector(step.usernameSelector, ctx), credential.username);
-    }
-    if (step.passwordSelector && credential.password) {
-      await reactFillSelector(resolveSelector(step.passwordSelector, ctx), credential.password);
-    }
-    if (step.submitSelector) {
-      await humanClick(page, resolveSelector(step.submitSelector, ctx));
-      await page.waitForLoadState("domcontentloaded").catch(() => {});
-      await page.waitForTimeout(TIMING.POST_LOGIN_WAIT);
-    }
-    if (step.totpSelector && credential.totp_secret) {
-      const totp = generateTOTP(credential.totp_secret);
-      await page.click(resolveSelector(step.totpSelector, ctx));
-      await page.keyboard.type(totp, { delay: 50 });
-      await page.waitForTimeout(TIMING.POST_TOTP_WAIT);
-    }
+    await runExplicitFlow(page, step, ctx, credential);
   } else {
-    log4.info(`login: auto-detecting form on ${beforeUrl}`);
+    const early = await runAutoDetect(page, step, ctx, credential, beforeUrl);
+    if (early)
+      return early;
+  }
+  return honestSignal(page, beforeUrl);
+}
+async function runExplicitFlow(page, step, ctx, credential) {
+  if (step.usernameSelector && credential.username) {
+    await fillSelectorNative(page, resolveSelector(step.usernameSelector, ctx), credential.username);
+  }
+  if (step.passwordSelector && credential.password) {
+    await fillSelectorNative(page, resolveSelector(step.passwordSelector, ctx), credential.password);
+  }
+  if (step.submitSelector) {
+    await humanClick(page, resolveSelector(step.submitSelector, ctx));
     await page.waitForLoadState("domcontentloaded").catch(() => {});
-    await page.waitForTimeout(500);
-    const initialCheck = await page.evaluate(() => {
-      const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])');
-      const pwdVisible = !!(pwd && pwd.offsetParent !== null);
-      return { url: location.href, title: document.title, pwdVisible };
-    }).catch(() => ({ url: page.url(), title: "", pwdVisible: false }));
-    const urlLooksLikeLogin = /\b(login|signin|sign-in|auth|oauth)\b/i.test(initialCheck.url);
-    if (!initialCheck.pwdVisible && !urlLooksLikeLogin) {
-      log4.info(`login: already logged in (no password field, URL=${initialCheck.url})`);
-      return {
-        loggedIn: true,
-        alreadyLoggedIn: true,
-        url: initialCheck.url,
-        reason: "Session already authenticated — no login form detected"
-      };
-    }
-    const passwordHandle = await page.waitForSelector('input[type="password"]:not([disabled]):not([readonly])', { state: "visible", timeout: 5000 }).catch(() => null);
-    const emailCandidates = [
-      'input[type="email"]:not([disabled]):not([readonly])',
-      'input[autocomplete="username"]:not([disabled]):not([readonly])',
-      'input[autocomplete="email"]:not([disabled]):not([readonly])',
-      'input[name*="email" i]:not([disabled]):not([readonly])',
-      'input[name*="user" i]:not([disabled]):not([readonly])',
-      'input[name*="login" i]:not([disabled]):not([readonly])',
-      'input[id*="email" i]:not([disabled]):not([readonly])',
-      'input[id*="user" i]:not([disabled]):not([readonly])',
-      'input[type="text"]:not([disabled]):not([readonly])',
-      "input:not([type]):not([disabled]):not([readonly])"
-    ];
-    const fillHandle = async (handle, value) => {
-      await handle.scrollIntoViewIfNeeded().catch(() => {});
-      await handle.click({ delay: 40 }).catch(() => {});
-      await handle.evaluate((el, val) => {
-        const input = el;
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-        setter?.call(input, val);
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-      }, value);
-      await page.waitForTimeout(TIMING.PRE_NAVIGATE[0] + Math.random() * (TIMING.PRE_NAVIGATE[1] - TIMING.PRE_NAVIGATE[0]));
-    };
-    if (!passwordHandle) {
-      const currentUrl = page.url();
-      if (!/\b(login|signin|sign-in|auth|oauth)\b/i.test(currentUrl)) {
-        log4.info(`login: no password field and URL left login area (${currentUrl}) — treating as success`);
-        return {
-          loggedIn: true,
-          alreadyLoggedIn: true,
-          url: currentUrl,
-          reason: "No login form detected after wait — assumed already authenticated"
-        };
-      }
-      const emailOnlyHandle = await page.evaluateHandle((candidates) => {
-        for (const sel of candidates) {
-          const el = document.querySelector(sel);
-          if (el && el.offsetParent !== null)
-            return el;
-        }
-        return null;
-      }, emailCandidates);
-      const emailOnlyEl = emailOnlyHandle.asElement();
-      if (emailOnlyEl && credential.username) {
-        log4.info(`login: no password field but found email input — running email-first flow on ${currentUrl}`);
-        await fillHandle(emailOnlyEl, credential.username);
-        const submitHandle2 = await page.evaluateHandle(() => {
-          const loginRe = /\b(log\s*in|sign\s*in|continue|submit|enter|next|send.*code|email.*me)\b/i;
-          const pick = (scope) => {
-            const typed = scope.querySelector('button[type="submit"]:not([disabled]), input[type="submit"]:not([disabled])');
-            if (typed)
-              return typed;
-            const buttons = Array.from(scope.querySelectorAll('button:not([disabled]), [role="button"]:not([disabled])'));
-            return buttons.find((b) => loginRe.test(b.textContent || "") && b.offsetParent !== null) || null;
-          };
-          const form = document.querySelector('input[type="email"], input[name*="email" i], input[type="text"]')?.closest("form");
-          if (form) {
-            const found = pick(form);
-            if (found)
-              return found;
-          }
-          return pick(document);
-        });
-        const submitEl2 = submitHandle2.asElement();
-        if (submitEl2) {
-          await submitEl2.scrollIntoViewIfNeeded().catch(() => {});
-          await submitEl2.click({ delay: 40 }).catch(async () => {
-            await submitEl2.evaluate((el) => el.click());
-          });
-        } else {
-          log4.warn("login: email-first flow, no submit button found — pressing Enter");
-          await emailOnlyEl.press("Enter").catch(() => {});
-        }
-        await page.waitForLoadState("domcontentloaded").catch(() => {});
-        await Promise.race([
-          page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {}),
-          page.waitForSelector('input[type="password"]:not([disabled])', { state: "visible", timeout: TIMEOUTS.NAVIGATION }).catch(() => null),
-          page.waitForSelector('input[inputmode="numeric"]:not([disabled]), input[autocomplete="one-time-code"]:not([disabled])', { state: "visible", timeout: TIMEOUTS.NAVIGATION }).catch(() => null)
-        ]);
-        const laterPasswordHandle = await page.$('input[type="password"]:not([disabled]):not([readonly])');
-        if (laterPasswordHandle && credential.password) {
-          log4.info("login: password field appeared after email submit — filling it");
-          await fillHandle(laterPasswordHandle, credential.password);
-          const laterSubmit = await page.$('button[type="submit"]:not([disabled])');
-          if (laterSubmit) {
-            await laterSubmit.click({ delay: 40 }).catch(() => {});
-          } else {
-            await laterPasswordHandle.press("Enter").catch(() => {});
-          }
-          await page.waitForLoadState("domcontentloaded").catch(() => {});
-          await page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {});
-        }
-        const afterUrl2 = page.url();
-        const emailFlowDone = afterUrl2 !== beforeUrl;
-        return {
-          loggedIn: emailFlowDone,
-          emailSubmitted: true,
-          url: afterUrl2,
-          reason: emailFlowDone ? "Email-first flow completed — check for code/OTP prompt if login isn't complete." : "Email submitted, waiting for next step (code entry, password page, or redirect)."
-        };
-      }
-      const pageDiag = await page.evaluate(() => {
-        const visibleText = (document.body?.innerText || "").slice(0, 500);
-        const inputCount = document.querySelectorAll("input").length;
-        const hiddenPassword = !!document.querySelector('input[type="password"]');
-        const hasCaptcha = !!document.querySelector('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], [class*="captcha" i], [id*="captcha" i]');
-        const hasCloudflare = !!document.querySelector('[class*="cf-" i], iframe[src*="challenges.cloudflare"]');
-        return { title: document.title, visibleText, inputCount, hiddenPassword, hasCaptcha, hasCloudflare };
-      }).catch(() => ({ title: "", visibleText: "", inputCount: 0, hiddenPassword: false, hasCaptcha: false, hasCloudflare: false }));
-      log4.warn(`login: no visible password or email field on ${currentUrl} — title="${pageDiag.title}", inputs=${pageDiag.inputCount}`);
-      const indicators = [];
-      if (pageDiag.hasCaptcha)
-        indicators.push("CAPTCHA detected");
-      if (pageDiag.hasCloudflare)
-        indicators.push("Cloudflare challenge");
-      if (pageDiag.inputCount === 0)
-        indicators.push("no input elements at all");
-      if (pageDiag.hiddenPassword)
-        indicators.push("password field exists but is hidden/disabled");
-      const indicatorStr = indicators.length > 0 ? ` (${indicators.join(", ")})` : "";
-      throw new Error(`login: no visible password or email field on ${currentUrl} after 5000ms${indicatorStr}. ` + `Page title: "${pageDiag.title}". ` + `The site may be showing a bot-detection wall, captcha, or an unsupported login flow. ` + `Retry with a stronger browser mode (binary-headful or docker-headful).`);
-    }
-    const usernameHandle = await page.evaluateHandle((candidates) => {
-      const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])');
-      if (!pwd)
-        return null;
-      const scope = pwd.closest("form") || document;
-      for (const sel of candidates) {
-        const el = scope.querySelector(sel);
-        if (el && el.offsetParent !== null)
-          return el;
-      }
-      return null;
-    }, emailCandidates);
-    const usernameEl = usernameHandle.asElement();
-    if (usernameEl && credential.username) {
-      await fillHandle(usernameEl, credential.username);
-    } else if (!usernameEl) {
-      log4.warn("login: no username field detected, proceeding with password only");
-    }
-    if (credential.password) {
-      await fillHandle(passwordHandle, credential.password);
-    }
-    const submitHandle = await page.evaluateHandle(() => {
-      const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])');
-      const form = pwd?.closest("form");
-      const loginRe = /\b(log\s*in|sign\s*in|continue|submit|enter|next)\b/i;
-      const pick = (scope) => {
-        const typed = scope.querySelector('button[type="submit"]:not([disabled]), input[type="submit"]:not([disabled])');
-        if (typed)
-          return typed;
-        const buttons = Array.from(scope.querySelectorAll('button:not([disabled]), [role="button"]:not([disabled])'));
-        return buttons.find((b) => loginRe.test(b.textContent || "") && b.offsetParent !== null) || null;
-      };
-      if (form) {
-        const found = pick(form);
-        if (found)
-          return found;
-      }
-      return pick(document);
-    });
-    const submitEl = submitHandle.asElement();
-    if (submitEl) {
-      await submitEl.scrollIntoViewIfNeeded().catch(() => {});
-      await submitEl.click({ delay: 40 }).catch(async () => {
-        await submitEl.evaluate((el) => el.click());
-      });
-    } else {
-      log4.warn("login: no submit button detected, pressing Enter in password field");
-      await passwordHandle.press("Enter").catch(() => {});
-    }
-    await page.waitForLoadState("domcontentloaded").catch(() => {});
-    await Promise.race([
-      page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {}),
-      page.waitForSelector('input[autocomplete="one-time-code"]:not([disabled]), input[inputmode="numeric"]:not([disabled]), input[name*="otp" i]:not([disabled]), input[name*="code" i]:not([disabled]), input[aria-label*="code" i]:not([disabled])', { state: "visible", timeout: TIMEOUTS.NAVIGATION }).catch(() => null)
-    ]);
-    const otpSelector = 'input[autocomplete="one-time-code"]:not([disabled]), input[inputmode="numeric"]:not([disabled]), input[name*="otp" i]:not([disabled]), input[name*="code" i]:not([disabled]), input[aria-label*="code" i]:not([disabled])';
-    const totpHandle = await page.$(otpSelector);
-    if (totpHandle) {
-      let code = null;
-      if (credential.totp_secret) {
-        code = generateTOTP(credential.totp_secret);
-        log4.info(`login: generated TOTP from stored secret for ${step.domain}`);
-      } else if (ctx.elicitOtp) {
-        log4.info(`login: prompting user for OTP for ${step.domain}`);
-        try {
-          code = await ctx.elicitOtp(step.domain);
-        } catch (err) {
-          log4.warn(`login: OTP elicitation failed: ${err instanceof Error ? err.message : String(err)}`);
-        }
-        if (!code) {
-          throw new Error(`login: OTP required but user did not provide one for ${step.domain}`);
-        }
-      } else {
-        throw new Error(`login: OTP field present but no TOTP secret stored and no elicitation callback available. Store a secret with \`credentials add ${step.domain} --totp-secret <secret>\` or use the MCP execute tool (which supports OTP elicitation).`);
-      }
-      await totpHandle.evaluate((el, val) => {
-        const input = el;
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-        setter?.call(input, val);
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-      }, code);
-      const totpSubmit = await page.$('button[type="submit"]:not([disabled])');
-      if (totpSubmit) {
-        await totpSubmit.click().catch(async () => {
-          await totpSubmit.evaluate((el) => el.click());
-        });
-      }
-      await page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {});
-    }
     await page.waitForTimeout(TIMING.POST_LOGIN_WAIT);
   }
+  if (step.totpSelector && credential.totp_secret) {
+    const totp = generateTOTP(credential.totp_secret);
+    await page.click(resolveSelector(step.totpSelector, ctx));
+    await page.keyboard.type(totp, { delay: 50 });
+    await page.waitForTimeout(TIMING.POST_TOTP_WAIT);
+  }
+}
+async function runAutoDetect(page, step, ctx, credential, beforeUrl) {
+  log14.info(`login: auto-detecting form on ${beforeUrl}`);
+  await page.waitForLoadState("domcontentloaded").catch(() => {});
+  await page.waitForTimeout(500);
+  const initialCheck = await page.evaluate((pwdSel) => {
+    const pwd = document.querySelector(pwdSel);
+    const pwdVisible = !!(pwd && pwd.offsetParent !== null);
+    return { url: location.href, title: document.title, pwdVisible };
+  }, PASSWORD_SELECTOR).catch(() => ({ url: page.url(), title: "", pwdVisible: false }));
+  if (!initialCheck.pwdVisible && !LOGIN_URL_RE.test(initialCheck.url)) {
+    log14.info(`login: already logged in (no password field, URL=${initialCheck.url})`);
+    return {
+      loggedIn: true,
+      alreadyLoggedIn: true,
+      url: initialCheck.url,
+      reason: "Session already authenticated — no login form detected"
+    };
+  }
+  const passwordHandle = await page.waitForSelector(PASSWORD_SELECTOR, { state: "visible", timeout: 5000 }).catch(() => null);
+  if (!passwordHandle) {
+    return runNoPasswordBranch(page, step, ctx, credential, beforeUrl);
+  }
+  await runPasswordFlow(page, credential, beforeUrl, passwordHandle);
+  await handleOtp(page, step, ctx, credential, beforeUrl);
+  await page.waitForTimeout(TIMING.POST_LOGIN_WAIT);
+  return null;
+}
+async function runNoPasswordBranch(page, step, ctx, credential, beforeUrl) {
+  const currentUrl = page.url();
+  if (!LOGIN_URL_RE.test(currentUrl)) {
+    log14.info(`login: no password field and URL left login area (${currentUrl}) — treating as success`);
+    return {
+      loggedIn: true,
+      alreadyLoggedIn: true,
+      url: currentUrl,
+      reason: "No login form detected after wait — assumed already authenticated"
+    };
+  }
+  const emailOnlyHandle = await page.evaluateHandle((candidates) => {
+    for (const sel of candidates) {
+      const el = document.querySelector(sel);
+      if (el && el.offsetParent !== null)
+        return el;
+    }
+    return null;
+  }, EMAIL_CANDIDATES);
+  const emailOnlyEl = emailOnlyHandle.asElement();
+  if (emailOnlyEl && credential.username) {
+    return runEmailFirstFlow(page, credential, beforeUrl, emailOnlyEl);
+  }
+  const pageDiag = await page.evaluate(() => {
+    const visibleText = (document.body?.innerText || "").slice(0, 500);
+    const inputCount = document.querySelectorAll("input").length;
+    const hiddenPassword = !!document.querySelector('input[type="password"]');
+    const hasCaptcha = !!document.querySelector('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], [class*="captcha" i], [id*="captcha" i]');
+    const hasCloudflare = !!document.querySelector('[class*="cf-" i], iframe[src*="challenges.cloudflare"]');
+    return { title: document.title, visibleText, inputCount, hiddenPassword, hasCaptcha, hasCloudflare };
+  }).catch(() => ({ title: "", visibleText: "", inputCount: 0, hiddenPassword: false, hasCaptcha: false, hasCloudflare: false }));
+  log14.warn(`login: no visible password or email field on ${currentUrl} — title="${pageDiag.title}", inputs=${pageDiag.inputCount}`);
+  const indicators = [];
+  if (pageDiag.hasCaptcha)
+    indicators.push("CAPTCHA detected");
+  if (pageDiag.hasCloudflare)
+    indicators.push("Cloudflare challenge");
+  if (pageDiag.inputCount === 0)
+    indicators.push("no input elements at all");
+  if (pageDiag.hiddenPassword)
+    indicators.push("password field exists but is hidden/disabled");
+  const indicatorStr = indicators.length > 0 ? ` (${indicators.join(", ")})` : "";
+  throw new Error(`login: no visible password or email field on ${currentUrl} after 5000ms${indicatorStr}. ` + `Page title: "${pageDiag.title}". ` + `The site may be showing a bot-detection wall, captcha, or an unsupported login flow. ` + `Retry with a stronger browser mode (binary-headful or docker-headful).`);
+}
+async function runEmailFirstFlow(page, credential, beforeUrl, emailEl) {
+  const currentUrl = page.url();
+  log14.info(`login: no password field but found email input — running email-first flow on ${currentUrl}`);
+  await fillHandleNative(page, emailEl, credential.username);
+  const submitEl = await findSubmitButton(page, {
+    formAnchor: EMAIL_FORM_ANCHOR,
+    reSource: EMAIL_FIRST_SUBMIT_RE.source,
+    reFlags: EMAIL_FIRST_SUBMIT_RE.flags
+  });
+  if (submitEl) {
+    await submitEl.scrollIntoViewIfNeeded().catch(() => {});
+    await submitEl.click({ delay: 40 }).catch(async () => {
+      await submitEl.evaluate((el) => el.click());
+    });
+  } else {
+    log14.warn("login: email-first flow, no submit button found — pressing Enter");
+    await emailEl.press("Enter").catch(() => {});
+  }
+  await page.waitForLoadState("domcontentloaded").catch(() => {});
+  await Promise.race([
+    page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {}),
+    page.waitForSelector('input[type="password"]:not([disabled])', { state: "visible", timeout: TIMEOUTS.NAVIGATION }).catch(() => null),
+    page.waitForSelector('input[inputmode="numeric"]:not([disabled]), input[autocomplete="one-time-code"]:not([disabled])', { state: "visible", timeout: TIMEOUTS.NAVIGATION }).catch(() => null)
+  ]);
+  const laterPasswordHandle = await page.$(PASSWORD_SELECTOR);
+  if (laterPasswordHandle && credential.password) {
+    log14.info("login: password field appeared after email submit — filling it");
+    await fillHandleNative(page, laterPasswordHandle, credential.password);
+    const laterSubmit = await page.$('button[type="submit"]:not([disabled])');
+    if (laterSubmit) {
+      await laterSubmit.click({ delay: 40 }).catch(() => {});
+    } else {
+      await laterPasswordHandle.press("Enter").catch(() => {});
+    }
+    await page.waitForLoadState("domcontentloaded").catch(() => {});
+    await page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {});
+  }
   const afterUrl = page.url();
-  const stillHasPasswordField = await page.evaluate(() => {
-    const pwd = document.querySelector('input[type="password"]:not([disabled]):not([readonly])');
+  const emailFlowDone = afterUrl !== beforeUrl;
+  return {
+    loggedIn: emailFlowDone,
+    emailSubmitted: true,
+    url: afterUrl,
+    reason: emailFlowDone ? "Email-first flow completed — check for code/OTP prompt if login isn't complete." : "Email submitted, waiting for next step (code entry, password page, or redirect)."
+  };
+}
+async function runPasswordFlow(page, credential, beforeUrl, passwordHandle) {
+  const usernameHandle = await page.evaluateHandle((args) => {
+    const pwd = document.querySelector(args.pwdSel);
+    if (!pwd)
+      return null;
+    const scope = pwd.closest("form") || document;
+    for (const sel of args.candidates) {
+      const el = scope.querySelector(sel);
+      if (el && el.offsetParent !== null)
+        return el;
+    }
+    return null;
+  }, { candidates: EMAIL_CANDIDATES, pwdSel: PASSWORD_SELECTOR });
+  const usernameEl = usernameHandle.asElement();
+  if (usernameEl && credential.username) {
+    await fillHandleNative(page, usernameEl, credential.username);
+  } else if (!usernameEl) {
+    log14.warn("login: no username field detected, proceeding with password only");
+  }
+  if (credential.password) {
+    await fillHandleNative(page, passwordHandle, credential.password);
+  }
+  const submitEl = await findSubmitButton(page, {
+    formAnchor: PASSWORD_FORM_ANCHOR,
+    reSource: PASSWORD_SUBMIT_RE.source,
+    reFlags: PASSWORD_SUBMIT_RE.flags
+  });
+  if (submitEl) {
+    await submitEl.scrollIntoViewIfNeeded().catch(() => {});
+    await submitEl.click({ delay: 40 }).catch(async () => {
+      await submitEl.evaluate((el) => el.click());
+    });
+  } else {
+    log14.warn("login: no submit button detected, pressing Enter in password field");
+    await passwordHandle.press("Enter").catch(() => {});
+  }
+  await page.waitForLoadState("domcontentloaded").catch(() => {});
+  await Promise.race([
+    page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {}),
+    page.waitForSelector(OTP_SELECTOR, { state: "visible", timeout: TIMEOUTS.NAVIGATION }).catch(() => null)
+  ]);
+}
+async function handleOtp(page, step, ctx, credential, beforeUrl) {
+  const totpHandle = await page.$(OTP_SELECTOR);
+  if (!totpHandle)
+    return;
+  let code = null;
+  if (credential.totp_secret) {
+    code = generateTOTP(credential.totp_secret);
+    log14.info(`login: generated TOTP from stored secret for ${step.domain}`);
+  } else if (ctx.elicitOtp) {
+    log14.info(`login: prompting user for OTP for ${step.domain}`);
+    try {
+      code = await ctx.elicitOtp(step.domain);
+    } catch (err) {
+      log14.warn(`login: OTP elicitation failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (!code) {
+      throw new Error(`login: OTP required but user did not provide one for ${step.domain}`);
+    }
+  } else {
+    throw new Error(`login: OTP field present but no TOTP secret stored and no elicitation callback available. Store a secret with \`credentials add ${step.domain} --totp-secret <secret>\` or use the MCP execute tool (which supports OTP elicitation).`);
+  }
+  await setValueNative(totpHandle, code);
+  const totpSubmit = await page.$('button[type="submit"]:not([disabled])');
+  if (totpSubmit) {
+    await totpSubmit.click().catch(async () => {
+      await totpSubmit.evaluate((el) => el.click());
+    });
+  }
+  await page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {});
+}
+async function honestSignal(page, beforeUrl) {
+  const afterUrl = page.url();
+  const stillHasPasswordField = await page.evaluate((pwdSel) => {
+    const pwd = document.querySelector(pwdSel);
     return !!(pwd && pwd.offsetParent !== null);
-  }).catch(() => false);
+  }, PASSWORD_SELECTOR).catch(() => false);
   const loggedIn = afterUrl !== beforeUrl && !stillHasPasswordField;
   return { loggedIn, url: afterUrl, changedUrl: afterUrl !== beforeUrl, passwordFieldRemains: stillHasPasswordField };
 }
-async function executeAction(page, step, ctx, monitor) {
-  const start = Date.now();
-  const stepIndex = -1;
-  try {
-    let result = null;
-    switch (step.type) {
-      case "navigate":
-        await page.goto(step.url, {
-          waitUntil: step.waitUntil || "domcontentloaded",
-          timeout: TIMEOUTS.NAVIGATION
-        });
-        const stealthScript = contextStealthScripts.get(page.context()) ?? STEALTH_SCRIPT;
-        try {
-          await page.evaluate(stealthScript);
-        } catch (err) {
-          log4.warn(`stealth injection failed: ${err}`);
-        }
-        if (ctx.sessionData) {
-          try {
-            await injectStorage(page, ctx.sessionData);
-          } catch (err) {
-            log4.warn(`storage injection after navigate failed: ${err}`);
-          }
-        }
-        break;
-      case "click":
-        await page.click(resolveSelector(step.selector, ctx));
-        break;
-      case "fill":
-        await page.fill(resolveSelector(step.selector, ctx), step.value);
-        break;
-      case "human-click":
-        if (step.selector) {
-          await humanClick(page, resolveSelector(step.selector, ctx));
-        } else if (step.x !== undefined && step.y !== undefined) {
-          await humanClickXY(page, step.x, step.y);
-        } else {
-          throw new Error("human-click requires selector or x/y coordinates");
-        }
-        break;
-      case "right-click":
-        if (step.selector) {
-          await page.click(resolveSelector(step.selector, ctx), { button: "right" });
-        } else if (step.x !== undefined && step.y !== undefined) {
-          await page.mouse.click(step.x, step.y, { button: "right" });
-        } else {
-          throw new Error("right-click requires selector or x/y coordinates");
-        }
-        break;
-      case "human-type":
-        await humanType(page, resolveSelector(step.selector, ctx), step.value);
-        break;
-      case "evaluate":
-        result = await page.evaluate(step.expression);
-        break;
-      case "extract":
-        result = await page.evaluate(step.expression);
-        break;
-      case "wait":
-        await page.waitForTimeout(step.ms);
-        break;
-      case "wait-for":
-        await page.waitForSelector(resolveSelector(step.selector, ctx), { timeout: step.timeout || TIMEOUTS.SELECTOR_WAIT });
-        break;
-      case "scroll":
-        await page.evaluate((dy) => window.scrollBy(0, dy || document.body.scrollHeight), step.deltaY ?? 0);
-        break;
-      case "keyboard":
-        await page.keyboard.press(step.key);
-        break;
-      case "type-code": {
-        const code = String(step.value || "");
-        const selector = step.selector ? resolveSelector(step.selector, ctx) : 'input[type="tel"]';
-        const firstInput = await page.waitForSelector(selector, { timeout: TIMEOUTS.TOTP_INPUT });
-        if (!firstInput)
-          throw new Error(`Input not found: ${selector}`);
-        await firstInput.click();
-        await page.waitForTimeout(TIMING.POST_FORM_CLICK);
-        for (const digit of code) {
-          await page.keyboard.press(digit);
-          await page.waitForTimeout(TIMING.DIGIT_DELAY_BASE + Math.random() * TIMING.DIGIT_DELAY_RANGE);
-        }
-        result = { typed: code.length };
-        break;
-      }
-      case "recaptcha-click":
-        result = await clickRecaptchaCheckbox(page);
-        break;
-      case "recaptcha-select":
-        result = await clickChallengeTiles(page, step.tiles);
-        break;
-      case "recaptcha-verify":
-        result = await clickChallengeVerify(page);
-        break;
-      case "recaptcha-info":
-        result = await getChallengeInfo(page);
-        break;
-      case "recaptcha-solve":
-        result = await handleRecaptchaSolve(page);
-        break;
-      case "recaptcha-answer":
-        result = await handleRecaptchaAnswer(page, step.tiles);
-        break;
-      case "solve-captcha":
-        result = await handleSolveCaptcha(page, monitor);
-        break;
-      case "screenshot": {
-        if (step.annotate) {
-          const annotated = await annotatedScreenshot(page, ctx);
-          const refLines = annotated.refs.map((r) => `  ${r.ref} ${r.role} "${r.name}"`).join(`
-`);
-          result = { screenshotUrl: annotated.screenshotUrl, refs: refLines };
-        } else {
-          const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
-          const url = saveScreenshot(buf, `step-${Date.now()}.jpg`, ctx.screenshotDir, ctx.publicUrl);
-          result = { screenshotUrl: url };
-        }
-        break;
-      }
-      case "snapshot": {
-        const snap = await takeSnapshot(page, ctx, {
-          interactiveOnly: step.interactiveOnly,
-          maxElements: step.maxElements
-        });
-        result = { elementCount: snap.nodes.length, snapshot: snap.text };
-        break;
-      }
-      case "find":
-        result = await handleFind(page, step, ctx);
-        break;
-      case "login":
-        result = await handleLogin(page, step, ctx);
-        break;
-      default: {
-        const _exhaustive = step;
-        throw new Error(`Unknown step type: ${_exhaustive.type}`);
-      }
-    }
-    return {
-      stepIndex,
-      step,
-      ok: true,
-      result,
-      durationMs: Date.now() - start
-    };
-  } catch (err) {
-    return {
-      stepIndex,
-      step,
-      ok: false,
-      error: getErrorMessage(err),
-      durationMs: Date.now() - start
-    };
-  }
-}
-var log4;
-var init_actions = __esm(() => {
-  init_stealth();
+var log14;
+var init_login = __esm(() => {
   init_humanize();
-  init_recaptcha();
-  init_hcaptcha();
+  init_form_fill();
   init_crypto();
+  init_credential_resolver();
   init_knowledge();
-  init_screenshot();
-  init_snapshot();
-  init_annotate();
   init_logger();
   init_constants();
-  log4 = createLogger("actions");
+  init_selectors();
+  log14 = createLogger("actions");
+});
+
+// src/lib/actions/registry.ts
+async function executeAction(page, step, ctx, monitor) {
+  const start = Date.now();
+  try {
+    const handler = registry[step.type];
+    const result = await handler(page, step, ctx, monitor);
+    return { stepIndex: -1, step, ok: true, result, durationMs: Date.now() - start };
+  } catch (err) {
+    return failedStepResult(step, getErrorMessage(err), Date.now() - start);
+  }
+}
+var registry, registeredStepTypes;
+var init_registry2 = __esm(() => {
+  init_navigation();
+  init_screenshot2();
+  init_captcha();
+  init_login();
+  registry = {
+    navigate,
+    click,
+    fill,
+    "human-click": humanClickStep,
+    "right-click": rightClick,
+    "human-type": humanTypeStep,
+    evaluate,
+    extract,
+    wait,
+    "wait-for": waitFor,
+    scroll,
+    keyboard,
+    "type-code": typeCode,
+    find,
+    screenshot,
+    snapshot,
+    login,
+    "solve-captcha": solveCaptcha,
+    "recaptcha-click": recaptchaClick,
+    "recaptcha-select": recaptchaSelect,
+    "recaptcha-verify": recaptchaVerify,
+    "recaptcha-info": recaptchaInfo,
+    "recaptcha-solve": recaptchaSolve,
+    "recaptcha-answer": recaptchaAnswer
+  };
+  registeredStepTypes = Object.keys(registry);
 });
 
 // src/lib/stale-monitor.ts
@@ -2884,6 +3983,28 @@ var init_obstacles = __esm(() => {
   ];
 });
 
+// src/lib/page-state.ts
+async function capturePageState(page, ctx, opts) {
+  const { screenshot: screenshot2 = false, namePrefix = "state" } = opts ?? {};
+  let url = "";
+  try {
+    url = page.url();
+  } catch {}
+  const title = await page.title().catch(() => "");
+  if (!screenshot2)
+    return { url, title };
+  try {
+    const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
+    const screenshotUrl = saveScreenshot(buf, `${namePrefix}-${Date.now()}.jpg`, ctx.screenshotDir, ctx.publicUrl);
+    return { url, title, screenshotUrl };
+  } catch {
+    return { url, title };
+  }
+}
+var init_page_state = __esm(() => {
+  init_screenshot();
+});
+
 // src/lib/api-capture.ts
 function isAuthHeader(name) {
   return AUTH_HEADER_PATTERNS.some((p) => p.test(name));
@@ -2891,8 +4012,11 @@ function isAuthHeader(name) {
 function isLikelyId(segment) {
   return ID_PATTERNS.some((p) => p.test(segment));
 }
-function parameterizePath(path4) {
-  const parts = path4.split("/");
+function isRecord(x) {
+  return typeof x === "object" && x !== null && !Array.isArray(x);
+}
+function parameterizePath(path8) {
+  const parts = path8.split("/");
   let idCount = 0;
   const parameterized = parts.map((part) => {
     if (part && isLikelyId(part)) {
@@ -2996,16 +4120,16 @@ function gqlActionFromBody(body) {
   return;
 }
 function classifyRequest(req) {
-  const path4 = req.path;
-  const lowerPath = path4.toLowerCase();
+  const path8 = req.path;
+  const lowerPath = path8.toLowerCase();
   const ct = (req.requestHeaders["content-type"] || req.requestHeaders["Content-Type"] || "").toLowerCase();
   const body = req.requestBody;
   if (ct.includes("application/grpc")) {
-    return { protocol: "grpc-web", action: path4.replace(/^\//, "") };
+    return { protocol: "grpc-web", action: path8.replace(/^\//, "") };
   }
   const soapAction = req.requestHeaders["soapaction"] || req.requestHeaders["SOAPAction"];
   if (soapAction || ct.includes("text/xml") || ct.includes("application/soap+xml")) {
-    return { protocol: "soap", action: (soapAction || path4).replace(/^["/]|["/]$/g, "") };
+    return { protocol: "soap", action: (soapAction || path8).replace(/^["/]|["/]$/g, "") };
   }
   if (/\/graphql\b/.test(lowerPath) || hasGraphQLShape(body)) {
     return { protocol: "graphql", action: gqlActionFromBody(body) ?? "anonymous" };
@@ -3021,7 +4145,7 @@ function classifyRequest(req) {
     if (friendly)
       return { protocol: "form-rpc", action: friendly };
   }
-  return { protocol: "rest", action: `${req.method} ${parameterizePath(path4)}` };
+  return { protocol: "rest", action: `${req.method} ${parameterizePath(path8)}` };
 }
 function inferVerb(protocol, action, method, responseBody) {
   const lower = action.toLowerCase();
@@ -3034,7 +4158,7 @@ function inferVerb(protocol, action, method, responseBody) {
     if (m === "PUT" || m === "PATCH")
       return "update";
     if (m === "GET")
-      return Array.isArray(responseBody) || Array.isArray(responseBody?.data) ? "list" : "read";
+      return Array.isArray(responseBody) || isRecord(responseBody) && Array.isArray(responseBody.data) ? "list" : "read";
     return "action";
   }
   if (/\b(delete|remove|destroy|unfollow|unlike|dislike)\b/.test(lower))
@@ -3048,7 +4172,7 @@ function inferVerb(protocol, action, method, responseBody) {
   if (/\b(get|fetch|load|read|query|view|show|profile|info|detail|me)\b/.test(lower))
     return "read";
   if (protocol === "graphql") {
-    const q = responseBody?.query;
+    const q = isRecord(responseBody) ? responseBody.query : undefined;
     if (typeof q === "string" && /^\s*mutation\b/.test(q))
       return "action";
     return "read";
@@ -3066,8 +4190,8 @@ function buildFunctionName(protocol, action, method, verb) {
   if (protocol === "rest") {
     const parts = action.split(" ");
     const httpMethod = parts[0];
-    const path4 = parts.slice(1).join(" ");
-    const segs = path4.split("/").filter((s) => s && !s.startsWith("{"));
+    const path8 = parts.slice(1).join(" ");
+    const segs = path8.split("/").filter((s) => s && !s.startsWith("{"));
     const verbPrefix = httpMethod === "GET" ? verb === "list" ? "list" : "get" : httpMethod === "POST" ? "create" : httpMethod === "PUT" ? "update" : httpMethod === "PATCH" ? "patch" : httpMethod === "DELETE" ? "delete" : httpMethod.toLowerCase();
     return camelCase(`${verbPrefix} ${segs.join(" ")}`) || camelCase(action);
   }
@@ -3345,20 +4469,6 @@ var init_api_capture = __esm(() => {
 });
 
 // src/lib/pipeline.ts
-async function getPageState(page, ctx, withScreenshot = false) {
-  const url = page.url();
-  const title = await page.title().catch(() => "");
-  if (!withScreenshot) {
-    return { url, title };
-  }
-  try {
-    const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
-    const screenshotUrl = saveScreenshot(buf, `state-${Date.now()}.jpg`, ctx.screenshotDir, ctx.publicUrl);
-    return { url, title, screenshotUrl };
-  } catch {
-    return { url, title };
-  }
-}
 function classifyError(err, step) {
   if (err instanceof StaleStateError)
     return "stale-state";
@@ -3434,14 +4544,8 @@ class PipelineRunner {
       } catch (err) {
         const asError = err instanceof Error ? err : new Error(String(err));
         const errorType = classifyError(asError, step);
-        const pageState = await getPageState(page, this.ctx, true);
-        stepResult = {
-          stepIndex: i,
-          step,
-          ok: false,
-          error: asError.message,
-          durationMs: Date.now() - startTime
-        };
+        const pageState = await capturePageState(page, this.ctx, { screenshot: true });
+        stepResult = failedStepResult(step, asError.message, Date.now() - startTime, i);
         results.push(stepResult);
         return {
           ok: false,
@@ -3471,7 +4575,7 @@ class PipelineRunner {
       }
       results.push(stepResult);
       if (!stepResult.ok && !continueOnError) {
-        const pageState = await getPageState(page, this.ctx, true);
+        const pageState = await capturePageState(page, this.ctx, { screenshot: true });
         const errorType = classifyError(new Error(stepResult.error || ""), step);
         return {
           ok: false,
@@ -3506,7 +4610,7 @@ class PipelineRunner {
             durationMs: Date.now() - obstacleStart
           });
           if (!resolution.resolved && obstacle.type === "captcha") {
-            const pageState = await getPageState(page, this.ctx, true);
+            const pageState = await capturePageState(page, this.ctx, { screenshot: true });
             return {
               ok: false,
               completedSteps: i,
@@ -3531,7 +4635,7 @@ class PipelineRunner {
       }
     }
     const capturedApi = await finishCapture();
-    const finalState = await getPageState(page, this.ctx, true);
+    const finalState = await capturePageState(page, this.ctx, { screenshot: true });
     return {
       ok: true,
       completedSteps: pipeline.steps.length,
@@ -3546,962 +4650,12 @@ class PipelineRunner {
 }
 var DEFAULT_STALE_TIMEOUT_MS2 = 20000;
 var init_pipeline = __esm(() => {
-  init_actions();
+  init_registry2();
   init_stale_monitor();
   init_obstacles();
   init_screenshot();
+  init_page_state();
   init_api_capture();
-});
-
-// src/lib/browser/launcher.ts
-function findChromeExecutable() {
-  if (process.env.CHROME_EXECUTABLE)
-    return process.env.CHROME_EXECUTABLE;
-  if (import_fs3.default.existsSync("/usr/bin/google-chrome-stable"))
-    return "/usr/bin/google-chrome-stable";
-  return;
-}
-async function getBrowser(_name = "chromium") {
-  if (cachedBrowser) {
-    if (cachedBrowser.isConnected())
-      return cachedBrowser;
-    try {
-      await cachedBrowser.close();
-    } catch (e) {
-      log5.warn(`stale browser close failed: ${e}`);
-    }
-    cachedBrowser = null;
-  }
-  cachedBrowser = await import_patchright.chromium.launch({
-    headless: true,
-    args: STEALTH_ARGS
-  });
-  return cachedBrowser;
-}
-async function closeBrowser() {
-  if (!cachedBrowser)
-    return;
-  try {
-    await cachedBrowser.close();
-  } catch (e) {
-    log5.warn(`closeBrowser failed: ${e}`);
-  }
-  cachedBrowser = null;
-}
-async function getBrowserWithFallback(_preferred) {
-  return { browser: await getBrowser(), name: "chromium" };
-}
-async function launchHeadful(displayNum) {
-  const executablePath = findChromeExecutable();
-  const hasExtensions = import_fs3.default.existsSync(UBLOCK_PATH);
-  const args = [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-blink-features=AutomationControlled",
-    "--disable-features=IsolateOrigins,site-per-process",
-    "--disable-infobars",
-    "--window-size=1920,1080",
-    "--force-device-scale-factor=1.25",
-    "--use-gl=angle",
-    "--use-angle=swiftshader"
-  ];
-  if (hasExtensions)
-    args.push(`--load-extension=${UBLOCK_PATH}`);
-  const launchOpts = {
-    headless: false,
-    args,
-    env: { ...process.env, DISPLAY: `:${displayNum}` }
-  };
-  if (executablePath)
-    launchOpts.executablePath = executablePath;
-  log5.debug(`headful: ${executablePath || "patchright chromium"}, extensions: ${hasExtensions}`);
-  return import_patchright.chromium.launch(launchOpts);
-}
-var import_fs3, import_patchright, log5, UBLOCK_PATH = "/extensions/uBlock0.chromium", cachedBrowser = null;
-var init_launcher = __esm(() => {
-  init_stealth();
-  init_logger();
-  import_fs3 = __toESM(require("fs"));
-  import_patchright = require("patchright");
-  log5 = createLogger("launcher");
-});
-
-// src/lib/browser/fingerprint.ts
-function generateWindowsFingerprint() {
-  const fp = generator.getFingerprint();
-  const { navigator: nav, screen } = fp.fingerprint;
-  const dprOptions = [1.25, 1.5, 1.25, 1.5, 1];
-  const dpr = dprOptions[Math.floor(Math.random() * dprOptions.length)];
-  const w = screen.width || SCREEN_DEFAULTS.WIDTH;
-  const h = screen.height || SCREEN_DEFAULTS.HEIGHT;
-  return {
-    userAgent: nav.userAgent,
-    platform: "Win32",
-    screenWidth: w,
-    screenHeight: h,
-    screenAvailHeight: h - 40,
-    colorDepth: 24,
-    deviceScaleFactor: dpr,
-    hardwareConcurrency: nav.hardwareConcurrency || 8,
-    deviceMemory: nav.deviceMemory || 8,
-    languages: nav.languages || ["en-US", "en"],
-    uaData: nav.userAgentData
-  };
-}
-var import_fingerprint_generator, generator;
-var init_fingerprint = __esm(() => {
-  init_constants();
-  import_fingerprint_generator = require("fingerprint-generator");
-  generator = new import_fingerprint_generator.FingerprintGenerator({
-    browsers: [{ name: "chrome", minVersion: CHROME_MIN_VERSION }],
-    operatingSystems: ["windows"],
-    devices: ["desktop"],
-    locales: ["en-US"]
-  });
-});
-
-// src/lib/browser/session-manager.ts
-function allocateDisplay() {
-  for (let i = 0;i < MAX_SESSIONS; i++) {
-    const num = BASE_DISPLAY + i;
-    if (!usedDisplays.has(num)) {
-      usedDisplays.add(num);
-      return num;
-    }
-  }
-  throw new Error("No available displays. Max concurrent sessions reached.");
-}
-function freeDisplay(num) {
-  usedDisplays.delete(num);
-}
-function waitForSocket(displayNum, timeoutMs = 5000) {
-  const socketPath = `/tmp/.X11-unix/X${displayNum}`;
-  return new Promise((resolve, reject) => {
-    const start = Date.now();
-    const check = () => {
-      if (import_fs4.default.existsSync(socketPath))
-        return resolve();
-      if (Date.now() - start > timeoutMs)
-        return reject(new Error(`Xvfb socket not ready after ${timeoutMs}ms`));
-      setTimeout(check, 100);
-    };
-    check();
-  });
-}
-function killProcess(proc) {
-  if (proc && !proc.killed) {
-    try {
-      proc.kill("SIGTERM");
-    } catch {}
-  }
-}
-async function startSession(userId) {
-  if (sessions.has(userId)) {
-    return sessions.get(userId);
-  }
-  const displayNum = allocateDisplay();
-  const vncPort = 5900 + displayNum;
-  const wsPort = 6080 + (displayNum - BASE_DISPLAY);
-  const xvfb = import_child_process.spawn("Xvfb", [`:${displayNum}`, "-screen", "0", "1920x1080x24", "-ac"], {
-    stdio: "ignore"
-  });
-  await waitForSocket(displayNum);
-  const x11vnc = import_child_process.spawn("x11vnc", ["-display", `:${displayNum}`, "-nopw", "-listen", "localhost", "-rfbport", String(vncPort), "-shared", "-forever"], { stdio: "ignore" });
-  const noVncPath = import_fs4.default.existsSync("/usr/share/novnc") ? "/usr/share/novnc" : "/usr/share/noVNC";
-  const websockify = import_child_process.spawn("websockify", ["--web", noVncPath, String(wsPort), `localhost:${vncPort}`], {
-    stdio: "ignore"
-  });
-  await new Promise((r) => setTimeout(r, 500));
-  const browser = await launchHeadful(displayNum);
-  const fingerprint = generateWindowsFingerprint();
-  const ctxOpts = stealthContextOptions({}, userId, fingerprint);
-  const context = await browser.newContext(ctxOpts);
-  const stealthScript = buildStealthScript(fingerprint);
-  contextStealthScripts.set(context, stealthScript);
-  const page = await context.newPage();
-  log6.debug(`fingerprint: ${fingerprint.userAgent.slice(0, 60)}... DPR=${fingerprint.deviceScaleFactor} screen=${fingerprint.screenWidth}x${fingerprint.screenHeight}`);
-  const session = {
-    displayNum,
-    vncPort,
-    wsPort,
-    xvfb,
-    x11vnc,
-    websockify,
-    browser,
-    context,
-    page,
-    createdAt: new Date,
-    timeoutTimer: null
-  };
-  session.timeoutTimer = setTimeout(() => stopSession(userId), SESSION_TIMEOUT);
-  sessions.set(userId, session);
-  return session;
-}
-function resetTimeout(userId) {
-  const session = sessions.get(userId);
-  if (session) {
-    clearTimeout(session.timeoutTimer);
-    session.timeoutTimer = setTimeout(() => stopSession(userId), SESSION_TIMEOUT);
-  }
-}
-function getSession(userId) {
-  return sessions.get(userId) || null;
-}
-async function stopSession(userId) {
-  const session = sessions.get(userId);
-  if (!session)
-    return null;
-  clearTimeout(session.timeoutTimer);
-  let sessionData = null;
-  try {
-    const { extractSession: extractSession2 } = await Promise.resolve().then(() => exports_persistence);
-    sessionData = await extractSession2(session.context, session.page);
-  } catch {}
-  contextStealthScripts.delete(session.context);
-  try {
-    await session.context.close();
-  } catch {}
-  try {
-    await session.browser.close();
-  } catch {}
-  killProcess(session.websockify);
-  killProcess(session.x11vnc);
-  killProcess(session.xvfb);
-  await new Promise((r) => setTimeout(r, 1000));
-  try {
-    import_fs4.default.unlinkSync(`/tmp/.X11-unix/X${session.displayNum}`);
-  } catch {}
-  freeDisplay(session.displayNum);
-  sessions.delete(userId);
-  return sessionData;
-}
-async function cleanupAllSessions() {
-  const userIds = [...sessions.keys()];
-  await Promise.all(userIds.map((id) => stopSession(id)));
-}
-var import_child_process, import_fs4, log6, BASE_DISPLAY, MAX_SESSIONS, SESSION_TIMEOUT, sessions, usedDisplays;
-var init_session_manager = __esm(() => {
-  init_launcher();
-  init_stealth();
-  init_logger();
-  init_fingerprint();
-  import_child_process = require("child_process");
-  import_fs4 = __toESM(require("fs"));
-  log6 = createLogger("session");
-  BASE_DISPLAY = parseInt(process.env.VNC_BASE_DISPLAY || "99", 10);
-  MAX_SESSIONS = parseInt(process.env.VNC_MAX_SESSIONS || "20", 10);
-  SESSION_TIMEOUT = parseInt(process.env.VNC_SESSION_TIMEOUT_MS || "300000", 10);
-  sessions = new Map;
-  usedDisplays = new Set;
-});
-
-// src/lib/session/sqlite-store.ts
-function createBunDb(dbPath) {
-  const { Database } = require("bun:sqlite");
-  const db = new Database(dbPath);
-  db.run("PRAGMA journal_mode = WAL");
-  return {
-    queryGet: (sql, ...params) => db.query(sql).get(...params),
-    queryAll: (sql, ...params) => db.query(sql).all(...params),
-    run: (sql, ...params) => {
-      if (params.length > 0) {
-        db.query(sql).run(...params);
-      } else {
-        db.run(sql);
-      }
-    },
-    close: () => db.close()
-  };
-}
-function createNodeDb(dbPath) {
-  const Database = require("better-sqlite3");
-  const db = new Database(dbPath);
-  db.pragma("journal_mode = WAL");
-  return {
-    queryGet: (sql, ...params) => db.prepare(sql).get(...params),
-    queryAll: (sql, ...params) => db.prepare(sql).all(...params),
-    run: (sql, ...params) => {
-      if (params.length > 0) {
-        db.prepare(sql).run(...params);
-      } else {
-        db.exec(sql);
-      }
-    },
-    close: () => db.close()
-  };
-}
-
-class SqliteStore {
-  db;
-  constructor(dataDir) {
-    import_fs5.default.mkdirSync(dataDir, { recursive: true });
-    const dbPath = import_path4.default.join(dataDir, "iframer.db");
-    this.db = IS_BUN ? createBunDb(dbPath) : createNodeDb(dbPath);
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS sessions (
-        user_id TEXT PRIMARY KEY,
-        blob    BLOB NOT NULL
-      )
-    `);
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS credentials (
-        user_id TEXT NOT NULL,
-        domain  TEXT NOT NULL,
-        blob    BLOB NOT NULL,
-        PRIMARY KEY (user_id, domain)
-      )
-    `);
-    this.migrateLegacyUserIds();
-  }
-  migrateLegacyUserIds() {
-    const CANONICAL = "iframer-local";
-    const LEGACY = ["cli-user", "mcp-user", "default"];
-    for (const legacy of LEGACY) {
-      this.db.run(`INSERT OR IGNORE INTO credentials (user_id, domain, blob)
-         SELECT ?, domain, blob FROM credentials WHERE user_id = ?`, CANONICAL, legacy);
-      this.db.run(`INSERT OR IGNORE INTO sessions (user_id, blob)
-         SELECT ?, blob FROM sessions WHERE user_id = ?`, CANONICAL, legacy);
-    }
-  }
-  async getSession(userId) {
-    const row = this.db.queryGet("SELECT blob FROM sessions WHERE user_id = ?", userId);
-    return row ? Buffer.from(row.blob) : null;
-  }
-  async setSession(userId, blob) {
-    this.db.run("INSERT OR REPLACE INTO sessions (user_id, blob) VALUES (?, ?)", userId, blob);
-  }
-  async deleteSession(userId) {
-    this.db.run("DELETE FROM sessions WHERE user_id = ?", userId);
-  }
-  async setCredential(userId, domain, encryptedBlob) {
-    this.db.run("INSERT OR REPLACE INTO credentials (user_id, domain, blob) VALUES (?, ?, ?)", userId, domain, encryptedBlob);
-  }
-  async getCredential(userId, domain) {
-    const row = this.db.queryGet("SELECT blob FROM credentials WHERE user_id = ? AND domain = ?", userId, domain);
-    return row ? Buffer.from(row.blob) : null;
-  }
-  async deleteCredential(userId, domain) {
-    this.db.run("DELETE FROM credentials WHERE user_id = ? AND domain = ?", userId, domain);
-  }
-  async listCredentialDomains(userId) {
-    const rows = this.db.queryAll("SELECT domain FROM credentials WHERE user_id = ?", userId);
-    return rows.map((r) => r.domain);
-  }
-  close() {
-    this.db.close();
-  }
-}
-var import_path4, import_fs5, IS_BUN;
-var init_sqlite_store = __esm(() => {
-  import_path4 = __toESM(require("path"));
-  import_fs5 = __toESM(require("fs"));
-  IS_BUN = typeof globalThis.Bun !== "undefined";
-});
-
-// src/lib/storage.ts
-function createStore(options = {}) {
-  const dataDir = options.dataDir || getDataDir();
-  return new SqliteStore(dataDir);
-}
-var init_storage = __esm(() => {
-  init_sqlite_store();
-  init_paths();
-});
-
-// src/lib/browser/chrome-downloader.ts
-var exports_chrome_downloader = {};
-__export(exports_chrome_downloader, {
-  isChromiumInstalled: () => isChromiumInstalled,
-  findChromeForTesting: () => findChromeForTesting,
-  findChrome: () => findChrome,
-  ensureChrome: () => ensureChrome,
-  downloadChrome: () => downloadChrome
-});
-function getPlatform() {
-  const arch = process.arch;
-  const platform = process.platform;
-  if (platform === "darwin")
-    return arch === "arm64" ? "mac-arm64" : "mac-x64";
-  if (platform === "linux")
-    return arch === "arm64" ? "linux-arm64" : "linux64";
-  if (platform === "win32")
-    return "win64";
-  throw new Error(`Unsupported platform: ${platform}-${arch}`);
-}
-function getChromeExecutablePath(installDir) {
-  const platform = process.platform;
-  if (platform === "darwin") {
-    const entries = import_fs6.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
-    const dir = entries[0] || "chrome-mac-arm64";
-    return import_path5.default.join(installDir, dir, "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing");
-  }
-  if (platform === "linux") {
-    const entries = import_fs6.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
-    const dir = entries[0] || "chrome-linux64";
-    return import_path5.default.join(installDir, dir, "chrome");
-  }
-  if (platform === "win32") {
-    const entries = import_fs6.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
-    const dir = entries[0] || "chrome-win64";
-    return import_path5.default.join(installDir, dir, "chrome.exe");
-  }
-  throw new Error(`Unsupported platform: ${platform}`);
-}
-async function downloadChrome(installDir = DEFAULT_INSTALL_DIR) {
-  log7.info("Downloading Chrome for Testing (first time only)...");
-  const res = await fetch(CHROME_VERSIONS_URL);
-  if (!res.ok)
-    throw new Error(`Failed to fetch Chrome versions: ${res.status}`);
-  const data = await res.json();
-  const channel = data.channels?.Stable;
-  if (!channel)
-    throw new Error("No Stable channel found in Chrome for Testing versions");
-  const platform = getPlatform();
-  const download = channel.downloads?.chrome?.find((d) => d.platform === platform);
-  if (!download)
-    throw new Error(`No Chrome for Testing download for platform: ${platform}`);
-  const url = download.url;
-  const version = channel.version;
-  log7.debug(`Version ${version} for ${platform}`);
-  log7.debug(`URL: ${url}`);
-  import_fs6.default.mkdirSync(installDir, { recursive: true });
-  const zipPath = import_path5.default.join(installDir, "chrome.zip");
-  const dlRes = await fetch(url);
-  if (!dlRes.ok)
-    throw new Error(`Download failed: ${dlRes.status}`);
-  const buf = Buffer.from(await dlRes.arrayBuffer());
-  import_fs6.default.writeFileSync(zipPath, buf);
-  log7.info(`Downloaded ${(buf.length / 1024 / 1024).toFixed(1)}MB`);
-  import_child_process2.execSync(`unzip -o -q "${zipPath}" -d "${installDir}"`, { stdio: "inherit" });
-  import_fs6.default.unlinkSync(zipPath);
-  const execPath = getChromeExecutablePath(installDir);
-  if (!import_fs6.default.existsSync(execPath)) {
-    throw new Error(`Chrome executable not found after extraction: ${execPath}`);
-  }
-  if (process.platform !== "win32") {
-    import_fs6.default.chmodSync(execPath, 493);
-  }
-  import_fs6.default.writeFileSync(import_path5.default.join(installDir, "version.json"), JSON.stringify({ version, platform, downloadedAt: new Date().toISOString() }));
-  log7.info(`Installed at: ${execPath}`);
-  return execPath;
-}
-function findChromeForTesting() {
-  if (process.env.CHROME_EXECUTABLE) {
-    if (import_fs6.default.existsSync(process.env.CHROME_EXECUTABLE))
-      return process.env.CHROME_EXECUTABLE;
-  }
-  try {
-    const execPath = getChromeExecutablePath(DEFAULT_INSTALL_DIR);
-    if (import_fs6.default.existsSync(execPath))
-      return execPath;
-  } catch {}
-  return null;
-}
-function findChrome() {
-  const cft = findChromeForTesting();
-  if (cft)
-    return cft;
-  const systemPaths = process.platform === "darwin" ? [
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium"
-  ] : process.platform === "linux" ? [
-    "/usr/bin/google-chrome-stable",
-    "/usr/bin/google-chrome",
-    "/usr/bin/chromium-browser",
-    "/usr/bin/chromium",
-    ...(() => {
-      try {
-        const dirs = import_fs6.default.readdirSync("/ms-playwright").filter((d) => d.startsWith("chromium-")).sort().reverse();
-        return dirs.map((d) => import_path5.default.join("/ms-playwright", d, "chrome-linux", "chrome"));
-      } catch {
-        return [];
-      }
-    })()
-  ] : [
-    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
-  ];
-  for (const p of systemPaths) {
-    if (import_fs6.default.existsSync(p))
-      return p;
-  }
-  return null;
-}
-function isChromiumInstalled() {
-  return findChrome() !== null;
-}
-async function ensureChrome() {
-  const cft = findChromeForTesting();
-  if (cft)
-    return cft;
-  try {
-    return await downloadChrome();
-  } catch (err) {
-    log7.error(`Failed to download Chrome for Testing: ${err instanceof Error ? err.message : String(err)}`);
-    const system = findChrome();
-    if (system) {
-      log7.warn(`Falling back to system Chrome: ${system}`);
-      return system;
-    }
-    throw new Error("No Chrome found. Download failed and no system Chrome available.");
-  }
-}
-var import_fs6, import_path5, import_os2, import_child_process2, log7, CHROME_VERSIONS_URL = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json", DEFAULT_INSTALL_DIR;
-var init_chrome_downloader = __esm(() => {
-  init_logger();
-  import_fs6 = __toESM(require("fs"));
-  import_path5 = __toESM(require("path"));
-  import_os2 = __toESM(require("os"));
-  import_child_process2 = require("child_process");
-  log7 = createLogger("chrome");
-  DEFAULT_INSTALL_DIR = import_path5.default.join(import_os2.default.homedir(), ".iframer", "chrome");
-});
-
-// src/lib/browser/cloak-browser.ts
-async function tryImport() {
-  try {
-    return await import("cloakbrowser");
-  } catch {
-    return null;
-  }
-}
-async function ensureBinary() {
-  const cloak = await tryImport();
-  if (!cloak)
-    return false;
-  try {
-    const info = cloak.binaryInfo();
-    if (!info.installed) {
-      log8.info("Downloading CloakBrowser binary...");
-      await cloak.ensureBinary();
-      log8.info("CloakBrowser ready");
-    }
-    _available = true;
-    return true;
-  } catch (err) {
-    log8.warn(`CloakBrowser setup failed: ${err instanceof Error ? err.message : String(err)}`);
-    _available = false;
-    return false;
-  }
-}
-async function launchCloakBrowser(options) {
-  const cloak = await tryImport();
-  if (!cloak)
-    return null;
-  try {
-    const ok = await ensureBinary();
-    if (!ok)
-      return null;
-    const browser = await cloak.launch({
-      headless: options.headless,
-      args: options.args
-    });
-    log8.info(`CloakBrowser launched (headless=${options.headless})`);
-    return browser;
-  } catch (err) {
-    log8.warn(`CloakBrowser launch failed: ${err instanceof Error ? err.message : String(err)}`);
-    return null;
-  }
-}
-var log8, _available = null;
-var init_cloak_browser = __esm(() => {
-  init_logger();
-  log8 = createLogger("cloak");
-});
-
-// src/lib/browser/registry.ts
-function browsersDir() {
-  const dir = import_path6.default.join(getDataDir(), "browsers");
-  import_fs7.default.mkdirSync(dir, { recursive: true });
-  return dir;
-}
-function isPidAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 1)
-    return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-function pidMatchesMarker(pid, marker) {
-  if (!isPidAlive(pid))
-    return false;
-  try {
-    const cmd = import_child_process3.execSync(`ps -o command= -p ${pid}`, { encoding: "utf8" });
-    return cmd.includes(marker);
-  } catch {
-    return false;
-  }
-}
-function findChromePidByMarker(marker) {
-  try {
-    const out = import_child_process3.execSync(`pgrep -f -- "${marker}"`, { encoding: "utf8" }).trim();
-    const pids = out.split(`
-`).map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n !== process.pid);
-    if (pids.length === 0)
-      return null;
-    return Math.min(...pids);
-  } catch {
-    return null;
-  }
-}
-function registerBrowser(rec) {
-  try {
-    import_fs7.default.writeFileSync(import_path6.default.join(browsersDir(), `${rec.chromePid}.json`), JSON.stringify(rec, null, 2));
-  } catch (err) {
-    log9.warn(`failed to write browser record for pid ${rec.chromePid}: ${err}`);
-  }
-}
-function unregisterBrowser(chromePid) {
-  try {
-    import_fs7.default.unlinkSync(import_path6.default.join(browsersDir(), `${chromePid}.json`));
-  } catch {}
-}
-async function forceKillBrowser(rec) {
-  if (!isPidAlive(rec.chromePid))
-    return true;
-  if (!pidMatchesMarker(rec.chromePid, rec.marker)) {
-    return true;
-  }
-  try {
-    process.kill(rec.chromePid, "SIGKILL");
-  } catch {}
-  const deadline = Date.now() + 2000;
-  while (Date.now() < deadline) {
-    if (!isPidAlive(rec.chromePid))
-      return true;
-    await sleep3(100);
-  }
-  return !isPidAlive(rec.chromePid);
-}
-var import_fs7, import_path6, import_child_process3, log9, sleep3 = (ms) => new Promise((r) => setTimeout(r, ms));
-var init_registry = __esm(() => {
-  init_paths();
-  init_logger();
-  import_fs7 = __toESM(require("fs"));
-  import_path6 = __toESM(require("path"));
-  import_child_process3 = require("child_process");
-  log9 = createLogger("registry");
-});
-
-// src/lib/browser/daemon.ts
-function keyOf(mode, instanceId) {
-  return `${mode}::${instanceId}`;
-}
-
-class BrowserDaemon {
-  instances = new Map;
-  idleTimers = new Map;
-  idleTimeout;
-  constructor(idleTimeout = DEFAULT_IDLE_TIMEOUT) {
-    this.idleTimeout = idleTimeout;
-  }
-  async ensure(mode, instanceId = DEFAULT_INSTANCE) {
-    if (mode === "docker-headful") {
-      throw new Error("Docker mode doesn't use the daemon. Use the Docker API.");
-    }
-    const key = keyOf(mode, instanceId);
-    let instance = this.instances.get(key);
-    if (instance) {
-      try {
-        if (instance.browser.isConnected()) {
-          let page2 = instance.page;
-          let context2 = instance.context;
-          try {
-            await page2.evaluate("1");
-          } catch {
-            log10.info(`Page for ${mode} is dead, creating fresh context`);
-            try {
-              await context2.close();
-            } catch (err) {
-              log10.warn(`dead-page context close failed: ${err}`);
-            }
-            context2 = await instance.browser.newContext();
-            page2 = await context2.newPage();
-            instance.context = context2;
-            instance.page = page2;
-          }
-          this.resetIdleTimer(key);
-          return { browser: instance.browser, context: context2, page: page2 };
-        }
-      } catch {}
-      log10.info(`Browser for ${key} disconnected (window closed?), relaunching...`);
-      await this.stopMode(mode, instanceId);
-    }
-    const marker = `--iframer-key=${key}-${import_crypto3.randomUUID()}`;
-    let browser;
-    const cloakBrowser = await launchCloakBrowser({ headless: mode === "headless", args: [marker] });
-    if (cloakBrowser) {
-      log10.info(`CloakBrowser ${mode} ready`);
-      browser = cloakBrowser;
-    } else {
-      const executablePath = await ensureChrome();
-      log10.info(`Falling back to Chrome for Testing in ${mode} mode: ${executablePath}`);
-      browser = await import_patchright2.chromium.launch({
-        executablePath,
-        headless: mode === "headless",
-        args: [
-          "--disable-blink-features=AutomationControlled",
-          "--no-first-run",
-          "--no-default-browser-check",
-          "--disable-infobars",
-          marker
-        ]
-      });
-    }
-    const chromePid = findChromePidByMarker(marker);
-    if (chromePid) {
-      registerBrowser({
-        key,
-        chromePid,
-        ownerPid: process.pid,
-        marker,
-        launchedAt: new Date().toISOString()
-      });
-    } else {
-      log10.warn(`could not resolve Chrome PID for ${key} — force-kill unavailable for this instance`);
-    }
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    instance = {
-      browser,
-      context,
-      page,
-      mode,
-      instanceId,
-      createdAt: new Date,
-      chromePid,
-      marker,
-      active: 0
-    };
-    this.instances.set(key, instance);
-    this.resetIdleTimer(key);
-    log10.info(`Chrome ${key} ready (pid=${chromePid ?? "unknown"})`);
-    return { browser, context, page };
-  }
-  acquire(mode, instanceId = DEFAULT_INSTANCE) {
-    const instance = this.instances.get(keyOf(mode, instanceId));
-    if (instance)
-      instance.active++;
-  }
-  release(mode, instanceId = DEFAULT_INSTANCE) {
-    const key = keyOf(mode, instanceId);
-    const instance = this.instances.get(key);
-    if (!instance)
-      return;
-    instance.active = Math.max(0, instance.active - 1);
-    if (instance.active === 0)
-      this.resetIdleTimer(key);
-  }
-  isRunning(mode, instanceId = DEFAULT_INSTANCE) {
-    const instance = this.instances.get(keyOf(mode, instanceId));
-    if (!instance)
-      return false;
-    try {
-      return instance.browser.isConnected();
-    } catch {
-      return false;
-    }
-  }
-  runningModes() {
-    return [...new Set(this.liveInstances().map((i) => i.mode))];
-  }
-  liveInstances() {
-    return [...this.instances.values()].filter((inst) => {
-      try {
-        return inst.browser.isConnected();
-      } catch {
-        return false;
-      }
-    });
-  }
-  async stopMode(mode, instanceId = DEFAULT_INSTANCE) {
-    await this.stopKey(keyOf(mode, instanceId));
-  }
-  async stopKey(key) {
-    const instance = this.instances.get(key);
-    if (!instance)
-      return;
-    const timer = this.idleTimers.get(key);
-    if (timer)
-      clearTimeout(timer);
-    this.idleTimers.delete(key);
-    log10.info(`Stopping Chrome ${key} (pid=${instance.chromePid ?? "unknown"})...`);
-    const politeClose = (async () => {
-      try {
-        await instance.context.close();
-      } catch (err) {
-        log10.warn(`context.close failed for ${key}: ${err}`);
-      }
-      try {
-        await instance.browser.close();
-      } catch (err) {
-        log10.warn(`browser.close failed for ${key}: ${err}`);
-      }
-    })();
-    const closedInTime = await Promise.race([
-      politeClose.then(() => true),
-      sleep4(CLOSE_GRACE_MS).then(() => false)
-    ]);
-    if (!closedInTime) {
-      log10.warn(`polite close timed out after ${CLOSE_GRACE_MS}ms for ${key}, force-killing`);
-    }
-    if (instance.chromePid !== null) {
-      const dead = await forceKillBrowser({ chromePid: instance.chromePid, marker: instance.marker });
-      if (dead) {
-        unregisterBrowser(instance.chromePid);
-      } else {
-        log10.warn(`Chrome pid=${instance.chromePid} survived SIGKILL?! leaving registry record for reaper`);
-      }
-    } else if (!closedInTime) {
-      log10.warn(`no PID recorded for ${key} and polite close hung — this Chrome may leak until the next reap`);
-    }
-    this.instances.delete(key);
-    log10.info(`Stopped Chrome ${key}`);
-  }
-  async stopAll(force = false) {
-    const keys = [...this.instances.entries()].filter(([, inst]) => force || inst.active === 0).map(([k]) => k);
-    await Promise.all(keys.map((k) => this.stopKey(k)));
-  }
-  resetIdleTimer(key) {
-    const existing = this.idleTimers.get(key);
-    if (existing)
-      clearTimeout(existing);
-    this.idleTimers.set(key, setTimeout(() => {
-      const instance = this.instances.get(key);
-      if (instance && instance.active > 0) {
-        this.resetIdleTimer(key);
-        return;
-      }
-      log10.info(`Idle timeout for ${key}, stopping...`);
-      this.stopKey(key).catch((err) => log10.warn(`idle stop failed for ${key}: ${err}`));
-    }, this.idleTimeout));
-  }
-  hasLiveProcesses() {
-    return [...this.instances.values()].some((inst) => inst.chromePid !== null && isPidAlive(inst.chromePid));
-  }
-}
-var import_patchright2, import_crypto3, log10, DEFAULT_IDLE_TIMEOUT, CLOSE_GRACE_MS = 5000, DEFAULT_INSTANCE = "default", sleep4 = (ms) => new Promise((r) => setTimeout(r, ms));
-var init_daemon = __esm(() => {
-  init_chrome_downloader();
-  init_cloak_browser();
-  init_logger();
-  init_registry();
-  import_patchright2 = require("patchright");
-  import_crypto3 = require("crypto");
-  log10 = createLogger("daemon");
-  DEFAULT_IDLE_TIMEOUT = 5 * 60 * 1000;
-});
-
-// src/lib/domain-modes.ts
-function defaultFile() {
-  return import_path7.default.join(getDataDir(), "domain-modes.json");
-}
-
-class DomainModeStore {
-  data = {};
-  filePath;
-  constructor(filePath = defaultFile()) {
-    this.filePath = filePath;
-    this.load();
-  }
-  getMode(domain) {
-    const entry = this.data[domain];
-    if (!entry)
-      return null;
-    if (this.isExpired(entry))
-      return null;
-    return entry.mode;
-  }
-  recordSuccess(domain, mode) {
-    const now = new Date().toISOString();
-    const existing = this.data[domain];
-    this.data[domain] = {
-      mode,
-      lastSuccess: now,
-      attempts: {
-        ...existing?.attempts || {},
-        [mode]: { result: "success", lastTried: now }
-      }
-    };
-    this.save();
-  }
-  recordFailure(domain, mode, reason) {
-    const now = new Date().toISOString();
-    const existing = this.data[domain];
-    this.data[domain] = {
-      mode: existing?.mode || mode,
-      lastSuccess: existing?.lastSuccess || "",
-      attempts: {
-        ...existing?.attempts || {},
-        [mode]: { result: "blocked", reason, lastTried: now }
-      }
-    };
-    this.save();
-  }
-  getNextMode(failedMode, availableModes) {
-    const idx = ESCALATION_LADDER.indexOf(failedMode);
-    for (let i = idx + 1;i < ESCALATION_LADDER.length; i++) {
-      if (availableModes.includes(ESCALATION_LADDER[i])) {
-        return ESCALATION_LADDER[i];
-      }
-    }
-    return null;
-  }
-  getBestMode(domain, availableModes) {
-    const remembered = this.getMode(domain);
-    if (remembered && availableModes.includes(remembered)) {
-      return remembered;
-    }
-    for (const mode of ESCALATION_LADDER) {
-      if (availableModes.includes(mode))
-        return mode;
-    }
-    return "headless";
-  }
-  getSummary() {
-    const entries = Object.entries(this.data).filter(([, e]) => !this.isExpired(e)).sort(([, a], [, b]) => b.lastSuccess.localeCompare(a.lastSuccess));
-    return {
-      totalDomains: entries.length,
-      recentDomains: entries.slice(0, 5).map(([d, e]) => `${d} (${e.mode})`)
-    };
-  }
-  isExpired(entry) {
-    if (!entry.lastSuccess)
-      return true;
-    const age = Date.now() - new Date(entry.lastSuccess).getTime();
-    return age > TTL_DAYS * 24 * 60 * 60 * 1000;
-  }
-  load() {
-    try {
-      if (import_fs8.default.existsSync(this.filePath)) {
-        this.data = JSON.parse(import_fs8.default.readFileSync(this.filePath, "utf-8"));
-      }
-    } catch {
-      this.data = {};
-    }
-  }
-  save() {
-    try {
-      import_fs8.default.mkdirSync(import_path7.default.dirname(this.filePath), { recursive: true });
-      import_fs8.default.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2));
-    } catch (err) {
-      log11.error("Failed to save:", err);
-    }
-  }
-}
-var import_fs8, import_path7, log11, TTL_DAYS = 14, ESCALATION_LADDER;
-var init_domain_modes = __esm(() => {
-  init_logger();
-  init_paths();
-  import_fs8 = __toESM(require("fs"));
-  import_path7 = __toESM(require("path"));
-  log11 = createLogger("domain-modes");
-  ESCALATION_LADDER = ["headless", "docker-headful", "binary-headful"];
 });
 
 // src/lib/block-detection.ts
@@ -4524,7 +4678,7 @@ async function detectBlock(page) {
     const hasCfChallenge = await page.evaluate(() => {
       return !!document.querySelector('iframe[src*="challenges.cloudflare.com"]');
     }).catch((err) => {
-      log12.warn(`CF challenge check failed, assuming blocked: ${err}`);
+      log15.warn(`CF challenge check failed, assuming blocked: ${err}`);
       return true;
     });
     if (hasCfChallenge) {
@@ -4543,7 +4697,7 @@ async function detectBlock(page) {
       const hasCaptchaIframe = await page.evaluate(() => {
         return !!(document.querySelector('iframe[src*="recaptcha"]') || document.querySelector('iframe[src*="hcaptcha"]'));
       }).catch((err) => {
-        log12.warn(`captcha iframe check failed, assuming blocked: ${err}`);
+        log15.warn(`captcha iframe check failed, assuming blocked: ${err}`);
         return true;
       });
       if (hasCaptchaIframe) {
@@ -4556,105 +4710,332 @@ async function detectBlock(page) {
     if (!url.includes("about:blank") && bodyText.trim().length < 20 && title.length < 5) {}
     return { blocked: false };
   } catch (err) {
-    log12.warn(`page evaluation failed, assuming blocked: ${err}`);
+    log15.warn(`page evaluation failed, assuming blocked: ${err}`);
     return { blocked: true, reason: "evaluation-failed" };
   }
 }
-var log12;
+var log15;
 var init_block_detection = __esm(() => {
   init_constants();
   init_logger();
-  log12 = createLogger("block-detection");
+  log15 = createLogger("block-detection");
 });
 
-// src/lib/browser/cdp-launcher.ts
-function hasDisplay() {
-  if (process.platform === "darwin" || process.platform === "win32")
-    return true;
-  return !!process.env.DISPLAY;
-}
-function checkModeAvailability() {
-  return {
-    headless: true,
-    binaryHeadful: hasDisplay()
-  };
-}
-var log13;
-var init_cdp_launcher = __esm(() => {
-  init_chrome_downloader();
-  init_logger();
-  log13 = createLogger("cdp-launcher");
-});
-
-// src/lib/iframer.ts
-var exports_iframer = {};
-__export(exports_iframer, {
-  Iframer: () => Iframer
-});
-function getErrorMessage2(err) {
-  return err instanceof Error ? err.message : String(err);
-}
-
-class Iframer {
-  screenshotDir;
-  publicUrl;
-  staleTimeoutMs;
-  userRefs = new Map;
-  store;
-  daemon;
-  domainModes;
-  operatingMode;
-  persistentCaptures = new Map;
-  constructor(config = {}) {
-    this.screenshotDir = config.screenshotDir || DEFAULT_SCREENSHOT_DIR;
-    this.publicUrl = config.publicUrl || DEFAULT_PUBLIC_URL;
-    this.staleTimeoutMs = config.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS3;
-    this.store = createStore({ dataDir: config.dataDir });
-    this.daemon = new BrowserDaemon(config.sessionTimeoutMs);
-    this.domainModes = new DomainModeStore;
-    this.operatingMode = config.mode || "local";
+// src/lib/knowledge/extract-from-run.ts
+function extractKnowledgeFromRun(pipeline, result, sessionData, mode) {
+  const firstNav = pipeline.steps.find((s) => s.type === "navigate");
+  if (!firstNav || firstNav.type !== "navigate")
+    return;
+  let domain;
+  try {
+    domain = new URL(firstNav.url).hostname;
+  } catch {
+    return;
   }
-  makeContext(userId, token) {
-    if (!this.userRefs.has(userId)) {
-      this.userRefs.set(userId, { refMap: new Map, nextRefId: 1 });
-    }
-    const refs = this.userRefs.get(userId);
-    return {
-      userId,
-      token,
-      screenshotDir: this.screenshotDir,
-      publicUrl: this.publicUrl,
-      staleTimeoutMs: this.staleTimeoutMs,
-      refMap: refs.refMap,
-      nextRefId: refs.nextRefId,
-      store: this.store
-    };
-  }
-  getAvailableModes() {
-    const modes = ["headless"];
-    const { binaryHeadful } = checkModeAvailability();
-    if (binaryHeadful)
-      modes.push("binary-headful");
-    if (this.operatingMode === "docker")
-      modes.push("docker-headful");
-    return modes;
-  }
-  async getModeAvailability() {
-    const { binaryHeadful } = checkModeAvailability();
-    return {
-      headless: { available: true },
-      "binary-headful": {
-        available: binaryHeadful,
-        reason: binaryHeadful ? undefined : "No display available"
-      },
-      "docker-headful": {
-        available: this.operatingMode === "docker",
-        reason: this.operatingMode === "docker" ? undefined : "Docker not configured"
+  const domainRoot = domain.replace(/^www\./, "");
+  const hadLogin = pipeline.steps.some((s) => s.type === "login");
+  const auth = { type: "unknown" };
+  const cookieNames = [];
+  const localStorageKeys = [];
+  const sessionStorageKeys = [];
+  if (sessionData) {
+    for (const c of sessionData.cookies ?? []) {
+      if (c.domain.endsWith(domainRoot) || domainRoot.endsWith(c.domain.replace(/^\./, ""))) {
+        if (!cookieNames.includes(c.name))
+          cookieNames.push(c.name);
       }
-    };
+    }
+    for (const [origin, store] of Object.entries(sessionData.localStorage ?? {})) {
+      if (origin.includes(domainRoot)) {
+        for (const k of Object.keys(store)) {
+          if (!localStorageKeys.includes(k))
+            localStorageKeys.push(k);
+        }
+      }
+    }
+    for (const [origin, store] of Object.entries(sessionData.sessionStorage ?? {})) {
+      if (origin.includes(domainRoot)) {
+        for (const k of Object.keys(store)) {
+          if (!sessionStorageKeys.includes(k))
+            sessionStorageKeys.push(k);
+        }
+      }
+    }
+  }
+  if (cookieNames.length > 0 && localStorageKeys.length > 0) {
+    auth.type = "cookies+localStorage";
+  } else if (localStorageKeys.length > 0) {
+    auth.type = "localStorage";
+  } else if (cookieNames.length > 0) {
+    auth.type = "cookies";
+  }
+  if (cookieNames.length > 0)
+    auth.cookieNames = cookieNames;
+  if (localStorageKeys.length > 0)
+    auth.localStorageKeys = localStorageKeys;
+  if (sessionStorageKeys.length > 0)
+    auth.sessionStorageKeys = sessionStorageKeys;
+  const endpoints = [];
+  const replayHeaders = new Set;
+  for (const api of result.capturedApi ?? []) {
+    if (!api.domain.includes(domainRoot) && !domainRoot.includes(api.domain.replace(/^www\./, "")))
+      continue;
+    if (api.auth?.authorization)
+      replayHeaders.add("Authorization");
+    for (const name of Object.keys(api.auth?.tokens ?? {}))
+      replayHeaders.add(name);
+    for (const ep of api.endpoints ?? []) {
+      endpoints.push({
+        method: ep.method,
+        path: ep.path,
+        description: `Status ${ep.responseStatus}. Triggered at step ${ep.triggeredAtStep}.`,
+        example: ep.curl,
+        firstSeen: new Date().toISOString()
+      });
+    }
+  }
+  if (replayHeaders.size > 0) {
+    auth.headers = [...replayHeaders];
+    if (!auth.type.includes("header"))
+      auth.type = auth.type === "unknown" ? "headers" : `${auth.type}+headers`;
+  }
+  const notes = [];
+  if (hadLogin)
+    notes.push(`Last successful login via browser in ${mode} mode.`);
+  if (result.obstacles?.some((o) => o.type?.includes("captcha")))
+    notes.push("Captcha encountered — browser required for fresh logins.");
+  mergeKnowledge(domainRoot, {
+    lastMode: mode,
+    browserRequired: true,
+    auth,
+    endpoints,
+    notes
+  });
+}
+var init_extract_from_run = __esm(() => {
+  init_knowledge();
+});
+
+// src/lib/execution/pipeline-executor.ts
+class PipelineExecutor {
+  deps;
+  pendingElicitOtp;
+  constructor(deps) {
+    this.deps = deps;
+  }
+  async execute(userId, token, pipeline, runtime) {
+    this.pendingElicitOtp = runtime?.elicitOtp;
+    try {
+      return await this.executeInner(userId, token, pipeline);
+    } finally {
+      this.pendingElicitOtp = undefined;
+    }
+  }
+  async executeInner(userId, token, pipeline) {
+    const opts = pipeline.options || {};
+    const forcedMode = opts.mode;
+    const autoEscalate = opts.autoEscalate !== false;
+    const instanceId = opts.instanceId || DEFAULT_INSTANCE;
+    const firstNav = pipeline.steps.find((s) => s.type === "navigate");
+    const domain = firstNav ? new URL(firstNav.url).hostname : null;
+    const availableModes = this.deps.availableModes();
+    let mode;
+    if (forcedMode && availableModes.includes(forcedMode)) {
+      mode = forcedMode;
+    } else if (domain) {
+      mode = this.deps.domainModes.getBestMode(domain, availableModes);
+    } else {
+      mode = availableModes[0] || "headless";
+    }
+    let result = await this.executeWithMode(userId, token, pipeline, mode, instanceId);
+    if (!result.ok && autoEscalate && domain && result.error?.errorType === "bot-blocked") {
+      const failedMode = mode;
+      if (domain)
+        this.deps.domainModes.recordFailure(domain, failedMode, result.error?.message || "blocked");
+      const nextMode = this.deps.domainModes.getNextMode(failedMode, availableModes);
+      if (nextMode) {
+        log16.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
+        if (failedMode !== "docker-headful") {
+          await this.deps.daemon.stopMode(failedMode, instanceId);
+        }
+        result = await this.executeWithMode(userId, token, pipeline, nextMode, instanceId);
+        result.modeEscalated = true;
+        result.modeUsed = nextMode;
+        if (result.ok && domain) {
+          this.deps.domainModes.recordSuccess(domain, nextMode);
+        } else if (!result.ok && domain && result.error?.errorType === "bot-blocked") {
+          this.deps.domainModes.recordFailure(domain, nextMode, result.error?.message || "blocked");
+          const thirdMode = this.deps.domainModes.getNextMode(nextMode, availableModes);
+          if (thirdMode) {
+            log16.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
+            if (nextMode !== "docker-headful") {
+              await this.deps.daemon.stopMode(nextMode, instanceId);
+            }
+            result = await this.executeWithMode(userId, token, pipeline, thirdMode, instanceId);
+            result.modeEscalated = true;
+            result.modeUsed = thirdMode;
+            if (result.ok && domain) {
+              this.deps.domainModes.recordSuccess(domain, thirdMode);
+            }
+          }
+        }
+      }
+    } else if (result.ok && domain) {
+      this.deps.domainModes.recordSuccess(domain, mode);
+    }
+    return result;
+  }
+  async executeWithMode(userId, token, pipeline, mode, instanceId = DEFAULT_INSTANCE) {
+    if (mode === "docker-headful") {
+      return this.executeDocker(userId, token, pipeline);
+    }
+    return this.executeLocal(userId, token, pipeline, mode, instanceId);
+  }
+  async executeDocker(userId, token, pipeline) {
+    let session = getSession(userId);
+    if (!session) {
+      const firstNav = pipeline.steps.find((s) => s.type === "navigate");
+      await this.deps.startSession(userId, token, firstNav ? { url: firstNav.url } : {});
+      session = getSession(userId);
+    }
+    resetTimeout(userId);
+    const ctx = this.deps.refStore.makeContext(userId, token);
+    const runner = new PipelineRunner(ctx);
+    const result = await runner.run(session.page, pipeline);
+    if (result.ok) {
+      const blockResult = await detectBlock(session.page);
+      if (blockResult.blocked) {
+        const pageState = await capturePageState(session.page, ctx, { screenshot: true, namePrefix: "block" });
+        return {
+          ...result,
+          ok: false,
+          modeUsed: "docker-headful",
+          error: {
+            failedAtStep: result.completedSteps - 1,
+            failedStep: pipeline.steps[result.completedSteps - 1],
+            errorType: "bot-blocked",
+            message: `Page blocked by bot detection: ${blockResult.reason}`,
+            pageState,
+            suggestion: "The page is blocked by bot detection. Try a different browser mode.",
+            retryable: true
+          }
+        };
+      }
+    }
+    this.deps.refStore.sync(userId, ctx);
+    result.modeUsed = "docker-headful";
+    return result;
+  }
+  async executeLocal(userId, token, pipeline, mode, instanceId = DEFAULT_INSTANCE) {
+    const startTime = Date.now();
+    let acquired = false;
+    try {
+      const { page } = await this.deps.daemon.ensure(mode, instanceId);
+      this.deps.daemon.acquire(mode, instanceId);
+      acquired = true;
+      const storeKey = sessionStoreKey(userId, instanceId);
+      const encryptionKey = await deriveKey(token);
+      const blob = await this.deps.store.getSession(storeKey);
+      let sessionData = null;
+      if (blob && blob.length > 0) {
+        try {
+          sessionData = JSON.parse(decrypt(blob, encryptionKey));
+          await injectCookies(page.context(), sessionData);
+        } catch {}
+      }
+      const ctx = this.deps.refStore.makeContext(userId, token);
+      if (sessionData)
+        ctx.sessionData = sessionData;
+      if (this.pendingElicitOtp)
+        ctx.elicitOtp = this.pendingElicitOtp;
+      const runner = new PipelineRunner(ctx);
+      const result = await runner.run(page, pipeline);
+      if (result.ok) {
+        const blockResult = await detectBlock(page);
+        if (blockResult.blocked) {
+          const pageState = await capturePageState(page, ctx, { screenshot: true, namePrefix: "block" });
+          return {
+            ...result,
+            ok: false,
+            modeUsed: mode,
+            error: {
+              failedAtStep: result.completedSteps - 1,
+              failedStep: pipeline.steps[result.completedSteps - 1],
+              errorType: "bot-blocked",
+              message: `Page blocked by bot detection: ${blockResult.reason}`,
+              pageState,
+              suggestion: `The page was blocked in ${mode} mode. ${mode === "headless" ? "Try docker-headful mode." : mode === "docker-headful" ? "Try binary-headful mode." : "All modes exhausted."}`,
+              retryable: true
+            }
+          };
+        }
+      }
+      let updatedSession = null;
+      if (result.ok) {
+        try {
+          updatedSession = await extractSession(page.context(), page);
+          const encrypted = encrypt(JSON.stringify(updatedSession), encryptionKey);
+          await this.deps.store.setSession(storeKey, encrypted);
+        } catch {}
+      }
+      if (result.ok) {
+        try {
+          extractKnowledgeFromRun(pipeline, result, updatedSession, mode);
+        } catch (err) {
+          log16.warn(`knowledge update failed: ${getErrorMessage(err)}`);
+        }
+      }
+      this.deps.refStore.sync(userId, ctx);
+      result.modeUsed = mode;
+      return result;
+    } catch (err) {
+      return {
+        ok: false,
+        completedSteps: 0,
+        totalSteps: pipeline.steps.length,
+        results: [],
+        finalState: { url: "", title: "" },
+        obstacles: [],
+        error: {
+          failedAtStep: 0,
+          failedStep: pipeline.steps[0],
+          errorType: "action-failed",
+          message: `Failed to launch browser in ${mode} mode: ${getErrorMessage(err)}`,
+          pageState: { url: "", title: "" },
+          suggestion: `Browser launch failed. ${mode === "binary-headful" ? "Make sure a display is available." : "Check Chrome installation."}`,
+          retryable: true
+        },
+        durationMs: Date.now() - startTime,
+        modeUsed: mode
+      };
+    } finally {
+      if (acquired)
+        this.deps.daemon.release(mode, instanceId);
+    }
+  }
+}
+var log16;
+var init_pipeline_executor = __esm(() => {
+  init_daemon();
+  init_pipeline();
+  init_session_manager();
+  init_crypto();
+  init_block_detection();
+  init_extract_from_run();
+  init_page_state();
+  init_config();
+  init_logger();
+  log16 = createLogger("iframer");
+});
+
+// src/lib/execution/fetch-service.ts
+class FetchService {
+  store;
+  constructor(store) {
+    this.store = store;
   }
   async fetch(userId, token, request) {
-    const { url, browser: preferredBrowser, waitUntil = "domcontentloaded", waitForSelector, extract, actions = [], returnHtml = false, headers = {}, locale = "pt-BR", sessionless = false } = request;
+    const { url, browser: preferredBrowser, waitUntil = "domcontentloaded", waitForSelector, extract: extract2, actions = [], returnHtml = false, headers = {}, locale = "pt-BR", sessionless = false } = request;
     const useSession = !sessionless && !!userId && !!token;
     const startedAt = Date.now();
     let context = null;
@@ -4712,7 +5093,7 @@ class Iframer {
       }
       const finalUrl = page.url();
       const html = returnHtml ? await page.content() : undefined;
-      const result = extract ? await page.evaluate(extract) : undefined;
+      const result = extract2 ? await page.evaluate(extract2) : undefined;
       if (useSession) {
         const updatedSession = await extractSession(context, page);
         const encrypted = encrypt(JSON.stringify(updatedSession), encryptionKey);
@@ -4720,388 +5101,47 @@ class Iframer {
       }
       return { ok: true, browser: browserName, url: finalUrl, html, result, durationMs: Date.now() - startedAt };
     } catch (err) {
-      return { ok: false, browser: "unknown", url, error: getErrorMessage2(err), durationMs: Date.now() - startedAt };
+      return { ok: false, browser: "unknown", url, error: getErrorMessage(err), durationMs: Date.now() - startedAt };
     } finally {
       if (context)
         await context.close();
     }
   }
-  async startSession(userId, token, options = {}) {
-    const existing = getSession(userId);
-    if (existing) {
-      resetTimeout(userId);
-      return {
-        noVncUrl: `http://localhost:${existing.wsPort}/vnc.html?autoconnect=true`,
-        wsPort: existing.wsPort
-      };
-    }
-    const session = await startSession(userId);
-    const encryptionKey = await deriveKey(token);
-    const blob = await this.store.getSession(userId);
-    let sessionData = null;
-    if (blob && blob.length > 0) {
-      sessionData = JSON.parse(decrypt(blob, encryptionKey));
-      if (sessionData)
-        await injectCookies(session.context, sessionData);
-    }
-    if (options.url) {
-      await session.page.goto(options.url, { waitUntil: "domcontentloaded", timeout: TIMEOUTS.NAVIGATION });
-      if (sessionData)
-        await injectStorage(session.page, sessionData);
-    }
-    return {
-      noVncUrl: `http://localhost:${session.wsPort}/vnc.html?autoconnect=true`,
-      wsPort: session.wsPort
-    };
-  }
-  getSession(userId) {
-    return getSession(userId);
-  }
-  sessionKey(userId, instanceId = DEFAULT_INSTANCE) {
-    return instanceId === DEFAULT_INSTANCE ? userId : `${userId}::${instanceId}`;
-  }
-  async stopSession(userId, token) {
-    let sessionSaved = false;
-    if (token) {
-      const encryptionKey = await deriveKey(token);
-      for (const inst of this.daemon.liveInstances()) {
-        try {
-          const data = await extractSession(inst.context, inst.page);
-          if (data) {
-            const encrypted = encrypt(JSON.stringify(data), encryptionKey);
-            await this.store.setSession(this.sessionKey(userId, inst.instanceId), encrypted);
-            sessionSaved = true;
-          }
-        } catch (err) {
-          log14.warn(`stopSession: failed to extract daemon state for ${inst.mode}::${inst.instanceId}: ${getErrorMessage2(err)}`);
-        }
-      }
-    }
-    const dockerSessionData = await stopSession(userId);
-    if (dockerSessionData && token) {
-      const encryptionKey = await deriveKey(token);
-      const encrypted = encrypt(JSON.stringify(dockerSessionData), encryptionKey);
-      await this.store.setSession(userId, encrypted);
-      sessionSaved = true;
-    }
-    await this.daemon.stopAll();
-    return { ok: true, sessionSaved };
-  }
-  pendingElicitOtp;
-  async execute(userId, token, pipeline, runtime) {
-    this.pendingElicitOtp = runtime?.elicitOtp;
-    try {
-      return await this.executeInner(userId, token, pipeline);
-    } finally {
-      this.pendingElicitOtp = undefined;
-    }
-  }
-  async executeInner(userId, token, pipeline) {
-    const opts = pipeline.options || {};
-    const forcedMode = opts.mode;
-    const autoEscalate = opts.autoEscalate !== false;
-    const instanceId = opts.instanceId || DEFAULT_INSTANCE;
-    const firstNav = pipeline.steps.find((s) => s.type === "navigate");
-    const domain = firstNav ? new URL(firstNav.url).hostname : null;
-    const availableModes = this.getAvailableModes();
-    let mode;
-    if (forcedMode && availableModes.includes(forcedMode)) {
-      mode = forcedMode;
-    } else if (domain) {
-      mode = this.domainModes.getBestMode(domain, availableModes);
-    } else {
-      mode = availableModes[0] || "headless";
-    }
-    let result = await this.executeWithMode(userId, token, pipeline, mode, instanceId);
-    if (!result.ok && autoEscalate && domain && result.error?.errorType === "bot-blocked") {
-      const failedMode = mode;
-      if (domain)
-        this.domainModes.recordFailure(domain, failedMode, result.error?.message || "blocked");
-      const nextMode = this.domainModes.getNextMode(failedMode, availableModes);
-      if (nextMode) {
-        log14.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
-        if (failedMode !== "docker-headful") {
-          await this.daemon.stopMode(failedMode, instanceId);
-        }
-        result = await this.executeWithMode(userId, token, pipeline, nextMode, instanceId);
-        result.modeEscalated = true;
-        result.modeUsed = nextMode;
-        if (result.ok && domain) {
-          this.domainModes.recordSuccess(domain, nextMode);
-        } else if (!result.ok && domain && result.error?.errorType === "bot-blocked") {
-          this.domainModes.recordFailure(domain, nextMode, result.error?.message || "blocked");
-          const thirdMode = this.domainModes.getNextMode(nextMode, availableModes);
-          if (thirdMode) {
-            log14.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
-            if (nextMode !== "docker-headful") {
-              await this.daemon.stopMode(nextMode, instanceId);
-            }
-            result = await this.executeWithMode(userId, token, pipeline, thirdMode, instanceId);
-            result.modeEscalated = true;
-            result.modeUsed = thirdMode;
-            if (result.ok && domain) {
-              this.domainModes.recordSuccess(domain, thirdMode);
-            }
-          }
-        }
-      }
-    } else if (result.ok && domain) {
-      this.domainModes.recordSuccess(domain, mode);
-    }
-    return result;
-  }
-  async executeWithMode(userId, token, pipeline, mode, instanceId = DEFAULT_INSTANCE) {
-    if (mode === "docker-headful") {
-      return this.executeDocker(userId, token, pipeline);
-    }
-    return this.executeLocal(userId, token, pipeline, mode, instanceId);
-  }
-  async executeDocker(userId, token, pipeline) {
-    let session = getSession(userId);
-    if (!session) {
-      const firstNav = pipeline.steps.find((s) => s.type === "navigate");
-      await this.startSession(userId, token, firstNav ? { url: firstNav.url } : {});
-      session = getSession(userId);
-    }
-    resetTimeout(userId);
-    const ctx = this.makeContext(userId, token);
-    const runner = new PipelineRunner(ctx);
-    const result = await runner.run(session.page, pipeline);
-    if (result.ok) {
-      const blockResult = await detectBlock(session.page);
-      if (blockResult.blocked) {
-        const pageState = await this.getPageState(session.page, ctx);
-        return {
-          ...result,
-          ok: false,
-          modeUsed: "docker-headful",
-          error: {
-            failedAtStep: result.completedSteps - 1,
-            failedStep: pipeline.steps[result.completedSteps - 1],
-            errorType: "bot-blocked",
-            message: `Page blocked by bot detection: ${blockResult.reason}`,
-            pageState,
-            suggestion: "The page is blocked by bot detection. Try a different browser mode.",
-            retryable: true
-          }
-        };
-      }
-    }
-    const refs = this.userRefs.get(userId);
-    if (refs)
-      refs.nextRefId = ctx.nextRefId;
-    result.modeUsed = "docker-headful";
-    return result;
-  }
-  async executeLocal(userId, token, pipeline, mode, instanceId = DEFAULT_INSTANCE) {
-    const startTime = Date.now();
-    let acquired = false;
-    try {
-      const { page } = await this.daemon.ensure(mode, instanceId);
-      this.daemon.acquire(mode, instanceId);
-      acquired = true;
-      const storeKey = this.sessionKey(userId, instanceId);
-      const encryptionKey = await deriveKey(token);
-      const blob = await this.store.getSession(storeKey);
-      let sessionData = null;
-      if (blob && blob.length > 0) {
-        try {
-          sessionData = JSON.parse(decrypt(blob, encryptionKey));
-          await injectCookies(page.context(), sessionData);
-        } catch {}
-      }
-      const ctx = this.makeContext(userId, token);
-      if (sessionData)
-        ctx.sessionData = sessionData;
-      if (this.pendingElicitOtp)
-        ctx.elicitOtp = this.pendingElicitOtp;
-      const runner = new PipelineRunner(ctx);
-      const result = await runner.run(page, pipeline);
-      if (result.ok) {
-        const blockResult = await detectBlock(page);
-        if (blockResult.blocked) {
-          const pageState = await this.getPageState(page, ctx);
-          return {
-            ...result,
-            ok: false,
-            modeUsed: mode,
-            error: {
-              failedAtStep: result.completedSteps - 1,
-              failedStep: pipeline.steps[result.completedSteps - 1],
-              errorType: "bot-blocked",
-              message: `Page blocked by bot detection: ${blockResult.reason}`,
-              pageState,
-              suggestion: `The page was blocked in ${mode} mode. ${mode === "headless" ? "Try docker-headful mode." : mode === "docker-headful" ? "Try binary-headful mode." : "All modes exhausted."}`,
-              retryable: true
-            }
-          };
-        }
-      }
-      let updatedSession = null;
-      if (result.ok) {
-        try {
-          updatedSession = await extractSession(page.context(), page);
-          const encrypted = encrypt(JSON.stringify(updatedSession), encryptionKey);
-          await this.store.setSession(storeKey, encrypted);
-        } catch {}
-      }
-      if (result.ok) {
-        try {
-          this.updateKnowledgeFromRun(pipeline, result, updatedSession, mode);
-        } catch (err) {
-          log14.warn(`knowledge update failed: ${getErrorMessage2(err)}`);
-        }
-      }
-      const refs = this.userRefs.get(userId);
-      if (refs)
-        refs.nextRefId = ctx.nextRefId;
-      result.modeUsed = mode;
-      return result;
-    } catch (err) {
-      return {
-        ok: false,
-        completedSteps: 0,
-        totalSteps: pipeline.steps.length,
-        results: [],
-        finalState: { url: "", title: "" },
-        obstacles: [],
-        error: {
-          failedAtStep: 0,
-          failedStep: pipeline.steps[0],
-          errorType: "action-failed",
-          message: `Failed to launch browser in ${mode} mode: ${getErrorMessage2(err)}`,
-          pageState: { url: "", title: "" },
-          suggestion: `Browser launch failed. ${mode === "binary-headful" ? "Make sure a display is available." : "Check Chrome installation."}`,
-          retryable: true
-        },
-        durationMs: Date.now() - startTime,
-        modeUsed: mode
-      };
-    } finally {
-      if (acquired)
-        this.daemon.release(mode, instanceId);
-    }
-  }
-  updateKnowledgeFromRun(pipeline, result, sessionData, mode) {
-    const firstNav = pipeline.steps.find((s) => s.type === "navigate");
-    if (!firstNav || firstNav.type !== "navigate")
-      return;
-    let domain;
-    try {
-      domain = new URL(firstNav.url).hostname;
-    } catch {
-      return;
-    }
-    const domainRoot = domain.replace(/^www\./, "");
-    const hadLogin = pipeline.steps.some((s) => s.type === "login");
-    const auth = { type: "unknown" };
-    const cookieNames = [];
-    const localStorageKeys = [];
-    const sessionStorageKeys = [];
-    if (sessionData) {
-      for (const c of sessionData.cookies ?? []) {
-        if (c.domain.endsWith(domainRoot) || domainRoot.endsWith(c.domain.replace(/^\./, ""))) {
-          if (!cookieNames.includes(c.name))
-            cookieNames.push(c.name);
-        }
-      }
-      for (const [origin, store] of Object.entries(sessionData.localStorage ?? {})) {
-        if (origin.includes(domainRoot)) {
-          for (const k of Object.keys(store)) {
-            if (!localStorageKeys.includes(k))
-              localStorageKeys.push(k);
-          }
-        }
-      }
-      for (const [origin, store] of Object.entries(sessionData.sessionStorage ?? {})) {
-        if (origin.includes(domainRoot)) {
-          for (const k of Object.keys(store)) {
-            if (!sessionStorageKeys.includes(k))
-              sessionStorageKeys.push(k);
-          }
-        }
-      }
-    }
-    if (cookieNames.length > 0 && localStorageKeys.length > 0) {
-      auth.type = "cookies+localStorage";
-    } else if (localStorageKeys.length > 0) {
-      auth.type = "localStorage";
-    } else if (cookieNames.length > 0) {
-      auth.type = "cookies";
-    }
-    if (cookieNames.length > 0)
-      auth.cookieNames = cookieNames;
-    if (localStorageKeys.length > 0)
-      auth.localStorageKeys = localStorageKeys;
-    if (sessionStorageKeys.length > 0)
-      auth.sessionStorageKeys = sessionStorageKeys;
-    const endpoints = [];
-    const replayHeaders = new Set;
-    for (const api of result.capturedApi ?? []) {
-      if (!api.domain.includes(domainRoot) && !domainRoot.includes(api.domain.replace(/^www\./, "")))
-        continue;
-      if (api.auth?.authorization)
-        replayHeaders.add("Authorization");
-      for (const name of Object.keys(api.auth?.tokens ?? {}))
-        replayHeaders.add(name);
-      for (const ep of api.endpoints ?? []) {
-        endpoints.push({
-          method: ep.method,
-          path: ep.path,
-          description: `Status ${ep.responseStatus}. Triggered at step ${ep.triggeredAtStep}.`,
-          example: ep.curl,
-          firstSeen: new Date().toISOString()
-        });
-      }
-    }
-    if (replayHeaders.size > 0) {
-      auth.headers = [...replayHeaders];
-      if (!auth.type.includes("header"))
-        auth.type = auth.type === "unknown" ? "headers" : `${auth.type}+headers`;
-    }
-    const notes = [];
-    if (hadLogin)
-      notes.push(`Last successful login via browser in ${mode} mode.`);
-    if (result.obstacles?.some((o) => o.type?.includes("captcha")))
-      notes.push("Captcha encountered — browser required for fresh logins.");
-    mergeKnowledge(domainRoot, {
-      lastMode: mode,
-      browserRequired: true,
-      auth,
-      endpoints,
-      notes
-    });
-  }
-  async getPageState(page, ctx) {
-    try {
-      const url = page.url();
-      const title = await page.title().catch(() => "");
-      const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false }).catch(() => null);
-      const screenshotUrl = buf ? saveScreenshot(buf, `block-${Date.now()}.jpg`, ctx.screenshotDir, ctx.publicUrl) : undefined;
-      return { url, title, screenshotUrl };
-    } catch {
-      return { url: "", title: "" };
-    }
+}
+var init_fetch_service = __esm(() => {
+  init_launcher();
+  init_stealth();
+  init_humanize();
+  init_crypto();
+  init_constants();
+});
+
+// src/lib/execution/capture-manager.ts
+class CaptureManager {
+  daemon;
+  captures = new Map;
+  constructor(daemon) {
+    this.daemon = daemon;
   }
   async startCapture(mode = "binary-headful", instanceId = DEFAULT_INSTANCE) {
     const key = `${mode}::${instanceId}`;
-    if (this.persistentCaptures.has(key)) {
+    if (this.captures.has(key)) {
       return { ok: true, message: `Capture already running on ${key}. Call capture-stop to flush.` };
     }
     const { page } = await this.daemon.ensure(mode, instanceId);
     const capture = new ApiCapture(page);
     capture.start();
-    this.persistentCaptures.set(key, capture);
+    this.captures.set(key, capture);
     return { ok: true, message: `Capture started on ${key}. Use 'session capture-stop' when ready to collect results.` };
   }
   async stopCapture(mode = "binary-headful", instanceId = DEFAULT_INSTANCE) {
     const key = `${mode}::${instanceId}`;
-    const capture = this.persistentCaptures.get(key);
+    const capture = this.captures.get(key);
     if (!capture) {
       return { ok: false, capturedApi: undefined, message: `No active capture on ${key}. Start one with 'session capture-start'.` };
     }
     capture.stop();
-    this.persistentCaptures.delete(key);
+    this.captures.delete(key);
     const capturedApi = capture.getResults();
     const total = capturedApi.reduce((n, a) => n + a.endpoints.length, 0);
     return { ok: true, capturedApi, message: `Capture stopped. ${total} endpoints across ${capturedApi.length} domain(s).` };
@@ -5141,31 +5181,19 @@ class Iframer {
       message: `${cookies.length} cookies, ${Object.values(localStorage).reduce((n, s) => n + Object.keys(s).length, 0)} localStorage keys, ${Object.values(sessionStorage).reduce((n, s) => n + Object.keys(s).length, 0)} sessionStorage keys.`
     };
   }
-  browserHealth() {
-    const modes = this.daemon.runningModes();
-    return { alive: modes.length > 0, modes };
-  }
-  async restartBrowser() {
-    const health = this.browserHealth();
-    await this.daemon.stopAll(true);
-    await cleanupAllSessions();
-    return {
-      killed: health.modes,
-      message: health.modes.length > 0 ? `Killed browser(s): ${health.modes.join(", ")}. Next execute call will launch a fresh instance.` : "No browsers were running. Next execute call will launch fresh."
-    };
-  }
-  async screenshot(userId) {
-    const session = getSession(userId);
-    if (!session)
-      return null;
-    resetTimeout(userId);
-    const buf = await session.page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
-    const screenshotUrl = saveScreenshot(buf, `screenshot-${Date.now()}.jpg`, this.screenshotDir, this.publicUrl);
-    return {
-      screenshotUrl,
-      url: session.page.url(),
-      title: await session.page.title()
-    };
+}
+var init_capture_manager = __esm(() => {
+  init_daemon();
+  init_api_capture();
+});
+
+// src/lib/auth/credential-store.ts
+class CredentialStore {
+  store;
+  config;
+  constructor(store, config) {
+    this.store = store;
+    this.config = config;
   }
   async storeCredential(userId, token, credential) {
     const credKey = await deriveKey(token, "credentials");
@@ -5180,18 +5208,8 @@ class Iframer {
     await this.store.setCredential(userId, normalizedDomain, encrypted);
   }
   async getCredential(userId, token, domain) {
-    const credKey = await deriveKey(token, "credentials");
-    for (const candidate of domainLookupChain(domain)) {
-      const blob = await this.store.getCredential(userId, candidate);
-      if (blob && blob.length > 0) {
-        try {
-          return JSON.parse(decrypt(blob, credKey));
-        } catch (err) {
-          throw new Error(`Credentials for ${candidate} exist but cannot be decrypted. ` + `The encryption key has changed. Re-store with: ` + `iframer-toolkit credentials add ${candidate}`);
-        }
-      }
-    }
-    return null;
+    const resolved = await resolveCredential(this.store, userId, token, domain);
+    return resolved?.credential ?? null;
   }
   async listCredentials(userId) {
     return this.store.listCredentialDomains(userId);
@@ -5203,20 +5221,12 @@ class Iframer {
     const session = getSession(userId);
     if (!session)
       return { ok: false, url: "", title: "", error: "No active interactive session. Start one first." };
-    const credKey = await deriveKey(token, "credentials");
-    let blob = null;
-    for (const candidate of domainLookupChain(domain)) {
-      const b = await this.store.getCredential(userId, candidate);
-      if (b && b.length > 0) {
-        blob = b;
-        break;
-      }
-    }
-    if (!blob) {
+    const resolved = await resolveCredential(this.store, userId, token, domain);
+    if (!resolved) {
       const stored = await this.store.listCredentialDomains(userId);
       return { ok: false, url: "", title: "", error: `No credentials stored for ${normalizeDomain(domain)}. Stored: ${stored.join(", ") || "(none)"}` };
     }
-    const credential = JSON.parse(decrypt(blob, credKey));
+    const { credential } = resolved;
     const page = session.page;
     resetTimeout(userId);
     if (selectors.username && credential.username) {
@@ -5239,8 +5249,199 @@ class Iframer {
       await page.waitForTimeout(TIMING.POST_TOTP_WAIT);
     }
     const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
-    const screenshotUrl = saveScreenshot(buf, `login-${Date.now()}.jpg`, this.screenshotDir, this.publicUrl);
+    const screenshotUrl = saveScreenshot(buf, `login-${Date.now()}.jpg`, this.config.screenshotDir, this.config.publicUrl);
     return { ok: true, url: page.url(), title: await page.title(), screenshotUrl };
+  }
+}
+var init_credential_store = __esm(() => {
+  init_session_manager();
+  init_crypto();
+  init_credential_resolver();
+  init_knowledge();
+  init_humanize();
+  init_screenshot();
+  init_constants();
+});
+
+// src/lib/iframer.ts
+var exports_iframer = {};
+__export(exports_iframer, {
+  Iframer: () => Iframer
+});
+
+class Iframer {
+  store;
+  daemon;
+  domainModes;
+  operatingMode;
+  config;
+  refStore;
+  executor;
+  fetchService;
+  captureManager;
+  credentials;
+  constructor(config = {}) {
+    this.config = {
+      screenshotDir: config.screenshotDir || DEFAULT_SCREENSHOT_DIR,
+      publicUrl: config.publicUrl || DEFAULT_PUBLIC_URL,
+      staleTimeoutMs: config.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS3
+    };
+    this.store = createStore({ dataDir: config.dataDir });
+    this.daemon = new BrowserDaemon(config.sessionTimeoutMs);
+    this.domainModes = new DomainModeStore;
+    this.operatingMode = config.mode || "local";
+    this.refStore = new RefStore(this.store, this.config);
+    this.fetchService = new FetchService(this.store);
+    this.captureManager = new CaptureManager(this.daemon);
+    this.credentials = new CredentialStore(this.store, this.config);
+    this.executor = new PipelineExecutor({
+      daemon: this.daemon,
+      store: this.store,
+      domainModes: this.domainModes,
+      refStore: this.refStore,
+      availableModes: () => this.getAvailableModes(),
+      startSession: (userId, token, options) => this.startSession(userId, token, options)
+    });
+  }
+  getAvailableModes() {
+    const modes = ["headless"];
+    const { binaryHeadful } = checkModeAvailability();
+    if (binaryHeadful)
+      modes.push("binary-headful");
+    if (this.operatingMode === "docker")
+      modes.push("docker-headful");
+    return modes;
+  }
+  async getModeAvailability() {
+    const { binaryHeadful } = checkModeAvailability();
+    return {
+      headless: { available: true },
+      "binary-headful": {
+        available: binaryHeadful,
+        reason: binaryHeadful ? undefined : "No display available"
+      },
+      "docker-headful": {
+        available: this.operatingMode === "docker",
+        reason: this.operatingMode === "docker" ? undefined : "Docker not configured"
+      }
+    };
+  }
+  fetch(userId, token, request) {
+    return this.fetchService.fetch(userId, token, request);
+  }
+  execute(userId, token, pipeline, runtime) {
+    return this.executor.execute(userId, token, pipeline, runtime);
+  }
+  async startSession(userId, token, options = {}) {
+    const existing = getSession(userId);
+    if (existing) {
+      resetTimeout(userId);
+      return {
+        noVncUrl: `http://localhost:${existing.wsPort}/vnc.html?autoconnect=true`,
+        wsPort: existing.wsPort
+      };
+    }
+    const session = await startSession(userId);
+    const encryptionKey = await deriveKey(token);
+    const blob = await this.store.getSession(userId);
+    let sessionData = null;
+    if (blob && blob.length > 0) {
+      sessionData = JSON.parse(decrypt(blob, encryptionKey));
+      if (sessionData)
+        await injectCookies(session.context, sessionData);
+    }
+    if (options.url) {
+      await session.page.goto(options.url, { waitUntil: "domcontentloaded", timeout: TIMEOUTS.NAVIGATION });
+      if (sessionData)
+        await injectStorage(session.page, sessionData);
+    }
+    return {
+      noVncUrl: `http://localhost:${session.wsPort}/vnc.html?autoconnect=true`,
+      wsPort: session.wsPort
+    };
+  }
+  getSession(userId) {
+    return getSession(userId);
+  }
+  async stopSession(userId, token) {
+    let sessionSaved = false;
+    if (token) {
+      const encryptionKey = await deriveKey(token);
+      for (const inst of this.daemon.liveInstances()) {
+        try {
+          const data = await extractSession(inst.context, inst.page);
+          if (data) {
+            const encrypted = encrypt(JSON.stringify(data), encryptionKey);
+            await this.store.setSession(sessionStoreKey(userId, inst.instanceId), encrypted);
+            sessionSaved = true;
+          }
+        } catch (err) {
+          log17.warn(`stopSession: failed to extract daemon state for ${inst.mode}::${inst.instanceId}: ${getErrorMessage(err)}`);
+        }
+      }
+    }
+    const dockerSessionData = await stopSession(userId);
+    if (dockerSessionData && token) {
+      const encryptionKey = await deriveKey(token);
+      const encrypted = encrypt(JSON.stringify(dockerSessionData), encryptionKey);
+      await this.store.setSession(userId, encrypted);
+      sessionSaved = true;
+    }
+    await this.daemon.stopAll();
+    return { ok: true, sessionSaved };
+  }
+  startCapture(mode = "binary-headful", instanceId = DEFAULT_INSTANCE) {
+    return this.captureManager.startCapture(mode, instanceId);
+  }
+  stopCapture(mode = "binary-headful", instanceId = DEFAULT_INSTANCE) {
+    return this.captureManager.stopCapture(mode, instanceId);
+  }
+  getCookies(mode = "binary-headful", urls, instanceId = DEFAULT_INSTANCE) {
+    return this.captureManager.getCookies(mode, urls, instanceId);
+  }
+  getFullAuth(mode = "binary-headful", urls, instanceId = DEFAULT_INSTANCE) {
+    return this.captureManager.getFullAuth(mode, urls, instanceId);
+  }
+  browserHealth() {
+    const modes = this.daemon.runningModes();
+    return { alive: modes.length > 0, modes };
+  }
+  async restartBrowser() {
+    const health = this.browserHealth();
+    await this.daemon.stopAll(true);
+    await cleanupAllSessions();
+    return {
+      killed: health.modes,
+      message: health.modes.length > 0 ? `Killed browser(s): ${health.modes.join(", ")}. Next execute call will launch a fresh instance.` : "No browsers were running. Next execute call will launch fresh."
+    };
+  }
+  async screenshot(userId) {
+    const session = getSession(userId);
+    if (!session)
+      return null;
+    resetTimeout(userId);
+    const buf = await session.page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
+    const screenshotUrl = saveScreenshot(buf, `screenshot-${Date.now()}.jpg`, this.config.screenshotDir, this.config.publicUrl);
+    return {
+      screenshotUrl,
+      url: session.page.url(),
+      title: await session.page.title()
+    };
+  }
+  storeCredential(userId, token, credential) {
+    return this.credentials.storeCredential(userId, token, credential);
+  }
+  getCredential(userId, token, domain) {
+    return this.credentials.getCredential(userId, token, domain);
+  }
+  listCredentials(userId) {
+    return this.credentials.listCredentials(userId);
+  }
+  deleteCredential(userId, domain) {
+    return this.credentials.deleteCredential(userId, domain);
+  }
+  loginWithCredentials(userId, token, domain, selectors) {
+    return this.credentials.loginWithCredentials(userId, token, domain, selectors);
   }
   async clearSession(userId) {
     await this.store.deleteSession(userId);
@@ -5254,27 +5455,26 @@ class Iframer {
     }
   }
 }
-var import_path8, import_url, log14, DEFAULT_SCREENSHOT_DIR, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3 = 20000;
+var import_path8, import_url, log17, DEFAULT_SCREENSHOT_DIR, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3 = 20000;
 var init_iframer = __esm(() => {
-  init_pipeline();
   init_session_manager();
   init_launcher();
-  init_stealth();
-  init_humanize();
   init_crypto();
-  init_knowledge();
   init_screenshot();
   init_storage();
   init_daemon();
-  init_api_capture();
   init_domain_modes();
-  init_block_detection();
   init_cdp_launcher();
   init_constants();
   init_logger();
+  init_config();
+  init_pipeline_executor();
+  init_fetch_service();
+  init_capture_manager();
+  init_credential_store();
   import_path8 = __toESM(require("path"));
   import_url = require("url");
-  log14 = createLogger("iframer");
+  log17 = createLogger("iframer");
   DEFAULT_SCREENSHOT_DIR = import_path8.default.join(import_path8.default.dirname(import_url.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/src/lib/iframer.ts")), "../../.screenshots");
   DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
 });
@@ -5632,9 +5832,9 @@ function hasFlag(args, flag) {
   return args.includes(flag);
 }
 function handleResponse(data, screenshotPath) {
-  const { screenshot, tileScreenshots, ...rest } = data;
-  if (screenshot && screenshotPath) {
-    fs9.writeFileSync(screenshotPath, Buffer.from(screenshot, "base64"));
+  const { screenshot: screenshot2, tileScreenshots, ...rest } = data;
+  if (screenshot2 && screenshotPath) {
+    fs9.writeFileSync(screenshotPath, Buffer.from(screenshot2, "base64"));
     rest._screenshotSaved = screenshotPath;
   }
   if (tileScreenshots && tileScreenshots.length > 0) {
@@ -5915,16 +6115,16 @@ async function main() {
         process.exit(1);
       }
       const options = { url };
-      const extract = parseFlag(args, "--extract");
-      if (extract)
-        options.extract = extract;
+      const extract2 = parseFlag(args, "--extract");
+      if (extract2)
+        options.extract = extract2;
       if (hasFlag(args, "--html"))
         options.returnHtml = true;
       if (hasFlag(args, "--sessionless"))
         options.sessionless = true;
-      const waitFor = parseFlag(args, "--wait-for");
-      if (waitFor)
-        options.waitForSelector = waitFor;
+      const waitFor2 = parseFlag(args, "--wait-for");
+      if (waitFor2)
+        options.waitForSelector = waitFor2;
       const docker = await isDockerRunning();
       let result;
       if (USE_LOCAL || !docker) {
