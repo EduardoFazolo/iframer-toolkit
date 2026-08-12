@@ -9,7 +9,8 @@ import type {
   ErrorContext,
   ExecutionContext,
 } from "./types";
-import { executeAction, failedStepResult } from "./actions";
+import { executeAction } from "./actions/registry";
+import { failedStepResult } from "./actions/types";
 import { StaleStateMonitor, StaleStateError } from "./stale-monitor";
 import { detectObstacles, resolveObstacle } from "./obstacles";
 import { saveScreenshot } from "./screenshot";
