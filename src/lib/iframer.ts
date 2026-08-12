@@ -34,11 +34,10 @@ import { detectBlock } from "./block-detection";
 import { checkModeAvailability } from "./browser/cdp-launcher";
 import { TIMEOUTS, TIMING } from "./constants";
 import { createLogger } from "./logger";
+import { getErrorMessage } from "./errors";
+import { capturePageState } from "./page-state";
 
 const log = createLogger("iframer");
-function getErrorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 const DEFAULT_SCREENSHOT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../.screenshots");
 const DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
@@ -384,7 +383,7 @@ export class Iframer {
     if (result.ok) {
       const blockResult = await detectBlock(session.page);
       if (blockResult.blocked) {
-        const pageState = await this.getPageState(session.page, ctx);
+        const pageState = await capturePageState(session.page, ctx, { screenshot: true, namePrefix: "block" });
         return {
           ...result,
           ok: false,
@@ -450,7 +449,7 @@ export class Iframer {
       if (result.ok) {
         const blockResult = await detectBlock(page);
         if (blockResult.blocked) {
-          const pageState = await this.getPageState(page, ctx);
+          const pageState = await capturePageState(page, ctx, { screenshot: true, namePrefix: "block" });
           return {
             ...result,
             ok: false,
@@ -626,17 +625,6 @@ export class Iframer {
     });
   }
 
-  private async getPageState(page: Page, ctx: ExecutionContext) {
-    try {
-      const url = page.url();
-      const title = await page.title().catch(() => "");
-      const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false }).catch(() => null);
-      const screenshotUrl = buf ? saveScreenshot(buf, `block-${Date.now()}.jpg`, ctx.screenshotDir, ctx.publicUrl) : undefined;
-      return { url, title, screenshotUrl };
-    } catch {
-      return { url: "", title: "" };
-    }
-  }
 
   // ─── Browser lifecycle ───────────────────────────────────────────
 

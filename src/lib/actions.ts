@@ -20,13 +20,10 @@ import { takeSnapshot } from "./snapshot";
 import { annotatedScreenshot } from "./annotate";
 import type { StaleStateMonitor } from "./stale-monitor";
 import { createLogger } from "./logger";
+import { getErrorMessage } from "./errors";
 import { TIMING, CAPTCHA_GRID, TIMEOUTS } from "./constants";
 
 const log = createLogger("actions");
-
-function getErrorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 /** Resolve @e refs to CSS selectors */
 function resolveSelector(selector: string, ctx: ExecutionContext): string {
