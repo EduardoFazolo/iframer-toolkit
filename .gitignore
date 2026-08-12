@@ -20,3 +20,15 @@ Thumbs.db
 
 # Output
 *.jpg
+
+# Reverse-engineering captures — contain live auth tokens, NEVER commit
+*-api/captured-api.json
+**/captured-api.json
+whatsapp-api/
+twitter-api/
+*-api/auth.ts
+
+# Secrets
+secret
+*.secret
+.iframer/
