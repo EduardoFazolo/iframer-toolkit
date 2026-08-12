@@ -42,8 +42,6 @@
     "stop:docker": "docker compose down",
     "logs:docker": "docker compose logs -f api",
     "test:smoke": "node tests/smoke.js",
-    "test:login": "node tests/login-flows.js",
-    "test:crypto": "node tests/crypto.test.js",
     "mcp:install": "node bin/cli.js install-mcp",
     "mcp:remove": "node bin/cli.js remove-mcp",
     "build:cli": "bun build bin/cli.js --target node --format cjs --outfile dist/cli.js --external better-sqlite3 --external patchright --external fingerprint-generator --external @anthropic-ai/sdk --external @modelcontextprotocol/sdk --external zod --external cloakbrowser --external playwright-core",
