@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { getDataDir } from "../paths";
 
@@ -24,27 +25,42 @@ const TAG_LENGTH = 16;
 export function getLocalToken(): string {
   if (process.env.IFRAMER_SECRET) return process.env.IFRAMER_SECRET;
 
-  const dir = getDataDir();
-  const file = path.join(dir, "secret");
+  // Persistent locations, in order of preference. Both CLI and MCP resolve the
+  // same list, so whichever file exists is shared between them.
+  const candidates = [
+    path.join(getDataDir(), "secret"),
+    path.join(process.env.XDG_RUNTIME_DIR || os.tmpdir(), "iframer-secret"),
+  ];
 
-  try {
-    const existing = fs.readFileSync(file, "utf8").trim();
-    if (existing) return existing;
-  } catch {
-    // file doesn't exist or unreadable — fall through to creation
+  // Reuse the first readable existing secret.
+  for (const file of candidates) {
+    try {
+      const existing = fs.readFileSync(file, "utf8").trim();
+      if (existing) return existing;
+    } catch {
+      // not present / unreadable here — try the next location
+    }
   }
 
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-    const secret = crypto.randomBytes(32).toString("hex");
-    fs.writeFileSync(file, secret, { mode: 0o600 });
-    return secret;
-  } catch {
-    // Couldn't create — fall back to a fixed default (means encryption is
-    // effectively unauthenticated, but keeps things functional on read-only
-    // home directories)
-    return "iframer-local-default-token";
+  // None exist yet: create one in the first writable location.
+  for (const file of candidates) {
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const secret = crypto.randomBytes(32).toString("hex");
+      fs.writeFileSync(file, secret, { mode: 0o600 });
+      return secret;
+    } catch {
+      // this location is not writable — try the next
+    }
   }
+
+  // Never fall back to a fixed key: that would encrypt credentials under a
+  // value baked into the source. Fail closed and tell the user how to recover.
+  throw new Error(
+    "iframer: could not read or create a persistent encryption secret in any " +
+      `writable location (${candidates.join(", ")}). Set IFRAMER_SECRET to a ` +
+      "stable value shared between the MCP server and CLI (openssl rand -hex 32).",
+  );
 }
 
 export function deriveKey(token: string, purpose: string = INFO): Promise<Buffer> {

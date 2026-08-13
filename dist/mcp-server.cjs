@@ -36,7 +36,7 @@ var import_stdio = require("@modelcontextprotocol/sdk/server/stdio.js");
 
 // src/mcp/helpers.ts
 var import_path5 = __toESM(require("path"));
-var import_os2 = __toESM(require("os"));
+var import_os3 = __toESM(require("os"));
 
 // src/lib/logger.ts
 var LEVELS = { debug: 0, info: 1, warn: 2, error: 3, silent: 4 };
@@ -66,6 +66,7 @@ function createLogger(tag) {
 // src/lib/auth/crypto.ts
 var import_crypto = __toESM(require("crypto"));
 var import_fs = __toESM(require("fs"));
+var import_os2 = __toESM(require("os"));
 var import_path2 = __toESM(require("path"));
 
 // src/lib/paths.ts
@@ -79,21 +80,26 @@ function getDataDir() {
 function getLocalToken() {
   if (process.env.IFRAMER_SECRET)
     return process.env.IFRAMER_SECRET;
-  const dir = getDataDir();
-  const file = import_path2.default.join(dir, "secret");
-  try {
-    const existing = import_fs.default.readFileSync(file, "utf8").trim();
-    if (existing)
-      return existing;
-  } catch {}
-  try {
-    import_fs.default.mkdirSync(dir, { recursive: true });
-    const secret = import_crypto.default.randomBytes(32).toString("hex");
-    import_fs.default.writeFileSync(file, secret, { mode: 384 });
-    return secret;
-  } catch {
-    return "iframer-local-default-token";
+  const candidates = [
+    import_path2.default.join(getDataDir(), "secret"),
+    import_path2.default.join(process.env.XDG_RUNTIME_DIR || import_os2.default.tmpdir(), "iframer-secret")
+  ];
+  for (const file of candidates) {
+    try {
+      const existing = import_fs.default.readFileSync(file, "utf8").trim();
+      if (existing)
+        return existing;
+    } catch {}
   }
+  for (const file of candidates) {
+    try {
+      import_fs.default.mkdirSync(import_path2.default.dirname(file), { recursive: true });
+      const secret = import_crypto.default.randomBytes(32).toString("hex");
+      import_fs.default.writeFileSync(file, secret, { mode: 384 });
+      return secret;
+    } catch {}
+  }
+  throw new Error("iframer: could not read or create a persistent encryption secret in any " + `writable location (${candidates.join(", ")}). Set IFRAMER_SECRET to a ` + "stable value shared between the MCP server and CLI (openssl rand -hex 32).");
 }
 
 // src/mcp/local-server.ts
@@ -418,7 +424,7 @@ async function resolveScreenshotPath(url) {
       return null;
     const buf = Buffer.from(await res.arrayBuffer());
     const fs4 = await import("fs");
-    const dir = import_path5.default.join(import_os2.default.tmpdir(), "iframer-screenshots", "screenshots");
+    const dir = import_path5.default.join(import_os3.default.tmpdir(), "iframer-screenshots", "screenshots");
     fs4.mkdirSync(dir, { recursive: true });
     const filePath = import_path5.default.join(dir, `docker-${Date.now()}.jpg`);
     fs4.writeFileSync(filePath, buf);

@@ -30,19 +30,35 @@ const LOCAL_USER_ID = "iframer-local";
  */
 function resolveLocalToken() {
   if (process.env.IFRAMER_SECRET) return process.env.IFRAMER_SECRET;
-  const file = path.join(CONFIG_DIR, "secret");
-  try {
-    const existing = fs.readFileSync(file, "utf8").trim();
-    if (existing) return existing;
-  } catch {}
-  try {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    const secret = require("crypto").randomBytes(32).toString("hex");
-    fs.writeFileSync(file, secret, { mode: 0o600 });
-    return secret;
-  } catch {
-    return "iframer-local-default-token";
+
+  const candidates = [
+    path.join(CONFIG_DIR, "secret"),
+    path.join(process.env.XDG_RUNTIME_DIR || os.tmpdir(), "iframer-secret"),
+  ];
+
+  for (const file of candidates) {
+    try {
+      const existing = fs.readFileSync(file, "utf8").trim();
+      if (existing) return existing;
+    } catch {}
   }
+
+  for (const file of candidates) {
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const secret = require("crypto").randomBytes(32).toString("hex");
+      fs.writeFileSync(file, secret, { mode: 0o600 });
+      return secret;
+    } catch {}
+  }
+
+  // Never fall back to a fixed key — that would encrypt credentials under a
+  // value baked into the source. Fail closed.
+  throw new Error(
+    "iframer: could not read or create a persistent encryption secret in any " +
+      `writable location (${candidates.join(", ")}). Set IFRAMER_SECRET to a ` +
+      "stable value shared between the MCP server and CLI (openssl rand -hex 32).",
+  );
 }
 
 const LOCAL_TOKEN = resolveLocalToken();
