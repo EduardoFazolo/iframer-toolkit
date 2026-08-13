@@ -823,6 +823,7 @@ async function cleanupAllSessions() {
 // src/lib/auth/crypto.ts
 var import_crypto = __toESM(require("crypto"));
 var import_fs3 = __toESM(require("fs"));
+var import_os2 = __toESM(require("os"));
 var import_path2 = __toESM(require("path"));
 
 // src/lib/paths.ts
@@ -841,21 +842,26 @@ var TAG_LENGTH = 16;
 function getLocalToken() {
   if (process.env.IFRAMER_SECRET)
     return process.env.IFRAMER_SECRET;
-  const dir = getDataDir();
-  const file = import_path2.default.join(dir, "secret");
-  try {
-    const existing = import_fs3.default.readFileSync(file, "utf8").trim();
-    if (existing)
-      return existing;
-  } catch {}
-  try {
-    import_fs3.default.mkdirSync(dir, { recursive: true });
-    const secret = import_crypto.default.randomBytes(32).toString("hex");
-    import_fs3.default.writeFileSync(file, secret, { mode: 384 });
-    return secret;
-  } catch {
-    return "iframer-local-default-token";
+  const candidates = [
+    import_path2.default.join(getDataDir(), "secret"),
+    import_path2.default.join(process.env.XDG_RUNTIME_DIR || import_os2.default.tmpdir(), "iframer-secret")
+  ];
+  for (const file of candidates) {
+    try {
+      const existing = import_fs3.default.readFileSync(file, "utf8").trim();
+      if (existing)
+        return existing;
+    } catch {}
   }
+  for (const file of candidates) {
+    try {
+      import_fs3.default.mkdirSync(import_path2.default.dirname(file), { recursive: true });
+      const secret = import_crypto.default.randomBytes(32).toString("hex");
+      import_fs3.default.writeFileSync(file, secret, { mode: 384 });
+      return secret;
+    } catch {}
+  }
+  throw new Error("iframer: could not read or create a persistent encryption secret in any " + `writable location (${candidates.join(", ")}). Set IFRAMER_SECRET to a ` + "stable value shared between the MCP server and CLI (openssl rand -hex 32).");
 }
 function deriveKey(token, purpose = INFO) {
   return new Promise((resolve, reject) => {
@@ -1083,11 +1089,11 @@ var import_crypto2 = require("crypto");
 // src/lib/browser/chrome-downloader.ts
 var import_fs6 = __toESM(require("fs"));
 var import_path5 = __toESM(require("path"));
-var import_os2 = __toESM(require("os"));
+var import_os3 = __toESM(require("os"));
 var import_child_process2 = require("child_process");
 var log4 = createLogger("chrome");
 var CHROME_VERSIONS_URL = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json";
-var DEFAULT_INSTALL_DIR = import_path5.default.join(import_os2.default.homedir(), ".iframer", "chrome");
+var DEFAULT_INSTALL_DIR = import_path5.default.join(import_os3.default.homedir(), ".iframer", "chrome");
 function getPlatform() {
   const arch = process.arch;
   const platform = process.platform;
