@@ -9,30 +9,15 @@ import type {
   ErrorContext,
   ExecutionContext,
 } from "./types";
-import { executeAction } from "./actions";
+import { executeAction } from "./actions/registry";
+import { failedStepResult } from "./actions/types";
 import { StaleStateMonitor, StaleStateError } from "./stale-monitor";
 import { detectObstacles, resolveObstacle } from "./obstacles";
 import { saveScreenshot } from "./screenshot";
+import { capturePageState } from "./page-state";
 import { ApiCapture } from "./api-capture";
 
 const DEFAULT_STALE_TIMEOUT_MS = 20_000;
-
-async function getPageState(page: Page, ctx: ExecutionContext, withScreenshot = false): Promise<PageState> {
-  const url = page.url();
-  const title = await page.title().catch(() => "");
-
-  if (!withScreenshot) {
-    return { url, title };
-  }
-
-  try {
-    const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
-    const screenshotUrl = saveScreenshot(buf, `state-${Date.now()}.jpg`, ctx.screenshotDir, ctx.publicUrl);
-    return { url, title, screenshotUrl };
-  } catch {
-    return { url, title };
-  }
-}
 
 function classifyError(err: Error, step: PipelineStep): ErrorContext["errorType"] {
   if (err instanceof StaleStateError) return "stale-state";
@@ -113,15 +98,9 @@ export class PipelineRunner {
         // StaleStateError or other wrapper errors
         const asError = err instanceof Error ? err : new Error(String(err));
         const errorType = classifyError(asError, step);
-        const pageState = await getPageState(page, this.ctx, true);
+        const pageState = await capturePageState(page, this.ctx, { screenshot: true });
 
-        stepResult = {
-          stepIndex: i,
-          step,
-          ok: false,
-          error: asError.message,
-          durationMs: Date.now() - startTime,
-        };
+        stepResult = failedStepResult(step, asError.message, Date.now() - startTime, i);
 
         results.push(stepResult);
 
@@ -163,7 +142,7 @@ export class PipelineRunner {
 
       // If step failed and not continueOnError, build error context and return
       if (!stepResult.ok && !continueOnError) {
-        const pageState = await getPageState(page, this.ctx, true);
+        const pageState = await capturePageState(page, this.ctx, { screenshot: true });
         const errorType = classifyError(new Error(stepResult.error || ""), step);
 
         return {
@@ -204,7 +183,7 @@ export class PipelineRunner {
 
           if (!resolution.resolved && obstacle.type === "captcha") {
             // Unresolvable captcha — stop pipeline with helpful context
-            const pageState = await getPageState(page, this.ctx, true);
+            const pageState = await capturePageState(page, this.ctx, { screenshot: true });
             return {
               ok: false,
               completedSteps: i,
@@ -230,7 +209,7 @@ export class PipelineRunner {
     }
 
     const capturedApi = await finishCapture();
-    const finalState = await getPageState(page, this.ctx, true);
+    const finalState = await capturePageState(page, this.ctx, { screenshot: true });
 
     return {
       ok: true,

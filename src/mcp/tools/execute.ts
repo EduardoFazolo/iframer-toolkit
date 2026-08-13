@@ -1,7 +1,20 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import type { PipelineResult, PipelineStep, StepResult } from "../../lib/types";
+import type { StepResultMap } from "../../lib/actions/types";
 import { apiPost, localApiPost, isDockerRunning, resolveScreenshotPath, err, getErrorMessage, log, localServer } from "../helpers";
 import { stepSchema } from "./step-schema";
+
+type TextContent = { type: "text"; text: string };
+
+/**
+ * Read a step's result at its registry-guaranteed type. TS can't narrow the
+ * nested `r.step.type` discriminant onto `r.result`, so this bridges the gap
+ * with a single assertion justified by the StepHandlerRegistry invariant.
+ */
+function resultOf<K extends PipelineStep["type"]>(r: StepResult, _type: K): StepResultMap[K] | undefined {
+  return r.result as StepResultMap[K] | undefined;
+}
 
 export function registerExecuteTool(server: McpServer) {
   server.tool(
@@ -41,7 +54,7 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
       try {
         const dockerRunning = await isDockerRunning();
 
-        async function runWithMode(mode?: string): Promise<any> {
+        async function runWithMode(mode?: string): Promise<PipelineResult> {
           // docker-headful is the only mode that goes through the Docker API.
           // Every other mode runs on the local background server so CLI, MCP,
           // and all browser modes share one credential / session / knowledge store.
@@ -61,7 +74,7 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
                 },
               };
             }
-            return apiPost("/execute", {
+            return apiPost<PipelineResult>("/execute", {
               steps: params.steps,
               options: { ...params.options, mode: "docker-headful", autoEscalate: false },
             });
@@ -69,7 +82,7 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
 
           // headless, binary-headful, and auto-select all go to the local
           // background server. Auto-escalation stays enabled.
-          return localApiPost("/execute", {
+          return localApiPost<PipelineResult>("/execute", {
             steps: params.steps,
             options: { ...params.options, mode: mode || undefined },
           });
@@ -77,7 +90,7 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
 
         // Run with crash recovery: if the local server dies mid-pipeline,
         // restart it and retry once.
-        let execResult: any;
+        let execResult: PipelineResult;
         try {
           execResult = await runWithMode(params.options?.mode);
         } catch (execErr: unknown) {
@@ -136,7 +149,7 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
           }
         }
 
-        const content: any[] = [{ type: "text" as const, text: lines.join("\n") }];
+        const content: TextContent[] = [{ type: "text", text: lines.join("\n") }];
         if (!execResult.ok) return { content, isError: true };
         return { content };
       } catch (e: unknown) {
@@ -146,7 +159,7 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
   );
 }
 
-export function formatExecuteResult(data: any): string[] {
+export function formatExecuteResult(data: PipelineResult): string[] {
   const lines: string[] = [];
   lines.push(`ok: ${data.ok}`);
   lines.push(`steps: ${data.completedSteps}/${data.totalSteps}`);
@@ -166,16 +179,25 @@ export function formatExecuteResult(data: any): string[] {
     } catch {}
   }
 
-  const meaningful = (data.results || []).filter((r: any) => r.ok && r.result !== undefined && r.result !== null);
+  const meaningful = (data.results || []).filter((r) => r.ok && r.result !== undefined && r.result !== null);
   for (const r of meaningful) {
-    if (r.step?.type === "snapshot" && r.result?.snapshot) {
-      lines.push(`\n--- Snapshot (${r.result.elementCount} elements) ---`);
-      lines.push(r.result.snapshot);
-    } else if (r.step?.type === "find" && r.result?.ref) {
-      lines.push(`\nFound: ${r.result.ref} ${r.result.role} "${r.result.name}" (${r.result.matchCount} match${r.result.matchCount > 1 ? "es" : ""})`);
-    } else if (r.step?.type === "screenshot" && r.result?.refs) {
-      lines.push(`\n--- Annotated screenshot refs ---`);
-      lines.push(r.result.refs);
+    if (r.step.type === "snapshot") {
+      const res = resultOf(r, "snapshot");
+      if (res?.snapshot) {
+        lines.push(`\n--- Snapshot (${res.elementCount} elements) ---`);
+        lines.push(res.snapshot);
+      }
+    } else if (r.step.type === "find") {
+      const res = resultOf(r, "find");
+      if (res?.ref) {
+        lines.push(`\nFound: ${res.ref} ${res.role} "${res.name}" (${res.matchCount} match${res.matchCount > 1 ? "es" : ""})`);
+      }
+    } else if (r.step.type === "screenshot") {
+      const res = resultOf(r, "screenshot");
+      if (res?.refs) {
+        lines.push(`\n--- Annotated screenshot refs ---`);
+        lines.push(res.refs);
+      }
     } else if (r.result !== undefined && r.result !== null) {
       lines.push(`\nstep ${r.stepIndex}: ${JSON.stringify(r.result)}`);
     }

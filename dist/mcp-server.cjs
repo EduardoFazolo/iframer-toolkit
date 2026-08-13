@@ -336,6 +336,11 @@ function findFreePort(start, attempts) {
   });
 }
 
+// src/lib/errors.ts
+function getErrorMessage(err) {
+  return err instanceof Error ? err.message : String(err);
+}
+
 // src/mcp/helpers.ts
 var log2 = createLogger("mcp");
 var BASE_URL = process.env.IFRAMER_URL || "http://localhost:3021";
@@ -424,9 +429,6 @@ async function resolveScreenshotPath(url) {
 }
 function err(message) {
   return { content: [{ type: "text", text: message }], isError: true };
-}
-function getErrorMessage(err2) {
-  return err2 instanceof Error ? err2.message : String(err2);
 }
 
 // src/lib/domain-modes.ts
@@ -640,6 +642,9 @@ var stepSchema = import_zod2.z.discriminatedUnion("type", [
 ]);
 
 // src/mcp/tools/execute.ts
+function resultOf(r, _type) {
+  return r.result;
+}
 function registerExecuteTool(server) {
   server.tool("execute", `Execute a pipeline of browser steps. Auto-starts a session if needed. Handles obstacles (captcha, cookie banners) automatically.
 
@@ -791,17 +796,26 @@ Knowledge cache updated for ${domain}. Before the next browser run on this domai
   }
   const meaningful = (data.results || []).filter((r) => r.ok && r.result !== undefined && r.result !== null);
   for (const r of meaningful) {
-    if (r.step?.type === "snapshot" && r.result?.snapshot) {
-      lines.push(`
---- Snapshot (${r.result.elementCount} elements) ---`);
-      lines.push(r.result.snapshot);
-    } else if (r.step?.type === "find" && r.result?.ref) {
-      lines.push(`
-Found: ${r.result.ref} ${r.result.role} "${r.result.name}" (${r.result.matchCount} match${r.result.matchCount > 1 ? "es" : ""})`);
-    } else if (r.step?.type === "screenshot" && r.result?.refs) {
-      lines.push(`
+    if (r.step.type === "snapshot") {
+      const res = resultOf(r, "snapshot");
+      if (res?.snapshot) {
+        lines.push(`
+--- Snapshot (${res.elementCount} elements) ---`);
+        lines.push(res.snapshot);
+      }
+    } else if (r.step.type === "find") {
+      const res = resultOf(r, "find");
+      if (res?.ref) {
+        lines.push(`
+Found: ${res.ref} ${res.role} "${res.name}" (${res.matchCount} match${res.matchCount > 1 ? "es" : ""})`);
+      }
+    } else if (r.step.type === "screenshot") {
+      const res = resultOf(r, "screenshot");
+      if (res?.refs) {
+        lines.push(`
 --- Annotated screenshot refs ---`);
-      lines.push(r.result.refs);
+        lines.push(res.refs);
+      }
     } else if (r.result !== undefined && r.result !== null) {
       lines.push(`
 step ${r.stepIndex}: ${JSON.stringify(r.result)}`);

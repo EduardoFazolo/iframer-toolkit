@@ -2,9 +2,21 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import path from "path";
 import fs from "fs";
+import type { CapturedApi } from "../../lib/types";
 import { localApiPost, localApiDelete, apiPost, isDockerRunning, err, getErrorMessage, localServer } from "../helpers";
 import { formatCapturedApi } from "./reverse-engineer";
 import { getDataDir } from "../../lib/paths";
+
+/** Cookie shape as returned by the browser context over the HTTP boundary. */
+interface BrowserCookie {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  httpOnly: boolean;
+  secure: boolean;
+}
+type OriginStore = Record<string, Record<string, string>>;
 
 export function registerSessionTool(server: McpServer) {
   server.tool(
@@ -74,7 +86,7 @@ Sessions live in the single local SQLite database (~/.iframer/iframer.db), share
         }
 
         if (action === "capture-stop") {
-          const result = await localApiPost<{ ok: boolean; capturedApi: any[]; message: string }>("/capture/stop", { mode: mode ?? "binary-headful", instanceId });
+          const result = await localApiPost<{ ok: boolean; capturedApi: CapturedApi[]; message: string }>("/capture/stop", { mode: mode ?? "binary-headful", instanceId });
           const lines: string[] = [result.message];
 
           if (result.capturedApi && result.capturedApi.length > 0) {
@@ -98,7 +110,7 @@ Sessions live in the single local SQLite database (~/.iframer/iframer.db), share
         }
 
         if (action === "get-cookies") {
-          const result = await localApiPost<{ ok: boolean; cookies: any[]; message: string }>("/auth/cookies", { mode: mode ?? "binary-headful", urls, instanceId });
+          const result = await localApiPost<{ ok: boolean; cookies: BrowserCookie[]; message: string }>("/auth/cookies", { mode: mode ?? "binary-headful", urls, instanceId });
           const lines = [result.message, ""];
           for (const c of result.cookies) {
             lines.push(`${c.name}=${c.value}  [domain=${c.domain} path=${c.path} httpOnly=${c.httpOnly} secure=${c.secure}]`);
@@ -107,7 +119,7 @@ Sessions live in the single local SQLite database (~/.iframer/iframer.db), share
         }
 
         if (action === "get-auth") {
-          const result = await localApiPost<{ ok: boolean; cookies: any[]; localStorage: any; sessionStorage: any; message: string }>("/auth/full", { mode: mode ?? "binary-headful", urls, instanceId });
+          const result = await localApiPost<{ ok: boolean; cookies: BrowserCookie[]; localStorage: OriginStore; sessionStorage: OriginStore; message: string }>("/auth/full", { mode: mode ?? "binary-headful", urls, instanceId });
           const lines = [result.message, ""];
           lines.push("=== Cookies ===");
           for (const c of result.cookies) {
