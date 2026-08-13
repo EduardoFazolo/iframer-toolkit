@@ -134,6 +134,5 @@ export function err(message: string) {
   return { content: [{ type: "text" as const, text: message }], isError: true };
 }
 
-export function getErrorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
+// Re-exported from the shared lib so the MCP tools keep their import path.
+export { getErrorMessage } from "../lib/errors";

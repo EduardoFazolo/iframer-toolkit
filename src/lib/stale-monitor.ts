@@ -9,7 +9,6 @@ export class StaleStateMonitor {
   private timeoutMs: number;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private lastActivity: number = Date.now();
-  private abortController: AbortController | null = null;
 
   constructor(page: Page, timeoutMs: number = DEFAULT_STALE_TIMEOUT_MS) {
     this.page = page;
@@ -81,7 +80,6 @@ export class StaleStateMonitor {
    */
   async withMonitoring<T>(fn: () => Promise<T>): Promise<T> {
     this.lastActivity = Date.now();
-    this.abortController = new AbortController();
     const beforeSnapshot = await this.snapshot();
 
     return new Promise<T>((resolve, reject) => {
@@ -93,7 +91,6 @@ export class StaleStateMonitor {
         if (checkInterval) clearInterval(checkInterval);
         if (this.timer) clearTimeout(this.timer);
         this.timer = null;
-        this.abortController = null;
       };
 
       // Periodic check for staleness
