@@ -119,6 +119,9 @@ export const TIMEOUTS = {
   // how long to let the followed tab reach domcontentloaded before continuing.
   TAB_FOLLOW_SETTLE: 400,
   TAB_LOAD: 15_000,
+  // A new tab usually opens at about:blank then navigates to its real URL —
+  // wait this long for that first real navigation before judging it blank.
+  TAB_BLANK_RESOLVE: 3_000,
 } as const;
 
 // ─── Chrome Version ────────────────────────────────────────────────

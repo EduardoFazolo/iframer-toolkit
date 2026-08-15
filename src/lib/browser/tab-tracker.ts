@@ -15,6 +15,9 @@ export interface SettleOptions {
   waitForPendingMs: number;
   /** How long to let the followed tab reach domcontentloaded. */
   loadTimeoutMs: number;
+  /** A new tab often opens at about:blank then navigates to the real URL; wait
+   *  up to this long for that first real navigation before judging it blank. */
+  blankResolveMs: number;
 }
 
 /**
@@ -92,12 +95,30 @@ export class TabTracker {
     if (target.isClosed()) return null;
 
     await target.waitForLoadState("domcontentloaded", { timeout: opts.loadTimeoutMs }).catch(() => {});
+    // A target=_blank tab starts at about:blank and then navigates to its real
+    // URL — wait for that first real navigation before deciding it's blank.
+    if (safeUrl(target) === "about:blank" || safeUrl(target) === "") {
+      await target.waitForURL((u) => { const s = u.toString(); return !!s && s !== "about:blank"; }, { timeout: opts.blankResolveMs }).catch(() => {});
+      await target.waitForLoadState("domcontentloaded", { timeout: opts.loadTimeoutMs }).catch(() => {});
+    }
+    const url = safeUrl(target);
+    if (!url || url === "about:blank") {
+      // Opened but never became a real page — don't switch to a blank popup.
+      return null;
+    }
     await target.bringToFront().catch(() => {});
     this.activePage = target;
 
-    const sw: TabSwitch = { url: safeUrl(target), title: await target.title().catch(() => "") };
+    const sw: TabSwitch = { url, title: await target.title().catch(() => "") };
     log.info(`followed new tab → ${sw.url}`);
     return sw;
+  }
+
+  /** Drop pending new-tab opens without following them. Used when a step opened
+   *  a tab we should NOT switch to (e.g. an incidental popup while the main page
+   *  navigated, or any tab opened by a non-click step like login). */
+  discardPending(): void {
+    this.newlyOpened = [];
   }
 
   dispose(): void {
