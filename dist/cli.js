@@ -4286,8 +4286,13 @@ class ApiCapture {
   currentStep = 0;
   requestHandler;
   responseHandler;
+  context;
+  hookedPages = new Set;
+  pageHandler;
   constructor(page) {
     this.page = page;
+    this.context = page.context();
+    this.pageHandler = (p) => this.hookPage(p);
     this.requestHandler = (req) => {
       const resourceType = req.resourceType();
       if (SKIP_RESOURCE_TYPES.has(resourceType))
@@ -4354,16 +4359,29 @@ class ApiCapture {
       } catch {}
     };
   }
+  hookPage(p) {
+    if (this.hookedPages.has(p))
+      return;
+    this.hookedPages.add(p);
+    p.on("request", this.requestHandler);
+    p.on("response", this.responseHandler);
+  }
   start() {
-    this.page.on("request", this.requestHandler);
-    this.page.on("response", this.responseHandler);
+    this.hookPage(this.page);
+    this.context.on("page", this.pageHandler);
   }
   setStep(index) {
     this.currentStep = index;
   }
   stop() {
-    this.page.off("request", this.requestHandler);
-    this.page.off("response", this.responseHandler);
+    this.context.off("page", this.pageHandler);
+    for (const p of this.hookedPages) {
+      try {
+        p.off("request", this.requestHandler);
+        p.off("response", this.responseHandler);
+      } catch {}
+    }
+    this.hookedPages.clear();
   }
   async drain(ms = 3000, pendingTimeoutMs = 5000) {
     await new Promise((r) => setTimeout(r, ms));
