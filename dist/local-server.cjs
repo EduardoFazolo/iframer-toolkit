@@ -663,7 +663,8 @@ var TIMEOUTS = {
   HEALTH_CHECK: 3000,
   CHALLENGE_FRAME_WAIT: 5000,
   TAB_FOLLOW_SETTLE: 400,
-  TAB_LOAD: 15000
+  TAB_LOAD: 15000,
+  TAB_BLANK_RESOLVE: 3000
 };
 var CHROME_MIN_VERSION = 130;
 
@@ -4483,11 +4484,25 @@ class TabTracker {
     if (target.isClosed())
       return null;
     await target.waitForLoadState("domcontentloaded", { timeout: opts.loadTimeoutMs }).catch(() => {});
+    if (safeUrl(target) === "about:blank" || safeUrl(target) === "") {
+      await target.waitForURL((u) => {
+        const s = u.toString();
+        return !!s && s !== "about:blank";
+      }, { timeout: opts.blankResolveMs }).catch(() => {});
+      await target.waitForLoadState("domcontentloaded", { timeout: opts.loadTimeoutMs }).catch(() => {});
+    }
+    const url = safeUrl(target);
+    if (!url || url === "about:blank") {
+      return null;
+    }
     await target.bringToFront().catch(() => {});
     this.activePage = target;
-    const sw = { url: safeUrl(target), title: await target.title().catch(() => "") };
+    const sw = { url, title: await target.title().catch(() => "") };
     log15.info(`followed new tab → ${sw.url}`);
     return sw;
+  }
+  discardPending() {
+    this.newlyOpened = [];
   }
   dispose() {
     this.disposed = true;
@@ -4506,6 +4521,13 @@ function safeUrl(p) {
 
 // src/lib/pipeline.ts
 var DEFAULT_STALE_TIMEOUT_MS2 = 20000;
+function safePageUrl(page) {
+  try {
+    return page.url();
+  } catch {
+    return "";
+  }
+}
 function classifyError(err, step) {
   if (err instanceof StaleStateError)
     return "stale-state";
@@ -4579,6 +4601,7 @@ class PipelineRunner {
         capture.setStep(i);
       const step = pipeline.steps[i];
       const page = tracker.active();
+      const urlBefore = safePageUrl(page);
       const monitor = new StaleStateMonitor(page, staleTimeoutMs);
       let stepResult;
       try {
@@ -4614,12 +4637,18 @@ class PipelineRunner {
         };
       }
       const canOpenTab = step.type === "click" || step.type === "human-click";
-      const switched = await tracker.settle({
-        waitForPendingMs: canOpenTab ? TIMEOUTS.TAB_FOLLOW_SETTLE : 0,
-        loadTimeoutMs: TIMEOUTS.TAB_LOAD
-      });
-      if (switched)
-        stepResult.tabSwitchedTo = switched.url;
+      const currentPageNavigated = safePageUrl(page) !== urlBefore;
+      if (canOpenTab && !currentPageNavigated) {
+        const switched = await tracker.settle({
+          waitForPendingMs: TIMEOUTS.TAB_FOLLOW_SETTLE,
+          loadTimeoutMs: TIMEOUTS.TAB_LOAD,
+          blankResolveMs: TIMEOUTS.TAB_BLANK_RESOLVE
+        });
+        if (switched)
+          stepResult.tabSwitchedTo = switched.url;
+      } else {
+        tracker.discardPending();
+      }
       if (screenshotAfterEach && stepResult.ok) {
         try {
           const buf = await tracker.active().screenshot({ type: "jpeg", quality: 50, fullPage: false });

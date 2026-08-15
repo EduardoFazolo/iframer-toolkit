@@ -21,6 +21,10 @@ import { TIMEOUTS } from "./constants";
 
 const DEFAULT_STALE_TIMEOUT_MS = 20_000;
 
+function safePageUrl(page: Page): string {
+  try { return page.url(); } catch { return ""; }
+}
+
 function classifyError(err: Error, step: PipelineStep): ErrorContext["errorType"] {
   if (err instanceof StaleStateError) return "stale-state";
   const msg = err.message.toLowerCase();
@@ -102,6 +106,7 @@ export class PipelineRunner {
       if (capture) capture.setStep(i);
       const step = pipeline.steps[i];
       const page = tracker.active();
+      const urlBefore = safePageUrl(page);
       const monitor = new StaleStateMonitor(page, staleTimeoutMs);
 
       let stepResult: StepResult;
@@ -143,15 +148,23 @@ export class PipelineRunner {
         };
       }
 
-      // Follow a tab opened by this step. Zero-wait for most steps (adopt an
-      // already-fired 'page' event); a short fallback wait after clicks covers
-      // the race where the event lands just after click() resolves.
+      // Follow a NEW tab only when a click opened one AND the clicked page did
+      // NOT itself navigate. That distinguishes a genuine target=_blank (feed
+      // stays, article opens in a new tab → follow) from a form submit that
+      // navigates the page and incidentally spawns a popup/ad, or any tab opened
+      // by a non-click step like `login` (must never hijack the flow → discard).
       const canOpenTab = step.type === "click" || step.type === "human-click";
-      const switched = await tracker.settle({
-        waitForPendingMs: canOpenTab ? TIMEOUTS.TAB_FOLLOW_SETTLE : 0,
-        loadTimeoutMs: TIMEOUTS.TAB_LOAD,
-      });
-      if (switched) stepResult.tabSwitchedTo = switched.url;
+      const currentPageNavigated = safePageUrl(page) !== urlBefore;
+      if (canOpenTab && !currentPageNavigated) {
+        const switched = await tracker.settle({
+          waitForPendingMs: TIMEOUTS.TAB_FOLLOW_SETTLE,
+          loadTimeoutMs: TIMEOUTS.TAB_LOAD,
+          blankResolveMs: TIMEOUTS.TAB_BLANK_RESOLVE,
+        });
+        if (switched) stepResult.tabSwitchedTo = switched.url;
+      } else {
+        tracker.discardPending();
+      }
 
       // Capture per-step screenshot if requested (of the now-active page)
       if (screenshotAfterEach && stepResult.ok) {

@@ -11,6 +11,7 @@ class FakePage {
   async title() { return this._title; }
   isClosed() { return this.closed; }
   async waitForLoadState() {}
+  async waitForURL() {}
   async bringToFront() {}
   on(ev: string, fn: (...a: unknown[]) => void) { this.emitter.on(ev, fn); return this; }
   close() { this.closed = true; this.emitter.emit("close"); }
@@ -42,7 +43,7 @@ function make(initialUrl = "https://start.test") {
   return { tracker, ctx, initial };
 }
 
-const NO_WAIT = { waitForPendingMs: 0, loadTimeoutMs: 100 };
+const NO_WAIT = { waitForPendingMs: 0, loadTimeoutMs: 100, blankResolveMs: 100 };
 
 describe("TabTracker", () => {
   test("active() is the initial page when nothing opened", async () => {
@@ -65,7 +66,7 @@ describe("TabTracker", () => {
   test("waitForPendingMs catches a tab whose event lands during settle", async () => {
     const { tracker, ctx } = make();
     const newTab = new FakePage("https://late.test", "Late");
-    const p = tracker.settle({ waitForPendingMs: 1000, loadTimeoutMs: 100 });
+    const p = tracker.settle({ waitForPendingMs: 1000, loadTimeoutMs: 100, blankResolveMs: 100 });
     ctx.openTab(newTab); // fires after settle registered its waiter
     const sw = await p;
     expect(sw?.url).toBe("https://late.test");
@@ -89,6 +90,21 @@ describe("TabTracker", () => {
     ctx.openTab(new FakePage("https://b.test"));
     const sw = await tracker.settle(NO_WAIT);
     expect(sw?.url).toBe("https://b.test");
+  });
+
+  test("discardPending() drops an opened tab without following it", async () => {
+    const { tracker, ctx, initial } = make();
+    ctx.openTab(new FakePage("https://ad.test"));
+    tracker.discardPending();
+    expect(await tracker.settle(NO_WAIT)).toBeNull();
+    expect(tracker.active()).toBe(initial as unknown as Page);
+  });
+
+  test("does not switch to a tab that stays about:blank", async () => {
+    const { tracker, ctx, initial } = make();
+    ctx.openTab(new FakePage("about:blank"));
+    expect(await tracker.settle(NO_WAIT)).toBeNull();
+    expect(tracker.active()).toBe(initial as unknown as Page);
   });
 
   test("dispose() removes the context listener and stops following", async () => {
