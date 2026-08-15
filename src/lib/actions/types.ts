@@ -112,6 +112,9 @@ export type StepResult = {
     durationMs: number;
     error?: string;
     screenshotUrl?: string;
+    /** Set when this step opened a new tab that the pipeline followed —
+     *  the URL the active page switched to. */
+    tabSwitchedTo?: string;
   };
 }[PipelineStep["type"]];
 

@@ -114,6 +114,11 @@ export const TIMEOUTS = {
   API_REQUEST: 180_000,
   HEALTH_CHECK: 3000,
   CHALLENGE_FRAME_WAIT: 5_000,
+  // New-tab following: after a click, how long to wait for a just-opened tab's
+  // 'page' event to arrive (only applies when no tab has registered yet), and
+  // how long to let the followed tab reach domcontentloaded before continuing.
+  TAB_FOLLOW_SETTLE: 400,
+  TAB_LOAD: 15_000,
 } as const;
 
 // ─── Chrome Version ────────────────────────────────────────────────

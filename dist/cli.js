@@ -593,7 +593,9 @@ var init_constants = __esm(() => {
     TOTP_INPUT: 5000,
     API_REQUEST: 180000,
     HEALTH_CHECK: 3000,
-    CHALLENGE_FRAME_WAIT: 5000
+    CHALLENGE_FRAME_WAIT: 5000,
+    TAB_FOLLOW_SETTLE: 400,
+    TAB_LOAD: 15000
   };
 });
 
@@ -4514,6 +4516,80 @@ var init_api_capture = __esm(() => {
   ];
 });
 
+// src/lib/browser/tab-tracker.ts
+class TabTracker {
+  context;
+  pages;
+  activePage;
+  newlyOpened = [];
+  disposed = false;
+  constructor(context, initial) {
+    this.context = context;
+    this.activePage = initial;
+    this.pages = [...context.pages()];
+    if (!this.pages.includes(initial))
+      this.pages.push(initial);
+    context.on("page", this.onNewPage);
+  }
+  onNewPage = (p) => {
+    if (this.disposed)
+      return;
+    this.pages.push(p);
+    this.newlyOpened.push(p);
+    p.on("close", () => this.onClose(p));
+    log15.debug(`new tab opened: ${safeUrl(p)}`);
+  };
+  onClose = (p) => {
+    this.pages = this.pages.filter((x) => x !== p);
+    this.newlyOpened = this.newlyOpened.filter((x) => x !== p);
+    if (this.activePage === p) {
+      this.activePage = this.pages[this.pages.length - 1] ?? p;
+      log15.debug(`active tab closed, fell back to: ${safeUrl(this.activePage)}`);
+    }
+  };
+  active() {
+    return this.activePage;
+  }
+  count() {
+    return this.pages.length;
+  }
+  async settle(opts) {
+    if (this.newlyOpened.length === 0 && opts.waitForPendingMs > 0) {
+      await this.context.waitForEvent("page", { timeout: opts.waitForPendingMs }).catch(() => null);
+    }
+    if (this.newlyOpened.length === 0)
+      return null;
+    const target = this.newlyOpened[this.newlyOpened.length - 1];
+    this.newlyOpened = [];
+    if (target.isClosed())
+      return null;
+    await target.waitForLoadState("domcontentloaded", { timeout: opts.loadTimeoutMs }).catch(() => {});
+    await target.bringToFront().catch(() => {});
+    this.activePage = target;
+    const sw = { url: safeUrl(target), title: await target.title().catch(() => "") };
+    log15.info(`followed new tab → ${sw.url}`);
+    return sw;
+  }
+  dispose() {
+    this.disposed = true;
+    try {
+      this.context.off("page", this.onNewPage);
+    } catch {}
+  }
+}
+function safeUrl(p) {
+  try {
+    return p.url();
+  } catch {
+    return "unknown";
+  }
+}
+var log15;
+var init_tab_tracker = __esm(() => {
+  init_logger();
+  log15 = createLogger("tabs");
+});
+
 // src/lib/pipeline.ts
 function classifyError(err, step) {
   if (err instanceof StaleStateError)
@@ -4557,7 +4633,15 @@ class PipelineRunner {
   constructor(ctx) {
     this.ctx = ctx;
   }
-  async run(page, pipeline) {
+  async run(initialPage, pipeline) {
+    const tracker = new TabTracker(initialPage.context(), initialPage);
+    try {
+      return await this.runSteps(initialPage, tracker, pipeline);
+    } finally {
+      tracker.dispose();
+    }
+  }
+  async runSteps(initialPage, tracker, pipeline) {
     const startTime = Date.now();
     const opts = pipeline.options || {};
     const staleTimeoutMs = opts.staleTimeoutMs ?? this.ctx.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS2;
@@ -4566,7 +4650,7 @@ class PipelineRunner {
     const continueOnError = opts.continueOnError ?? false;
     const results = [];
     const obstacles = [];
-    const capture = opts.captureApi ? new ApiCapture(page) : null;
+    const capture = opts.captureApi ? new ApiCapture(initialPage) : null;
     if (capture)
       capture.start();
     const finishCapture = async () => {
@@ -4579,6 +4663,7 @@ class PipelineRunner {
       if (capture)
         capture.setStep(i);
       const step = pipeline.steps[i];
+      const page = tracker.active();
       const monitor = new StaleStateMonitor(page, staleTimeoutMs);
       let stepResult;
       try {
@@ -4590,7 +4675,7 @@ class PipelineRunner {
       } catch (err) {
         const asError = err instanceof Error ? err : new Error(String(err));
         const errorType = classifyError(asError, step);
-        const pageState = await capturePageState(page, this.ctx, { screenshot: true });
+        const pageState = await capturePageState(tracker.active(), this.ctx, { screenshot: true });
         stepResult = failedStepResult(step, asError.message, Date.now() - startTime, i);
         results.push(stepResult);
         return {
@@ -4613,15 +4698,22 @@ class PipelineRunner {
           capturedApi: await finishCapture()
         };
       }
+      const canOpenTab = step.type === "click" || step.type === "human-click";
+      const switched = await tracker.settle({
+        waitForPendingMs: canOpenTab ? TIMEOUTS.TAB_FOLLOW_SETTLE : 0,
+        loadTimeoutMs: TIMEOUTS.TAB_LOAD
+      });
+      if (switched)
+        stepResult.tabSwitchedTo = switched.url;
       if (screenshotAfterEach && stepResult.ok) {
         try {
-          const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
+          const buf = await tracker.active().screenshot({ type: "jpeg", quality: 50, fullPage: false });
           stepResult.screenshotUrl = saveScreenshot(buf, `step-${i}-${Date.now()}.jpg`, this.ctx.screenshotDir, this.ctx.publicUrl);
         } catch {}
       }
       results.push(stepResult);
       if (!stepResult.ok && !continueOnError) {
-        const pageState = await capturePageState(page, this.ctx, { screenshot: true });
+        const pageState = await capturePageState(tracker.active(), this.ctx, { screenshot: true });
         const errorType = classifyError(new Error(stepResult.error || ""), step);
         return {
           ok: false,
@@ -4645,9 +4737,10 @@ class PipelineRunner {
       }
       if (step.type === "navigate" && continueOnObstacle) {
         const obstacleStart = Date.now();
-        const obstacle = await detectObstacles(page);
+        const obstaclePage = tracker.active();
+        const obstacle = await detectObstacles(obstaclePage);
         if (obstacle) {
-          const resolution = await resolveObstacle(page, obstacle, this.ctx, monitor);
+          const resolution = await resolveObstacle(obstaclePage, obstacle, this.ctx, monitor);
           obstacles.push({
             type: obstacle.type,
             detectedAtStep: i,
@@ -4656,7 +4749,7 @@ class PipelineRunner {
             durationMs: Date.now() - obstacleStart
           });
           if (!resolution.resolved && obstacle.type === "captcha") {
-            const pageState = await capturePageState(page, this.ctx, { screenshot: true });
+            const pageState = await capturePageState(tracker.active(), this.ctx, { screenshot: true });
             return {
               ok: false,
               completedSteps: i,
@@ -4681,7 +4774,7 @@ class PipelineRunner {
       }
     }
     const capturedApi = await finishCapture();
-    const finalState = await capturePageState(page, this.ctx, { screenshot: true });
+    const finalState = await capturePageState(tracker.active(), this.ctx, { screenshot: true });
     return {
       ok: true,
       completedSteps: pipeline.steps.length,
@@ -4702,6 +4795,8 @@ var init_pipeline = __esm(() => {
   init_screenshot();
   init_page_state();
   init_api_capture();
+  init_tab_tracker();
+  init_constants();
 });
 
 // src/lib/block-detection.ts
@@ -4724,7 +4819,7 @@ async function detectBlock(page) {
     const hasCfChallenge = await page.evaluate(() => {
       return !!document.querySelector('iframe[src*="challenges.cloudflare.com"]');
     }).catch((err) => {
-      log15.warn(`CF challenge check failed, assuming blocked: ${err}`);
+      log16.warn(`CF challenge check failed, assuming blocked: ${err}`);
       return true;
     });
     if (hasCfChallenge) {
@@ -4743,7 +4838,7 @@ async function detectBlock(page) {
       const hasCaptchaIframe = await page.evaluate(() => {
         return !!(document.querySelector('iframe[src*="recaptcha"]') || document.querySelector('iframe[src*="hcaptcha"]'));
       }).catch((err) => {
-        log15.warn(`captcha iframe check failed, assuming blocked: ${err}`);
+        log16.warn(`captcha iframe check failed, assuming blocked: ${err}`);
         return true;
       });
       if (hasCaptchaIframe) {
@@ -4756,15 +4851,15 @@ async function detectBlock(page) {
     if (!url.includes("about:blank") && bodyText.trim().length < 20 && title.length < 5) {}
     return { blocked: false };
   } catch (err) {
-    log15.warn(`page evaluation failed, assuming blocked: ${err}`);
+    log16.warn(`page evaluation failed, assuming blocked: ${err}`);
     return { blocked: true, reason: "evaluation-failed" };
   }
 }
-var log15;
+var log16;
 var init_block_detection = __esm(() => {
   init_constants();
   init_logger();
-  log15 = createLogger("block-detection");
+  log16 = createLogger("block-detection");
 });
 
 // src/lib/knowledge/extract-from-run.ts
@@ -4900,7 +4995,7 @@ class PipelineExecutor {
         this.deps.domainModes.recordFailure(domain, failedMode, result.error?.message || "blocked");
       const nextMode = this.deps.domainModes.getNextMode(failedMode, availableModes);
       if (nextMode) {
-        log16.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
+        log17.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
         if (failedMode !== "docker-headful") {
           await this.deps.daemon.stopMode(failedMode, instanceId);
         }
@@ -4913,7 +5008,7 @@ class PipelineExecutor {
           this.deps.domainModes.recordFailure(domain, nextMode, result.error?.message || "blocked");
           const thirdMode = this.deps.domainModes.getNextMode(nextMode, availableModes);
           if (thirdMode) {
-            log16.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
+            log17.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
             if (nextMode !== "docker-headful") {
               await this.deps.daemon.stopMode(nextMode, instanceId);
             }
@@ -5028,7 +5123,7 @@ class PipelineExecutor {
         try {
           extractKnowledgeFromRun(pipeline, result, updatedSession, mode);
         } catch (err) {
-          log16.warn(`knowledge update failed: ${getErrorMessage(err)}`);
+          log17.warn(`knowledge update failed: ${getErrorMessage(err)}`);
         }
       }
       this.deps.refStore.sync(userId, ctx);
@@ -5060,7 +5155,7 @@ class PipelineExecutor {
     }
   }
 }
-var log16;
+var log17;
 var init_pipeline_executor = __esm(() => {
   init_daemon();
   init_pipeline();
@@ -5071,7 +5166,7 @@ var init_pipeline_executor = __esm(() => {
   init_page_state();
   init_config();
   init_logger();
-  log16 = createLogger("iframer");
+  log17 = createLogger("iframer");
 });
 
 // src/lib/execution/fetch-service.ts
@@ -5422,7 +5517,7 @@ class Iframer {
             sessionSaved = true;
           }
         } catch (err) {
-          log17.warn(`stopSession: failed to extract daemon state for ${inst.mode}::${inst.instanceId}: ${getErrorMessage(err)}`);
+          log18.warn(`stopSession: failed to extract daemon state for ${inst.mode}::${inst.instanceId}: ${getErrorMessage(err)}`);
         }
       }
     }
@@ -5501,7 +5596,7 @@ class Iframer {
     }
   }
 }
-var import_path8, import_url, log17, DEFAULT_SCREENSHOT_DIR, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3 = 20000;
+var import_path8, import_url, log18, DEFAULT_SCREENSHOT_DIR, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3 = 20000;
 var init_iframer = __esm(() => {
   init_session_manager();
   init_launcher();
@@ -5519,7 +5614,7 @@ var init_iframer = __esm(() => {
   init_credential_store();
   import_path8 = __toESM(require("path"));
   import_url = require("url");
-  log17 = createLogger("iframer");
+  log18 = createLogger("iframer");
   DEFAULT_SCREENSHOT_DIR = import_path8.default.join(import_path8.default.dirname(import_url.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/src/lib/iframer.ts")), "../../.screenshots");
   DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
 });
