@@ -179,6 +179,13 @@ export function formatExecuteResult(data: PipelineResult): string[] {
     } catch {}
   }
 
+  // Report any tabs the pipeline followed (a click that opened a new tab).
+  for (const r of data.results || []) {
+    if (r.tabSwitchedTo) {
+      lines.push(`\n↳ step ${r.stepIndex} opened a new tab — pipeline is now on: ${r.tabSwitchedTo}`);
+    }
+  }
+
   const meaningful = (data.results || []).filter((r) => r.ok && r.result !== undefined && r.result !== null);
   for (const r of meaningful) {
     if (r.step.type === "snapshot") {
