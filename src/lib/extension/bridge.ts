@@ -17,6 +17,9 @@ import { getLocalToken } from "../auth/crypto";
 // HTTP server this attaches to — never exposed off-box.
 
 const REQUEST_TIMEOUT_MS = 180_000;
+// App-level heartbeat: an open WebSocket receiving messages keeps an MV3
+// service worker alive (Chrome 116+). Ping well under the ~30s idle-kill.
+const HEARTBEAT_MS = 15_000;
 
 export interface ExtensionTab {
   id: number;
@@ -44,6 +47,7 @@ class ExtensionBridge {
   private connectedAt: number | null = null;
   private nextId = 1;
   private pending = new Map<number, Pending>();
+  private heartbeat: ReturnType<typeof setInterval> | null = null;
 
   /** Attach the WS server to the already-listening HTTP server. Idempotent. */
   attach(server: HttpServer): void {
@@ -75,12 +79,14 @@ class ExtensionBridge {
       }
       this.socket = ws;
       this.connectedAt = Date.now();
+      this.startHeartbeat();
 
       ws.on("message", (data: Buffer) => this.onMessage(ws, data));
       ws.on("close", () => {
         if (this.socket === ws) {
           this.socket = null;
           this.connectedAt = null;
+          this.stopHeartbeat();
           // Fail any in-flight requests — the executor is gone.
           for (const [, p] of this.pending) {
             clearTimeout(p.timer);
@@ -93,6 +99,23 @@ class ExtensionBridge {
         /* close handler does the cleanup */
       });
     });
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.heartbeat = setInterval(() => {
+      // Fire-and-forget; the extension replies pong. Failures just mean the
+      // socket is gone, which the close handler already cleans up.
+      this.send("ping", {}).catch(() => {});
+    }, HEARTBEAT_MS);
+    this.heartbeat.unref?.();
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeat) {
+      clearInterval(this.heartbeat);
+      this.heartbeat = null;
+    }
   }
 
   private onMessage(ws: WebSocket, data: Buffer): void {

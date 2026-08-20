@@ -14,9 +14,6 @@ const RECONNECT_MS = 2000;
 let ws = null;
 let currentPort = null;
 let scanning = false;
-// Tabs the user has explicitly allowed via the popup. execute refuses any tab
-// not in this set — this is the "run in THIS window" consent gesture.
-const allowedTabs = new Set();
 
 async function getToken() {
   const { token } = await chrome.storage.local.get("token");
@@ -222,30 +219,6 @@ async function runStep(tabId, step) {
 async function runPipeline(tabId, steps, options) {
   const totalSteps = steps.length;
   const started = Date.now();
-
-  if (!allowedTabs.has(tabId)) {
-    const st = await tabState(tabId);
-    return {
-      ok: false,
-      completedSteps: 0,
-      totalSteps,
-      results: [],
-      finalState: st,
-      obstacles: [],
-      durationMs: Date.now() - started,
-      modeUsed: "extension",
-      error: {
-        failedAtStep: 0,
-        failedStep: steps[0],
-        errorType: "action-failed",
-        message: `Tab ${tabId} has not been allowed. The user must open that tab, click the iframer icon, and press "Allow this tab".`,
-        pageState: st,
-        suggestion: "Ask the user to allow the tab in the iframer extension popup, then retry.",
-        retryable: true,
-      },
-    };
-  }
-
   const results = [];
   const continueOnError = !!options.continueOnError;
 
@@ -303,15 +276,9 @@ async function runPipeline(tabId, steps, options) {
 // ─── Popup <-> worker messaging ─────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
-    if (msg.cmd === "allow-tab" && typeof msg.tabId === "number") {
-      allowedTabs.add(msg.tabId);
-      sendResponse({ ok: true, allowed: Array.from(allowedTabs) });
-    } else if (msg.cmd === "disallow-tab" && typeof msg.tabId === "number") {
-      allowedTabs.delete(msg.tabId);
-      sendResponse({ ok: true, allowed: Array.from(allowedTabs) });
-    } else if (msg.cmd === "get-state") {
+    if (msg.cmd === "get-state") {
       const { status } = await chrome.storage.local.get("status");
-      sendResponse({ ok: true, status: status || { connected: false }, allowed: Array.from(allowedTabs) });
+      sendResponse({ ok: true, status: status || { connected: false } });
     } else if (msg.cmd === "set-token") {
       await chrome.storage.local.set({ token: msg.token || "" });
       // Force a fresh connection attempt with the new token.
@@ -327,11 +294,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   return true; // async response
 });
 
-// Drop a tab from the allowed set when it closes.
-chrome.tabs.onRemoved.addListener((tabId) => allowedTabs.delete(tabId));
-
-// Keep trying to (re)connect.
+// Keep trying to (re)connect. Two layers, because an MV3 service worker is
+// killed after ~30s idle and a plain setInterval dies with it:
+//  - setInterval: fast retry while the worker is awake.
+//  - chrome.alarms: wakes the (possibly-terminated) worker to reconnect.
 connectLoop();
 setInterval(() => {
   if (!ws || ws.readyState !== WebSocket.OPEN) connectLoop();
 }, RECONNECT_MS);
+
+chrome.alarms.create("iframer-reconnect", { periodInMinutes: 0.5 });
+chrome.alarms.onAlarm.addListener((a) => {
+  if (a.name === "iframer-reconnect" && (!ws || ws.readyState !== WebSocket.OPEN)) {
+    connectLoop();
+  }
+});

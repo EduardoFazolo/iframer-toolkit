@@ -13,8 +13,11 @@ Claude (agent) ──MCP──▶ iframer local server ──WebSocket──▶ 
 - The extension **dials out** to iframer's local server (extensions can't listen
   on a port, so the server is the WebSocket server and the extension is the client).
 - iframer holds the step pipeline; the extension is a thin executor that runs each
-  step in the tab **you explicitly allowed**, using ordinary DOM APIs
-  (`chrome.scripting`), so there is no debugger banner.
+  step in the tab the agent picked, using ordinary DOM APIs (`chrome.scripting`),
+  so there is no debugger banner.
+
+Once paired, iframer can see and drive **any** of your open tabs — the agent lists
+them (`tabs` tool), finds the one you meant, and drives it.
 
 ## Install (unpacked, dev)
 
@@ -37,12 +40,10 @@ only ever sent to `127.0.0.1`.
 
 ## Use it
 
-1. Open the tab you want iframer to drive.
-2. Click the iframer icon → **Allow this tab**. (This is the "run in THIS window"
-   consent gesture — iframer refuses any tab you haven't allowed.)
-3. Tell your agent, e.g. *"use my Gmail tab and archive everything from X."*
-   The agent calls the `tabs` tool to find the tab, then `execute` with
-   `mode: "extension"` and that tab's id.
+Just tell your agent, e.g. *"use my Gmail tab and archive everything from X."*
+The agent calls the `tabs` tool to list your open tabs, finds the one you meant,
+then `execute`s with `mode: "extension"` and that tab's id. No per-tab step —
+once the extension is connected, every open tab is reachable.
 
 ## Supported steps (v1)
 

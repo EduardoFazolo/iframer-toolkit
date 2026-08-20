@@ -25,7 +25,7 @@ export function registerTabsTool(server: McpServer) {
 
 Use this when the user says something like "use my open tab", "the tab I have here", "my Gmail tab", or references a site/screenshot they already have open. Match their reference against the returned tabs (by url or title), pick the tab id, then call \`execute\` with options.mode="extension" and options.tabId=<id> to drive that exact tab — banner-free, on their real logged-in session.
 
-Requires the iframer Chrome extension to be installed and connected (the user clicks its icon on the tab they want to allow). If nothing is connected, this returns a clear message telling the user how to connect.
+Requires the iframer Chrome extension to be installed and connected (paired once with the token). Once connected, iframer can see and drive any open tab. If nothing is connected, this returns a clear message telling the user how to connect.
 
 Returns: connected (bool), and tabs: [{ id, title, url, active, windowId }]. If several tabs match the user's reference, ask them which one rather than guessing.`,
     {
@@ -44,11 +44,10 @@ Returns: connected (bool), and tabs: [{ id, title, url, active, windowId }]. If 
         if (!status.connected) {
           return err(
             "No iframer extension is connected.\n\n" +
-              "To use your real Chrome tab:\n" +
+              "To use your real Chrome tabs:\n" +
               "1. Install the iframer extension (chrome://extensions → Load unpacked → the `extension/` folder).\n" +
-              "2. Click the iframer icon and paste your pairing token (from `cat ~/.iframer/secret` or your IFRAMER_SECRET).\n" +
-              "3. Open the tab you want, click the iframer icon, and press 'Allow this tab'.\n" +
-              "Then run `tabs` again.",
+              "2. Click the iframer icon and paste your pairing token (from `cat ~/.iframer/secret` or your IFRAMER_SECRET), then Save & connect.\n" +
+              "Once the dot is green, run `tabs` again — iframer can then see and drive any open tab.",
           );
         }
 
