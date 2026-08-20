@@ -32,3 +32,9 @@ twitter-api/
 secret
 *.secret
 .iframer/
+
+# Lupe
+.lupe/
+.lupeignore
+.lupeshared
+.lupe-branch

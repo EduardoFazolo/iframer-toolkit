@@ -5834,6 +5834,13 @@ function registerRoutes(app) {
       throw new AppError(400, "steps must be a non-empty array");
     }
     const result = await extensionBridge.execute(tabId, steps, options || {});
+    if (result?.ok) {
+      try {
+        const hasNav = steps.some((s) => s?.type === "navigate");
+        const pipeline = hasNav ? { steps } : { steps: [{ type: "navigate", url: result.finalState?.url || "" }, ...steps] };
+        extractKnowledgeFromRun(pipeline, result, null, "extension");
+      } catch {}
+    }
     res.json(result);
   }));
   app.post("/fetch", asyncHandler(async (req, res) => {
