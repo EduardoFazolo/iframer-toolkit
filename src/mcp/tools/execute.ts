@@ -45,13 +45,36 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
         continueOnObstacle: z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
         continueOnError: z.boolean().optional().describe("Continue past failing steps (default: false)"),
         captureApi: z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes."),
-        mode: z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("DO NOT SET THIS unless user explicitly requests a mode. iframer auto-selects and auto-escalates."),
+        mode: z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("DO NOT SET THIS unless user explicitly requests a mode. iframer auto-selects and auto-escalates. Use 'extension' ONLY to drive a tab in the user's real Chrome via the iframer extension — requires options.tabId (get it from the `tabs` tool)."),
         autoEscalate: z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)"),
         instanceId: z.string().optional().describe("Run in a named parallel browser within this session (default: 'default'). Use distinct ids to drive several browsers at once, e.g. one per account — each keeps its own login/session state."),
+        tabId: z.number().optional().describe("Only with mode='extension': the id of the real Chrome tab to drive (from the `tabs` tool)."),
       }).optional(),
     },
     async (params) => {
       try {
+        // Extension mode: drive a tab in the user's real Chrome, banner-free.
+        // Bypasses the whole launch/escalation machinery — the extension owns
+        // the browser, iframer just streams the step pipeline to it.
+        if (params.options?.mode === "extension") {
+          const tabId = params.options?.tabId;
+          if (typeof tabId !== "number") {
+            return err(
+              "mode='extension' requires options.tabId. Call the `tabs` tool first to " +
+                "find the id of the tab the user wants to drive.",
+            );
+          }
+          const extResult = await localApiPost<PipelineResult>("/extension/execute", {
+            tabId,
+            steps: params.steps,
+            options: params.options,
+          });
+          const extLines = formatExecuteResult(extResult);
+          const content: TextContent[] = [{ type: "text", text: extLines.join("\n") }];
+          if (!extResult.ok) return { content, isError: true };
+          return { content };
+        }
+
         const dockerRunning = await isDockerRunning();
 
         async function runWithMode(mode?: string): Promise<PipelineResult> {
