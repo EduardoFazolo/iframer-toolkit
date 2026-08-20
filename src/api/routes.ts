@@ -4,6 +4,8 @@ import type { AuthRequest } from "./middleware";
 import { Iframer } from "../lib/iframer";
 import { asyncHandler, AppError } from "./error-handler";
 import { extensionBridge } from "../lib/extension/bridge";
+import { extractKnowledgeFromRun } from "../lib/knowledge/extract-from-run";
+import type { Pipeline, PipelineResult, BrowserMode } from "../lib/types";
 import fs from "fs";
 
 /** Cast Request to AuthRequest (populated by tokenAuth middleware) */
@@ -245,7 +247,24 @@ export function registerRoutes(app: Express): void {
     if (!Array.isArray(steps) || steps.length === 0) {
       throw new AppError(400, "steps must be a non-empty array");
     }
-    const result = await extensionBridge.execute(tabId, steps, options || {});
+    const result = (await extensionBridge.execute(tabId, steps, options || {})) as PipelineResult;
+
+    // Learn from the run, exactly like the patchright pipeline does. Extension
+    // runs usually drive an already-open tab (no navigate step), so synthesize
+    // one from the final URL to give the knowledge extractor a domain. No
+    // sessionData: the real profile owns the cookies, iframer never stores them.
+    if (result?.ok) {
+      try {
+        const hasNav = steps.some((s: { type?: string }) => s?.type === "navigate");
+        const pipeline: Pipeline = hasNav
+          ? { steps }
+          : { steps: [{ type: "navigate", url: result.finalState?.url || "" }, ...steps] };
+        extractKnowledgeFromRun(pipeline, result, null, "extension" as unknown as BrowserMode);
+      } catch {
+        /* learning is best-effort; never fail the run over it */
+      }
+    }
+
     res.json(result);
   }));
 
