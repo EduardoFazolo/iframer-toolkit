@@ -5,7 +5,8 @@ import { Iframer } from "../lib/iframer";
 import { asyncHandler, AppError } from "./error-handler";
 import { extensionBridge } from "../lib/extension/bridge";
 import { extractKnowledgeFromRun } from "../lib/knowledge/extract-from-run";
-import type { Pipeline, PipelineResult, BrowserMode } from "../lib/types";
+import { buildCapturedApi } from "../lib/api-capture";
+import type { Pipeline, PipelineResult, BrowserMode, CapturedRequest } from "../lib/types";
 import fs from "fs";
 
 /** Cast Request to AuthRequest (populated by tokenAuth middleware) */
@@ -247,7 +248,21 @@ export function registerRoutes(app: Express): void {
     if (!Array.isArray(steps) || steps.length === 0) {
       throw new AppError(400, "steps must be a non-empty array");
     }
-    const result = (await extensionBridge.execute(tabId, steps, options || {})) as PipelineResult;
+    const result = (await extensionBridge.execute(tabId, steps, options || {})) as PipelineResult & {
+      capturedRequests?: CapturedRequest[];
+    };
+
+    // Reverse-engineering: the extension captured raw requests via webRequest;
+    // run them through the SAME post-processing the patchright capture uses so
+    // paths get parameterized, protocol/verb inferred, curl + auth generated.
+    if (result?.capturedRequests?.length) {
+      try {
+        result.capturedApi = buildCapturedApi(result.capturedRequests);
+      } catch {
+        /* leave capturedApi unset on failure */
+      }
+    }
+    delete result.capturedRequests;
 
     // Learn from the run, exactly like the patchright pipeline does. Extension
     // runs usually drive an already-open tab (no navigate step), so synthesize

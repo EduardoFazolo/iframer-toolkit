@@ -947,7 +947,8 @@ The outputDir defaults to ./<domain>/. Ask the user where to save if unclear.`, 
       staleTimeoutMs: import_zod4.z.number().optional().describe("Override the 20s stale-state timeout per step"),
       continueOnObstacle: import_zod4.z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
       continueOnError: import_zod4.z.boolean().optional().describe("Continue past failing steps (default: false)"),
-      mode: import_zod4.z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("Browser mode override")
+      mode: import_zod4.z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("Browser mode override. Use 'extension' to capture the API of a tab already open in the user's real Chrome (banner-free) — requires options.tabId from the `tabs` tool. Note: response BODIES aren't captured in extension mode (MV3 limitation); request/headers/auth/curl/endpoints are."),
+      tabId: import_zod4.z.number().optional().describe("Only with mode='extension': the real Chrome tab to reverse-engineer (from the `tabs` tool).")
     }).optional()
   }, async (params) => {
     try {
@@ -957,7 +958,21 @@ The outputDir defaults to ./<domain>/. Ask the user where to save if unclear.`, 
       };
       const mode = params.options?.mode;
       const dockerRunning = await isDockerRunning();
-      const captureResult = mode === "docker-headful" && dockerRunning ? await apiPost("/execute", execParams) : await localApiPost("/execute", execParams);
+      let captureResult;
+      if (mode === "extension") {
+        if (typeof params.options?.tabId !== "number") {
+          return err("mode='extension' requires options.tabId. Call the `tabs` tool first to find the tab to reverse-engineer.");
+        }
+        captureResult = await localApiPost("/extension/execute", {
+          tabId: params.options.tabId,
+          steps: params.steps,
+          options: { ...params.options, captureApi: true }
+        });
+      } else if (mode === "docker-headful" && dockerRunning) {
+        captureResult = await apiPost("/execute", execParams);
+      } else {
+        captureResult = await localApiPost("/execute", execParams);
+      }
       const lines = [];
       lines.push(`ok: ${captureResult.ok}`);
       lines.push(`steps: ${captureResult.completedSteps}/${captureResult.totalSteps}`);

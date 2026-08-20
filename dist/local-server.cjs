@@ -4343,95 +4343,98 @@ class ApiCapture {
       await new Promise((r) => setTimeout(r, 100));
     }
   }
-  extractAuth(requests) {
-    const auth = { cookies: {}, tokens: {} };
-    for (const req of requests) {
-      for (const [key, value] of Object.entries(req.requestHeaders)) {
-        const lower = key.toLowerCase();
-        if (lower === "authorization" && !auth.authorization) {
-          auth.authorization = value;
-        } else if (lower === "cookie") {
-          const cookies = parseCookies(value);
-          Object.assign(auth.cookies, cookies);
-        } else if (isAuthHeader(key) && lower !== "authorization" && lower !== "cookie") {
-          auth.tokens[key] = value;
-        }
-      }
-    }
-    return auth;
-  }
-  splitHeaders(headers) {
-    const endpointHeaders = {};
-    for (const [key, value] of Object.entries(headers)) {
-      const lower = key.toLowerCase();
-      if (BROWSER_NOISE_HEADERS.has(lower))
-        continue;
-      if (isAuthHeader(key))
-        continue;
-      if (lower === "user-agent")
-        continue;
-      endpointHeaders[key] = value;
-    }
-    return endpointHeaders;
-  }
   getResults() {
-    const byDomain = new Map;
-    for (const req of this.requests) {
-      try {
-        const host = new URL(req.url).origin;
-        if (!byDomain.has(host))
-          byDomain.set(host, []);
-        byDomain.get(host)?.push(req);
-      } catch {}
+    return buildCapturedApi(this.requests);
+  }
+}
+function extractAuth(requests) {
+  const auth = { cookies: {}, tokens: {} };
+  for (const req of requests) {
+    for (const [key, value] of Object.entries(req.requestHeaders)) {
+      const lower = key.toLowerCase();
+      if (lower === "authorization" && !auth.authorization) {
+        auth.authorization = value;
+      } else if (lower === "cookie") {
+        const cookies = parseCookies(value);
+        Object.assign(auth.cookies, cookies);
+      } else if (isAuthHeader(key) && lower !== "authorization" && lower !== "cookie") {
+        auth.tokens[key] = value;
+      }
     }
-    const apis = [];
-    for (const [baseUrl, requests] of byDomain) {
-      const auth = this.extractAuth(requests);
-      const endpointMap = new Map;
-      for (const req of requests) {
-        const paramPath = parameterizePath(req.path);
-        const { protocol, action } = classifyRequest(req);
-        const key = `${protocol}:${action}`;
-        const endpointHeaders = this.splitHeaders(req.requestHeaders);
-        if (!endpointMap.has(key)) {
-          const verb = inferVerb(protocol, action, req.method, req.responseBody);
-          const functionName = buildFunctionName(protocol, action, req.method, verb);
-          endpointMap.set(key, {
-            method: req.method,
-            path: paramPath,
-            rawPaths: [req.path],
-            queryParams: req.queryParams,
-            headers: endpointHeaders,
-            requestBody: req.requestBody,
-            responseStatus: req.responseStatus,
-            responseBody: req.responseBody,
-            triggeredAtStep: req.triggeredAtStep,
-            curl: buildCurl(req.method, req.url, endpointHeaders, auth, req.requestBody),
-            protocol,
-            action,
-            verb,
-            functionName
-          });
-        } else {
-          const existing = endpointMap.get(key);
-          if (!existing)
-            continue;
-          if (!existing.rawPaths.includes(req.path)) {
-            existing.rawPaths.push(req.path);
-          }
+  }
+  return auth;
+}
+function splitHeaders(headers) {
+  const endpointHeaders = {};
+  for (const [key, value] of Object.entries(headers)) {
+    const lower = key.toLowerCase();
+    if (BROWSER_NOISE_HEADERS.has(lower))
+      continue;
+    if (isAuthHeader(key))
+      continue;
+    if (lower === "user-agent")
+      continue;
+    endpointHeaders[key] = value;
+  }
+  return endpointHeaders;
+}
+function buildCapturedApi(requests) {
+  const byDomain = new Map;
+  for (const req of requests) {
+    try {
+      const host = new URL(req.url).origin;
+      if (!byDomain.has(host))
+        byDomain.set(host, []);
+      byDomain.get(host)?.push(req);
+    } catch {}
+  }
+  const apis = [];
+  for (const [baseUrl, domainRequests] of byDomain) {
+    const auth = extractAuth(domainRequests);
+    const endpointMap = new Map;
+    for (const req of domainRequests) {
+      const paramPath = parameterizePath(req.path);
+      const { protocol, action } = classifyRequest(req);
+      const key = `${protocol}:${action}`;
+      const endpointHeaders = splitHeaders(req.requestHeaders);
+      if (!endpointMap.has(key)) {
+        const verb = inferVerb(protocol, action, req.method, req.responseBody);
+        const functionName = buildFunctionName(protocol, action, req.method, verb);
+        endpointMap.set(key, {
+          method: req.method,
+          path: paramPath,
+          rawPaths: [req.path],
+          queryParams: req.queryParams,
+          headers: endpointHeaders,
+          requestBody: req.requestBody,
+          responseStatus: req.responseStatus,
+          responseBody: req.responseBody,
+          triggeredAtStep: req.triggeredAtStep,
+          curl: buildCurl(req.method, req.url, endpointHeaders, auth, req.requestBody),
+          protocol,
+          action,
+          verb,
+          functionName
+        });
+      } else {
+        const existing = endpointMap.get(key);
+        if (!existing)
+          continue;
+        if (!existing.rawPaths.includes(req.path)) {
+          existing.rawPaths.push(req.path);
         }
       }
-      const domain = new URL(baseUrl).hostname.replace(/\./g, "_");
-      apis.push({
-        domain,
-        baseUrl,
-        auth,
-        endpoints: Array.from(endpointMap.values()).sort((a, b) => a.triggeredAtStep - b.triggeredAtStep),
-        capturedAt: new Date().toISOString()
-      });
     }
-    return apis.sort((a, b) => b.endpoints.length - a.endpoints.length);
+    const domain = new URL(baseUrl).hostname.replace(/\./g, "_");
+    apis.push({
+      domain,
+      baseUrl,
+      auth,
+      endpoints: Array.from(endpointMap.values()).sort((a, b) => a.triggeredAtStep - b.triggeredAtStep),
+      capturedAt: new Date().toISOString()
+    });
   }
+  return apis.sort((a, b) => b.endpoints.length - a.endpoints.length);
 }
 
 // src/lib/browser/tab-tracker.ts
@@ -5834,6 +5837,12 @@ function registerRoutes(app) {
       throw new AppError(400, "steps must be a non-empty array");
     }
     const result = await extensionBridge.execute(tabId, steps, options || {});
+    if (result?.capturedRequests?.length) {
+      try {
+        result.capturedApi = buildCapturedApi(result.capturedRequests);
+      } catch {}
+    }
+    delete result.capturedRequests;
     if (result?.ok) {
       try {
         const hasNav = steps.some((s) => s?.type === "navigate");
