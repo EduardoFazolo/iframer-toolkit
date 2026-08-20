@@ -1,6 +1,6 @@
 {
   "name": "iframer-toolkit",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Browser access toolkit for AI agents — CLI and MCP server for headless/headful browsing, login flows, and pipeline execution.",
   "keywords": [
     "iframer",
