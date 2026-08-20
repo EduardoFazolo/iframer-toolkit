@@ -1,4 +1,4 @@
-import type { Page, Request, Response } from "patchright";
+import type { Page, Request, Response, BrowserContext } from "patchright";
 import type { CapturedRequest, CapturedApi, CapturedAuth, CapturedEndpoint, ApiProtocol, ApiVerb } from "./types";
 
 const SKIP_RESOURCE_TYPES = new Set([
@@ -298,8 +298,16 @@ export class ApiCapture {
   private currentStep = 0;
   private requestHandler: (req: Request) => void;
   private responseHandler: (res: Response) => void;
+  // Capture spans every tab in the context, not just the initial page: a click
+  // that opens a new tab (which the pipeline now follows) makes its XHR/fetch on
+  // a separate Page, so we hook each page opened while capturing.
+  private context: BrowserContext;
+  private hookedPages = new Set<Page>();
+  private pageHandler: (p: Page) => void;
 
   constructor(private page: Page) {
+    this.context = page.context();
+    this.pageHandler = (p: Page) => this.hookPage(p);
     this.requestHandler = (req: Request) => {
       const resourceType = req.resourceType();
       if (SKIP_RESOURCE_TYPES.has(resourceType)) return;
@@ -375,9 +383,19 @@ export class ApiCapture {
     };
   }
 
+  private hookPage(p: Page) {
+    if (this.hookedPages.has(p)) return;
+    this.hookedPages.add(p);
+    p.on("request", this.requestHandler);
+    p.on("response", this.responseHandler);
+  }
+
   start() {
-    this.page.on("request", this.requestHandler);
-    this.page.on("response", this.responseHandler);
+    // Hook the starting page plus any tab opened while capturing. We do NOT
+    // retroactively hook pre-existing tabs (stale tabs the daemon left open) —
+    // only the flow the capture is scoped to.
+    this.hookPage(this.page);
+    this.context.on("page", this.pageHandler);
   }
 
   setStep(index: number) {
@@ -385,8 +403,14 @@ export class ApiCapture {
   }
 
   stop() {
-    this.page.off("request", this.requestHandler);
-    this.page.off("response", this.responseHandler);
+    this.context.off("page", this.pageHandler);
+    for (const p of this.hookedPages) {
+      try {
+        p.off("request", this.requestHandler);
+        p.off("response", this.responseHandler);
+      } catch {}
+    }
+    this.hookedPages.clear();
   }
 
   /** Keep listening for `ms` additional milliseconds, then wait up to `pendingTimeoutMs`

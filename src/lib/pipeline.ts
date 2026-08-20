@@ -16,8 +16,14 @@ import { detectObstacles, resolveObstacle } from "./obstacles";
 import { saveScreenshot } from "./screenshot";
 import { capturePageState } from "./page-state";
 import { ApiCapture } from "./api-capture";
+import { TabTracker } from "./browser/tab-tracker";
+import { TIMEOUTS } from "./constants";
 
 const DEFAULT_STALE_TIMEOUT_MS = 20_000;
+
+function safePageUrl(page: Page): string {
+  try { return page.url(); } catch { return ""; }
+}
 
 function classifyError(err: Error, step: PipelineStep): ErrorContext["errorType"] {
   if (err instanceof StaleStateError) return "stale-state";
@@ -60,7 +66,21 @@ function getSuggestion(errorType: ErrorContext["errorType"], step: PipelineStep)
 export class PipelineRunner {
   constructor(private ctx: ExecutionContext) {}
 
-  async run(page: Page, pipeline: Pipeline): Promise<PipelineResult> {
+  async run(initialPage: Page, pipeline: Pipeline): Promise<PipelineResult> {
+    // The tracker is the single source of truth for the active page: it follows
+    // tabs opened mid-run so later steps don't keep driving a frozen original
+    // page (the cause of the new-tab stale-state failures). Scoped to this run;
+    // dispose() in finally is REQUIRED — the daemon reuses the context, so an
+    // undisposed 'page' listener would leak across runs.
+    const tracker = new TabTracker(initialPage.context(), initialPage);
+    try {
+      return await this.runSteps(initialPage, tracker, pipeline);
+    } finally {
+      tracker.dispose();
+    }
+  }
+
+  private async runSteps(initialPage: Page, tracker: TabTracker, pipeline: Pipeline): Promise<PipelineResult> {
     const startTime = Date.now();
     const opts = pipeline.options || {};
     const staleTimeoutMs = opts.staleTimeoutMs ?? this.ctx.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS;
@@ -71,8 +91,9 @@ export class PipelineRunner {
     const results: StepResult[] = [];
     const obstacles: ObstacleEncounter[] = [];
 
-    // API capture — hook network events when enabled
-    const capture = opts.captureApi ? new ApiCapture(page) : null;
+    // API capture — hook network events when enabled. Bound to the initial page;
+    // capturing traffic from followed tabs is a separate follow-up.
+    const capture = opts.captureApi ? new ApiCapture(initialPage) : null;
     if (capture) capture.start();
 
     const finishCapture = async () => {
@@ -84,6 +105,8 @@ export class PipelineRunner {
     for (let i = 0; i < pipeline.steps.length; i++) {
       if (capture) capture.setStep(i);
       const step = pipeline.steps[i];
+      const page = tracker.active();
+      const urlBefore = safePageUrl(page);
       const monitor = new StaleStateMonitor(page, staleTimeoutMs);
 
       let stepResult: StepResult;
@@ -98,7 +121,7 @@ export class PipelineRunner {
         // StaleStateError or other wrapper errors
         const asError = err instanceof Error ? err : new Error(String(err));
         const errorType = classifyError(asError, step);
-        const pageState = await capturePageState(page, this.ctx, { screenshot: true });
+        const pageState = await capturePageState(tracker.active(), this.ctx, { screenshot: true });
 
         stepResult = failedStepResult(step, asError.message, Date.now() - startTime, i);
 
@@ -125,10 +148,28 @@ export class PipelineRunner {
         };
       }
 
-      // Capture per-step screenshot if requested
+      // Follow a NEW tab only when a click opened one AND the clicked page did
+      // NOT itself navigate. That distinguishes a genuine target=_blank (feed
+      // stays, article opens in a new tab → follow) from a form submit that
+      // navigates the page and incidentally spawns a popup/ad, or any tab opened
+      // by a non-click step like `login` (must never hijack the flow → discard).
+      const canOpenTab = step.type === "click" || step.type === "human-click";
+      const currentPageNavigated = safePageUrl(page) !== urlBefore;
+      if (canOpenTab && !currentPageNavigated) {
+        const switched = await tracker.settle({
+          waitForPendingMs: TIMEOUTS.TAB_FOLLOW_SETTLE,
+          loadTimeoutMs: TIMEOUTS.TAB_LOAD,
+          blankResolveMs: TIMEOUTS.TAB_BLANK_RESOLVE,
+        });
+        if (switched) stepResult.tabSwitchedTo = switched.url;
+      } else {
+        tracker.discardPending();
+      }
+
+      // Capture per-step screenshot if requested (of the now-active page)
       if (screenshotAfterEach && stepResult.ok) {
         try {
-          const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
+          const buf = await tracker.active().screenshot({ type: "jpeg", quality: 50, fullPage: false });
           stepResult.screenshotUrl = saveScreenshot(
             buf,
             `step-${i}-${Date.now()}.jpg`,
@@ -142,7 +183,7 @@ export class PipelineRunner {
 
       // If step failed and not continueOnError, build error context and return
       if (!stepResult.ok && !continueOnError) {
-        const pageState = await capturePageState(page, this.ctx, { screenshot: true });
+        const pageState = await capturePageState(tracker.active(), this.ctx, { screenshot: true });
         const errorType = classifyError(new Error(stepResult.error || ""), step);
 
         return {
@@ -166,13 +207,14 @@ export class PipelineRunner {
         };
       }
 
-      // After navigate steps, check for obstacles
+      // After navigate steps, check for obstacles (on the active page)
       if (step.type === "navigate" && continueOnObstacle) {
         const obstacleStart = Date.now();
-        const obstacle = await detectObstacles(page);
+        const obstaclePage = tracker.active();
+        const obstacle = await detectObstacles(obstaclePage);
 
         if (obstacle) {
-          const resolution = await resolveObstacle(page, obstacle, this.ctx, monitor);
+          const resolution = await resolveObstacle(obstaclePage, obstacle, this.ctx, monitor);
           obstacles.push({
             type: obstacle.type,
             detectedAtStep: i,
@@ -183,7 +225,7 @@ export class PipelineRunner {
 
           if (!resolution.resolved && obstacle.type === "captcha") {
             // Unresolvable captcha — stop pipeline with helpful context
-            const pageState = await capturePageState(page, this.ctx, { screenshot: true });
+            const pageState = await capturePageState(tracker.active(), this.ctx, { screenshot: true });
             return {
               ok: false,
               completedSteps: i,
@@ -209,7 +251,7 @@ export class PipelineRunner {
     }
 
     const capturedApi = await finishCapture();
-    const finalState = await capturePageState(page, this.ctx, { screenshot: true });
+    const finalState = await capturePageState(tracker.active(), this.ctx, { screenshot: true });
 
     return {
       ok: true,

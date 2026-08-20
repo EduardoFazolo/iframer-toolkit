@@ -661,7 +661,10 @@ var TIMEOUTS = {
   TOTP_INPUT: 5000,
   API_REQUEST: 180000,
   HEALTH_CHECK: 3000,
-  CHALLENGE_FRAME_WAIT: 5000
+  CHALLENGE_FRAME_WAIT: 5000,
+  TAB_FOLLOW_SETTLE: 400,
+  TAB_LOAD: 15000,
+  TAB_BLANK_RESOLVE: 3000
 };
 var CHROME_MIN_VERSION = 130;
 
@@ -4236,8 +4239,13 @@ class ApiCapture {
   currentStep = 0;
   requestHandler;
   responseHandler;
+  context;
+  hookedPages = new Set;
+  pageHandler;
   constructor(page) {
     this.page = page;
+    this.context = page.context();
+    this.pageHandler = (p) => this.hookPage(p);
     this.requestHandler = (req) => {
       const resourceType = req.resourceType();
       if (SKIP_RESOURCE_TYPES.has(resourceType))
@@ -4304,16 +4312,29 @@ class ApiCapture {
       } catch {}
     };
   }
+  hookPage(p) {
+    if (this.hookedPages.has(p))
+      return;
+    this.hookedPages.add(p);
+    p.on("request", this.requestHandler);
+    p.on("response", this.responseHandler);
+  }
   start() {
-    this.page.on("request", this.requestHandler);
-    this.page.on("response", this.responseHandler);
+    this.hookPage(this.page);
+    this.context.on("page", this.pageHandler);
   }
   setStep(index) {
     this.currentStep = index;
   }
   stop() {
-    this.page.off("request", this.requestHandler);
-    this.page.off("response", this.responseHandler);
+    this.context.off("page", this.pageHandler);
+    for (const p of this.hookedPages) {
+      try {
+        p.off("request", this.requestHandler);
+        p.off("response", this.responseHandler);
+      } catch {}
+    }
+    this.hookedPages.clear();
   }
   async drain(ms = 3000, pendingTimeoutMs = 5000) {
     await new Promise((r) => setTimeout(r, ms));
@@ -4413,8 +4434,100 @@ class ApiCapture {
   }
 }
 
+// src/lib/browser/tab-tracker.ts
+var log15 = createLogger("tabs");
+
+class TabTracker {
+  context;
+  pages;
+  activePage;
+  newlyOpened = [];
+  disposed = false;
+  constructor(context, initial) {
+    this.context = context;
+    this.activePage = initial;
+    this.pages = [...context.pages()];
+    if (!this.pages.includes(initial))
+      this.pages.push(initial);
+    context.on("page", this.onNewPage);
+  }
+  onNewPage = (p) => {
+    if (this.disposed)
+      return;
+    this.pages.push(p);
+    this.newlyOpened.push(p);
+    p.on("close", () => this.onClose(p));
+    log15.debug(`new tab opened: ${safeUrl(p)}`);
+  };
+  onClose = (p) => {
+    this.pages = this.pages.filter((x) => x !== p);
+    this.newlyOpened = this.newlyOpened.filter((x) => x !== p);
+    if (this.activePage === p) {
+      this.activePage = this.pages[this.pages.length - 1] ?? p;
+      log15.debug(`active tab closed, fell back to: ${safeUrl(this.activePage)}`);
+    }
+  };
+  active() {
+    return this.activePage;
+  }
+  count() {
+    return this.pages.length;
+  }
+  async settle(opts) {
+    if (this.newlyOpened.length === 0 && opts.waitForPendingMs > 0) {
+      await this.context.waitForEvent("page", { timeout: opts.waitForPendingMs }).catch(() => null);
+    }
+    if (this.newlyOpened.length === 0)
+      return null;
+    const target = this.newlyOpened[this.newlyOpened.length - 1];
+    this.newlyOpened = [];
+    if (target.isClosed())
+      return null;
+    await target.waitForLoadState("domcontentloaded", { timeout: opts.loadTimeoutMs }).catch(() => {});
+    if (safeUrl(target) === "about:blank" || safeUrl(target) === "") {
+      await target.waitForURL((u) => {
+        const s = u.toString();
+        return !!s && s !== "about:blank";
+      }, { timeout: opts.blankResolveMs }).catch(() => {});
+      await target.waitForLoadState("domcontentloaded", { timeout: opts.loadTimeoutMs }).catch(() => {});
+    }
+    const url = safeUrl(target);
+    if (!url || url === "about:blank") {
+      return null;
+    }
+    await target.bringToFront().catch(() => {});
+    this.activePage = target;
+    const sw = { url, title: await target.title().catch(() => "") };
+    log15.info(`followed new tab → ${sw.url}`);
+    return sw;
+  }
+  discardPending() {
+    this.newlyOpened = [];
+  }
+  dispose() {
+    this.disposed = true;
+    try {
+      this.context.off("page", this.onNewPage);
+    } catch {}
+  }
+}
+function safeUrl(p) {
+  try {
+    return p.url();
+  } catch {
+    return "unknown";
+  }
+}
+
 // src/lib/pipeline.ts
 var DEFAULT_STALE_TIMEOUT_MS2 = 20000;
+function safePageUrl(page) {
+  try {
+    return page.url();
+  } catch {
+    return "";
+  }
+}
 function classifyError(err, step) {
   if (err instanceof StaleStateError)
     return "stale-state";
@@ -4457,7 +4570,15 @@ class PipelineRunner {
   constructor(ctx) {
     this.ctx = ctx;
   }
-  async run(page, pipeline) {
+  async run(initialPage, pipeline) {
+    const tracker = new TabTracker(initialPage.context(), initialPage);
+    try {
+      return await this.runSteps(initialPage, tracker, pipeline);
+    } finally {
+      tracker.dispose();
+    }
+  }
+  async runSteps(initialPage, tracker, pipeline) {
     const startTime = Date.now();
     const opts = pipeline.options || {};
     const staleTimeoutMs = opts.staleTimeoutMs ?? this.ctx.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS2;
@@ -4466,7 +4587,7 @@ class PipelineRunner {
     const continueOnError = opts.continueOnError ?? false;
     const results = [];
     const obstacles = [];
-    const capture = opts.captureApi ? new ApiCapture(page) : null;
+    const capture = opts.captureApi ? new ApiCapture(initialPage) : null;
     if (capture)
       capture.start();
     const finishCapture = async () => {
@@ -4479,6 +4600,8 @@ class PipelineRunner {
       if (capture)
         capture.setStep(i);
       const step = pipeline.steps[i];
+      const page = tracker.active();
+      const urlBefore = safePageUrl(page);
       const monitor = new StaleStateMonitor(page, staleTimeoutMs);
       let stepResult;
       try {
@@ -4490,7 +4613,7 @@ class PipelineRunner {
       } catch (err) {
         const asError = err instanceof Error ? err : new Error(String(err));
         const errorType = classifyError(asError, step);
-        const pageState = await capturePageState(page, this.ctx, { screenshot: true });
+        const pageState = await capturePageState(tracker.active(), this.ctx, { screenshot: true });
         stepResult = failedStepResult(step, asError.message, Date.now() - startTime, i);
         results.push(stepResult);
         return {
@@ -4513,15 +4636,28 @@ class PipelineRunner {
           capturedApi: await finishCapture()
         };
       }
+      const canOpenTab = step.type === "click" || step.type === "human-click";
+      const currentPageNavigated = safePageUrl(page) !== urlBefore;
+      if (canOpenTab && !currentPageNavigated) {
+        const switched = await tracker.settle({
+          waitForPendingMs: TIMEOUTS.TAB_FOLLOW_SETTLE,
+          loadTimeoutMs: TIMEOUTS.TAB_LOAD,
+          blankResolveMs: TIMEOUTS.TAB_BLANK_RESOLVE
+        });
+        if (switched)
+          stepResult.tabSwitchedTo = switched.url;
+      } else {
+        tracker.discardPending();
+      }
       if (screenshotAfterEach && stepResult.ok) {
         try {
-          const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
+          const buf = await tracker.active().screenshot({ type: "jpeg", quality: 50, fullPage: false });
           stepResult.screenshotUrl = saveScreenshot(buf, `step-${i}-${Date.now()}.jpg`, this.ctx.screenshotDir, this.ctx.publicUrl);
         } catch {}
       }
       results.push(stepResult);
       if (!stepResult.ok && !continueOnError) {
-        const pageState = await capturePageState(page, this.ctx, { screenshot: true });
+        const pageState = await capturePageState(tracker.active(), this.ctx, { screenshot: true });
         const errorType = classifyError(new Error(stepResult.error || ""), step);
         return {
           ok: false,
@@ -4545,9 +4681,10 @@ class PipelineRunner {
       }
       if (step.type === "navigate" && continueOnObstacle) {
         const obstacleStart = Date.now();
-        const obstacle = await detectObstacles(page);
+        const obstaclePage = tracker.active();
+        const obstacle = await detectObstacles(obstaclePage);
         if (obstacle) {
-          const resolution = await resolveObstacle(page, obstacle, this.ctx, monitor);
+          const resolution = await resolveObstacle(obstaclePage, obstacle, this.ctx, monitor);
           obstacles.push({
             type: obstacle.type,
             detectedAtStep: i,
@@ -4556,7 +4693,7 @@ class PipelineRunner {
             durationMs: Date.now() - obstacleStart
           });
           if (!resolution.resolved && obstacle.type === "captcha") {
-            const pageState = await capturePageState(page, this.ctx, { screenshot: true });
+            const pageState = await capturePageState(tracker.active(), this.ctx, { screenshot: true });
             return {
               ok: false,
               completedSteps: i,
@@ -4581,7 +4718,7 @@ class PipelineRunner {
       }
     }
     const capturedApi = await finishCapture();
-    const finalState = await capturePageState(page, this.ctx, { screenshot: true });
+    const finalState = await capturePageState(tracker.active(), this.ctx, { screenshot: true });
     return {
       ok: true,
       completedSteps: pipeline.steps.length,
@@ -4595,7 +4732,7 @@ class PipelineRunner {
   }
 }
 // src/lib/block-detection.ts
-var log15 = createLogger("block-detection");
+var log16 = createLogger("block-detection");
 async function detectBlock(page) {
   try {
     const [title, url, bodyText] = await Promise.all([
@@ -4615,7 +4752,7 @@ async function detectBlock(page) {
     const hasCfChallenge = await page.evaluate(() => {
       return !!document.querySelector('iframe[src*="challenges.cloudflare.com"]');
     }).catch((err) => {
-      log15.warn(`CF challenge check failed, assuming blocked: ${err}`);
+      log16.warn(`CF challenge check failed, assuming blocked: ${err}`);
       return true;
     });
     if (hasCfChallenge) {
@@ -4634,7 +4771,7 @@ async function detectBlock(page) {
       const hasCaptchaIframe = await page.evaluate(() => {
         return !!(document.querySelector('iframe[src*="recaptcha"]') || document.querySelector('iframe[src*="hcaptcha"]'));
       }).catch((err) => {
-        log15.warn(`captcha iframe check failed, assuming blocked: ${err}`);
+        log16.warn(`captcha iframe check failed, assuming blocked: ${err}`);
         return true;
       });
       if (hasCaptchaIframe) {
@@ -4647,7 +4784,7 @@ async function detectBlock(page) {
     if (!url.includes("about:blank") && bodyText.trim().length < 20 && title.length < 5) {}
     return { blocked: false };
   } catch (err) {
-    log15.warn(`page evaluation failed, assuming blocked: ${err}`);
+    log16.warn(`page evaluation failed, assuming blocked: ${err}`);
     return { blocked: true, reason: "evaluation-failed" };
   }
 }
@@ -4745,7 +4882,7 @@ function extractKnowledgeFromRun(pipeline, result, sessionData, mode) {
 }
 
 // src/lib/execution/pipeline-executor.ts
-var log16 = createLogger("iframer");
+var log17 = createLogger("iframer");
 
 class PipelineExecutor {
   deps;
@@ -4784,7 +4921,7 @@ class PipelineExecutor {
         this.deps.domainModes.recordFailure(domain, failedMode, result.error?.message || "blocked");
       const nextMode = this.deps.domainModes.getNextMode(failedMode, availableModes);
       if (nextMode) {
-        log16.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
+        log17.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
         if (failedMode !== "docker-headful") {
           await this.deps.daemon.stopMode(failedMode, instanceId);
         }
@@ -4797,7 +4934,7 @@ class PipelineExecutor {
           this.deps.domainModes.recordFailure(domain, nextMode, result.error?.message || "blocked");
           const thirdMode = this.deps.domainModes.getNextMode(nextMode, availableModes);
           if (thirdMode) {
-            log16.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
+            log17.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
             if (nextMode !== "docker-headful") {
               await this.deps.daemon.stopMode(nextMode, instanceId);
             }
@@ -4912,7 +5049,7 @@ class PipelineExecutor {
         try {
           extractKnowledgeFromRun(pipeline, result, updatedSession, mode);
         } catch (err) {
-          log16.warn(`knowledge update failed: ${getErrorMessage(err)}`);
+          log17.warn(`knowledge update failed: ${getErrorMessage(err)}`);
         }
       }
       this.deps.refStore.sync(userId, ctx);
@@ -5160,7 +5297,7 @@ class CredentialStore {
 }
 
 // src/lib/iframer.ts
-var log17 = createLogger("iframer");
+var log18 = createLogger("iframer");
 var DEFAULT_SCREENSHOT_DIR = import_path9.default.join(import_path9.default.dirname(import_url.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/src/lib/iframer.ts")), "../../.screenshots");
 var DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
 var DEFAULT_STALE_TIMEOUT_MS3 = 20000;
@@ -5272,7 +5409,7 @@ class Iframer {
             sessionSaved = true;
           }
         } catch (err) {
-          log17.warn(`stopSession: failed to extract daemon state for ${inst.mode}::${inst.instanceId}: ${getErrorMessage(err)}`);
+          log18.warn(`stopSession: failed to extract daemon state for ${inst.mode}::${inst.instanceId}: ${getErrorMessage(err)}`);
         }
       }
     }

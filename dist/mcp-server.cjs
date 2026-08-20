@@ -800,6 +800,12 @@ Final page: ${data.finalState.title}`);
 Knowledge cache updated for ${domain}. Before the next browser run on this domain, call \`knowledge get ${domain}\` — you may be able to skip the browser entirely.`);
     } catch {}
   }
+  for (const r of data.results || []) {
+    if (r.tabSwitchedTo) {
+      lines.push(`
+↳ step ${r.stepIndex} opened a new tab — pipeline is now on: ${r.tabSwitchedTo}`);
+    }
+  }
   const meaningful = (data.results || []).filter((r) => r.ok && r.result !== undefined && r.result !== null);
   for (const r of meaningful) {
     if (r.step.type === "snapshot") {
