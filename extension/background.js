@@ -6,6 +6,11 @@
 // and streams results back. iframer is the brain; this is the hands.
 
 import { iframerRunStep } from "./interpreter.js";
+import { capture } from "./capture.js";
+
+// Extra settle time after the last step so late/async XHRs (auth re-challenges,
+// deferred mutations) are still captured before we stop listening.
+const CAPTURE_DRAIN_MS = 2500;
 
 const PORT_START = 3022;
 const PORT_END = 3042;
@@ -221,9 +226,20 @@ async function runPipeline(tabId, steps, options) {
   const started = Date.now();
   const results = [];
   const continueOnError = !!options.continueOnError;
+  const capturing = !!options.captureApi;
+  if (capturing) capture.start(tabId);
+
+  // Drain briefly so late/async XHRs land, then return the raw requests
+  // (iframer post-processes them into endpoints server-side).
+  async function collectCapture() {
+    if (!capturing) return undefined;
+    await sleep(CAPTURE_DRAIN_MS);
+    return capture.stop(tabId);
+  }
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
+    if (capturing) capture.setStep(i);
     let result;
     try {
       result = await runStep(tabId, step);
@@ -234,6 +250,7 @@ async function runPipeline(tabId, steps, options) {
     if (failed) {
       results.push({ stepIndex: i, ok: false, step, error: result.__error });
       if (!continueOnError) {
+        const capturedRequests = await collectCapture();
         const st = await tabState(tabId);
         return {
           ok: false,
@@ -244,6 +261,7 @@ async function runPipeline(tabId, steps, options) {
           obstacles: [],
           durationMs: Date.now() - started,
           modeUsed: "extension",
+          capturedRequests,
           error: {
             failedAtStep: i,
             failedStep: step,
@@ -260,6 +278,7 @@ async function runPipeline(tabId, steps, options) {
     }
   }
 
+  const capturedRequests = await collectCapture();
   const finalState = await tabState(tabId);
   return {
     ok: true,
@@ -270,6 +289,7 @@ async function runPipeline(tabId, steps, options) {
     obstacles: [],
     durationMs: Date.now() - started,
     modeUsed: "extension",
+    capturedRequests,
   };
 }
 

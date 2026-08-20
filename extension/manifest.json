@@ -3,7 +3,7 @@
   "name": "iframer",
   "version": "0.1.0",
   "description": "Let iframer drive a Chrome tab you choose — banner-free, on your real logged-in session.",
-  "permissions": ["tabs", "scripting", "storage", "activeTab", "alarms"],
+  "permissions": ["tabs", "scripting", "storage", "activeTab", "alarms", "webRequest"],
   "host_permissions": ["<all_urls>", "http://127.0.0.1/*", "http://localhost/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "action": { "default_popup": "popup.html", "default_title": "iframer" }

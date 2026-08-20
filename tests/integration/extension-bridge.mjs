@@ -65,11 +65,20 @@ async function main() {
         { id: 8, windowId: 1, title: "GitHub", url: "https://github.com/", active: false },
       ] } }));
     } else if (msg.type === "execute") {
+      const capturing = msg.options && msg.options.captureApi;
       ext.send(JSON.stringify({ id: msg.id, ok: true, result: {
         ok: true, completedSteps: msg.steps.length, totalSteps: msg.steps.length,
         results: msg.steps.map((s, i) => ({ stepIndex: i, ok: true, step: s, result: { did: s.type } })),
         finalState: { url: "https://mail.google.com/", title: "Gmail" },
         obstacles: [], durationMs: 5, modeUsed: "extension",
+        capturedRequests: capturing ? [
+          {
+            method: "POST", url: "https://mail.google.com/api/v1/threads/archive?id=42",
+            path: "/api/v1/threads/archive", queryParams: { id: "42" },
+            requestHeaders: { "authorization": "Bearer tok123", "content-type": "application/json", "cookie": "SID=abc" },
+            requestBody: { action: "archive" }, responseStatus: 200, responseHeaders: {}, resourceType: "xhr", triggeredAtStep: 0, timestamp: 1,
+          },
+        ] : undefined,
       } }));
     }
   });
@@ -89,6 +98,14 @@ async function main() {
   check("execute ok", exec.ok === true, exec);
   check("execute completed 2 steps", exec.completedSteps === 2, exec);
   check("execute modeUsed extension", exec.modeUsed === "extension", exec);
+
+  // 5b. reverse-engineering: captureApi → capturedApi with classified endpoints
+  const re = await api("/extension/execute", { tabId: 7, steps: [{ type: "click", selector: "@e1" }], options: { captureApi: true } });
+  check("RE: capturedApi present", Array.isArray(re.capturedApi) && re.capturedApi.length === 1, re.capturedApi);
+  const ep = re.capturedApi?.[0]?.endpoints?.[0];
+  check("RE: endpoint parameterized + classified", !!ep && ep.method === "POST" && ep.path === "/api/v1/threads/archive" && !!ep.functionName && !!ep.curl, ep);
+  check("RE: auth extracted", re.capturedApi?.[0]?.auth?.authorization === "Bearer tok123", re.capturedApi?.[0]?.auth);
+  check("RE: raw capturedRequests stripped from response", re.capturedRequests === undefined, Object.keys(re));
 
   // 6. execute with missing tabId → 400-style error
   const badExec = await api("/extension/execute", { steps: [{ type: "click", selector: "a" }] });

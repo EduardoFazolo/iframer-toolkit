@@ -53,6 +53,21 @@ once the extension is connected, every open tab is reachable.
 
 Selectors accept CSS or iframer `@e` refs from `snapshot` / `find`.
 
+## Reverse-engineering (banner-free)
+
+Extension mode captures the API too. Run `reverse-engineer` (or `execute` with
+`options.captureApi: true`) with `mode: "extension"` + `tabId`, and the extension
+records the tab's XHR/fetch via `chrome.webRequest`. iframer runs those through the
+**same** pipeline the normal capture uses — parameterized paths, protocol/verb
+classification, `functionName`, ready-to-run `curl`, and extracted auth
+(Authorization / cookies / token headers). Captured endpoints also feed the
+knowledge cache automatically.
+
+The one gap vs. patchright capture: **response bodies are not available** to MV3
+`webRequest`. You get the full request (method, URL, headers, body, auth) and
+response status/headers, but not the response payload. Capturing response bodies
+would require the opt-in `chrome.debugger` mode (with the yellow banner).
+
 ## Limitations (by design, v1)
 
 - **Synthetic input.** Clicks/typing are dispatched DOM events (`isTrusted: false`).
