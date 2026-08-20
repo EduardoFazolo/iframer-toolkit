@@ -9,6 +9,7 @@ import { registerSessionTool } from "./tools/session";
 import { registerCredentialsTool } from "./tools/credentials";
 import { registerReverseEngineerTool } from "./tools/reverse-engineer";
 import { registerKnowledgeTool } from "./tools/knowledge";
+import { registerTabsTool } from "./tools/tabs";
 
 // ─── Instructions ───────────────────────────────────────────────────
 
@@ -58,6 +59,7 @@ registerSessionTool(server);
 registerCredentialsTool(server);
 registerReverseEngineerTool(server);
 registerKnowledgeTool(server);
+registerTabsTool(server);
 
 // ─── Lifecycle ───────────────────────────────────────────────────────
 

@@ -677,12 +677,30 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
       continueOnObstacle: import_zod3.z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
       continueOnError: import_zod3.z.boolean().optional().describe("Continue past failing steps (default: false)"),
       captureApi: import_zod3.z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes."),
-      mode: import_zod3.z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("DO NOT SET THIS unless user explicitly requests a mode. iframer auto-selects and auto-escalates."),
+      mode: import_zod3.z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("DO NOT SET THIS unless user explicitly requests a mode. iframer auto-selects and auto-escalates. Use 'extension' ONLY to drive a tab in the user's real Chrome via the iframer extension — requires options.tabId (get it from the `tabs` tool)."),
       autoEscalate: import_zod3.z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)"),
-      instanceId: import_zod3.z.string().optional().describe("Run in a named parallel browser within this session (default: 'default'). Use distinct ids to drive several browsers at once, e.g. one per account — each keeps its own login/session state.")
+      instanceId: import_zod3.z.string().optional().describe("Run in a named parallel browser within this session (default: 'default'). Use distinct ids to drive several browsers at once, e.g. one per account — each keeps its own login/session state."),
+      tabId: import_zod3.z.number().optional().describe("Only with mode='extension': the id of the real Chrome tab to drive (from the `tabs` tool).")
     }).optional()
   }, async (params) => {
     try {
+      if (params.options?.mode === "extension") {
+        const tabId = params.options?.tabId;
+        if (typeof tabId !== "number") {
+          return err("mode='extension' requires options.tabId. Call the `tabs` tool first to " + "find the id of the tab the user wants to drive.");
+        }
+        const extResult = await localApiPost("/extension/execute", {
+          tabId,
+          steps: params.steps,
+          options: params.options
+        });
+        const extLines = formatExecuteResult(extResult);
+        const content2 = [{ type: "text", text: extLines.join(`
+`) }];
+        if (!extResult.ok)
+          return { content: content2, isError: true };
+        return { content: content2 };
+      }
       const dockerRunning = await isDockerRunning();
       async function runWithMode(mode) {
         if (mode === "docker-headful") {
@@ -1639,6 +1657,58 @@ Actions:
   });
 }
 
+// src/mcp/tools/tabs.ts
+var import_zod8 = require("zod");
+function registerTabsTool(server) {
+  server.tool("tabs", `List the tabs currently open in the user's REAL Chrome browser, through the iframer browser extension.
+
+Use this when the user says something like "use my open tab", "the tab I have here", "my Gmail tab", or references a site/screenshot they already have open. Match their reference against the returned tabs (by url or title), pick the tab id, then call \`execute\` with options.mode="extension" and options.tabId=<id> to drive that exact tab — banner-free, on their real logged-in session.
+
+Requires the iframer Chrome extension to be installed and connected (the user clicks its icon on the tab they want to allow). If nothing is connected, this returns a clear message telling the user how to connect.
+
+Returns: connected (bool), and tabs: [{ id, title, url, active, windowId }]. If several tabs match the user's reference, ask them which one rather than guessing.`, {
+    filter: import_zod8.z.string().optional().describe("Optional case-insensitive substring to match against tab url or title (e.g. 'gmail', 'github.com'). Omit to list every open tab.")
+  }, async ({ filter }) => {
+    try {
+      const status = await localApiGet("/extension/status");
+      if (!status.connected) {
+        return err(`No iframer extension is connected.
+
+` + `To use your real Chrome tab:
+` + "1. Install the iframer extension (chrome://extensions → Load unpacked → the `extension/` folder).\n" + "2. Click the iframer icon and paste your pairing token (from `cat ~/.iframer/secret` or your IFRAMER_SECRET).\n" + `3. Open the tab you want, click the iframer icon, and press 'Allow this tab'.
+` + "Then run `tabs` again.");
+      }
+      const data = await localApiPost("/extension/tabs", {});
+      let tabs = data.tabs || [];
+      if (filter) {
+        const f = filter.toLowerCase();
+        tabs = tabs.filter((t) => t.url.toLowerCase().includes(f) || (t.title || "").toLowerCase().includes(f));
+      }
+      if (tabs.length === 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: filter ? `Extension connected, but no open tab matches "${filter}".` : "Extension connected, but no tabs were reported."
+            }
+          ]
+        };
+      }
+      const lines = [`Connected. ${tabs.length} tab${tabs.length > 1 ? "s" : ""}${filter ? ` matching "${filter}"` : ""}:`, ""];
+      for (const t of tabs) {
+        lines.push(`  [id ${t.id}]${t.active ? " (active)" : ""} ${t.title}`);
+        lines.push(`         ${t.url}`);
+      }
+      lines.push("");
+      lines.push('To drive one: execute with options.mode="extension", options.tabId=<id>.');
+      return { content: [{ type: "text", text: lines.join(`
+`) }] };
+    } catch (e) {
+      return err(`Error listing tabs: ${getErrorMessage(e)}`);
+    }
+  });
+}
+
 // src/mcp/server.ts
 var IS_DEV = process.env.IFRAMER_URL?.includes("localhost") || process.env.IFRAMER_URL?.includes("127.0.0.1");
 var INSTRUCTIONS = IS_DEV ? `iframer-dev — local development instance of iframer (connects to ${BASE_URL}).
@@ -1676,6 +1746,7 @@ registerSessionTool(server);
 registerCredentialsTool(server);
 registerReverseEngineerTool(server);
 registerKnowledgeTool(server);
+registerTabsTool(server);
 process.on("SIGTERM", () => process.exit(0));
 process.on("SIGINT", () => process.exit(0));
 process.on("uncaughtException", (err2) => {

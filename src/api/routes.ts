@@ -3,6 +3,7 @@ import type { Express, Request, Response } from "express";
 import type { AuthRequest } from "./middleware";
 import { Iframer } from "../lib/iframer";
 import { asyncHandler, AppError } from "./error-handler";
+import { extensionBridge } from "../lib/extension/bridge";
 import fs from "fs";
 
 /** Cast Request to AuthRequest (populated by tokenAuth middleware) */
@@ -225,6 +226,27 @@ export function registerRoutes(app: Express): void {
     if (!result.ok) throw new AppError(400, result.error || "Login failed");
     const { ok: _ok, ...resultRest } = result;
     res.json({ ok: true, message: "Login attempted", ...resultRest });
+  }));
+
+  // ─── Extension bridge (banner-free real-tab control) ─────────────
+
+  app.get("/extension/status", (_req, res) => {
+    res.json({ ok: true, ...extensionBridge.status() });
+  });
+
+  app.post("/extension/tabs", asyncHandler(async (_req: Request, res: Response) => {
+    const result = await extensionBridge.listTabs();
+    res.json({ ok: true, ...result });
+  }));
+
+  app.post("/extension/execute", asyncHandler(async (req: Request, res: Response) => {
+    const { tabId, steps, options } = req.body || {};
+    if (typeof tabId !== "number") throw new AppError(400, "tabId (number) is required");
+    if (!Array.isArray(steps) || steps.length === 0) {
+      throw new AppError(400, "steps must be a non-empty array");
+    }
+    const result = await extensionBridge.execute(tabId, steps, options || {});
+    res.json(result);
   }));
 
   // ─── Headless fetch ─────────────────────────────────────────────

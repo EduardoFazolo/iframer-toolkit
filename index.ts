@@ -6,6 +6,7 @@ import { registerRoutes, iframer } from "./src/api/routes";
 import { tokenAuth } from "./src/api/middleware";
 import { errorHandler } from "./src/api/error-handler";
 import { writeServerInfo, clearServerInfo, reapOrphanBrowsers } from "./src/lib/browser/registry";
+import { extensionBridge } from "./src/lib/extension/bridge";
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "3021", 10);
@@ -45,6 +46,10 @@ const server = app.listen(PORT, () => {
   // Advertise ourselves as THE shared local server for this machine.
   writeServerInfo({ pid: process.pid, port: PORT, startedAt: new Date().toISOString() });
 });
+
+// Banner-free "run in my real Chrome tab" transport: the MV3 extension dials
+// into this same HTTP server over WebSocket (/extension/ws).
+extensionBridge.attach(server);
 
 // ─── Shutdown: single owner, cannot wedge ──────────────────────────
 // Polite teardown races a hard deadline. The old version awaited

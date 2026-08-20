@@ -5511,6 +5511,114 @@ function errorHandler(err, _req, res, _next) {
   res.status(500).json({ ok: false, error: message });
 }
 
+// src/lib/extension/bridge.ts
+var import_ws = require("ws");
+var REQUEST_TIMEOUT_MS = 180000;
+
+class ExtensionBridge {
+  wss = null;
+  socket = null;
+  connectedAt = null;
+  nextId = 1;
+  pending = new Map;
+  attach(server) {
+    if (this.wss)
+      return;
+    this.wss = new import_ws.WebSocketServer({ server, path: "/extension/ws" });
+    this.wss.on("connection", (ws, req) => {
+      const token = new URL(req.url || "", "http://127.0.0.1").searchParams.get("token");
+      let expected = "";
+      try {
+        expected = getLocalToken();
+      } catch {
+        expected = "";
+      }
+      if (!expected || token !== expected) {
+        ws.close(4001, "unauthorized");
+        return;
+      }
+      if (this.socket && this.socket !== ws) {
+        try {
+          this.socket.close(4000, "replaced by newer connection");
+        } catch {}
+      }
+      this.socket = ws;
+      this.connectedAt = Date.now();
+      ws.on("message", (data) => this.onMessage(ws, data));
+      ws.on("close", () => {
+        if (this.socket === ws) {
+          this.socket = null;
+          this.connectedAt = null;
+          for (const [, p] of this.pending) {
+            clearTimeout(p.timer);
+            p.reject(new Error("Extension disconnected before responding."));
+          }
+          this.pending.clear();
+        }
+      });
+      ws.on("error", () => {});
+    });
+  }
+  onMessage(ws, data) {
+    if (ws !== this.socket)
+      return;
+    let msg;
+    try {
+      msg = JSON.parse(data.toString());
+    } catch {
+      return;
+    }
+    if (typeof msg.id !== "number")
+      return;
+    const p = this.pending.get(msg.id);
+    if (!p)
+      return;
+    this.pending.delete(msg.id);
+    clearTimeout(p.timer);
+    if (msg.ok)
+      p.resolve(msg.result);
+    else
+      p.reject(new Error(msg.error || "Extension reported an error."));
+  }
+  send(type, payload) {
+    const ws = this.socket;
+    if (!ws || ws.readyState !== import_ws.WebSocket.OPEN) {
+      return Promise.reject(new Error("No iframer extension is connected. Open Chrome, install the iframer " + "extension, click its icon on the tab you want to drive, and make sure " + "it shows 'connected'."));
+    }
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`Extension did not respond within ${REQUEST_TIMEOUT_MS}ms (${type}).`));
+      }, REQUEST_TIMEOUT_MS);
+      this.pending.set(id, { resolve, reject, timer });
+      try {
+        ws.send(JSON.stringify({ id, type, ...payload }));
+      } catch (e) {
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      }
+    });
+  }
+  isConnected() {
+    return !!this.socket && this.socket.readyState === import_ws.WebSocket.OPEN;
+  }
+  status() {
+    return {
+      connected: this.isConnected(),
+      connectedAt: this.connectedAt ? new Date(this.connectedAt).toISOString() : null
+    };
+  }
+  listTabs() {
+    return this.send("list_tabs", {});
+  }
+  execute(tabId, steps, options = {}) {
+    return this.send("execute", { tabId, steps, options });
+  }
+}
+var extensionBridge = new ExtensionBridge;
+
 // src/api/routes.ts
 var import_fs10 = __toESM(require("fs"));
 function auth(req) {
@@ -5694,6 +5802,23 @@ function registerRoutes(app) {
     const { ok: _ok, ...resultRest } = result;
     res.json({ ok: true, message: "Login attempted", ...resultRest });
   }));
+  app.get("/extension/status", (_req, res) => {
+    res.json({ ok: true, ...extensionBridge.status() });
+  });
+  app.post("/extension/tabs", asyncHandler(async (_req, res) => {
+    const result = await extensionBridge.listTabs();
+    res.json({ ok: true, ...result });
+  }));
+  app.post("/extension/execute", asyncHandler(async (req, res) => {
+    const { tabId, steps, options } = req.body || {};
+    if (typeof tabId !== "number")
+      throw new AppError(400, "tabId (number) is required");
+    if (!Array.isArray(steps) || steps.length === 0) {
+      throw new AppError(400, "steps must be a non-empty array");
+    }
+    const result = await extensionBridge.execute(tabId, steps, options || {});
+    res.json(result);
+  }));
   app.post("/fetch", asyncHandler(async (req, res) => {
     const { url } = req.body || {};
     if (!url)
@@ -5748,6 +5873,7 @@ var server = app.listen(PORT, () => {
   console.log(`iframer listening on ${PORT}`);
   writeServerInfo({ pid: process.pid, port: PORT, startedAt: new Date().toISOString() });
 });
+extensionBridge.attach(server);
 var shutdownStarted = false;
 async function gracefulShutdown(reason) {
   if (shutdownStarted)
