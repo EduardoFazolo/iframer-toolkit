@@ -5514,6 +5514,7 @@ function errorHandler(err, _req, res, _next) {
 // src/lib/extension/bridge.ts
 var import_ws = require("ws");
 var REQUEST_TIMEOUT_MS = 180000;
+var HEARTBEAT_MS = 15000;
 
 class ExtensionBridge {
   wss = null;
@@ -5521,6 +5522,7 @@ class ExtensionBridge {
   connectedAt = null;
   nextId = 1;
   pending = new Map;
+  heartbeat = null;
   attach(server) {
     if (this.wss)
       return;
@@ -5544,11 +5546,13 @@ class ExtensionBridge {
       }
       this.socket = ws;
       this.connectedAt = Date.now();
+      this.startHeartbeat();
       ws.on("message", (data) => this.onMessage(ws, data));
       ws.on("close", () => {
         if (this.socket === ws) {
           this.socket = null;
           this.connectedAt = null;
+          this.stopHeartbeat();
           for (const [, p] of this.pending) {
             clearTimeout(p.timer);
             p.reject(new Error("Extension disconnected before responding."));
@@ -5558,6 +5562,19 @@ class ExtensionBridge {
       });
       ws.on("error", () => {});
     });
+  }
+  startHeartbeat() {
+    this.stopHeartbeat();
+    this.heartbeat = setInterval(() => {
+      this.send("ping", {}).catch(() => {});
+    }, HEARTBEAT_MS);
+    this.heartbeat.unref?.();
+  }
+  stopHeartbeat() {
+    if (this.heartbeat) {
+      clearInterval(this.heartbeat);
+      this.heartbeat = null;
+    }
   }
   onMessage(ws, data) {
     if (ws !== this.socket)
