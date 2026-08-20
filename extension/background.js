@@ -299,6 +299,27 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.cmd === "get-state") {
       const { status } = await chrome.storage.local.get("status");
       sendResponse({ ok: true, status: status || { connected: false } });
+    } else if (msg.cmd === "diag") {
+      // Report exactly what the loaded extension has, and whether a real
+      // executeScript against the active tab works.
+      const hostPermissions = chrome.runtime.getManifest().host_permissions || [];
+      const perms = await chrome.permissions.getAll();
+      let tabUrl = null, ok = false, value = null, error = null;
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        tabUrl = tab && tab.url;
+        if (tab) {
+          const [r] = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: () => location.href,
+          });
+          ok = true;
+          value = r && r.result;
+        }
+      } catch (e) {
+        error = e && e.message ? e.message : String(e);
+      }
+      sendResponse({ ok: true, hostPermissions, grantedOrigins: perms.origins || [], tabUrl, okExec: ok, value, error });
     } else if (msg.cmd === "set-token") {
       await chrome.storage.local.set({ token: msg.token || "" });
       // Force a fresh connection attempt with the new token.

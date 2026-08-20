@@ -38,3 +38,6 @@ secret
 .lupeignore
 .lupeshared
 .lupe-branch
+
+# local API reverse-engineering scratch (not committed)
+api-tests/
