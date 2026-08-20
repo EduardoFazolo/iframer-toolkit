@@ -144,8 +144,21 @@ export function iframerRunStep(step) {
     if (!el) return { __error: `No element for selector: ${step.selector}` };
     el.focus();
     if (el.isContentEditable) {
-      el.textContent = step.value;
-      el.dispatchEvent(new Event("input", { bubbles: true }));
+      // Rich-text editors (Lexical/Draft/ProseMirror) keep their own model and
+      // ignore direct textContent writes; execCommand routes through
+      // beforeinput/input so the editor state actually updates.
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      const inserted = document.execCommand("insertText", false, step.value);
+      if (!inserted) {
+        el.textContent = step.value;
+        el.dispatchEvent(
+          new InputEvent("input", { bubbles: true, inputType: "insertText", data: step.value })
+        );
+      }
     } else {
       setNativeValue(el, step.value);
     }
