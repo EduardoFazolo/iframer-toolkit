@@ -7,6 +7,7 @@
 
 import { iframerRunStep } from "./interpreter.js";
 import { capture } from "./capture.js";
+import { cdp } from "./cdp.js";
 
 // Extra settle time after the last step so late/async XHRs (auth re-challenges,
 // deferred mutations) are still captured before we stop listening.
@@ -269,7 +270,45 @@ async function injectStep(tabId, step) {
   return res ? res.result : { __error: "No result from injected step." };
 }
 
-async function runStep(tabId, step) {
+// Resolve a selector/@ref to its viewport-center coords (for trusted CDP input).
+// Runs in the isolated world — DOM only, no eval.
+async function getElementCenter(tabId, selector) {
+  const [res] = await chrome.scripting.executeScript({
+    target: { tabId },
+    world: "ISOLATED",
+    args: [selector || ""],
+    func: (sel) => {
+      const REF = "data-iframer-ref";
+      const el = sel && sel.startsWith("@e")
+        ? document.querySelector(`[${REF}="${sel}"]`)
+        : sel
+          ? document.querySelector(sel)
+          : null;
+      if (!el) return null;
+      try { el.scrollIntoView({ block: "center", inline: "center" }); } catch {}
+      const r = el.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height };
+    },
+  });
+  return res ? res.result : null;
+}
+
+async function runStep(tabId, step, cdpTarget) {
+  // Trusted input path (CDP): synthetic DOM events are ignored by some SPAs
+  // (Slack), so when the pipeline runs with options.trusted we send real,
+  // isTrusted mouse/key events via chrome.debugger.
+  if (cdpTarget && (step.type === "click" || step.type === "human-click" || step.type === "right-click")) {
+    const c = await getElementCenter(tabId, step.selector);
+    if (!c) return { __error: `No element for selector: ${step.selector}` };
+    if (step.type === "right-click") await cdp.rightClick(cdpTarget, c.x, c.y);
+    else await cdp.click(cdpTarget, c.x, c.y);
+    return { clicked: true, trusted: true };
+  }
+  if (cdpTarget && step.type === "keyboard") {
+    await cdp.key(cdpTarget, step.key, { meta: step.meta, ctrl: step.ctrl, shift: step.shift, alt: step.alt });
+    return { pressed: step.key, trusted: true };
+  }
+
   // Steps the background handles directly (tab-level, not page-level).
   if (step.type === "navigate") {
     await chrome.tabs.update(tabId, { url: step.url });
@@ -304,6 +343,24 @@ async function runPipeline(tabId, steps, options) {
   const capturing = !!options.captureApi;
   if (capturing) capture.start(tabId);
 
+  // Trusted input: attach the debugger ONCE for the whole pipeline (one banner).
+  let cdpTarget = null;
+  if (options.trusted) {
+    try {
+      cdpTarget = await cdp.attach(tabId);
+    } catch (e) {
+      // Attach can fail if DevTools is open on the tab or another debugger is
+      // attached. Fall back to synthetic input rather than aborting.
+      cdpTarget = null;
+    }
+  }
+  const cleanup = async () => {
+    if (cdpTarget) {
+      await cdp.detach(cdpTarget);
+      cdpTarget = null;
+    }
+  };
+
   // Drain briefly so late/async XHRs land, then return the raw requests
   // (iframer post-processes them into endpoints server-side).
   async function collectCapture() {
@@ -317,7 +374,7 @@ async function runPipeline(tabId, steps, options) {
     if (capturing) capture.setStep(i);
     let result;
     try {
-      result = await runStep(tabId, step);
+      result = await runStep(tabId, step, cdpTarget);
     } catch (e) {
       result = { __error: e && e.message ? e.message : String(e) };
     }
@@ -326,6 +383,7 @@ async function runPipeline(tabId, steps, options) {
       results.push({ stepIndex: i, ok: false, step, error: result.__error });
       if (!continueOnError) {
         const capturedRequests = await collectCapture();
+        await cleanup();
         const st = await tabState(tabId);
         return {
           ok: false,
@@ -354,6 +412,7 @@ async function runPipeline(tabId, steps, options) {
   }
 
   const capturedRequests = await collectCapture();
+  await cleanup();
   const finalState = await tabState(tabId);
   return {
     ok: true,

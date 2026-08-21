@@ -17,6 +17,7 @@ interface ExtensionTab {
 interface ClientInfo {
   clientId: string;
   profileName?: string;
+  extVersion?: string;
   tabCount: number;
 }
 
@@ -90,8 +91,9 @@ Returns: connected (bool), and tabs: [{ id, title, url, active, windowId }]. If 
         }
 
         const profiles = clients.map((c) => c.profileName || c.clientId.slice(0, 8)).join(", ");
+        const ver = clients[0]?.extVersion ? ` [ext v${clients[0].extVersion}]` : "";
         const lines = [
-          `Connected: ${clients.length} profile${clients.length > 1 ? "s" : ""}${profiles ? ` (${profiles})` : ""}.`,
+          `Connected: ${clients.length} profile${clients.length > 1 ? "s" : ""}${profiles ? ` (${profiles})` : ""}${ver}.`,
           `${tabs.length} tab${tabs.length > 1 ? "s" : ""}${filter ? ` matching "${filter}"` : ""}:`,
           "",
         ];

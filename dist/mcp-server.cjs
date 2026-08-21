@@ -682,7 +682,8 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
       autoEscalate: import_zod3.z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)"),
       instanceId: import_zod3.z.string().optional().describe("Run in a named parallel browser within this session (default: 'default'). Use distinct ids to drive several browsers at once, e.g. one per account — each keeps its own login/session state."),
       tabId: import_zod3.z.number().optional().describe("Only with mode='extension': the id of the real Chrome tab to drive (from the `tabs` tool)."),
-      clientId: import_zod3.z.string().optional().describe("Only with mode='extension', and only needed when several profiles/browsers are connected and a tab is ambiguous: the clientId of the profile that owns the tab (from the `tabs` tool).")
+      clientId: import_zod3.z.string().optional().describe("Only with mode='extension', and only needed when several profiles/browsers are connected and a tab is ambiguous: the clientId of the profile that owns the tab (from the `tabs` tool)."),
+      trusted: import_zod3.z.boolean().optional().describe("Only with mode='extension': use trusted OS-level input (via chrome.debugger) for clicks/keyboard instead of synthetic DOM events. Needed for apps that ignore synthetic events (Slack, some editors). Shows Chrome's debug banner while running. Default false.")
     }).optional()
   }, async (params) => {
     try {
@@ -959,7 +960,8 @@ The outputDir defaults to ./<domain>/. Ask the user where to save if unclear.`, 
       continueOnError: import_zod4.z.boolean().optional().describe("Continue past failing steps (default: false)"),
       mode: import_zod4.z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("Browser mode override. Use 'extension' to capture the API of a tab already open in the user's real Chrome (banner-free) — requires options.tabId from the `tabs` tool. Note: response BODIES aren't captured in extension mode (MV3 limitation); request/headers/auth/curl/endpoints are."),
       tabId: import_zod4.z.number().optional().describe("Only with mode='extension': the real Chrome tab to reverse-engineer (from the `tabs` tool)."),
-      clientId: import_zod4.z.string().optional().describe("Only with mode='extension', when multiple profiles are connected and the tab is ambiguous: the owning profile's clientId (from the `tabs` tool).")
+      clientId: import_zod4.z.string().optional().describe("Only with mode='extension', when multiple profiles are connected and the tab is ambiguous: the owning profile's clientId (from the `tabs` tool)."),
+      trusted: import_zod4.z.boolean().optional().describe("Only with mode='extension': use trusted OS-level input (chrome.debugger) for clicks/keyboard. Needed for apps that ignore synthetic events (Slack). Shows Chrome's debug banner. Default false.")
     }).optional()
   }, async (params) => {
     try {
@@ -1723,8 +1725,9 @@ Returns: connected (bool), and tabs: [{ id, title, url, active, windowId }]. If 
         };
       }
       const profiles = clients.map((c) => c.profileName || c.clientId.slice(0, 8)).join(", ");
+      const ver = clients[0]?.extVersion ? ` [ext v${clients[0].extVersion}]` : "";
       const lines = [
-        `Connected: ${clients.length} profile${clients.length > 1 ? "s" : ""}${profiles ? ` (${profiles})` : ""}.`,
+        `Connected: ${clients.length} profile${clients.length > 1 ? "s" : ""}${profiles ? ` (${profiles})` : ""}${ver}.`,
         `${tabs.length} tab${tabs.length > 1 ? "s" : ""}${filter ? ` matching "${filter}"` : ""}:`,
         ""
       ];

@@ -50,6 +50,7 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
         instanceId: z.string().optional().describe("Run in a named parallel browser within this session (default: 'default'). Use distinct ids to drive several browsers at once, e.g. one per account — each keeps its own login/session state."),
         tabId: z.number().optional().describe("Only with mode='extension': the id of the real Chrome tab to drive (from the `tabs` tool)."),
         clientId: z.string().optional().describe("Only with mode='extension', and only needed when several profiles/browsers are connected and a tab is ambiguous: the clientId of the profile that owns the tab (from the `tabs` tool)."),
+        trusted: z.boolean().optional().describe("Only with mode='extension': use trusted OS-level input (via chrome.debugger) for clicks/keyboard instead of synthetic DOM events. Needed for apps that ignore synthetic events (Slack, some editors). Shows Chrome's debug banner while running. Default false."),
       }).optional(),
     },
     async (params) => {
