@@ -61,7 +61,14 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>;
 }
 
-type OutboundType = "list_tabs" | "execute" | "ping";
+type OutboundType = "list_tabs" | "execute" | "ping" | "cdp_attach" | "cdp_command" | "cdp_detach";
+
+export interface CdpEvent {
+  tabId: number;
+  sessionId?: string;
+  method: string;
+  params?: unknown;
+}
 
 class ExtensionBridge {
   private wss: WebSocketServer | null = null;
@@ -70,6 +77,9 @@ class ExtensionBridge {
   private nextReqId = 1;
   // tabId -> clientId, refreshed on every listTabs() so execute can route.
   private tabOwner = new Map<number, string>();
+  // Active CDP relay listener (one relay at a time). Receives forwarded
+  // chrome.debugger events from the extension.
+  private cdpEventHandler: ((clientId: string, ev: CdpEvent) => void) | null = null;
 
   /** Attach the WS server to the already-listening HTTP server. Idempotent. */
   attach(server: HttpServer): void {
@@ -170,6 +180,15 @@ class ExtensionBridge {
       return;
     }
 
+    // CDP relay event forwarded from the extension's chrome.debugger.
+    if (msg.type === "cdp_event") {
+      const ev = msg as unknown as CdpEvent;
+      if (typeof ev.tabId === "number" && this.cdpEventHandler) {
+        this.cdpEventHandler(client.clientId, ev);
+      }
+      return;
+    }
+
     // Otherwise it's a response to one of our requests.
     if (typeof msg.id !== "number") return;
     const p = this.pending.get(msg.id);
@@ -266,6 +285,10 @@ class ExtensionBridge {
           "extension, and pair it (paste the token, dot goes green).",
       );
     }
+    // Single connected profile → no ambiguity; skip the (blocking) tab refresh.
+    if (this.clients.size === 1) {
+      return [...this.clients.values()][0];
+    }
     let owner = this.tabOwner.get(tabId);
     if (!owner) {
       await this.listTabs(); // refresh ownership
@@ -293,6 +316,39 @@ class ExtensionBridge {
     return this.resolveClient(tabId, clientId).then((client) =>
       this.send(client, "execute", { tabId, steps, options }),
     );
+  }
+
+  // ─── CDP relay plumbing ───────────────────────────────────────────
+  setCdpEventHandler(fn: ((clientId: string, ev: CdpEvent) => void) | null): void {
+    this.cdpEventHandler = fn;
+  }
+
+  async cdpAttach(tabId: number, clientId?: string): Promise<{ targetInfo: unknown; clientId: string }> {
+    const client = await this.resolveClient(tabId, clientId);
+    const res = (await this.send<{ targetInfo: unknown }>(client, "cdp_attach", { tabId })) || { targetInfo: null };
+    return { targetInfo: res.targetInfo, clientId: client.clientId };
+  }
+
+  async cdpCommand(
+    clientId: string,
+    tabId: number,
+    sessionId: string | undefined,
+    method: string,
+    params: unknown,
+  ): Promise<unknown> {
+    const client = this.clients.get(clientId);
+    if (!client) throw new Error(`CDP: client ${clientId} is gone.`);
+    return this.send(client, "cdp_command", { tabId, sessionId, method, params });
+  }
+
+  async cdpDetach(clientId: string, tabId: number): Promise<void> {
+    const client = this.clients.get(clientId);
+    if (!client) return;
+    try {
+      await this.send(client, "cdp_detach", { tabId });
+    } catch {
+      /* extension gone — nothing to detach */
+    }
   }
 }
 

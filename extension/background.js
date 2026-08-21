@@ -197,6 +197,13 @@ async function handleMessage(sock, raw) {
       reply(sock, id, true, { tabs: await listTabs() });
     } else if (type === "execute") {
       reply(sock, id, true, await runPipeline(msg.tabId, msg.steps || [], msg.options || {}));
+    } else if (type === "cdp_attach") {
+      reply(sock, id, true, await cdpAttach(msg.tabId));
+    } else if (type === "cdp_command") {
+      reply(sock, id, true, await cdpCommand(msg.tabId, msg.sessionId, msg.method, msg.params));
+    } else if (type === "cdp_detach") {
+      await cdpDetach(msg.tabId);
+      reply(sock, id, true, { detached: true });
     } else {
       reply(sock, id, false, `Unknown message type: ${type}`);
     }
@@ -470,6 +477,65 @@ async function runPipeline(tabId, steps, options) {
     capturedRequests,
   };
 }
+
+// ─── CDP relay ──────────────────────────────────────────────────────
+// Bridges chrome.debugger for a tab to iframer's server, which connects to it
+// with patchright's connectOverCDP and drives the tab through the REAL iframer
+// pipeline (find/click/snapshot/navigate/capture). This replaces the hand-rolled
+// interpreter with iframer's proven engine. Shows Chrome's debug banner.
+const attachedTabs = new Set();
+
+function dbgSend(target, method, params) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.sendCommand(target, method, params || {}, (result) => {
+      const e = chrome.runtime.lastError;
+      if (e) reject(new Error(e.message));
+      else resolve(result);
+    });
+  });
+}
+
+async function cdpAttach(tabId) {
+  await focusTab(tabId); // live tab so CDP hit-testing/render works
+  if (!attachedTabs.has(tabId)) {
+    await chrome.debugger.attach({ tabId }, "1.3");
+    attachedTabs.add(tabId);
+  }
+  const info = await dbgSend({ tabId }, "Target.getTargetInfo");
+  return { targetInfo: info && info.targetInfo };
+}
+
+async function cdpCommand(tabId, sessionId, method, params) {
+  const target = sessionId ? { tabId, sessionId } : { tabId };
+  return await dbgSend(target, method, params);
+}
+
+async function cdpDetach(tabId) {
+  attachedTabs.delete(tabId);
+  try { await chrome.debugger.detach({ tabId }); } catch {}
+}
+
+// Forward all debugger events for attached tabs to the server (tagged with the
+// child sessionId when present, undefined for the top-level page).
+chrome.debugger.onEvent.addListener((source, method, params) => {
+  if (!attachedTabs.has(source.tabId)) return;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify({ type: "cdp_event", tabId: source.tabId, sessionId: source.sessionId, method, params }));
+    } catch {}
+  }
+});
+
+chrome.debugger.onDetach.addListener((source, reason) => {
+  if (typeof source.tabId === "number" && attachedTabs.has(source.tabId)) {
+    attachedTabs.delete(source.tabId);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ type: "cdp_event", tabId: source.tabId, method: "Inspector.detached", params: { reason } }));
+      } catch {}
+    }
+  }
+});
 
 // ─── Popup <-> worker messaging ─────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

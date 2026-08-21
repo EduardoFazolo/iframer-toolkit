@@ -4,9 +4,6 @@ import type { AuthRequest } from "./middleware";
 import { Iframer } from "../lib/iframer";
 import { asyncHandler, AppError } from "./error-handler";
 import { extensionBridge } from "../lib/extension/bridge";
-import { extractKnowledgeFromRun } from "../lib/knowledge/extract-from-run";
-import { buildCapturedApi } from "../lib/api-capture";
-import type { Pipeline, PipelineResult, BrowserMode, CapturedRequest } from "../lib/types";
 import fs from "fs";
 
 /** Cast Request to AuthRequest (populated by tokenAuth middleware) */
@@ -242,67 +239,19 @@ export function registerRoutes(app: Express): void {
     res.json({ ok: true, ...result });
   }));
 
+  // Drive a REAL Chrome tab through iframer's full pipeline via the extension
+  // CDP relay (connectOverCDP). Same engine as every other mode.
   app.post("/extension/execute", asyncHandler(async (req: Request, res: Response) => {
     const { tabId, steps, options, clientId } = req.body || {};
     if (typeof tabId !== "number") throw new AppError(400, "tabId (number) is required");
     if (!Array.isArray(steps) || steps.length === 0) {
       throw new AppError(400, "steps must be a non-empty array");
     }
-    const result = (await extensionBridge.execute(tabId, steps, options || {}, clientId)) as PipelineResult & {
-      capturedRequests?: CapturedRequest[];
-    };
-
-    // Reverse-engineering: the extension captured raw requests via webRequest;
-    // run them through the SAME post-processing the patchright capture uses so
-    // paths get parameterized, protocol/verb inferred, curl + auth generated.
-    if (result?.capturedRequests?.length) {
-      try {
-        result.capturedApi = buildCapturedApi(result.capturedRequests);
-      } catch {
-        /* leave capturedApi unset on failure */
-      }
-    }
-    delete result.capturedRequests;
-
-    // Persist any screenshot data URLs a step returned to files the agent can read.
-    try {
-      const os = await import("os");
-      const path = await import("path");
-      const shotDir = path.join(os.tmpdir(), "iframer-ext-shots");
-      fs.mkdirSync(shotDir, { recursive: true });
-      let lastShot: string | undefined;
-      for (const r of (result.results || []) as { result?: { dataUrl?: string; screenshotUrl?: string } }[]) {
-        const dataUrl = r.result?.dataUrl;
-        if (typeof dataUrl === "string" && dataUrl.startsWith("data:image")) {
-          const b64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
-          const file = path.join(shotDir, `shot-${Date.now()}-${Math.floor(Math.random() * 1e6)}.jpg`);
-          fs.writeFileSync(file, Buffer.from(b64, "base64"));
-          delete r.result!.dataUrl;
-          r.result!.screenshotUrl = `file://${file}`;
-          lastShot = `file://${file}`;
-        }
-      }
-      if (lastShot && result.finalState) result.finalState.screenshotUrl = lastShot;
-    } catch {
-      /* screenshot persistence is best-effort */
-    }
-
-    // Learn from the run, exactly like the patchright pipeline does. Extension
-    // runs usually drive an already-open tab (no navigate step), so synthesize
-    // one from the final URL to give the knowledge extractor a domain. No
-    // sessionData: the real profile owns the cookies, iframer never stores them.
-    if (result?.ok) {
-      try {
-        const hasNav = steps.some((s: { type?: string }) => s?.type === "navigate");
-        const pipeline: Pipeline = hasNav
-          ? { steps }
-          : { steps: [{ type: "navigate", url: result.finalState?.url || "" }, ...steps] };
-        extractKnowledgeFromRun(pipeline, result, null, "extension" as unknown as BrowserMode);
-      } catch {
-        /* learning is best-effort; never fail the run over it */
-      }
-    }
-
+    const r = auth(req);
+    const result = await iframer.execute(r.userId, r.token, {
+      steps,
+      options: { ...(options || {}), extensionTabId: tabId, clientId },
+    });
     res.json(result);
   }));
 

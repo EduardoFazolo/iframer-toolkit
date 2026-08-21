@@ -50,7 +50,8 @@
     "build": "bun run build:cli && bun run build:mcp && bun run build:local-server",
     "test": "bun test tests/unit",
     "test:extension": "node tests/integration/extension-bridge.mjs",
-    "prepublishOnly": "bun run build"
+    "prepublishOnly": "bun run build",
+    "test:cdp-relay": "bun tests/integration/cdp-relay.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

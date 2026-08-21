@@ -7,17 +7,27 @@ debugged" bar.
 ## How it works
 
 ```
-Claude (agent) ──MCP──▶ iframer local server ──WebSocket──▶ this extension ──▶ your tab
+Claude (agent) ──MCP──▶ iframer server ──connectOverCDP──▶ CDP relay ──WS──▶ this extension ──chrome.debugger──▶ your tab
 ```
 
 - The extension **dials out** to iframer's local server (extensions can't listen
-  on a port, so the server is the WebSocket server and the extension is the client).
-- iframer holds the step pipeline; the extension is a thin executor that runs each
-  step in the tab the agent picked, using ordinary DOM APIs (`chrome.scripting`),
-  so there is no debugger banner.
+  on a port).
+- For discovery (`tabs`), the extension uses `chrome.tabs`.
+- To **drive** a tab, the extension attaches `chrome.debugger` to it and **relays
+  the CDP protocol** to iframer's server, which connects with patchright's
+  `connectOverCDP` and runs the **exact same pipeline** (find/click/snapshot/
+  navigate/obstacle-handling/API-capture) it uses in every other mode. Nothing is
+  reimplemented — your live tab is driven by the real, proven engine.
+
+**Trade-off:** driving a tab uses `chrome.debugger`, so Chrome shows a yellow
+"iframer started debugging this browser" banner while a run is in progress. This
+is the cost of using real, trusted input and the full engine; it detaches when the
+run finishes.
 
 Once paired, iframer can see and drive **any** of your open tabs — the agent lists
-them (`tabs` tool), finds the one you meant, and drives it.
+them (`tabs` tool), finds the one you meant, and drives it. Multiple Chrome
+profiles can be connected at once; each identifies itself and calls route to the
+profile that owns the target tab.
 
 ## Multiple profiles / browsers
 

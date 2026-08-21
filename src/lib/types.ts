@@ -60,6 +60,8 @@ export interface PipelineOptions {
   mode?: BrowserMode;             // Force a specific browser mode (default: auto-select)
   autoEscalate?: boolean;         // Auto-retry with stronger mode if blocked (default: true)
   instanceId?: string;            // Named browser within this session (default: "default") — run several in parallel, e.g. one per account
+  extensionTabId?: number;        // Set to drive a real Chrome tab via the browser extension (CDP relay). Bypasses launch/escalation.
+  clientId?: string;              // With extensionTabId: which connected extension profile owns the tab (when ambiguous).
 }
 
 // ─── Captured API Types ────────────────────────────────────────────
