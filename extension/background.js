@@ -334,12 +334,30 @@ async function runStep(tabId, step, cdpTarget) {
   return injectStep(tabId, step);
 }
 
+// Bring the target tab to the foreground before driving it. Chrome throttles
+// and can freeze background tabs — their DOM goes stale and CDP mouse events
+// don't hit-test — so a backgrounded tab silently no-ops clicks. Focusing it
+// (the state a human is in when they drive their own tab) is what makes clicks,
+// reads, and screenshots actually work. This is why it "just worked" on a tab
+// the user was already looking at.
+async function focusTab(tabId) {
+  try {
+    const t = await chrome.tabs.get(tabId);
+    await chrome.windows.update(t.windowId, { focused: true });
+    await chrome.tabs.update(tabId, { active: true });
+    await sleep(400); // let the tab un-throttle and paint
+  } catch {
+    /* tab/window gone — the step will surface the real error */
+  }
+}
+
 async function runPipeline(tabId, steps, options) {
   const totalSteps = steps.length;
   const started = Date.now();
   const results = [];
   const continueOnError = !!options.continueOnError;
   await ensureAwake(tabId);
+  if (options.focus !== false) await focusTab(tabId);
   const capturing = !!options.captureApi;
   if (capturing) capture.start(tabId);
 
