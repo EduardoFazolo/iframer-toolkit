@@ -346,12 +346,12 @@ async function runStep(tabId, step, cdpTarget) {
     return { waited: true };
   }
   if (step.type === "screenshot") {
-    // Banner-free capture is best-effort: only the visible tab can be grabbed,
-    // and the extension can't write files, so we just confirm it worked.
+    // The tab is focused (see focusTab) so captureVisibleTab works. Return the
+    // image as a data URL; the server persists it to a file the agent can read.
     try {
       const tab = await chrome.tabs.get(tabId);
-      await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 50 });
-      return { captured: true, note: "Screenshot captured (not persisted in extension mode). Prefer `snapshot` for perception." };
+      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 60 });
+      return { dataUrl };
     } catch (e) {
       return { __error: `screenshot failed: ${e && e.message ? e.message : String(e)}` };
     }
