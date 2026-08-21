@@ -19,6 +19,17 @@ Claude (agent) ──MCP──▶ iframer local server ──WebSocket──▶ 
 Once paired, iframer can see and drive **any** of your open tabs — the agent lists
 them (`tabs` tool), finds the one you meant, and drives it.
 
+## Multiple profiles / browsers
+
+You can run the extension in as many Chrome profiles (or browsers) as you want at
+once. Each connection identifies itself with a stable **profile id** and a
+**profile name** (set it in the popup — "Work", "Personal", …). The server keeps
+every connection separate, aggregates tabs across all of them (each tab tagged
+with its profile), and routes every `execute`/`reverse-engineer` to the profile
+that owns the target tab. A service-worker restart replaces that profile's own
+connection instead of piling up. The server stays alive while any profile is
+connected and idle-exits once none are.
+
 ## Install (unpacked, dev)
 
 1. Open `chrome://extensions`.

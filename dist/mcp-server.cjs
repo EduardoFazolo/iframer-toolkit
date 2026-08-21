@@ -680,7 +680,8 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
       mode: import_zod3.z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("DO NOT SET THIS unless user explicitly requests a mode. iframer auto-selects and auto-escalates. Use 'extension' ONLY to drive a tab in the user's real Chrome via the iframer extension — requires options.tabId (get it from the `tabs` tool)."),
       autoEscalate: import_zod3.z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)"),
       instanceId: import_zod3.z.string().optional().describe("Run in a named parallel browser within this session (default: 'default'). Use distinct ids to drive several browsers at once, e.g. one per account — each keeps its own login/session state."),
-      tabId: import_zod3.z.number().optional().describe("Only with mode='extension': the id of the real Chrome tab to drive (from the `tabs` tool).")
+      tabId: import_zod3.z.number().optional().describe("Only with mode='extension': the id of the real Chrome tab to drive (from the `tabs` tool)."),
+      clientId: import_zod3.z.string().optional().describe("Only with mode='extension', and only needed when several profiles/browsers are connected and a tab is ambiguous: the clientId of the profile that owns the tab (from the `tabs` tool).")
     }).optional()
   }, async (params) => {
     try {
@@ -691,6 +692,7 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
         }
         const extResult = await localApiPost("/extension/execute", {
           tabId,
+          clientId: params.options?.clientId,
           steps: params.steps,
           options: params.options
         });
@@ -948,7 +950,8 @@ The outputDir defaults to ./<domain>/. Ask the user where to save if unclear.`, 
       continueOnObstacle: import_zod4.z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
       continueOnError: import_zod4.z.boolean().optional().describe("Continue past failing steps (default: false)"),
       mode: import_zod4.z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("Browser mode override. Use 'extension' to capture the API of a tab already open in the user's real Chrome (banner-free) — requires options.tabId from the `tabs` tool. Note: response BODIES aren't captured in extension mode (MV3 limitation); request/headers/auth/curl/endpoints are."),
-      tabId: import_zod4.z.number().optional().describe("Only with mode='extension': the real Chrome tab to reverse-engineer (from the `tabs` tool).")
+      tabId: import_zod4.z.number().optional().describe("Only with mode='extension': the real Chrome tab to reverse-engineer (from the `tabs` tool)."),
+      clientId: import_zod4.z.string().optional().describe("Only with mode='extension', when multiple profiles are connected and the tab is ambiguous: the owning profile's clientId (from the `tabs` tool).")
     }).optional()
   }, async (params) => {
     try {
@@ -965,6 +968,7 @@ The outputDir defaults to ./<domain>/. Ask the user where to save if unclear.`, 
         }
         captureResult = await localApiPost("/extension/execute", {
           tabId: params.options.tabId,
+          clientId: params.options.clientId,
           steps: params.steps,
           options: { ...params.options, captureApi: true }
         });
@@ -1694,6 +1698,8 @@ Returns: connected (bool), and tabs: [{ id, title, url, active, windowId }]. If 
       }
       const data = await localApiPost("/extension/tabs", {});
       let tabs = data.tabs || [];
+      const clients = data.clients || [];
+      const multiProfile = clients.length > 1;
       if (filter) {
         const f = filter.toLowerCase();
         tabs = tabs.filter((t) => t.url.toLowerCase().includes(f) || (t.title || "").toLowerCase().includes(f));
@@ -1708,13 +1714,24 @@ Returns: connected (bool), and tabs: [{ id, title, url, active, windowId }]. If 
           ]
         };
       }
-      const lines = [`Connected. ${tabs.length} tab${tabs.length > 1 ? "s" : ""}${filter ? ` matching "${filter}"` : ""}:`, ""];
+      const profiles = clients.map((c) => c.profileName || c.clientId.slice(0, 8)).join(", ");
+      const lines = [
+        `Connected: ${clients.length} profile${clients.length > 1 ? "s" : ""}${profiles ? ` (${profiles})` : ""}.`,
+        `${tabs.length} tab${tabs.length > 1 ? "s" : ""}${filter ? ` matching "${filter}"` : ""}:`,
+        ""
+      ];
       for (const t of tabs) {
-        lines.push(`  [id ${t.id}]${t.active ? " (active)" : ""} ${t.title}`);
+        const prof = multiProfile ? `  «${t.profileName || t.clientId.slice(0, 8)}»` : "";
+        lines.push(`  [id ${t.id}]${t.active ? " (active)" : ""}${prof} ${t.title}`);
         lines.push(`         ${t.url}`);
+        if (multiProfile)
+          lines.push(`         clientId: ${t.clientId}`);
       }
       lines.push("");
       lines.push('To drive one: execute with options.mode="extension", options.tabId=<id>.');
+      if (multiProfile) {
+        lines.push("Multiple profiles are connected — if two tabs share a title, also pass options.clientId " + "(shown as «profile» above maps to a clientId) so the right profile is driven.");
+      }
       return { content: [{ type: "text", text: lines.join(`
 `) }] };
     } catch (e) {

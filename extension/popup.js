@@ -26,10 +26,18 @@ async function refresh() {
 }
 
 async function init() {
-  const { token } = await chrome.storage.local.get("token");
+  const { token, profileLabel } = await chrome.storage.local.get(["token", "profileLabel"]);
   if (token) $("token").value = token;
-  await refresh();
+  if (profileLabel) $("label").value = profileLabel;
+  const state = await send("get-state");
+  renderStatus(state.status);
+  if (state.profileName) $("profinfo").textContent = `${state.profileName} · id ${String(state.profileId).slice(0, 8)}`;
 }
+
+$("savelabel").addEventListener("click", async () => {
+  const res = await send("set-label", { label: $("label").value });
+  if (res.profileName) $("profinfo").textContent = `${res.profileName} · id ${String(res.profileId).slice(0, 8)}`;
+});
 
 $("grant").addEventListener("click", () => {
   // Must run in the popup (user gesture) — requesting host access to all sites.

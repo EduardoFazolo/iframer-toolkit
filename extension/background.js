@@ -25,6 +25,36 @@ async function getToken() {
   return token || "";
 }
 
+// Stable per-profile identity. chrome.storage.local is per-profile, so a UUID
+// stored there uniquely and durably identifies this profile. The human label
+// is user-set in the popup (defaults to a short id).
+async function ensureProfile() {
+  const store = await chrome.storage.local.get(["profileId", "profileLabel"]);
+  let profileId = store.profileId;
+  if (!profileId) {
+    profileId = crypto.randomUUID();
+    await chrome.storage.local.set({ profileId });
+  }
+  const profileName = store.profileLabel || `Profile ${profileId.slice(0, 6)}`;
+  return { profileId, profileName };
+}
+
+async function sendHello(sock) {
+  try {
+    const { profileId, profileName } = await ensureProfile();
+    sock.send(
+      JSON.stringify({
+        type: "hello",
+        profileId,
+        profileName,
+        extVersion: chrome.runtime.getManifest().version,
+      }),
+    );
+  } catch {
+    /* best-effort identity */
+  }
+}
+
 async function setStatus(patch) {
   const prev = (await chrome.storage.local.get("status")).status || {};
   await chrome.storage.local.set({ status: { ...prev, ...patch } });
@@ -79,6 +109,7 @@ function tryConnect(port, token) {
       ws = sock;
       currentPort = port;
       wire(sock);
+      sendHello(sock);
       setStatus({ connected: true, port, reason: null });
       done(true);
     };
@@ -298,7 +329,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     if (msg.cmd === "get-state") {
       const { status } = await chrome.storage.local.get("status");
-      sendResponse({ ok: true, status: status || { connected: false } });
+      const { profileId, profileName } = await ensureProfile();
+      sendResponse({ ok: true, status: status || { connected: false }, profileId, profileName });
+    } else if (msg.cmd === "set-label") {
+      await chrome.storage.local.set({ profileLabel: (msg.label || "").trim() });
+      if (ws && ws.readyState === WebSocket.OPEN) sendHello(ws); // push the new name to the server
+      const { profileId, profileName } = await ensureProfile();
+      sendResponse({ ok: true, profileId, profileName });
     } else if (msg.cmd === "diag") {
       // Report exactly what the loaded extension has, and whether a real
       // executeScript against the active tab works.
