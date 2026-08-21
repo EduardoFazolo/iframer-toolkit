@@ -8213,12 +8213,30 @@ class CdpRelay {
       });
     });
     await new Promise((resolve, reject) => {
-      this.httpServer = import_http.default.createServer((_req, res) => {
+      this.httpServer = import_http.default.createServer((req, res) => {
+        if (req.url === "/json/version" || req.url === "/json/version/") {
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({
+            Browser: "Chrome/iframer-extension",
+            "Protocol-Version": "1.3",
+            "User-Agent": "iframer-cdp-relay/1.0",
+            "V8-Version": "",
+            "WebKit-Version": "",
+            webSocketDebuggerUrl: `ws://127.0.0.1:${this.port}${this.path}`
+          }));
+          return;
+        }
         res.writeHead(404);
         res.end();
       });
+      this.httpServer.on("upgrade", (req) => {
+        if (process.env.IFRAMER_RELAY_DEBUG)
+          log17.info(`[relay] upgrade request url=${req.url}`);
+      });
       this.wss = new import_websocket_server.default({ server: this.httpServer, path: this.path });
       this.wss.on("connection", (ws) => {
+        if (process.env.IFRAMER_RELAY_DEBUG)
+          log17.info(`[relay] playwright connected`);
         if (this.pw) {
           ws.close(4000, "relay already has a client");
           return;
@@ -8242,6 +8260,9 @@ class CdpRelay {
   cdpEndpoint() {
     return `ws://127.0.0.1:${this.port}${this.path}`;
   }
+  httpEndpoint() {
+    return `http://127.0.0.1:${this.port}`;
+  }
   sendToPw(msg) {
     if (this.pw && this.pw.readyState === import_websocket.default.OPEN) {
       try {
@@ -8250,6 +8271,8 @@ class CdpRelay {
     }
   }
   async onPwMessage(data) {
+    if (process.env.IFRAMER_RELAY_DEBUG)
+      log17.info(`[relay] raw pw msg (${data?.length ?? 0} bytes): ${data?.toString().slice(0, 120)}`);
     let msg;
     try {
       msg = JSON.parse(data.toString());
@@ -8257,6 +8280,8 @@ class CdpRelay {
       return;
     }
     const { id, sessionId, method, params } = msg;
+    if (process.env.IFRAMER_RELAY_DEBUG)
+      log17.info(`[relay] pw→ ${method} (id=${id}, sess=${sessionId || "-"})`);
     if (!method)
       return;
     try {
@@ -8437,7 +8462,7 @@ class PipelineExecutor {
     let browser;
     try {
       await relay.start();
-      browser = await import_patchright3.chromium.connectOverCDP(relay.cdpEndpoint(), { timeout: 30000 });
+      browser = await import_playwright_core.chromium.connectOverCDP(relay.httpEndpoint(), { timeout: 30000 });
       const context = browser.contexts()[0];
       if (!context)
         throw new Error("no CDP browser context for the tab");
@@ -8617,7 +8642,7 @@ class PipelineExecutor {
     }
   }
 }
-var import_patchright3, log18;
+var import_playwright_core, log18;
 var init_pipeline_executor = __esm(() => {
   init_daemon();
   init_pipeline();
@@ -8629,7 +8654,7 @@ var init_pipeline_executor = __esm(() => {
   init_config();
   init_logger();
   init_cdp_relay();
-  import_patchright3 = require("patchright");
+  import_playwright_core = require("playwright-core");
   log18 = createLogger("iframer");
 });
 

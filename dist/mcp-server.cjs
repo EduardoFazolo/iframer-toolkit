@@ -263,19 +263,24 @@ ${this.readLogTail()}`);
     }
   }
   resolveRuntime() {
-    try {
-      const bunPath = require("child_process").execSync("which bun", { encoding: "utf8" }).trim();
-      const serverTs2 = import_path4.default.join(__dirname, "..", "..", "index.ts");
-      if (import_fs3.default.existsSync(serverTs2)) {
-        return { command: bunPath, args: ["run", serverTs2] };
-      }
-    } catch {}
+    const serverTs = import_path4.default.join(__dirname, "..", "..", "index.ts");
     const serverCjs = import_path4.default.join(__dirname, "..", "..", "dist", "local-server.cjs");
     if (import_fs3.default.existsSync(serverCjs)) {
       return { command: "node", args: [serverCjs] };
     }
-    const serverTs = import_path4.default.join(__dirname, "..", "..", "index.ts");
-    return { command: "node", args: ["--import", "tsx", serverTs] };
+    if (import_fs3.default.existsSync(serverTs)) {
+      try {
+        require.resolve("/Users/eduardoverona/tools/iframer-toolkit/node_modules/tsx/dist/loader.mjs");
+        return { command: "node", args: ["--import", "tsx", serverTs] };
+      } catch {}
+    }
+    try {
+      const bunPath = require("child_process").execSync("which bun", { encoding: "utf8" }).trim();
+      if (bunPath && import_fs3.default.existsSync(serverTs)) {
+        return { command: bunPath, args: ["run", serverTs] };
+      }
+    } catch {}
+    return { command: "node", args: [serverCjs] };
   }
   async restart() {
     const info = readServerInfo();

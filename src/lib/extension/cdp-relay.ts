@@ -60,12 +60,32 @@ export class CdpRelay {
 
     // 3) Listen for the Playwright CDP connection.
     await new Promise<void>((resolve, reject) => {
-      this.httpServer = http.createServer((_req, res) => {
+      this.httpServer = http.createServer((req, res) => {
+        // DevTools discovery endpoint: connectOverCDP(httpUrl) GETs /json/version/
+        // and reads webSocketDebuggerUrl. Serving it is the reliable path.
+        if (req.url === "/json/version" || req.url === "/json/version/") {
+          res.setHeader("content-type", "application/json");
+          res.end(
+            JSON.stringify({
+              Browser: "Chrome/iframer-extension",
+              "Protocol-Version": "1.3",
+              "User-Agent": "iframer-cdp-relay/1.0",
+              "V8-Version": "",
+              "WebKit-Version": "",
+              webSocketDebuggerUrl: `ws://127.0.0.1:${this.port}${this.path}`,
+            }),
+          );
+          return;
+        }
         res.writeHead(404);
         res.end();
       });
+      this.httpServer.on("upgrade", (req) => {
+        if (process.env.IFRAMER_RELAY_DEBUG) log.info(`[relay] upgrade request url=${req.url}`);
+      });
       this.wss = new WebSocketServer({ server: this.httpServer, path: this.path });
       this.wss.on("connection", (ws) => {
+        if (process.env.IFRAMER_RELAY_DEBUG) log.info(`[relay] playwright connected`);
         if (this.pw) {
           ws.close(4000, "relay already has a client");
           return;
@@ -86,8 +106,15 @@ export class CdpRelay {
     });
   }
 
+  /** WS URL (used by the low-level protocol test). */
   cdpEndpoint(): string {
     return `ws://127.0.0.1:${this.port}${this.path}`;
+  }
+
+  /** HTTP DevTools endpoint — pass THIS to connectOverCDP so it fetches
+   *  /json/version/ and discovers the ws url (the reliable path). */
+  httpEndpoint(): string {
+    return `http://127.0.0.1:${this.port}`;
   }
 
   private sendToPw(msg: Record<string, unknown>): void {
@@ -101,6 +128,7 @@ export class CdpRelay {
   }
 
   private async onPwMessage(data: Buffer): Promise<void> {
+    if (process.env.IFRAMER_RELAY_DEBUG) log.info(`[relay] raw pw msg (${data?.length ?? 0} bytes): ${data?.toString().slice(0, 120)}`);
     let msg: { id?: number; sessionId?: string; method?: string; params?: unknown };
     try {
       msg = JSON.parse(data.toString());
@@ -108,6 +136,7 @@ export class CdpRelay {
       return;
     }
     const { id, sessionId, method, params } = msg;
+    if (process.env.IFRAMER_RELAY_DEBUG) log.info(`[relay] pw→ ${method} (id=${id}, sess=${sessionId || "-"})`);
     if (!method) return;
     try {
       const result = await this.handleCdpCommand(method, params, sessionId);
