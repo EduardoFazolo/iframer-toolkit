@@ -1,3 +1,4 @@
+import { chromium } from "patchright";
 import type { Pipeline, PipelineResult, BrowserMode, SessionStartOptions } from "../types";
 import type { StorageBackend } from "../storage";
 import type { SessionData } from "../session/persistence";
@@ -14,6 +15,7 @@ import { capturePageState } from "../page-state";
 import { sessionStoreKey } from "./config";
 import { getErrorMessage } from "../errors";
 import { createLogger } from "../logger";
+import { CdpRelay } from "../extension/cdp-relay";
 
 const log = createLogger("iframer");
 
@@ -54,6 +56,14 @@ export class PipelineExecutor {
 
   private async executeInner(userId: string, token: string, pipeline: Pipeline): Promise<PipelineResult> {
     const opts = pipeline.options || {};
+
+    // Extension mode: drive the user's real tab through iframer's full pipeline
+    // via a CDP relay. Bypasses launch, escalation, and session inject/extract
+    // (the real profile owns auth).
+    if (typeof opts.extensionTabId === "number") {
+      return this.executeExtension(userId, token, pipeline, opts.extensionTabId, opts.clientId);
+    }
+
     const forcedMode = opts.mode;
     const autoEscalate = opts.autoEscalate !== false;
     const instanceId = opts.instanceId || DEFAULT_INSTANCE;
@@ -126,6 +136,83 @@ export class PipelineExecutor {
       return this.executeDocker(userId, token, pipeline);
     }
     return this.executeLocal(userId, token, pipeline, mode, instanceId);
+  }
+
+  /** Execute against the user's real Chrome tab via the extension CDP relay,
+   *  using the SAME PipelineRunner as every other mode. No session inject/extract
+   *  (the real profile owns auth) and no escalation (can't escalate a live tab). */
+  private async executeExtension(
+    userId: string,
+    token: string,
+    pipeline: Pipeline,
+    tabId: number,
+    clientId?: string,
+  ): Promise<PipelineResult> {
+    const startTime = Date.now();
+    const relay = new CdpRelay(tabId, clientId);
+    let browser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | undefined;
+    try {
+      await relay.start();
+      browser = await chromium.connectOverCDP(relay.cdpEndpoint(), { timeout: 30_000 });
+      const context = browser.contexts()[0];
+      if (!context) throw new Error("no CDP browser context for the tab");
+      let page = context.pages()[0];
+      if (!page) {
+        page = (await context
+          .waitForEvent("page", { timeout: 5_000 })
+          .catch(() => undefined)) as typeof page;
+      }
+      if (!page) throw new Error("no page available for the tab (is it still open?)");
+
+      const ctx = this.deps.refStore.makeContext(userId, token);
+      if (this.pendingElicitOtp) ctx.elicitOtp = this.pendingElicitOtp;
+      const runner = new PipelineRunner(ctx);
+      const result = await runner.run(page, pipeline);
+      this.deps.refStore.sync(userId, ctx);
+      result.modeUsed = "extension" as BrowserMode;
+
+      // Learn from the run — real profile owns cookies, so no sessionData.
+      if (result.ok) {
+        try {
+          extractKnowledgeFromRun(pipeline, result, null, "extension" as unknown as BrowserMode);
+        } catch (e) {
+          log.warn(`knowledge update failed: ${getErrorMessage(e)}`);
+        }
+      }
+      return result;
+    } catch (err) {
+      return {
+        ok: false,
+        completedSteps: 0,
+        totalSteps: pipeline.steps.length,
+        results: [],
+        finalState: { url: "", title: "" },
+        obstacles: [],
+        durationMs: Date.now() - startTime,
+        modeUsed: "extension" as BrowserMode,
+        error: {
+          failedAtStep: 0,
+          failedStep: pipeline.steps[0],
+          errorType: "action-failed",
+          message: `Extension mode failed: ${getErrorMessage(err)}`,
+          pageState: { url: "", title: "" },
+          suggestion:
+            "Ensure the iframer extension is connected (green dot) and the tab is still open. See chrome://extensions.",
+          retryable: true,
+        },
+      };
+    } finally {
+      try {
+        if (browser) await browser.close();
+      } catch {
+        /* connectOverCDP close just disconnects */
+      }
+      try {
+        await relay.stop();
+      } catch {
+        /* best-effort teardown */
+      }
+    }
   }
 
   /** Execute via Docker session-manager. */

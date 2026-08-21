@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "iframer",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Let iframer drive a Chrome tab you choose, on your real logged-in session.",
   "permissions": ["tabs", "scripting", "storage", "activeTab", "alarms", "webRequest", "identity", "identity.email", "debugger"],
   "host_permissions": ["<all_urls>", "http://127.0.0.1/*", "http://localhost/*"],

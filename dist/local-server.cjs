@@ -106,7 +106,7 @@ var import_fs11 = __toESM(require("fs"));
 var import_url2 = require("url");
 
 // src/api/routes.ts
-var import_patchright3 = require("patchright");
+var import_patchright4 = require("patchright");
 
 // src/lib/iframer.ts
 var import_path9 = __toESM(require("path"));
@@ -1773,6 +1773,9 @@ class RefStore {
       refs.nextRefId = ctx.nextRefId;
   }
 }
+
+// src/lib/execution/pipeline-executor.ts
+var import_patchright3 = require("patchright");
 
 // src/lib/actions/types.ts
 function failedStepResult(step, error, durationMs, stepIndex = -1) {
@@ -4907,8 +4910,407 @@ function extractKnowledgeFromRun(pipeline, result, sessionData, mode) {
   });
 }
 
+// src/lib/extension/cdp-relay.ts
+var import_http = __toESM(require("http"));
+var import_ws2 = require("ws");
+var import_crypto7 = require("crypto");
+
+// src/lib/extension/bridge.ts
+var import_ws = require("ws");
+var import_crypto5 = __toESM(require("crypto"));
+var REQUEST_TIMEOUT_MS = 180000;
+var HEARTBEAT_MS = 15000;
+
+class ExtensionBridge {
+  wss = null;
+  clients = new Map;
+  pending = new Map;
+  nextReqId = 1;
+  tabOwner = new Map;
+  cdpEventHandler = null;
+  attach(server) {
+    if (this.wss)
+      return;
+    this.wss = new import_ws.WebSocketServer({ server, path: "/extension/ws" });
+    this.wss.on("connection", (ws, req) => {
+      const token = new URL(req.url || "", "http://127.0.0.1").searchParams.get("token");
+      let expected = "";
+      try {
+        expected = getLocalToken();
+      } catch {
+        expected = "";
+      }
+      if (!expected || token !== expected) {
+        ws.close(4001, "unauthorized");
+        return;
+      }
+      const client = {
+        clientId: import_crypto5.default.randomUUID(),
+        socket: ws,
+        connectedAt: Date.now(),
+        tabs: [],
+        heartbeat: null
+      };
+      this.clients.set(client.clientId, client);
+      this.startHeartbeat(client);
+      ws.on("message", (data) => this.onMessage(client, data));
+      ws.on("close", () => this.dropClient(client, "socket closed"));
+      ws.on("error", () => {});
+    });
+  }
+  startHeartbeat(client) {
+    client.heartbeat = setInterval(() => {
+      this.send(client, "ping", {}).catch(() => {});
+    }, HEARTBEAT_MS);
+    client.heartbeat.unref?.();
+  }
+  dropClient(client, _reason) {
+    if (client.heartbeat)
+      clearInterval(client.heartbeat);
+    if (this.clients.get(client.clientId) === client) {
+      this.clients.delete(client.clientId);
+    }
+    for (const [tabId, owner] of this.tabOwner) {
+      if (owner === client.clientId)
+        this.tabOwner.delete(tabId);
+    }
+    for (const [id, p] of this.pending) {
+      if (p.clientId === client.clientId) {
+        clearTimeout(p.timer);
+        p.reject(new Error("Extension disconnected before responding."));
+        this.pending.delete(id);
+      }
+    }
+  }
+  onMessage(client, data) {
+    let msg;
+    try {
+      msg = JSON.parse(data.toString());
+    } catch {
+      return;
+    }
+    if (msg.type === "hello") {
+      client.profileId = msg.profileId;
+      client.profileName = msg.profileName;
+      client.extVersion = msg.extVersion;
+      if (msg.profileId) {
+        for (const other of this.clients.values()) {
+          if (other !== client && other.profileId === msg.profileId) {
+            try {
+              other.socket.close(4002, "replaced by same profile reconnect");
+            } catch {}
+          }
+        }
+      }
+      return;
+    }
+    if (msg.type === "cdp_event") {
+      const ev = msg;
+      if (typeof ev.tabId === "number" && this.cdpEventHandler) {
+        this.cdpEventHandler(client.clientId, ev);
+      }
+      return;
+    }
+    if (typeof msg.id !== "number")
+      return;
+    const p = this.pending.get(msg.id);
+    if (!p || p.clientId !== client.clientId)
+      return;
+    this.pending.delete(msg.id);
+    clearTimeout(p.timer);
+    if (msg.ok)
+      p.resolve(msg.result);
+    else
+      p.reject(new Error(msg.error || "Extension reported an error."));
+  }
+  send(client, type, payload) {
+    const ws = client.socket;
+    if (!ws || ws.readyState !== import_ws.WebSocket.OPEN) {
+      return Promise.reject(new Error("Extension client is not connected."));
+    }
+    const id = this.nextReqId++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`Extension did not respond within ${REQUEST_TIMEOUT_MS}ms (${type}).`));
+      }, REQUEST_TIMEOUT_MS);
+      this.pending.set(id, { clientId: client.clientId, resolve, reject, timer });
+      try {
+        ws.send(JSON.stringify({ id, type, ...payload }));
+      } catch (e) {
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      }
+    });
+  }
+  isConnected() {
+    return this.clients.size > 0;
+  }
+  hasClients() {
+    return this.clients.size > 0;
+  }
+  status() {
+    return {
+      connected: this.clients.size > 0,
+      clients: [...this.clients.values()].map((c) => ({
+        clientId: c.clientId,
+        profileId: c.profileId,
+        profileName: c.profileName,
+        extVersion: c.extVersion,
+        connectedAt: new Date(c.connectedAt).toISOString(),
+        tabCount: c.tabs.length
+      }))
+    };
+  }
+  async listTabs() {
+    const all = [];
+    this.tabOwner.clear();
+    await Promise.all([...this.clients.values()].map(async (client) => {
+      try {
+        const res = await this.send(client, "list_tabs", {}) || { tabs: [] };
+        const tagged = (res.tabs || []).map((t) => ({
+          ...t,
+          clientId: client.clientId,
+          profileId: client.profileId,
+          profileName: client.profileName
+        }));
+        client.tabs = tagged;
+        for (const t of tagged)
+          this.tabOwner.set(t.id, client.clientId);
+        all.push(...tagged);
+      } catch {
+        client.tabs = [];
+      }
+    }));
+    return { tabs: all, clients: this.status().clients };
+  }
+  async resolveClient(tabId, clientId) {
+    if (clientId) {
+      const c = this.clients.get(clientId);
+      if (!c)
+        throw new Error(`No connected extension with clientId ${clientId}.`);
+      return c;
+    }
+    if (this.clients.size === 0) {
+      throw new Error("No iframer extension is connected. Open Chrome, install/enable the iframer " + "extension, and pair it (paste the token, dot goes green).");
+    }
+    if (this.clients.size === 1) {
+      return [...this.clients.values()][0];
+    }
+    let owner = this.tabOwner.get(tabId);
+    if (!owner) {
+      await this.listTabs();
+      owner = this.tabOwner.get(tabId);
+    }
+    if (owner) {
+      const c = this.clients.get(owner);
+      if (c)
+        return c;
+    }
+    if (this.clients.size === 1) {
+      return [...this.clients.values()][0];
+    }
+    throw new Error(`Could not determine which browser profile owns tab ${tabId}. Call \`tabs\` to ` + `refresh the list, then pass the tab's clientId alongside tabId.`);
+  }
+  execute(tabId, steps, options = {}, clientId) {
+    return this.resolveClient(tabId, clientId).then((client) => this.send(client, "execute", { tabId, steps, options }));
+  }
+  setCdpEventHandler(fn) {
+    this.cdpEventHandler = fn;
+  }
+  async cdpAttach(tabId, clientId) {
+    const client = await this.resolveClient(tabId, clientId);
+    const res = await this.send(client, "cdp_attach", { tabId }) || { targetInfo: null };
+    return { targetInfo: res.targetInfo, clientId: client.clientId };
+  }
+  async cdpCommand(clientId, tabId, sessionId, method, params) {
+    const client = this.clients.get(clientId);
+    if (!client)
+      throw new Error(`CDP: client ${clientId} is gone.`);
+    return this.send(client, "cdp_command", { tabId, sessionId, method, params });
+  }
+  async cdpDetach(clientId, tabId) {
+    const client = this.clients.get(clientId);
+    if (!client)
+      return;
+    try {
+      await this.send(client, "cdp_detach", { tabId });
+    } catch {}
+  }
+}
+var extensionBridge = new ExtensionBridge;
+
+// src/lib/extension/cdp-relay.ts
+var log17 = createLogger("cdp-relay");
+
+class CdpRelay {
+  tabId;
+  clientId;
+  httpServer = null;
+  wss = null;
+  pw = null;
+  port = 0;
+  path = `/cdp/${import_crypto7.randomUUID()}`;
+  tabSessionId = "pw-tab-1";
+  targetInfo = null;
+  ownerClientId = "";
+  constructor(tabId, clientId) {
+    this.tabId = tabId;
+    this.clientId = clientId;
+  }
+  async start() {
+    const { targetInfo, clientId } = await extensionBridge.cdpAttach(this.tabId, this.clientId);
+    this.ownerClientId = clientId;
+    this.targetInfo = targetInfo || {
+      targetId: `iframer-${this.tabId}`,
+      type: "page",
+      title: "",
+      url: ""
+    };
+    extensionBridge.setCdpEventHandler((clientId2, ev) => {
+      if (clientId2 !== this.ownerClientId || ev.tabId !== this.tabId)
+        return;
+      this.sendToPw({
+        method: ev.method,
+        params: ev.params,
+        sessionId: ev.sessionId || this.tabSessionId
+      });
+    });
+    await new Promise((resolve, reject) => {
+      this.httpServer = import_http.default.createServer((_req, res) => {
+        res.writeHead(404);
+        res.end();
+      });
+      this.wss = new import_ws2.WebSocketServer({ server: this.httpServer, path: this.path });
+      this.wss.on("connection", (ws) => {
+        if (this.pw) {
+          ws.close(4000, "relay already has a client");
+          return;
+        }
+        this.pw = ws;
+        ws.on("message", (data) => this.onPwMessage(data));
+        ws.on("close", () => {
+          if (this.pw === ws)
+            this.pw = null;
+        });
+        ws.on("error", () => {});
+      });
+      this.httpServer.on("error", reject);
+      this.httpServer.listen(0, "127.0.0.1", () => {
+        const addr = this.httpServer.address();
+        this.port = typeof addr === "object" && addr ? addr.port : 0;
+        resolve();
+      });
+    });
+  }
+  cdpEndpoint() {
+    return `ws://127.0.0.1:${this.port}${this.path}`;
+  }
+  sendToPw(msg) {
+    if (this.pw && this.pw.readyState === import_ws2.WebSocket.OPEN) {
+      try {
+        this.pw.send(JSON.stringify(msg));
+      } catch {}
+    }
+  }
+  async onPwMessage(data) {
+    let msg;
+    try {
+      msg = JSON.parse(data.toString());
+    } catch {
+      return;
+    }
+    const { id, sessionId, method, params } = msg;
+    if (!method)
+      return;
+    try {
+      const result = await this.handleCdpCommand(method, params, sessionId);
+      if (typeof id === "number")
+        this.sendToPw({ id, sessionId, result });
+    } catch (e) {
+      if (typeof id === "number") {
+        this.sendToPw({ id, sessionId, error: { message: e instanceof Error ? e.message : String(e) } });
+      }
+    }
+  }
+  async handleCdpCommand(method, params, sessionId) {
+    switch (method) {
+      case "Browser.getVersion":
+        return { protocolVersion: "1.3", product: "Chrome/iframer-extension", userAgent: "iframer-cdp-relay/1.0" };
+      case "Browser.setDownloadBehavior":
+        return {};
+      case "Browser.close":
+        return {};
+      case "Target.setDiscoverTargets":
+        return {};
+      case "Target.getTargets":
+        return { targetInfos: this.targetInfo ? [{ ...this.targetInfo, attached: true }] : [] };
+      case "Target.setAutoAttach":
+        if (!sessionId) {
+          this.sendToPw({
+            method: "Target.attachedToTarget",
+            params: {
+              sessionId: this.tabSessionId,
+              targetInfo: { ...this.targetInfo, attached: true },
+              waitingForDebugger: false
+            }
+          });
+          return {};
+        }
+        break;
+      case "Target.getTargetInfo":
+        if (!sessionId)
+          return { targetInfo: this.targetInfo };
+        break;
+    }
+    const realSessionId = sessionId === this.tabSessionId ? undefined : sessionId;
+    return extensionBridge.cdpCommand(this.ownerClientId, this.tabId, realSessionId, method, params);
+  }
+  async stop() {
+    extensionBridge.setCdpEventHandler(null);
+    try {
+      this.wss?.clients.forEach((c) => {
+        try {
+          c.terminate();
+        } catch {}
+      });
+    } catch {}
+    try {
+      this.pw?.terminate();
+    } catch {}
+    this.pw = null;
+    const withTimeout = (fn) => new Promise((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (!done) {
+          done = true;
+          resolve();
+        }
+      };
+      try {
+        fn(finish);
+      } catch {
+        finish();
+      }
+      setTimeout(finish, 1000).unref?.();
+    });
+    if (this.wss)
+      await withTimeout((cb) => this.wss.close(cb));
+    if (this.httpServer)
+      await withTimeout((cb) => this.httpServer.close(cb));
+    this.wss = null;
+    this.httpServer = null;
+    try {
+      await extensionBridge.cdpDetach(this.ownerClientId, this.tabId);
+    } catch (e) {
+      log17.warn(`cdp detach failed: ${e}`);
+    }
+  }
+}
+
 // src/lib/execution/pipeline-executor.ts
-var log17 = createLogger("iframer");
+var log18 = createLogger("iframer");
 
 class PipelineExecutor {
   deps;
@@ -4926,6 +5328,9 @@ class PipelineExecutor {
   }
   async executeInner(userId, token, pipeline) {
     const opts = pipeline.options || {};
+    if (typeof opts.extensionTabId === "number") {
+      return this.executeExtension(userId, token, pipeline, opts.extensionTabId, opts.clientId);
+    }
     const forcedMode = opts.mode;
     const autoEscalate = opts.autoEscalate !== false;
     const instanceId = opts.instanceId || DEFAULT_INSTANCE;
@@ -4947,7 +5352,7 @@ class PipelineExecutor {
         this.deps.domainModes.recordFailure(domain, failedMode, result.error?.message || "blocked");
       const nextMode = this.deps.domainModes.getNextMode(failedMode, availableModes);
       if (nextMode) {
-        log17.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
+        log18.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
         if (failedMode !== "docker-headful") {
           await this.deps.daemon.stopMode(failedMode, instanceId);
         }
@@ -4960,7 +5365,7 @@ class PipelineExecutor {
           this.deps.domainModes.recordFailure(domain, nextMode, result.error?.message || "blocked");
           const thirdMode = this.deps.domainModes.getNextMode(nextMode, availableModes);
           if (thirdMode) {
-            log17.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
+            log18.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
             if (nextMode !== "docker-headful") {
               await this.deps.daemon.stopMode(nextMode, instanceId);
             }
@@ -4983,6 +5388,69 @@ class PipelineExecutor {
       return this.executeDocker(userId, token, pipeline);
     }
     return this.executeLocal(userId, token, pipeline, mode, instanceId);
+  }
+  async executeExtension(userId, token, pipeline, tabId, clientId) {
+    const startTime = Date.now();
+    const relay = new CdpRelay(tabId, clientId);
+    let browser;
+    try {
+      await relay.start();
+      browser = await import_patchright3.chromium.connectOverCDP(relay.cdpEndpoint(), { timeout: 30000 });
+      const context = browser.contexts()[0];
+      if (!context)
+        throw new Error("no CDP browser context for the tab");
+      let page = context.pages()[0];
+      if (!page) {
+        page = await context.waitForEvent("page", { timeout: 5000 }).catch(() => {
+          return;
+        });
+      }
+      if (!page)
+        throw new Error("no page available for the tab (is it still open?)");
+      const ctx = this.deps.refStore.makeContext(userId, token);
+      if (this.pendingElicitOtp)
+        ctx.elicitOtp = this.pendingElicitOtp;
+      const runner = new PipelineRunner(ctx);
+      const result = await runner.run(page, pipeline);
+      this.deps.refStore.sync(userId, ctx);
+      result.modeUsed = "extension";
+      if (result.ok) {
+        try {
+          extractKnowledgeFromRun(pipeline, result, null, "extension");
+        } catch (e) {
+          log18.warn(`knowledge update failed: ${getErrorMessage(e)}`);
+        }
+      }
+      return result;
+    } catch (err) {
+      return {
+        ok: false,
+        completedSteps: 0,
+        totalSteps: pipeline.steps.length,
+        results: [],
+        finalState: { url: "", title: "" },
+        obstacles: [],
+        durationMs: Date.now() - startTime,
+        modeUsed: "extension",
+        error: {
+          failedAtStep: 0,
+          failedStep: pipeline.steps[0],
+          errorType: "action-failed",
+          message: `Extension mode failed: ${getErrorMessage(err)}`,
+          pageState: { url: "", title: "" },
+          suggestion: "Ensure the iframer extension is connected (green dot) and the tab is still open. See chrome://extensions.",
+          retryable: true
+        }
+      };
+    } finally {
+      try {
+        if (browser)
+          await browser.close();
+      } catch {}
+      try {
+        await relay.stop();
+      } catch {}
+    }
   }
   async executeDocker(userId, token, pipeline) {
     let session = getSession(userId);
@@ -5075,7 +5543,7 @@ class PipelineExecutor {
         try {
           extractKnowledgeFromRun(pipeline, result, updatedSession, mode);
         } catch (err) {
-          log17.warn(`knowledge update failed: ${getErrorMessage(err)}`);
+          log18.warn(`knowledge update failed: ${getErrorMessage(err)}`);
         }
       }
       this.deps.refStore.sync(userId, ctx);
@@ -5323,7 +5791,7 @@ class CredentialStore {
 }
 
 // src/lib/iframer.ts
-var log18 = createLogger("iframer");
+var log19 = createLogger("iframer");
 var DEFAULT_SCREENSHOT_DIR = import_path9.default.join(import_path9.default.dirname(import_url.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/src/lib/iframer.ts")), "../../.screenshots");
 var DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
 var DEFAULT_STALE_TIMEOUT_MS3 = 20000;
@@ -5435,7 +5903,7 @@ class Iframer {
             sessionSaved = true;
           }
         } catch (err) {
-          log18.warn(`stopSession: failed to extract daemon state for ${inst.mode}::${inst.instanceId}: ${getErrorMessage(err)}`);
+          log19.warn(`stopSession: failed to extract daemon state for ${inst.mode}::${inst.instanceId}: ${getErrorMessage(err)}`);
         }
       }
     }
@@ -5537,199 +6005,6 @@ function errorHandler(err, _req, res, _next) {
   res.status(500).json({ ok: false, error: message });
 }
 
-// src/lib/extension/bridge.ts
-var import_ws = require("ws");
-var import_crypto9 = __toESM(require("crypto"));
-var REQUEST_TIMEOUT_MS = 180000;
-var HEARTBEAT_MS = 15000;
-
-class ExtensionBridge {
-  wss = null;
-  clients = new Map;
-  pending = new Map;
-  nextReqId = 1;
-  tabOwner = new Map;
-  attach(server) {
-    if (this.wss)
-      return;
-    this.wss = new import_ws.WebSocketServer({ server, path: "/extension/ws" });
-    this.wss.on("connection", (ws, req) => {
-      const token = new URL(req.url || "", "http://127.0.0.1").searchParams.get("token");
-      let expected = "";
-      try {
-        expected = getLocalToken();
-      } catch {
-        expected = "";
-      }
-      if (!expected || token !== expected) {
-        ws.close(4001, "unauthorized");
-        return;
-      }
-      const client = {
-        clientId: import_crypto9.default.randomUUID(),
-        socket: ws,
-        connectedAt: Date.now(),
-        tabs: [],
-        heartbeat: null
-      };
-      this.clients.set(client.clientId, client);
-      this.startHeartbeat(client);
-      ws.on("message", (data) => this.onMessage(client, data));
-      ws.on("close", () => this.dropClient(client, "socket closed"));
-      ws.on("error", () => {});
-    });
-  }
-  startHeartbeat(client) {
-    client.heartbeat = setInterval(() => {
-      this.send(client, "ping", {}).catch(() => {});
-    }, HEARTBEAT_MS);
-    client.heartbeat.unref?.();
-  }
-  dropClient(client, _reason) {
-    if (client.heartbeat)
-      clearInterval(client.heartbeat);
-    if (this.clients.get(client.clientId) === client) {
-      this.clients.delete(client.clientId);
-    }
-    for (const [tabId, owner] of this.tabOwner) {
-      if (owner === client.clientId)
-        this.tabOwner.delete(tabId);
-    }
-    for (const [id, p] of this.pending) {
-      if (p.clientId === client.clientId) {
-        clearTimeout(p.timer);
-        p.reject(new Error("Extension disconnected before responding."));
-        this.pending.delete(id);
-      }
-    }
-  }
-  onMessage(client, data) {
-    let msg;
-    try {
-      msg = JSON.parse(data.toString());
-    } catch {
-      return;
-    }
-    if (msg.type === "hello") {
-      client.profileId = msg.profileId;
-      client.profileName = msg.profileName;
-      client.extVersion = msg.extVersion;
-      if (msg.profileId) {
-        for (const other of this.clients.values()) {
-          if (other !== client && other.profileId === msg.profileId) {
-            try {
-              other.socket.close(4002, "replaced by same profile reconnect");
-            } catch {}
-          }
-        }
-      }
-      return;
-    }
-    if (typeof msg.id !== "number")
-      return;
-    const p = this.pending.get(msg.id);
-    if (!p || p.clientId !== client.clientId)
-      return;
-    this.pending.delete(msg.id);
-    clearTimeout(p.timer);
-    if (msg.ok)
-      p.resolve(msg.result);
-    else
-      p.reject(new Error(msg.error || "Extension reported an error."));
-  }
-  send(client, type, payload) {
-    const ws = client.socket;
-    if (!ws || ws.readyState !== import_ws.WebSocket.OPEN) {
-      return Promise.reject(new Error("Extension client is not connected."));
-    }
-    const id = this.nextReqId++;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`Extension did not respond within ${REQUEST_TIMEOUT_MS}ms (${type}).`));
-      }, REQUEST_TIMEOUT_MS);
-      this.pending.set(id, { clientId: client.clientId, resolve, reject, timer });
-      try {
-        ws.send(JSON.stringify({ id, type, ...payload }));
-      } catch (e) {
-        clearTimeout(timer);
-        this.pending.delete(id);
-        reject(e instanceof Error ? e : new Error(String(e)));
-      }
-    });
-  }
-  isConnected() {
-    return this.clients.size > 0;
-  }
-  hasClients() {
-    return this.clients.size > 0;
-  }
-  status() {
-    return {
-      connected: this.clients.size > 0,
-      clients: [...this.clients.values()].map((c) => ({
-        clientId: c.clientId,
-        profileId: c.profileId,
-        profileName: c.profileName,
-        extVersion: c.extVersion,
-        connectedAt: new Date(c.connectedAt).toISOString(),
-        tabCount: c.tabs.length
-      }))
-    };
-  }
-  async listTabs() {
-    const all = [];
-    this.tabOwner.clear();
-    await Promise.all([...this.clients.values()].map(async (client) => {
-      try {
-        const res = await this.send(client, "list_tabs", {}) || { tabs: [] };
-        const tagged = (res.tabs || []).map((t) => ({
-          ...t,
-          clientId: client.clientId,
-          profileId: client.profileId,
-          profileName: client.profileName
-        }));
-        client.tabs = tagged;
-        for (const t of tagged)
-          this.tabOwner.set(t.id, client.clientId);
-        all.push(...tagged);
-      } catch {
-        client.tabs = [];
-      }
-    }));
-    return { tabs: all, clients: this.status().clients };
-  }
-  async resolveClient(tabId, clientId) {
-    if (clientId) {
-      const c = this.clients.get(clientId);
-      if (!c)
-        throw new Error(`No connected extension with clientId ${clientId}.`);
-      return c;
-    }
-    if (this.clients.size === 0) {
-      throw new Error("No iframer extension is connected. Open Chrome, install/enable the iframer " + "extension, and pair it (paste the token, dot goes green).");
-    }
-    let owner = this.tabOwner.get(tabId);
-    if (!owner) {
-      await this.listTabs();
-      owner = this.tabOwner.get(tabId);
-    }
-    if (owner) {
-      const c = this.clients.get(owner);
-      if (c)
-        return c;
-    }
-    if (this.clients.size === 1) {
-      return [...this.clients.values()][0];
-    }
-    throw new Error(`Could not determine which browser profile owns tab ${tabId}. Call \`tabs\` to ` + `refresh the list, then pass the tab's clientId alongside tabId.`);
-  }
-  execute(tabId, steps, options = {}, clientId) {
-    return this.resolveClient(tabId, clientId).then((client) => this.send(client, "execute", { tabId, steps, options }));
-  }
-}
-var extensionBridge = new ExtensionBridge;
-
 // src/api/routes.ts
 var import_fs10 = __toESM(require("fs"));
 function auth(req) {
@@ -5743,7 +6018,7 @@ function registerRoutes(app) {
   app.get("/browsers", async (_req, res) => {
     const browsers = [];
     try {
-      const execPath = import_patchright3.chromium.executablePath();
+      const execPath = import_patchright4.chromium.executablePath();
       browsers.push({ name: "chromium", installed: import_fs10.default.existsSync(execPath), executablePath: execPath });
     } catch {
       browsers.push({ name: "chromium", installed: false, executablePath: null });
@@ -5927,20 +6202,11 @@ function registerRoutes(app) {
     if (!Array.isArray(steps) || steps.length === 0) {
       throw new AppError(400, "steps must be a non-empty array");
     }
-    const result = await extensionBridge.execute(tabId, steps, options || {}, clientId);
-    if (result?.capturedRequests?.length) {
-      try {
-        result.capturedApi = buildCapturedApi(result.capturedRequests);
-      } catch {}
-    }
-    delete result.capturedRequests;
-    if (result?.ok) {
-      try {
-        const hasNav = steps.some((s) => s?.type === "navigate");
-        const pipeline = hasNav ? { steps } : { steps: [{ type: "navigate", url: result.finalState?.url || "" }, ...steps] };
-        extractKnowledgeFromRun(pipeline, result, null, "extension");
-      } catch {}
-    }
+    const r = auth(req);
+    const result = await iframer.execute(r.userId, r.token, {
+      steps,
+      options: { ...options || {}, extensionTabId: tabId, clientId }
+    });
     res.json(result);
   }));
   app.post("/fetch", asyncHandler(async (req, res) => {

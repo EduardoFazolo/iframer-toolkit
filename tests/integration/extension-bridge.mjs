@@ -101,19 +101,9 @@ async function main() {
   const gmailWork = tabs.tabs?.find((t) => t.id === 7);
   check("tabs: tagged with profileName", gmailWork?.profileName === "Work", gmailWork);
 
-  // 5. execute routes by tabId to the correct profile
-  const r7 = await api("/extension/execute", { tabId: 7, steps: [{ type: "click", selector: "@e1" }] });
-  check("execute tab 7 routed to Work", r7.routedTo === "Work", r7);
-  check("execute: only Work received it", work.state.executed.includes(7) && !personal.state.executed.includes(7), { work: work.state.executed, personal: personal.state.executed });
-
-  const r100 = await api("/extension/execute", { tabId: 100, steps: [{ type: "click", selector: "@e1" }] });
-  check("execute tab 100 routed to Personal", r100.routedTo === "Personal", r100);
-
-  // 6. reverse-engineering capture through the multi-client path
-  const re = await api("/extension/execute", { tabId: 7, steps: [{ type: "click", selector: "@e1" }], options: { captureApi: true } });
-  const ep = re.capturedApi?.[0]?.endpoints?.[0];
-  check("RE: endpoint classified + curl", !!ep && ep.path === "/api/v1/threads/archive" && !!ep.functionName && !!ep.curl, ep);
-  check("RE: raw requests stripped", re.capturedRequests === undefined, Object.keys(re));
+  // 5. execute now routes through the real connectOverCDP pipeline (tested end-
+  // to-end in cdp-relay.mjs). Here we only assert the bridge-level contract: a
+  // missing tabId is rejected before any pipeline work.
 
   // 7. missing tabId → error
   const badExec = await api("/extension/execute", { steps: [{ type: "click", selector: "a" }] });
