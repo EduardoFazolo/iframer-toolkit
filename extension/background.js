@@ -229,6 +229,22 @@ async function tabState(tabId) {
   }
 }
 
+// Chrome discards (freezes) background tabs to save memory — a discarded tab has
+// no content process, so executeScript fails with a host-access error. Wake it
+// by reloading before we try to drive it.
+async function ensureAwake(tabId) {
+  try {
+    const t = await chrome.tabs.get(tabId);
+    if (t.discarded || t.status === "unloaded") {
+      await chrome.tabs.reload(tabId);
+      await waitForLoad(tabId);
+      await sleep(1500); // let the SPA boot after document load
+    }
+  } catch {
+    /* tab gone — the step will surface the real error */
+  }
+}
+
 async function waitForLoad(tabId, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -284,6 +300,7 @@ async function runPipeline(tabId, steps, options) {
   const started = Date.now();
   const results = [];
   const continueOnError = !!options.continueOnError;
+  await ensureAwake(tabId);
   const capturing = !!options.captureApi;
   if (capturing) capture.start(tabId);
 
