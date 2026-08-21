@@ -9,6 +9,15 @@ interface ExtensionTab {
   url: string;
   active: boolean;
   favIconUrl?: string;
+  clientId: string;
+  profileId?: string;
+  profileName?: string;
+}
+
+interface ClientInfo {
+  clientId: string;
+  profileName?: string;
+  tabCount: number;
 }
 
 /**
@@ -54,8 +63,11 @@ Returns: connected (bool), and tabs: [{ id, title, url, active, windowId }]. If 
         const data = (await localApiPost("/extension/tabs", {})) as {
           ok?: boolean;
           tabs?: ExtensionTab[];
+          clients?: ClientInfo[];
         };
         let tabs = data.tabs || [];
+        const clients = data.clients || [];
+        const multiProfile = clients.length > 1;
 
         if (filter) {
           const f = filter.toLowerCase();
@@ -77,13 +89,26 @@ Returns: connected (bool), and tabs: [{ id, title, url, active, windowId }]. If 
           };
         }
 
-        const lines = [`Connected. ${tabs.length} tab${tabs.length > 1 ? "s" : ""}${filter ? ` matching "${filter}"` : ""}:`, ""];
+        const profiles = clients.map((c) => c.profileName || c.clientId.slice(0, 8)).join(", ");
+        const lines = [
+          `Connected: ${clients.length} profile${clients.length > 1 ? "s" : ""}${profiles ? ` (${profiles})` : ""}.`,
+          `${tabs.length} tab${tabs.length > 1 ? "s" : ""}${filter ? ` matching "${filter}"` : ""}:`,
+          "",
+        ];
         for (const t of tabs) {
-          lines.push(`  [id ${t.id}]${t.active ? " (active)" : ""} ${t.title}`);
+          const prof = multiProfile ? `  «${t.profileName || t.clientId.slice(0, 8)}»` : "";
+          lines.push(`  [id ${t.id}]${t.active ? " (active)" : ""}${prof} ${t.title}`);
           lines.push(`         ${t.url}`);
+          if (multiProfile) lines.push(`         clientId: ${t.clientId}`);
         }
         lines.push("");
         lines.push('To drive one: execute with options.mode="extension", options.tabId=<id>.');
+        if (multiProfile) {
+          lines.push(
+            "Multiple profiles are connected — if two tabs share a title, also pass options.clientId " +
+              "(shown as «profile» above maps to a clientId) so the right profile is driven.",
+          );
+        }
 
         return { content: [{ type: "text" as const, text: lines.join("\n") }] };
       } catch (e: unknown) {

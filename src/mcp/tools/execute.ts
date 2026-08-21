@@ -49,6 +49,7 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
         autoEscalate: z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)"),
         instanceId: z.string().optional().describe("Run in a named parallel browser within this session (default: 'default'). Use distinct ids to drive several browsers at once, e.g. one per account — each keeps its own login/session state."),
         tabId: z.number().optional().describe("Only with mode='extension': the id of the real Chrome tab to drive (from the `tabs` tool)."),
+        clientId: z.string().optional().describe("Only with mode='extension', and only needed when several profiles/browsers are connected and a tab is ambiguous: the clientId of the profile that owns the tab (from the `tabs` tool)."),
       }).optional(),
     },
     async (params) => {
@@ -66,6 +67,7 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
           }
           const extResult = await localApiPost<PipelineResult>("/extension/execute", {
             tabId,
+            clientId: params.options?.clientId,
             steps: params.steps,
             options: params.options,
           });

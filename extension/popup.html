@@ -25,6 +25,17 @@
     <div class="status" id="status">Checking…</div>
 
     <div class="row">
+      <label for="label">This profile's name</label>
+      <input id="label" type="text" placeholder="e.g. Work, Personal" />
+      <div class="actions" style="margin-top:6px;">
+        <button id="savelabel" class="secondary">Save name</button>
+      </div>
+      <div class="muted" id="profinfo" style="margin-top:4px;"></div>
+    </div>
+
+    <hr />
+
+    <div class="row">
       <label for="token">Pairing token</label>
       <input id="token" type="password" placeholder="paste from ~/.iframer/secret" />
       <div class="muted" style="margin-top:4px;">Run <code>cat ~/.iframer/secret</code> (or use your IFRAMER_SECRET) and paste it here.</div>

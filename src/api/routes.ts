@@ -243,12 +243,12 @@ export function registerRoutes(app: Express): void {
   }));
 
   app.post("/extension/execute", asyncHandler(async (req: Request, res: Response) => {
-    const { tabId, steps, options } = req.body || {};
+    const { tabId, steps, options, clientId } = req.body || {};
     if (typeof tabId !== "number") throw new AppError(400, "tabId (number) is required");
     if (!Array.isArray(steps) || steps.length === 0) {
       throw new AppError(400, "steps must be a non-empty array");
     }
-    const result = (await extensionBridge.execute(tabId, steps, options || {})) as PipelineResult & {
+    const result = (await extensionBridge.execute(tabId, steps, options || {}, clientId)) as PipelineResult & {
       capturedRequests?: CapturedRequest[];
     };
 

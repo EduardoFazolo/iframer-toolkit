@@ -1,24 +1,23 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server as HttpServer } from "http";
+import crypto from "crypto";
 import { getLocalToken } from "../auth/crypto";
 
-// ─── Extension bridge ───────────────────────────────────────────────
+// ─── Extension bridge (multi-client) ────────────────────────────────
 //
-// The banner-free "run in my real Chrome tab" transport. An MV3 extension
-// living in the user's browser dials OUT to this server (extensions cannot
-// listen on a port, so the server is always the WebSocket server and the
-// extension is the client). iframer stays the brain: it holds the step
-// pipeline and vocabulary; the extension is a thin executor that runs steps
-// in the tab and streams results back.
+// The banner-free "run in my real Chrome tab" transport. Any number of MV3
+// extensions — across Chrome profiles or browsers — dial OUT to this server
+// (extensions can't listen on a port, so the server is always the WS server).
+// Each connection is a CLIENT that identifies itself (profile id/name, version)
+// and reports its tabs. The server keeps them all separate and routes every
+// tabs/execute call to the client that owns the target tab.
 //
-// Auth: the extension must present ?token=<getLocalToken()> on the handshake.
-// That is the same machine-local secret the CLI/MCP already share, so the
-// user pastes it once into the extension popup. Bound to 127.0.0.1 by the
-// HTTP server this attaches to — never exposed off-box.
+// Auth: each client presents ?token=<getLocalToken()> on the handshake.
+// Bound to 127.0.0.1 by the HTTP server this attaches to.
 
 const REQUEST_TIMEOUT_MS = 180_000;
-// App-level heartbeat: an open WebSocket receiving messages keeps an MV3
-// service worker alive (Chrome 116+). Ping well under the ~30s idle-kill.
+// App-level heartbeat keeps an MV3 service worker alive (Chrome 116+) and
+// detects dead sockets. Well under the ~30s idle-kill.
 const HEARTBEAT_MS = 15_000;
 
 export interface ExtensionTab {
@@ -28,9 +27,35 @@ export interface ExtensionTab {
   url: string;
   active: boolean;
   favIconUrl?: string;
+  // Tagged in by the server so callers can disambiguate identical tabs across
+  // profiles (e.g. Slack open in both "Work" and "Personal").
+  clientId: string;
+  profileId?: string;
+  profileName?: string;
+}
+
+export interface ClientInfo {
+  clientId: string;
+  profileId?: string;
+  profileName?: string;
+  extVersion?: string;
+  connectedAt: string;
+  tabCount: number;
+}
+
+interface Client {
+  clientId: string;
+  socket: WebSocket;
+  profileId?: string;
+  profileName?: string;
+  extVersion?: string;
+  connectedAt: number;
+  tabs: ExtensionTab[]; // last-known tabs (refreshed on every listTabs)
+  heartbeat: ReturnType<typeof setInterval> | null;
 }
 
 interface Pending {
+  clientId: string;
   resolve: (value: unknown) => void;
   reject: (err: Error) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -40,14 +65,11 @@ type OutboundType = "list_tabs" | "execute" | "ping";
 
 class ExtensionBridge {
   private wss: WebSocketServer | null = null;
-  // The most-recently-connected extension. v1 assumes a single browser; the
-  // last live socket wins so a reconnect (service-worker restart) transparently
-  // replaces a stale one.
-  private socket: WebSocket | null = null;
-  private connectedAt: number | null = null;
-  private nextId = 1;
+  private clients = new Map<string, Client>();
   private pending = new Map<number, Pending>();
-  private heartbeat: ReturnType<typeof setInterval> | null = null;
+  private nextReqId = 1;
+  // tabId -> clientId, refreshed on every listTabs() so execute can route.
+  private tabOwner = new Map<number, string>();
 
   /** Attach the WS server to the already-listening HTTP server. Idempotent. */
   attach(server: HttpServer): void {
@@ -55,8 +77,6 @@ class ExtensionBridge {
 
     this.wss = new WebSocketServer({ server, path: "/extension/ws" });
     this.wss.on("connection", (ws: WebSocket, req) => {
-      // Validate the pairing token from the query string. Browser WebSocket
-      // clients cannot set custom headers, so the token rides in the URL.
       const token = new URL(req.url || "", "http://127.0.0.1").searchParams.get("token");
       let expected = "";
       try {
@@ -69,90 +89,109 @@ class ExtensionBridge {
         return;
       }
 
-      // Newest connection wins. Drop any previous socket cleanly.
-      if (this.socket && this.socket !== ws) {
-        try {
-          this.socket.close(4000, "replaced by newer connection");
-        } catch {
-          /* already gone */
-        }
-      }
-      this.socket = ws;
-      this.connectedAt = Date.now();
-      this.startHeartbeat();
+      const client: Client = {
+        clientId: crypto.randomUUID(),
+        socket: ws,
+        connectedAt: Date.now(),
+        tabs: [],
+        heartbeat: null,
+      };
+      this.clients.set(client.clientId, client);
+      this.startHeartbeat(client);
 
-      ws.on("message", (data: Buffer) => this.onMessage(ws, data));
-      ws.on("close", () => {
-        if (this.socket === ws) {
-          this.socket = null;
-          this.connectedAt = null;
-          this.stopHeartbeat();
-          // Fail any in-flight requests — the executor is gone.
-          for (const [, p] of this.pending) {
-            clearTimeout(p.timer);
-            p.reject(new Error("Extension disconnected before responding."));
-          }
-          this.pending.clear();
-        }
-      });
+      ws.on("message", (data: Buffer) => this.onMessage(client, data));
+      ws.on("close", () => this.dropClient(client, "socket closed"));
       ws.on("error", () => {
-        /* close handler does the cleanup */
+        /* close handler cleans up */
       });
     });
   }
 
-  private startHeartbeat(): void {
-    this.stopHeartbeat();
-    this.heartbeat = setInterval(() => {
-      // Fire-and-forget; the extension replies pong. Failures just mean the
-      // socket is gone, which the close handler already cleans up.
-      this.send("ping", {}).catch(() => {});
+  private startHeartbeat(client: Client): void {
+    client.heartbeat = setInterval(() => {
+      this.send(client, "ping", {}).catch(() => {});
     }, HEARTBEAT_MS);
-    this.heartbeat.unref?.();
+    client.heartbeat.unref?.();
   }
 
-  private stopHeartbeat(): void {
-    if (this.heartbeat) {
-      clearInterval(this.heartbeat);
-      this.heartbeat = null;
+  private dropClient(client: Client, _reason: string): void {
+    if (client.heartbeat) clearInterval(client.heartbeat);
+    if (this.clients.get(client.clientId) === client) {
+      this.clients.delete(client.clientId);
+    }
+    // Forget any tabs this client owned.
+    for (const [tabId, owner] of this.tabOwner) {
+      if (owner === client.clientId) this.tabOwner.delete(tabId);
+    }
+    // Fail this client's in-flight requests.
+    for (const [id, p] of this.pending) {
+      if (p.clientId === client.clientId) {
+        clearTimeout(p.timer);
+        p.reject(new Error("Extension disconnected before responding."));
+        this.pending.delete(id);
+      }
     }
   }
 
-  private onMessage(ws: WebSocket, data: Buffer): void {
-    if (ws !== this.socket) return;
-    let msg: { id?: number; ok?: boolean; result?: unknown; error?: string };
+  private onMessage(client: Client, data: Buffer): void {
+    let msg: {
+      id?: number;
+      ok?: boolean;
+      result?: unknown;
+      error?: string;
+      type?: string;
+      profileId?: string;
+      profileName?: string;
+      extVersion?: string;
+    };
     try {
       msg = JSON.parse(data.toString());
     } catch {
       return;
     }
+
+    // Event: the client introduces itself. De-dupe by profileId so a service-
+    // worker restart replaces its own stale connection instead of piling up.
+    if (msg.type === "hello") {
+      client.profileId = msg.profileId;
+      client.profileName = msg.profileName;
+      client.extVersion = msg.extVersion;
+      if (msg.profileId) {
+        for (const other of this.clients.values()) {
+          if (other !== client && other.profileId === msg.profileId) {
+            try {
+              other.socket.close(4002, "replaced by same profile reconnect");
+            } catch {
+              /* already gone */
+            }
+          }
+        }
+      }
+      return;
+    }
+
+    // Otherwise it's a response to one of our requests.
     if (typeof msg.id !== "number") return;
     const p = this.pending.get(msg.id);
-    if (!p) return;
+    if (!p || p.clientId !== client.clientId) return;
     this.pending.delete(msg.id);
     clearTimeout(p.timer);
     if (msg.ok) p.resolve(msg.result);
     else p.reject(new Error(msg.error || "Extension reported an error."));
   }
 
-  private send<T>(type: OutboundType, payload: Record<string, unknown>): Promise<T> {
-    const ws = this.socket;
+  private send<T>(client: Client, type: OutboundType, payload: Record<string, unknown>): Promise<T> {
+    const ws = client.socket;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      return Promise.reject(
-        new Error(
-          "No iframer extension is connected. Open Chrome, install the iframer " +
-            "extension, click its icon on the tab you want to drive, and make sure " +
-            "it shows 'connected'.",
-        ),
-      );
+      return Promise.reject(new Error("Extension client is not connected."));
     }
-    const id = this.nextId++;
+    const id = this.nextReqId++;
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`Extension did not respond within ${REQUEST_TIMEOUT_MS}ms (${type}).`));
       }, REQUEST_TIMEOUT_MS);
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
+      this.pending.set(id, { clientId: client.clientId, resolve: resolve as (v: unknown) => void, reject, timer });
       try {
         ws.send(JSON.stringify({ id, type, ...payload }));
       } catch (e) {
@@ -164,22 +203,96 @@ class ExtensionBridge {
   }
 
   isConnected(): boolean {
-    return !!this.socket && this.socket.readyState === WebSocket.OPEN;
+    return this.clients.size > 0;
   }
 
-  status(): { connected: boolean; connectedAt: string | null } {
+  hasClients(): boolean {
+    return this.clients.size > 0;
+  }
+
+  status(): { connected: boolean; clients: ClientInfo[] } {
     return {
-      connected: this.isConnected(),
-      connectedAt: this.connectedAt ? new Date(this.connectedAt).toISOString() : null,
+      connected: this.clients.size > 0,
+      clients: [...this.clients.values()].map((c) => ({
+        clientId: c.clientId,
+        profileId: c.profileId,
+        profileName: c.profileName,
+        extVersion: c.extVersion,
+        connectedAt: new Date(c.connectedAt).toISOString(),
+        tabCount: c.tabs.length,
+      })),
     };
   }
 
-  listTabs(): Promise<{ tabs: ExtensionTab[] }> {
-    return this.send<{ tabs: ExtensionTab[] }>("list_tabs", {});
+  /** List tabs across ALL connected clients, tagged with profile/client, and
+   *  refresh the tabId → client ownership map used for routing. */
+  async listTabs(): Promise<{ tabs: ExtensionTab[]; clients: ClientInfo[] }> {
+    const all: ExtensionTab[] = [];
+    this.tabOwner.clear();
+
+    await Promise.all(
+      [...this.clients.values()].map(async (client) => {
+        try {
+          const res = (await this.send<{ tabs: ExtensionTab[] }>(client, "list_tabs", {})) || { tabs: [] };
+          const tagged = (res.tabs || []).map((t) => ({
+            ...t,
+            clientId: client.clientId,
+            profileId: client.profileId,
+            profileName: client.profileName,
+          }));
+          client.tabs = tagged;
+          for (const t of tagged) this.tabOwner.set(t.id, client.clientId);
+          all.push(...tagged);
+        } catch {
+          client.tabs = [];
+        }
+      }),
+    );
+
+    return { tabs: all, clients: this.status().clients };
   }
 
-  execute(tabId: number, steps: unknown[], options: Record<string, unknown> = {}): Promise<unknown> {
-    return this.send("execute", { tabId, steps, options });
+  /** Resolve which client should run a tab. Prefer an explicit clientId, else
+   *  the ownership map, refreshing once if unknown. Errors clearly on ambiguity. */
+  private async resolveClient(tabId: number, clientId?: string): Promise<Client> {
+    if (clientId) {
+      const c = this.clients.get(clientId);
+      if (!c) throw new Error(`No connected extension with clientId ${clientId}.`);
+      return c;
+    }
+    if (this.clients.size === 0) {
+      throw new Error(
+        "No iframer extension is connected. Open Chrome, install/enable the iframer " +
+          "extension, and pair it (paste the token, dot goes green).",
+      );
+    }
+    let owner = this.tabOwner.get(tabId);
+    if (!owner) {
+      await this.listTabs(); // refresh ownership
+      owner = this.tabOwner.get(tabId);
+    }
+    if (owner) {
+      const c = this.clients.get(owner);
+      if (c) return c;
+    }
+    if (this.clients.size === 1) {
+      return [...this.clients.values()][0];
+    }
+    throw new Error(
+      `Could not determine which browser profile owns tab ${tabId}. Call \`tabs\` to ` +
+        `refresh the list, then pass the tab's clientId alongside tabId.`,
+    );
+  }
+
+  execute(
+    tabId: number,
+    steps: unknown[],
+    options: Record<string, unknown> = {},
+    clientId?: string,
+  ): Promise<unknown> {
+    return this.resolveClient(tabId, clientId).then((client) =>
+      this.send(client, "execute", { tabId, steps, options }),
+    );
   }
 }
 

@@ -5516,16 +5516,16 @@ function errorHandler(err, _req, res, _next) {
 
 // src/lib/extension/bridge.ts
 var import_ws = require("ws");
+var import_crypto9 = __toESM(require("crypto"));
 var REQUEST_TIMEOUT_MS = 180000;
 var HEARTBEAT_MS = 15000;
 
 class ExtensionBridge {
   wss = null;
-  socket = null;
-  connectedAt = null;
-  nextId = 1;
+  clients = new Map;
   pending = new Map;
-  heartbeat = null;
+  nextReqId = 1;
+  tabOwner = new Map;
   attach(server) {
     if (this.wss)
       return;
@@ -5542,56 +5542,70 @@ class ExtensionBridge {
         ws.close(4001, "unauthorized");
         return;
       }
-      if (this.socket && this.socket !== ws) {
-        try {
-          this.socket.close(4000, "replaced by newer connection");
-        } catch {}
-      }
-      this.socket = ws;
-      this.connectedAt = Date.now();
-      this.startHeartbeat();
-      ws.on("message", (data) => this.onMessage(ws, data));
-      ws.on("close", () => {
-        if (this.socket === ws) {
-          this.socket = null;
-          this.connectedAt = null;
-          this.stopHeartbeat();
-          for (const [, p] of this.pending) {
-            clearTimeout(p.timer);
-            p.reject(new Error("Extension disconnected before responding."));
-          }
-          this.pending.clear();
-        }
-      });
+      const client = {
+        clientId: import_crypto9.default.randomUUID(),
+        socket: ws,
+        connectedAt: Date.now(),
+        tabs: [],
+        heartbeat: null
+      };
+      this.clients.set(client.clientId, client);
+      this.startHeartbeat(client);
+      ws.on("message", (data) => this.onMessage(client, data));
+      ws.on("close", () => this.dropClient(client, "socket closed"));
       ws.on("error", () => {});
     });
   }
-  startHeartbeat() {
-    this.stopHeartbeat();
-    this.heartbeat = setInterval(() => {
-      this.send("ping", {}).catch(() => {});
+  startHeartbeat(client) {
+    client.heartbeat = setInterval(() => {
+      this.send(client, "ping", {}).catch(() => {});
     }, HEARTBEAT_MS);
-    this.heartbeat.unref?.();
+    client.heartbeat.unref?.();
   }
-  stopHeartbeat() {
-    if (this.heartbeat) {
-      clearInterval(this.heartbeat);
-      this.heartbeat = null;
+  dropClient(client, _reason) {
+    if (client.heartbeat)
+      clearInterval(client.heartbeat);
+    if (this.clients.get(client.clientId) === client) {
+      this.clients.delete(client.clientId);
+    }
+    for (const [tabId, owner] of this.tabOwner) {
+      if (owner === client.clientId)
+        this.tabOwner.delete(tabId);
+    }
+    for (const [id, p] of this.pending) {
+      if (p.clientId === client.clientId) {
+        clearTimeout(p.timer);
+        p.reject(new Error("Extension disconnected before responding."));
+        this.pending.delete(id);
+      }
     }
   }
-  onMessage(ws, data) {
-    if (ws !== this.socket)
-      return;
+  onMessage(client, data) {
     let msg;
     try {
       msg = JSON.parse(data.toString());
     } catch {
       return;
     }
+    if (msg.type === "hello") {
+      client.profileId = msg.profileId;
+      client.profileName = msg.profileName;
+      client.extVersion = msg.extVersion;
+      if (msg.profileId) {
+        for (const other of this.clients.values()) {
+          if (other !== client && other.profileId === msg.profileId) {
+            try {
+              other.socket.close(4002, "replaced by same profile reconnect");
+            } catch {}
+          }
+        }
+      }
+      return;
+    }
     if (typeof msg.id !== "number")
       return;
     const p = this.pending.get(msg.id);
-    if (!p)
+    if (!p || p.clientId !== client.clientId)
       return;
     this.pending.delete(msg.id);
     clearTimeout(p.timer);
@@ -5600,18 +5614,18 @@ class ExtensionBridge {
     else
       p.reject(new Error(msg.error || "Extension reported an error."));
   }
-  send(type, payload) {
-    const ws = this.socket;
+  send(client, type, payload) {
+    const ws = client.socket;
     if (!ws || ws.readyState !== import_ws.WebSocket.OPEN) {
-      return Promise.reject(new Error("No iframer extension is connected. Open Chrome, install the iframer " + "extension, click its icon on the tab you want to drive, and make sure " + "it shows 'connected'."));
+      return Promise.reject(new Error("Extension client is not connected."));
     }
-    const id = this.nextId++;
+    const id = this.nextReqId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`Extension did not respond within ${REQUEST_TIMEOUT_MS}ms (${type}).`));
       }, REQUEST_TIMEOUT_MS);
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { clientId: client.clientId, resolve, reject, timer });
       try {
         ws.send(JSON.stringify({ id, type, ...payload }));
       } catch (e) {
@@ -5622,19 +5636,73 @@ class ExtensionBridge {
     });
   }
   isConnected() {
-    return !!this.socket && this.socket.readyState === import_ws.WebSocket.OPEN;
+    return this.clients.size > 0;
+  }
+  hasClients() {
+    return this.clients.size > 0;
   }
   status() {
     return {
-      connected: this.isConnected(),
-      connectedAt: this.connectedAt ? new Date(this.connectedAt).toISOString() : null
+      connected: this.clients.size > 0,
+      clients: [...this.clients.values()].map((c) => ({
+        clientId: c.clientId,
+        profileId: c.profileId,
+        profileName: c.profileName,
+        extVersion: c.extVersion,
+        connectedAt: new Date(c.connectedAt).toISOString(),
+        tabCount: c.tabs.length
+      }))
     };
   }
-  listTabs() {
-    return this.send("list_tabs", {});
+  async listTabs() {
+    const all = [];
+    this.tabOwner.clear();
+    await Promise.all([...this.clients.values()].map(async (client) => {
+      try {
+        const res = await this.send(client, "list_tabs", {}) || { tabs: [] };
+        const tagged = (res.tabs || []).map((t) => ({
+          ...t,
+          clientId: client.clientId,
+          profileId: client.profileId,
+          profileName: client.profileName
+        }));
+        client.tabs = tagged;
+        for (const t of tagged)
+          this.tabOwner.set(t.id, client.clientId);
+        all.push(...tagged);
+      } catch {
+        client.tabs = [];
+      }
+    }));
+    return { tabs: all, clients: this.status().clients };
   }
-  execute(tabId, steps, options = {}) {
-    return this.send("execute", { tabId, steps, options });
+  async resolveClient(tabId, clientId) {
+    if (clientId) {
+      const c = this.clients.get(clientId);
+      if (!c)
+        throw new Error(`No connected extension with clientId ${clientId}.`);
+      return c;
+    }
+    if (this.clients.size === 0) {
+      throw new Error("No iframer extension is connected. Open Chrome, install/enable the iframer " + "extension, and pair it (paste the token, dot goes green).");
+    }
+    let owner = this.tabOwner.get(tabId);
+    if (!owner) {
+      await this.listTabs();
+      owner = this.tabOwner.get(tabId);
+    }
+    if (owner) {
+      const c = this.clients.get(owner);
+      if (c)
+        return c;
+    }
+    if (this.clients.size === 1) {
+      return [...this.clients.values()][0];
+    }
+    throw new Error(`Could not determine which browser profile owns tab ${tabId}. Call \`tabs\` to ` + `refresh the list, then pass the tab's clientId alongside tabId.`);
+  }
+  execute(tabId, steps, options = {}, clientId) {
+    return this.resolveClient(tabId, clientId).then((client) => this.send(client, "execute", { tabId, steps, options }));
   }
 }
 var extensionBridge = new ExtensionBridge;
@@ -5830,13 +5898,13 @@ function registerRoutes(app) {
     res.json({ ok: true, ...result });
   }));
   app.post("/extension/execute", asyncHandler(async (req, res) => {
-    const { tabId, steps, options } = req.body || {};
+    const { tabId, steps, options, clientId } = req.body || {};
     if (typeof tabId !== "number")
       throw new AppError(400, "tabId (number) is required");
     if (!Array.isArray(steps) || steps.length === 0) {
       throw new AppError(400, "steps must be a non-empty array");
     }
-    const result = await extensionBridge.execute(tabId, steps, options || {});
+    const result = await extensionBridge.execute(tabId, steps, options || {}, clientId);
     if (result?.capturedRequests?.length) {
       try {
         result.capturedApi = buildCapturedApi(result.capturedRequests);
@@ -5949,7 +6017,7 @@ var reapTimer = setInterval(async () => {
     await reapOrphanBrowsers();
   } catch {}
   const idleMs = Date.now() - lastActivity;
-  if (idleMs > IDLE_EXIT_MS && !iframer.browserHealth().alive) {
+  if (idleMs > IDLE_EXIT_MS && !iframer.browserHealth().alive && !extensionBridge.hasClients()) {
     gracefulShutdown(`idle for ${Math.round(idleMs / 60000)}min with no browsers`);
   }
 }, REAP_INTERVAL_MS);

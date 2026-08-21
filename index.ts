@@ -111,7 +111,7 @@ const reapTimer = setInterval(async () => {
   // Idle retirement: no browsers alive and no HTTP traffic for a while —
   // exit cleanly. The next MCP tool call spawns a fresh server.
   const idleMs = Date.now() - lastActivity;
-  if (idleMs > IDLE_EXIT_MS && !iframer.browserHealth().alive) {
+  if (idleMs > IDLE_EXIT_MS && !iframer.browserHealth().alive && !extensionBridge.hasClients()) {
     gracefulShutdown(`idle for ${Math.round(idleMs / 60000)}min with no browsers`);
   }
 }, REAP_INTERVAL_MS);
