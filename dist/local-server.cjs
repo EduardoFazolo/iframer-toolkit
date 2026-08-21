@@ -2058,7 +2058,29 @@ async function scroll(page, step) {
   await page.evaluate((dy) => window.scrollBy(0, dy || document.body.scrollHeight), step.deltaY ?? 0);
 }
 async function keyboard(page, step) {
-  await page.keyboard.press(step.key);
+  const mods = [
+    step.meta ? "Meta" : null,
+    step.ctrl ? "Control" : null,
+    step.shift ? "Shift" : null,
+    step.alt ? "Alt" : null
+  ].filter(Boolean);
+  await page.keyboard.press(mods.length ? `${mods.join("+")}+${step.key}` : step.key);
+}
+async function read(page, step, ctx) {
+  const selector = step.selector ? resolveSelector(step.selector, ctx) : "body";
+  const raw = await page.evaluate((sel) => {
+    const el = sel === "body" ? document.body : document.querySelector(sel);
+    if (!el)
+      return null;
+    return el.innerText || el.textContent || "";
+  }, selector);
+  if (raw == null)
+    throw new Error(`read: no element for selector ${selector}`);
+  const text = raw.replace(/\n{3,}/g, `
+
+`).trim();
+  const max = step.maxChars || 20000;
+  return { text: text.slice(0, max), truncated: text.length > max };
 }
 async function typeCode(page, step, ctx) {
   const code = String(step.value || "");
@@ -3640,6 +3662,7 @@ var registry = {
   "wait-for": waitFor,
   scroll,
   keyboard,
+  read,
   "type-code": typeCode,
   find,
   screenshot,

@@ -230,6 +230,12 @@ export function formatExecuteResult(data: PipelineResult): string[] {
         lines.push(`\n--- Annotated screenshot refs ---`);
         lines.push(res.refs);
       }
+    } else if (r.step.type === "read") {
+      const res = r.result as { text?: string; truncated?: boolean } | undefined;
+      if (res?.text !== undefined) {
+        lines.push(`\n--- Read (step ${r.stepIndex}${res.truncated ? ", truncated" : ""}) ---`);
+        lines.push(res.text);
+      }
     } else if (r.result !== undefined && r.result !== null) {
       lines.push(`\nstep ${r.stepIndex}: ${JSON.stringify(r.result)}`);
     }
