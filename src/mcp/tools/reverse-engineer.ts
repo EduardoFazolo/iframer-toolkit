@@ -63,6 +63,7 @@ The outputDir defaults to ./<domain>/. Ask the user where to save if unclear.`,
         mode: z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("Browser mode override. Use 'extension' to capture the API of a tab already open in the user's real Chrome (banner-free) — requires options.tabId from the `tabs` tool. Note: response BODIES aren't captured in extension mode (MV3 limitation); request/headers/auth/curl/endpoints are."),
         tabId: z.number().optional().describe("Only with mode='extension': the real Chrome tab to reverse-engineer (from the `tabs` tool)."),
         clientId: z.string().optional().describe("Only with mode='extension', when multiple profiles are connected and the tab is ambiguous: the owning profile's clientId (from the `tabs` tool)."),
+        trusted: z.boolean().optional().describe("Only with mode='extension': use trusted OS-level input (chrome.debugger) for clicks/keyboard. Needed for apps that ignore synthetic events (Slack). Shows Chrome's debug banner. Default false."),
       }).optional(),
     },
     async (params) => {
