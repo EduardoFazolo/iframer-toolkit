@@ -92,11 +92,44 @@ export function iframerRunStep(step) {
     el.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
+  function scrollIntoView(el) {
+    try {
+      el.scrollIntoView({ block: "center", inline: "center" });
+    } catch {
+      /* jsdom/happy-dom or detached — ignore */
+    }
+  }
+
   function fireClick(el) {
-    el.scrollIntoView({ block: "center", inline: "center" });
+    scrollIntoView(el);
     ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach((type) => {
-      el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+      const Ctor = type.startsWith("pointer") && typeof PointerEvent !== "undefined" ? PointerEvent : MouseEvent;
+      el.dispatchEvent(new Ctor(type, { bubbles: true, cancelable: true, view: window }));
     });
+  }
+
+  // Full keyboard metadata so app handlers that check code/keyCode fire.
+  function keyMeta(key) {
+    const M = {
+      Enter: { code: "Enter", kc: 13 },
+      Escape: { code: "Escape", kc: 27 },
+      Esc: { code: "Escape", kc: 27 },
+      Tab: { code: "Tab", kc: 9 },
+      Backspace: { code: "Backspace", kc: 8 },
+      Delete: { code: "Delete", kc: 46 },
+      ArrowDown: { code: "ArrowDown", kc: 40 },
+      ArrowUp: { code: "ArrowUp", kc: 38 },
+      ArrowLeft: { code: "ArrowLeft", kc: 37 },
+      ArrowRight: { code: "ArrowRight", kc: 39 },
+      " ": { code: "Space", kc: 32 },
+    };
+    if (M[key]) return M[key];
+    if (key && key.length === 1) {
+      const up = key.toUpperCase();
+      const cc = up.charCodeAt(0);
+      return { code: /[A-Z]/.test(up) ? "Key" + up : /[0-9]/.test(key) ? "Digit" + key : key, kc: cc };
+    }
+    return { code: key || "", kc: 0 };
   }
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -120,7 +153,7 @@ export function iframerRunStep(step) {
     const wantName = (step.name || step.text || "").toLowerCase();
     const wantPlaceholder = (step.placeholder || "").toLowerCase();
     const exact = !!step.exact;
-    const matches = interactive().filter((el) => {
+    let matches = interactive().filter((el) => {
       if (wantRole && roleOf(el).toLowerCase() !== wantRole) return false;
       const nm = nameOf(el).toLowerCase();
       if (wantName) {
@@ -133,7 +166,15 @@ export function iframerRunStep(step) {
       return true;
     });
     if (!matches.length) return { ref: null, matchCount: 0 };
+
+    // Prefer the TIGHTEST clickable match: the shortest accessible name that
+    // still matches. On nested SPA rows this picks the actual row/link rather
+    // than a huge wrapping container.
+    if (wantName) {
+      matches = matches.slice().sort((a, b) => nameOf(a).length - nameOf(b).length);
+    }
     const el = matches[0];
+    scrollIntoView(el);
     const ref = "@efind";
     el.setAttribute(REF_ATTR, ref);
     return { ref, role: roleOf(el), name: nameOf(el), matchCount: matches.length };
@@ -149,6 +190,7 @@ export function iframerRunStep(step) {
   if (t === "right-click") {
     const el = resolve(step.selector);
     if (!el) return { __error: `No element for selector: ${step.selector}` };
+    scrollIntoView(el);
     el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, view: window }));
     return { rightClicked: true };
   }
@@ -161,17 +203,17 @@ export function iframerRunStep(step) {
       // Rich-text editors (Lexical/Draft/ProseMirror) keep their own model and
       // ignore direct textContent writes; execCommand routes through
       // beforeinput/input so the editor state actually updates.
-      const sel = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      sel.removeAllRanges();
-      sel.addRange(range);
-      const inserted = document.execCommand("insertText", false, step.value);
+      const sel = window.getSelection && window.getSelection();
+      if (sel && document.createRange) {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+      const inserted = document.execCommand && document.execCommand("insertText", false, step.value);
       if (!inserted) {
         el.textContent = step.value;
-        el.dispatchEvent(
-          new InputEvent("input", { bubbles: true, inputType: "insertText", data: step.value })
-        );
+        el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: step.value }));
       }
     } else {
       setNativeValue(el, step.value);
@@ -181,19 +223,33 @@ export function iframerRunStep(step) {
 
   if (t === "keyboard") {
     const target = document.activeElement || document.body;
-    ["keydown", "keyup"].forEach((type) => {
-      target.dispatchEvent(new KeyboardEvent(type, { key: step.key, bubbles: true }));
-    });
+    const m = keyMeta(step.key);
+    const opts = {
+      key: step.key,
+      code: m.code,
+      keyCode: m.kc,
+      which: m.kc,
+      bubbles: true,
+      cancelable: true,
+      metaKey: !!step.meta,
+      ctrlKey: !!step.ctrl,
+      shiftKey: !!step.shift,
+      altKey: !!step.alt,
+    };
+    target.dispatchEvent(new KeyboardEvent("keydown", opts));
+    target.dispatchEvent(new KeyboardEvent("keyup", opts));
     return { pressed: step.key };
   }
 
   if (t === "scroll") {
-    window.scrollBy(0, typeof step.deltaY === "number" ? step.deltaY : 500);
+    const el = step.selector ? resolve(step.selector) : null;
+    const dy = typeof step.deltaY === "number" ? step.deltaY : 500;
+    if (el) el.scrollBy ? el.scrollBy(0, dy) : (el.scrollTop += dy);
+    else window.scrollBy(0, dy);
     return { scrolled: true };
   }
 
   if (t === "wait-for") {
-    // Poll for the selector within the step timeout (default 10s).
     const deadline = Date.now() + (step.timeout || 10000);
     return (async () => {
       while (Date.now() < deadline) {
@@ -204,15 +260,30 @@ export function iframerRunStep(step) {
     })();
   }
 
+  if (t === "read") {
+    // Non-eval DOM read — works even on strict-CSP pages (Slack, etc.) because
+    // it only touches the DOM, never evaluates a string. Returns visible text.
+    const el = step.selector ? resolve(step.selector) : document.body;
+    if (!el) return { __error: `No element for selector: ${step.selector}` };
+    const raw = (el.innerText != null ? el.innerText : el.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
+    const max = step.maxChars || 20000;
+    return { text: raw.slice(0, max), truncated: raw.length > max };
+  }
+
   if (t === "extract" || t === "evaluate") {
     try {
-      // Runs in MAIN world (see background). eval may be blocked by strict page
-      // CSP; that's an accepted banner-free limitation.
+      // Runs in MAIN world (see background). eval is blocked by strict page CSP
+      // (e.g. Slack). For DOM reads, use the `read` step instead — it needs no
+      // eval and works everywhere.
       // eslint-disable-next-line no-eval
       const out = (0, eval)(step.expression);
       return { value: out === undefined ? null : out };
     } catch (e) {
-      return { __error: `extract failed: ${e && e.message ? e.message : String(e)}` };
+      const msg = e && e.message ? e.message : String(e);
+      const cspHint = /content security policy|unsafe-eval/i.test(msg)
+        ? " This page's CSP blocks eval in extension mode — use a `read` step (DOM text, no eval) or `snapshot`/`find` instead."
+        : "";
+      return { __error: `extract failed: ${msg}${cspHint}` };
     }
   }
 

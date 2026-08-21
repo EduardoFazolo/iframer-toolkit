@@ -33,6 +33,7 @@ const registry = {
   "wait-for": nav.waitFor,
   scroll: nav.scroll,
   keyboard: nav.keyboard,
+  read: nav.read,
   "type-code": nav.typeCode,
   find,
   screenshot,

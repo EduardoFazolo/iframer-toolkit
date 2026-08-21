@@ -17,8 +17,9 @@ export type PipelineStep =
   | { type: "extract"; expression: string }
   | { type: "wait"; ms: number }
   | { type: "wait-for"; selector: string; timeout?: number }
-  | { type: "scroll"; deltaY?: number }
-  | { type: "keyboard"; key: string }
+  | { type: "scroll"; deltaY?: number; selector?: string }
+  | { type: "keyboard"; key: string; meta?: boolean; ctrl?: boolean; shift?: boolean; alt?: boolean }
+  | { type: "read"; selector?: string; maxChars?: number }
   | { type: "type-code"; value: string; selector?: string }
   | { type: "login"; domain: string; usernameSelector?: string; passwordSelector?: string; submitSelector?: string; totpSelector?: string }
   | { type: "solve-captcha" }

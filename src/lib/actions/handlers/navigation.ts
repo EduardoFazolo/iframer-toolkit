@@ -86,7 +86,30 @@ export async function scroll(page: Page, step: Step<"scroll">): Promise<void> {
 }
 
 export async function keyboard(page: Page, step: Step<"keyboard">): Promise<void> {
-  await page.keyboard.press(step.key);
+  const mods = [
+    step.meta ? "Meta" : null,
+    step.ctrl ? "Control" : null,
+    step.shift ? "Shift" : null,
+    step.alt ? "Alt" : null,
+  ].filter(Boolean);
+  await page.keyboard.press(mods.length ? `${mods.join("+")}+${step.key}` : step.key);
+}
+
+export async function read(
+  page: Page,
+  step: Step<"read">,
+  ctx: ExecutionContext
+): Promise<{ text: string; truncated?: boolean }> {
+  const selector = step.selector ? resolveSelector(step.selector, ctx) : "body";
+  const raw = await page.evaluate((sel) => {
+    const el = sel === "body" ? document.body : document.querySelector(sel);
+    if (!el) return null;
+    return (el as HTMLElement).innerText || el.textContent || "";
+  }, selector);
+  if (raw == null) throw new Error(`read: no element for selector ${selector}`);
+  const text = raw.replace(/\n{3,}/g, "\n\n").trim();
+  const max = step.maxChars || 20000;
+  return { text: text.slice(0, max), truncated: text.length > max };
 }
 
 export async function typeCode(page: Page, step: Step<"type-code">, ctx: ExecutionContext): Promise<{ typed: number }> {

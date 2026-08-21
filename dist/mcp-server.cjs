@@ -631,8 +631,9 @@ var stepSchema = import_zod2.z.discriminatedUnion("type", [
   import_zod2.z.object({ type: import_zod2.z.literal("extract"), expression: import_zod2.z.string() }),
   import_zod2.z.object({ type: import_zod2.z.literal("wait"), ms: import_zod2.z.number() }),
   import_zod2.z.object({ type: import_zod2.z.literal("wait-for"), selector: import_zod2.z.string(), timeout: import_zod2.z.number().optional() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("scroll"), deltaY: import_zod2.z.number().optional() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("keyboard"), key: import_zod2.z.string() }),
+  import_zod2.z.object({ type: import_zod2.z.literal("scroll"), deltaY: import_zod2.z.number().optional(), selector: import_zod2.z.string().optional().describe("Scroll within this element instead of the window") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("keyboard"), key: import_zod2.z.string(), meta: import_zod2.z.boolean().optional(), ctrl: import_zod2.z.boolean().optional(), shift: import_zod2.z.boolean().optional(), alt: import_zod2.z.boolean().optional() }),
+  import_zod2.z.object({ type: import_zod2.z.literal("read"), selector: import_zod2.z.string().optional().describe("Element to read visible text from (CSS or @e ref). Omit for the whole page body."), maxChars: import_zod2.z.number().optional().describe("Cap the returned text length (default 20000)") }),
   import_zod2.z.object({ type: import_zod2.z.literal("type-code"), value: import_zod2.z.string(), selector: import_zod2.z.string().optional() }),
   import_zod2.z.object({ type: import_zod2.z.literal("login"), domain: import_zod2.z.string(), usernameSelector: import_zod2.z.string().optional(), passwordSelector: import_zod2.z.string().optional(), submitSelector: import_zod2.z.string().optional(), totpSelector: import_zod2.z.string().optional() }),
   import_zod2.z.object({ type: import_zod2.z.literal("solve-captcha") }),
@@ -847,6 +848,13 @@ Found: ${res.ref} ${res.role} "${res.name}" (${res.matchCount} match${res.matchC
         lines.push(`
 --- Annotated screenshot refs ---`);
         lines.push(res.refs);
+      }
+    } else if (r.step.type === "read") {
+      const res = r.result;
+      if (res?.text !== undefined) {
+        lines.push(`
+--- Read (step ${r.stepIndex}${res.truncated ? ", truncated" : ""}) ---`);
+        lines.push(res.text);
       }
     } else if (r.result !== undefined && r.result !== null) {
       lines.push(`

@@ -56,11 +56,19 @@ The agent calls the `tabs` tool to list your open tabs, finds the one you meant,
 then `execute`s with `mode: "extension"` and that tab's id. No per-tab step —
 once the extension is connected, every open tab is reachable.
 
-## Supported steps (v1)
+## Supported steps
 
 `navigate`, `click`, `right-click`, `fill`, `type` / `human-type` / `type-code`,
-`keyboard`, `scroll`, `wait`, `wait-for`, `snapshot`, `find`, `extract` (best-effort),
-`screenshot` (capture only — use `snapshot` for perception).
+`keyboard` (with `meta`/`ctrl`/`shift`/`alt` modifiers), `scroll`, `wait`,
+`wait-for`, `snapshot`, `find`, `read`, `screenshot` (capture only),
+`extract`/`evaluate` (best-effort — see below).
+
+- **`read`** returns an element's visible text (or the whole page) with **no eval**,
+  so it works on strict-CSP apps like Slack. Use it to read content.
+- **`extract`/`evaluate`** run arbitrary JS in the page's main world; strict page
+  CSP (Slack, GitHub, …) blocks `eval`, so prefer `read`/`snapshot`/`find` there.
+- **`find`** picks the tightest clickable match and scrolls it into view; it sees
+  SPA rows (`role=option`/`row`/`listitem`, focusable divs), not just links/buttons.
 
 Selectors accept CSS or iframer `@e` refs from `snapshot` / `find`.
 
