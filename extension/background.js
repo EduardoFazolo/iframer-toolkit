@@ -25,18 +25,45 @@ async function getToken() {
   return token || "";
 }
 
-// Stable per-profile identity. chrome.storage.local is per-profile, so a UUID
-// stored there uniquely and durably identifies this profile. The human label
-// is user-set in the popup (defaults to a short id).
+// Read the profile straight from Chrome — the signed-in account's email is the
+// natural profile name. Returns {email, id} or null if not signed in.
+function getChromeProfile() {
+  return new Promise((resolve) => {
+    try {
+      chrome.identity.getProfileUserInfo({ accountStatus: "ANY" }, (info) => {
+        if (chrome.runtime.lastError) return resolve(null);
+        resolve(info && info.email ? info : null);
+      });
+    } catch {
+      // Older Chrome without the options arg.
+      try {
+        chrome.identity.getProfileUserInfo((info) => resolve(info && info.email ? info : null));
+      } catch {
+        resolve(null);
+      }
+    }
+  });
+}
+
+// Stable per-profile identity, auto-detected from Chrome. Prefers the signed-in
+// account (email as name, gaia id as id). Falls back to a persistent per-profile
+// UUID when Chrome isn't signed in. The popup label is an OPTIONAL override only.
 async function ensureProfile() {
   const store = await chrome.storage.local.get(["profileId", "profileLabel"]);
+  const info = await getChromeProfile();
+
   let profileId = store.profileId;
   if (!profileId) {
-    profileId = crypto.randomUUID();
+    profileId = (info && info.id) || crypto.randomUUID();
     await chrome.storage.local.set({ profileId });
   }
-  const profileName = store.profileLabel || `Profile ${profileId.slice(0, 6)}`;
-  return { profileId, profileName };
+
+  const profileName =
+    (store.profileLabel && store.profileLabel.trim()) ||
+    (info && info.email) ||
+    `Chrome profile ${String(profileId).slice(0, 6)}`;
+
+  return { profileId, profileName, email: info && info.email };
 }
 
 async function sendHello(sock) {
