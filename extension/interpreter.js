@@ -83,6 +83,45 @@ export function iframerRunStep(step) {
     }
   }
 
+  // Match interactive elements by role/name/text/placeholder, tightest first.
+  function matchElements(step) {
+    const wantRole = (step.role || "").toLowerCase();
+    const wantName = (step.name || step.text || "").toLowerCase();
+    const wantPlaceholder = (step.placeholder || "").toLowerCase();
+    const exact = !!step.exact;
+    let matches = interactive().filter((el) => {
+      if (wantRole && roleOf(el).toLowerCase() !== wantRole) return false;
+      const nm = nameOf(el).toLowerCase();
+      if (wantName) {
+        if (exact ? nm !== wantName : !nm.includes(wantName)) return false;
+      }
+      if (wantPlaceholder) {
+        const ph = (el.getAttribute("placeholder") || "").toLowerCase();
+        if (exact ? ph !== wantPlaceholder : !ph.includes(wantPlaceholder)) return false;
+      }
+      return true;
+    });
+    if (wantName) matches = matches.slice().sort((a, b) => nameOf(a).length - nameOf(b).length);
+    return matches;
+  }
+
+  // Resolve a step's target element: an explicit selector/@ref, OR find-criteria
+  // (name/text/role/placeholder) matched IN THE SAME injection. The latter is
+  // essential on live SPAs (Slack) where a separate find→click loses the ref to
+  // a re-render between the two injected calls.
+  function locate(step) {
+    if (step.selector) return resolve(step.selector);
+    if (step.name || step.text || step.role || step.placeholder) {
+      const m = matchElements(step);
+      return m.length ? m[0] : null;
+    }
+    return null;
+  }
+
+  function describeTarget(step) {
+    return step.selector || step.name || step.text || step.placeholder || step.role || "(no target)";
+  }
+
   function setNativeValue(el, value) {
     const proto = el.tagName.toLowerCase() === "textarea" ? HTMLTextAreaElement : HTMLInputElement;
     const setter = Object.getOwnPropertyDescriptor(proto.prototype, "value")?.set;
@@ -175,30 +214,8 @@ export function iframerRunStep(step) {
   }
 
   if (t === "find") {
-    const wantRole = (step.role || "").toLowerCase();
-    const wantName = (step.name || step.text || "").toLowerCase();
-    const wantPlaceholder = (step.placeholder || "").toLowerCase();
-    const exact = !!step.exact;
-    let matches = interactive().filter((el) => {
-      if (wantRole && roleOf(el).toLowerCase() !== wantRole) return false;
-      const nm = nameOf(el).toLowerCase();
-      if (wantName) {
-        if (exact ? nm !== wantName : !nm.includes(wantName)) return false;
-      }
-      if (wantPlaceholder) {
-        const ph = (el.getAttribute("placeholder") || "").toLowerCase();
-        if (exact ? ph !== wantPlaceholder : !ph.includes(wantPlaceholder)) return false;
-      }
-      return true;
-    });
+    const matches = matchElements(step);
     if (!matches.length) return { ref: null, matchCount: 0 };
-
-    // Prefer the TIGHTEST clickable match: the shortest accessible name that
-    // still matches. On nested SPA rows this picks the actual row/link rather
-    // than a huge wrapping container.
-    if (wantName) {
-      matches = matches.slice().sort((a, b) => nameOf(a).length - nameOf(b).length);
-    }
     const el = matches[0];
     scrollIntoView(el);
     const ref = "@efind";
@@ -207,23 +224,23 @@ export function iframerRunStep(step) {
   }
 
   if (t === "click" || t === "human-click") {
-    const el = resolve(step.selector);
-    if (!el) return { __error: `No element for selector: ${step.selector}` };
+    const el = locate(step);
+    if (!el) return { __error: `No element for: ${describeTarget(step)}` };
     fireClick(el);
     return { clicked: true };
   }
 
   if (t === "right-click") {
-    const el = resolve(step.selector);
-    if (!el) return { __error: `No element for selector: ${step.selector}` };
+    const el = locate(step);
+    if (!el) return { __error: `No element for: ${describeTarget(step)}` };
     scrollIntoView(el);
     el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, view: window }));
     return { rightClicked: true };
   }
 
   if (t === "fill" || t === "human-type" || t === "type" || t === "type-code") {
-    const el = resolve(step.selector);
-    if (!el) return { __error: `No element for selector: ${step.selector}` };
+    const el = locate(step);
+    if (!el) return { __error: `No element for: ${describeTarget(step)}` };
     el.focus();
     if (el.isContentEditable) {
       // Rich-text editors (Lexical/Draft/ProseMirror) keep their own model and

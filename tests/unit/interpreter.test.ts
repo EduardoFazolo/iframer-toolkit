@@ -78,6 +78,27 @@ test("click resolves an @efind ref and fires a real click", async () => {
   expect(clicked).toBe(true);
 });
 
+test("click by name finds + clicks in ONE call (no ref needed)", async () => {
+  // This is the live-SPA case: no prior find/ref, click resolves criteria itself.
+  let clicked = false;
+  document.querySelector("#berni")!.addEventListener("click", () => (clicked = true));
+  const r = (await iframerRunStep({ type: "click", name: "Berni", role: "option", exact: false })) as {
+    clicked?: boolean;
+    __error?: string;
+  };
+  expect(r.clicked).toBe(true);
+  expect(clicked).toBe(true);
+});
+
+test("fill by placeholder/name finds the field atomically", async () => {
+  const input = document.querySelector("#filter")! as HTMLInputElement;
+  const r = (await iframerRunStep({ type: "fill", name: "Channel or user name", value: "berni" })) as {
+    filled?: boolean;
+  };
+  expect(r.filled).toBe(true);
+  expect(input.value).toBe("berni");
+});
+
 test("fill sets input value and dispatches input event", async () => {
   let inputFired = false;
   const input = document.querySelector("#filter")! as HTMLInputElement;
