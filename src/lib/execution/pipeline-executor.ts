@@ -1,4 +1,9 @@
-import { chromium } from "patchright";
+// connectOverCDP is used ONLY for extension mode. patchright (a stealth fork)
+// deliberately breaks connectOverCDP, so we use stock playwright-core for it —
+// its Page is API-compatible with patchright's, so the handlers work unchanged.
+// NOTE: this WS transport requires the server to run under node, not bun.
+import { chromium as cdpChromium } from "playwright-core";
+import type { Page as PatchrightPage } from "patchright";
 import type { Pipeline, PipelineResult, BrowserMode, SessionStartOptions } from "../types";
 import type { StorageBackend } from "../storage";
 import type { SessionData } from "../session/persistence";
@@ -150,10 +155,10 @@ export class PipelineExecutor {
   ): Promise<PipelineResult> {
     const startTime = Date.now();
     const relay = new CdpRelay(tabId, clientId);
-    let browser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | undefined;
+    let browser: Awaited<ReturnType<typeof cdpChromium.connectOverCDP>> | undefined;
     try {
       await relay.start();
-      browser = await chromium.connectOverCDP(relay.cdpEndpoint(), { timeout: 30_000 });
+      browser = await cdpChromium.connectOverCDP(relay.httpEndpoint(), { timeout: 30_000 });
       const context = browser.contexts()[0];
       if (!context) throw new Error("no CDP browser context for the tab");
       let page = context.pages()[0];
@@ -167,7 +172,8 @@ export class PipelineExecutor {
       const ctx = this.deps.refStore.makeContext(userId, token);
       if (this.pendingElicitOtp) ctx.elicitOtp = this.pendingElicitOtp;
       const runner = new PipelineRunner(ctx);
-      const result = await runner.run(page, pipeline);
+      // playwright-core Page ≡ patchright Page at runtime (same API).
+      const result = await runner.run(page as unknown as PatchrightPage, pipeline);
       this.deps.refStore.sync(userId, ctx);
       result.modeUsed = "extension" as BrowserMode;
 

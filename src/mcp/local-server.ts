@@ -147,26 +147,37 @@ export class LocalServerManager {
   }
 
   private resolveRuntime(): { command: string; args: string[] } {
-    // Prefer bun + source (dev mode)
-    try {
-      const bunPath = require("child_process")
-        .execSync("which bun", { encoding: "utf8" })
-        .trim();
-      const serverTs = path.join(__dirname, "..", "..", "index.ts");
-      if (fs.existsSync(serverTs)) {
-        return { command: bunPath, args: ["run", serverTs] };
-      }
-    } catch {}
+    // MUST run under node, not bun: extension mode uses playwright-core's
+    // connectOverCDP, whose WebSocket transport hangs under bun. All other
+    // modes work under node too, so node is the correct runtime everywhere.
+    const serverTs = path.join(__dirname, "..", "..", "index.ts");
 
-    // Fallback: node + built bundle
+    // 1) node + built bundle (production / after `bun run build`).
     const serverCjs = path.join(__dirname, "..", "..", "dist", "local-server.cjs");
     if (fs.existsSync(serverCjs)) {
       return { command: "node", args: [serverCjs] };
     }
 
-    // Last resort: try index.ts with whatever `node` can do
-    const serverTs = path.join(__dirname, "..", "..", "index.ts");
-    return { command: "node", args: ["--import", "tsx", serverTs] };
+    // 2) node + TS source via tsx (dev), if tsx is resolvable.
+    if (fs.existsSync(serverTs)) {
+      try {
+        require.resolve("tsx");
+        return { command: "node", args: ["--import", "tsx", serverTs] };
+      } catch {
+        /* tsx not installed — fall through */
+      }
+    }
+
+    // 3) Last resort: bun + source. Everything works EXCEPT extension mode
+    //    (connectOverCDP), which will error clearly if used.
+    try {
+      const bunPath = require("child_process").execSync("which bun", { encoding: "utf8" }).trim();
+      if (bunPath && fs.existsSync(serverTs)) {
+        return { command: bunPath, args: ["run", serverTs] };
+      }
+    } catch {}
+
+    return { command: "node", args: [serverCjs] };
   }
 
   /** Ask the shared server to exit (it kills its browsers with a hard
