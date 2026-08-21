@@ -102,10 +102,36 @@ export function iframerRunStep(step) {
 
   function fireClick(el) {
     scrollIntoView(el);
-    ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach((type) => {
+    // Click the actual visual leaf at the element's center — what a real click
+    // hits. SPAs (Slack, Notion) put the onClick on an inner node of a
+    // role=treeitem/row container; events only bubble UP, so dispatching on the
+    // container misses a handler that lives on a descendant.
+    const r = el.getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    let target = el;
+    try {
+      const hit = document.elementFromPoint(cx, cy);
+      if (hit && (el.contains(hit) || hit === el)) target = hit;
+    } catch {
+      /* no layout (happy-dom) — use el */
+    }
+    const opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy };
+    ["pointerover", "pointerenter", "pointerdown", "mousedown", "pointerup", "mouseup"].forEach((type) => {
       const Ctor = type.startsWith("pointer") && typeof PointerEvent !== "undefined" ? PointerEvent : MouseEvent;
-      el.dispatchEvent(new Ctor(type, { bubbles: true, cancelable: true, view: window }));
+      target.dispatchEvent(new Ctor(type, opts));
     });
+    // Prefer the native click (fires React onClick once); fall back to a
+    // synthetic click event only if unavailable.
+    if (typeof target.click === "function") {
+      try {
+        target.click();
+      } catch {
+        target.dispatchEvent(new MouseEvent("click", opts));
+      }
+    } else {
+      target.dispatchEvent(new MouseEvent("click", opts));
+    }
   }
 
   // Full keyboard metadata so app handlers that check code/keyCode fire.
