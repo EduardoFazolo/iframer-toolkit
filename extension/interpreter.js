@@ -51,10 +51,24 @@ export function iframerRunStep(step) {
   }
 
   function interactive() {
-    const sel =
-      "a[href], button, input, textarea, select, [role=button], [role=link], " +
-      "[role=textbox], [role=checkbox], [role=tab], [role=menuitem], [onclick], [contenteditable=true]";
-    return Array.from(document.querySelectorAll(sel)).filter(visible);
+    // Broad on purpose: modern SPAs (Slack, Notion, …) render clickable rows as
+    // role=option/row/listitem or focusable divs, not <a>/<button>. Visibility
+    // filtering keeps the list usable.
+    const sel = [
+      "a", "button", "input", "textarea", "select", "summary",
+      "[role=button]", "[role=link]", "[role=textbox]", "[role=checkbox]",
+      "[role=tab]", "[role=menuitem]", "[role=menuitemradio]", "[role=menuitemcheckbox]",
+      "[role=option]", "[role=row]", "[role=listitem]", "[role=treeitem]", "[role=gridcell]",
+      "[onclick]", "[contenteditable=true]", '[tabindex]:not([tabindex="-1"])',
+    ].join(", ");
+    const seen = new Set();
+    const out = [];
+    for (const el of document.querySelectorAll(sel)) {
+      if (seen.has(el) || !visible(el)) continue;
+      seen.add(el);
+      out.push(el);
+    }
+    return out;
   }
 
   function resolve(selector) {
