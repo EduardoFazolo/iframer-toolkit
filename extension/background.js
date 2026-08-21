@@ -270,20 +270,46 @@ async function injectStep(tabId, step) {
   return res ? res.result : { __error: "No result from injected step." };
 }
 
-// Resolve a selector/@ref to its viewport-center coords (for trusted CDP input).
+// Resolve a step's target to viewport-center coords (for trusted CDP input),
+// atomically in one injection — by selector/@ref OR by find-criteria (so the
+// coords match a live element, not a ref that a re-render may have dropped).
 // Runs in the isolated world — DOM only, no eval.
-async function getElementCenter(tabId, selector) {
+async function getElementCenter(tabId, step) {
   const [res] = await chrome.scripting.executeScript({
     target: { tabId },
     world: "ISOLATED",
-    args: [selector || ""],
-    func: (sel) => {
+    args: [step],
+    func: (s) => {
       const REF = "data-iframer-ref";
-      const el = sel && sel.startsWith("@e")
-        ? document.querySelector(`[${REF}="${sel}"]`)
-        : sel
-          ? document.querySelector(sel)
-          : null;
+      function visible(el) {
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) return false;
+        const st = getComputedStyle(el);
+        return st.visibility !== "hidden" && st.display !== "none" && st.opacity !== "0";
+      }
+      function nameOf(el) {
+        const a = el.getAttribute("aria-label");
+        if (a) return a.trim();
+        if (el.getAttribute("placeholder")) return el.getAttribute("placeholder").trim();
+        return (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 120);
+      }
+      let el = null;
+      if (s.selector) {
+        el = s.selector.startsWith("@e")
+          ? document.querySelector(`[${REF}="${s.selector}"]`)
+          : document.querySelector(s.selector);
+      } else if (s.name || s.text || s.placeholder) {
+        const want = (s.name || s.text || s.placeholder || "").toLowerCase();
+        const exact = !!s.exact;
+        const sel = "a,button,input,textarea,select,summary,[role],[onclick],[contenteditable=true],[tabindex]:not([tabindex='-1'])";
+        const cands = Array.from(document.querySelectorAll(sel)).filter((e) => {
+          if (!visible(e)) return false;
+          const nm = nameOf(e).toLowerCase();
+          return exact ? nm === want : nm.includes(want);
+        });
+        cands.sort((a, b) => nameOf(a).length - nameOf(b).length);
+        el = cands[0] || null;
+      }
       if (!el) return null;
       try { el.scrollIntoView({ block: "center", inline: "center" }); } catch {}
       const r = el.getBoundingClientRect();
@@ -298,8 +324,8 @@ async function runStep(tabId, step, cdpTarget) {
   // (Slack), so when the pipeline runs with options.trusted we send real,
   // isTrusted mouse/key events via chrome.debugger.
   if (cdpTarget && (step.type === "click" || step.type === "human-click" || step.type === "right-click")) {
-    const c = await getElementCenter(tabId, step.selector);
-    if (!c) return { __error: `No element for selector: ${step.selector}` };
+    const c = await getElementCenter(tabId, step);
+    if (!c) return { __error: `No element for: ${step.selector || step.name || step.text || step.placeholder || "(no target)"}` };
     if (step.type === "right-click") await cdp.rightClick(cdpTarget, c.x, c.y);
     else await cdp.click(cdpTarget, c.x, c.y);
     return { clicked: true, trusted: true };
