@@ -41,13 +41,15 @@ process.on("unhandledRejection", (reason) => {
   console.error(`[local-server] unhandledRejection (survived): ${reason}`);
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`iframer listening on ${PORT}`);
+// Loopback ONLY. This server trusts a machine-local token; binding all
+// interfaces would expose /execute (and the extension bridge) to the LAN.
+const server = app.listen(PORT, "127.0.0.1", () => {
+  console.log(`iframer listening on 127.0.0.1:${PORT}`);
   // Advertise ourselves as THE shared local server for this machine.
   writeServerInfo({ pid: process.pid, port: PORT, startedAt: new Date().toISOString() });
 });
 
-// Banner-free "run in my real Chrome tab" transport: the MV3 extension dials
+// "Run in my real Chrome tab" transport: the MV3 extension dials
 // into this same HTTP server over WebSocket (/extension/ws).
 extensionBridge.attach(server);
 
@@ -108,8 +110,15 @@ const reapTimer = setInterval(async () => {
     await reapOrphanBrowsers();
   } catch {}
 
-  // Idle retirement: no browsers alive and no HTTP traffic for a while —
-  // exit cleanly. The next MCP tool call spawns a fresh server.
+  // Idle retirement: exit cleanly only when nothing needs us — no browsers,
+  // no recent HTTP traffic, AND no extension connected. A connected extension
+  // MUST keep us alive: it is a live client that expects to drive tabs on
+  // demand, and it has no way to restart us (only MCP tool calls spawn the
+  // server). Exiting under a connected extension is what silently "unpairs"
+  // it. When every extension disconnects (all Chrome windows closed), the
+  // server is free to idle-exit; the next MCP call respawns it. The cost of
+  // staying up for an idle extension is tiny — a websocket + heartbeat, no
+  // Chrome — and Chrome itself is reaped separately.
   const idleMs = Date.now() - lastActivity;
   if (idleMs > IDLE_EXIT_MS && !iframer.browserHealth().alive && !extensionBridge.hasClients()) {
     gracefulShutdown(`idle for ${Math.round(idleMs / 60000)}min with no browsers`);

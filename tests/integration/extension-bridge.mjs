@@ -1,16 +1,22 @@
 import { spawn } from "child_process";
+import { mkdtempSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import WebSocket from "ws";
 
 const SECRET = "smoke-secret-123";
 const PORT = 3099;
 const BASE = `http://127.0.0.1:${PORT}`;
 const repo = new URL("../..", import.meta.url).pathname;
+// Isolate ALL server state (server.json, db, logs) from the real ~/.iframer —
+// a test server must never overwrite the user's server registry.
+const DATA_DIR = mkdtempSync(join(tmpdir(), "iframer-test-"));
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const srv = spawn("bun", ["run", "index.ts"], {
   cwd: repo,
-  env: { ...process.env, PORT: String(PORT), IFRAMER_SECRET: SECRET, IFRAMER_MODE: "local" },
+  env: { ...process.env, PORT: String(PORT), IFRAMER_SECRET: SECRET, IFRAMER_MODE: "local", IFRAMER_DATA_DIR: DATA_DIR },
   stdio: ["ignore", "pipe", "pipe"],
 });
 srv.stdout.on("data", (d) => process.stdout.write(`[srv] ${d}`));
@@ -79,6 +85,24 @@ async function main() {
   const bad = new WebSocket(`ws://127.0.0.1:${PORT}/extension/ws?token=wrong`);
   const badClosed = await new Promise((res) => { bad.on("close", (c) => res(c)); bad.on("error", () => {}); });
   check("bad token closed with 4001", badClosed === 4001, { badClosed });
+
+  // 2b. First-message auth (the real extension's path — no token in the URL)
+  const msgAuth = new WebSocket(`ws://127.0.0.1:${PORT}/extension/ws`);
+  await new Promise((res, rej) => { msgAuth.on("open", res); msgAuth.on("error", rej); });
+  msgAuth.send(JSON.stringify({ type: "auth", token: SECRET }));
+  msgAuth.send(JSON.stringify({ type: "hello", profileId: "msg-auth-id", profileName: "MsgAuth", extVersion: "test" }));
+  await sleep(300);
+  st = await apiGet("/extension/status");
+  check("message auth: accepted and hello landed", st.connected === true && st.clients.some((c) => c.profileName === "MsgAuth"), st);
+  msgAuth.close();
+  await sleep(300);
+
+  // 2c. Bad first-message auth → 4001
+  const msgBad = new WebSocket(`ws://127.0.0.1:${PORT}/extension/ws`);
+  await new Promise((res, rej) => { msgBad.on("open", res); msgBad.on("error", rej); });
+  msgBad.send(JSON.stringify({ type: "auth", token: "wrong" }));
+  const msgBadClosed = await new Promise((res) => { msgBad.on("close", (c) => res(c)); });
+  check("bad message auth closed with 4001", msgBadClosed === 4001, { msgBadClosed });
 
   // 3. Two profiles connect
   const work = makeClient({ profileId: "work-id", profileName: "Work", tabs: [

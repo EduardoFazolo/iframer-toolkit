@@ -468,13 +468,10 @@ function splitHeaders(headers: Record<string, string>): Record<string, string> {
 
 /**
  * Turn raw captured requests into the grouped, parameterized, protocol-aware
- * CapturedApi[] (with curl, verb, functionName). This is the whole RE
- * post-processing pipeline, decoupled from patchright so the browser extension
- * can capture requests via chrome.webRequest and hand them here for the exact
- * same treatment. Response bodies are simply absent for the extension path
- * (MV3 webRequest can't read them) — everything else is identical.
+ * CapturedApi[] (with curl, verb, functionName) — the whole RE post-processing
+ * pipeline, independent of how the requests were captured.
  */
-export function buildCapturedApi(requests: CapturedRequest[]): CapturedApi[] {
+function buildCapturedApi(requests: CapturedRequest[]): CapturedApi[] {
   const byDomain = new Map<string, CapturedRequest[]>();
   for (const req of requests) {
     try {

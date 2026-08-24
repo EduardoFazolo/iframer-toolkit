@@ -81,8 +81,20 @@ export async function waitFor(page: Page, step: Step<"wait-for">, ctx: Execution
   await page.waitForSelector(resolveSelector(step.selector, ctx), { timeout: step.timeout || TIMEOUTS.SELECTOR_WAIT });
 }
 
-export async function scroll(page: Page, step: Step<"scroll">): Promise<void> {
-  await page.evaluate((dy) => window.scrollBy(0, dy || document.body.scrollHeight), step.deltaY ?? 0);
+export async function scroll(page: Page, step: Step<"scroll">, ctx: ExecutionContext): Promise<void> {
+  const selector = step.selector ? resolveSelector(step.selector, ctx) : null;
+  await page.evaluate(
+    ({ dy, sel }) => {
+      if (sel) {
+        const el = document.querySelector(sel);
+        if (!el) throw new Error(`scroll: no element for selector ${sel}`);
+        el.scrollBy(0, dy || el.scrollHeight);
+      } else {
+        window.scrollBy(0, dy || document.body.scrollHeight);
+      }
+    },
+    { dy: step.deltaY ?? 0, sel: selector },
+  );
 }
 
 export async function keyboard(page: Page, step: Step<"keyboard">): Promise<void> {
@@ -108,7 +120,9 @@ export async function read(
   }, selector);
   if (raw == null) throw new Error(`read: no element for selector ${selector}`);
   const text = raw.replace(/\n{3,}/g, "\n\n").trim();
-  const max = step.maxChars || 20000;
+  // Default kept modest so a blind `read` of a whole page doesn't dump ~5k
+  // tokens into context. Agents that genuinely need the full text pass maxChars.
+  const max = step.maxChars || 6000;
   return { text: text.slice(0, max), truncated: text.length > max };
 }
 

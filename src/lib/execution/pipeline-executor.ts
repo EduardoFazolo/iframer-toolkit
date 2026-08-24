@@ -43,6 +43,10 @@ export class PipelineExecutor {
    *  executeLocal and immediately cleared. */
   private pendingElicitOtp?: (domain: string) => Promise<string | null>;
 
+  /** One pipeline per real tab at a time: chrome.debugger and the CDP relay
+   *  can't share a tab, so concurrent executes on the same tab queue up here. */
+  private extensionTabLocks = new Map<string, Promise<PipelineResult>>();
+
   constructor(private deps: PipelineExecutorDeps) {}
 
   async execute(
@@ -66,7 +70,19 @@ export class PipelineExecutor {
     // via a CDP relay. Bypasses launch, escalation, and session inject/extract
     // (the real profile owns auth).
     if (typeof opts.extensionTabId === "number") {
-      return this.executeExtension(userId, token, pipeline, opts.extensionTabId, opts.clientId);
+      const tabId = opts.extensionTabId;
+      const lockKey = `${opts.clientId || "auto"}:${tabId}`;
+      const prev = this.extensionTabLocks.get(lockKey);
+      const run = (prev ? prev.catch(() => undefined) : Promise.resolve()).then(() =>
+        this.executeExtension(userId, token, pipeline, tabId, opts.clientId),
+      );
+      this.extensionTabLocks.set(lockKey, run);
+      run
+        .catch(() => undefined)
+        .finally(() => {
+          if (this.extensionTabLocks.get(lockKey) === run) this.extensionTabLocks.delete(lockKey);
+        });
+      return run;
     }
 
     const forcedMode = opts.mode;
@@ -154,7 +170,7 @@ export class PipelineExecutor {
     clientId?: string,
   ): Promise<PipelineResult> {
     const startTime = Date.now();
-    const relay = new CdpRelay(tabId, clientId);
+    const relay = new CdpRelay(tabId, clientId, pipeline.options?.focus);
     let browser: Awaited<ReturnType<typeof cdpChromium.connectOverCDP>> | undefined;
     try {
       await relay.start();
@@ -172,21 +188,55 @@ export class PipelineExecutor {
       const ctx = this.deps.refStore.makeContext(userId, token);
       if (this.pendingElicitOtp) ctx.elicitOtp = this.pendingElicitOtp;
       const runner = new PipelineRunner(ctx);
-      // playwright-core Page ≡ patchright Page at runtime (same API).
-      const result = await runner.run(page as unknown as PatchrightPage, pipeline);
+      // Hard watchdog: a CDP call against a tab that stopped rendering (window
+      // minimized, renderer wedged) can stall past every per-step timeout, and
+      // a stalled run also blocks the per-tab queue behind it. Cap the whole
+      // pipeline WELL under the MCP client's 180s fetch abort so the agent
+      // gets a real, retryable error instead of a dead tool call.
+      const capMs = Math.min(60_000 + pipeline.steps.length * 15_000, 150_000);
+      let watchdog: ReturnType<typeof setTimeout> | undefined;
+      let result: PipelineResult;
+      try {
+        // playwright-core Page ≡ patchright Page at runtime (same API).
+        const runPromise = runner.run(page as unknown as PatchrightPage, pipeline);
+        // If the watchdog wins, this promise settles later (rejecting once the
+        // relay teardown kills its CDP calls) — keep that from being unhandled.
+        runPromise.catch(() => undefined);
+        result = await Promise.race([
+          runPromise,
+          new Promise<never>((_, reject) => {
+            watchdog = setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    `pipeline exceeded ${Math.round(capMs / 1000)}s — the tab may have stopped ` +
+                      `rendering (minimized window?). Un-minimize the Chrome window or retry ` +
+                      `with options.focus=true.`,
+                  ),
+                ),
+              capMs,
+            );
+            watchdog.unref?.();
+          }),
+        ]);
+      } finally {
+        if (watchdog) clearTimeout(watchdog);
+      }
       this.deps.refStore.sync(userId, ctx);
-      result.modeUsed = "extension" as BrowserMode;
+      result.modeUsed = "extension";
 
       // Learn from the run — real profile owns cookies, so no sessionData.
       if (result.ok) {
         try {
-          extractKnowledgeFromRun(pipeline, result, null, "extension" as unknown as BrowserMode);
+          extractKnowledgeFromRun(pipeline, result, null, "extension");
         } catch (e) {
           log.warn(`knowledge update failed: ${getErrorMessage(e)}`);
         }
       }
       return result;
     } catch (err) {
+      const msg = getErrorMessage(err);
+      const stalled = msg.includes("pipeline exceeded");
       return {
         ok: false,
         completedSteps: 0,
@@ -195,16 +245,20 @@ export class PipelineExecutor {
         finalState: { url: "", title: "" },
         obstacles: [],
         durationMs: Date.now() - startTime,
-        modeUsed: "extension" as BrowserMode,
+        modeUsed: "extension",
         error: {
           failedAtStep: 0,
           failedStep: pipeline.steps[0],
           errorType: "action-failed",
-          message: `Extension mode failed: ${getErrorMessage(err)}`,
+          message: `Extension mode failed: ${msg}`,
           pageState: { url: "", title: "" },
-          suggestion:
-            "Ensure the iframer extension is connected (green dot) and the tab is still open. See chrome://extensions.",
-          retryable: true,
+          suggestion: stalled
+            ? "STOP retrying and tell the user what happened: the Chrome tab being driven stopped " +
+              "responding — its window is likely minimized or the page is wedged. Ask them to " +
+              "un-minimize the Chrome window (leaving it behind other windows is fine), or ask " +
+              "permission to rerun with options.focus=true to bring it to the front."
+            : "Ensure the iframer extension is connected (green dot) and the tab is still open. See chrome://extensions.",
+          retryable: !stalled,
         },
       };
     } finally {

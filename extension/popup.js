@@ -1,15 +1,23 @@
 const $ = (id) => document.getElementById(id);
 
 function send(cmd, extra = {}) {
-  return new Promise((resolve) => chrome.runtime.sendMessage({ cmd, ...extra }, resolve));
+  // Resolve to {} when the worker is asleep or errored (sendMessage passes
+  // undefined + sets lastError) so callers never null-deref on res.status etc.
+  return new Promise((resolve) =>
+    chrome.runtime.sendMessage({ cmd, ...extra }, (resp) => {
+      void chrome.runtime.lastError; // touch it so Chrome doesn't log "Unchecked"
+      resolve(resp || {});
+    }),
+  );
 }
 
 function renderStatus(status) {
   const connected = status && status.connected;
   $("dot").className = "dot" + (connected ? " on" : "");
   const reasonText = {
-    "no-token": "No token set — paste your pairing token below.",
+    "no-token": "No token set — try Pair automatically, or paste it below.",
     "server-not-found": "iframer server not found. Is Claude Code / iframer running?",
+    "server-not-running": "iframer server not running — it starts with your Claude/iframer session. Will connect by itself.",
     "bad-token": "Token rejected. Check it matches ~/.iframer/secret.",
     disconnected: "Disconnected — retrying…",
   };
@@ -60,6 +68,21 @@ $("test").addEventListener("click", async () => {
   lines.push(`tab: ${res.tabUrl || "(none)"}`);
   lines.push(res.okExec ? `✓ executeScript OK → ${res.value}` : `✗ executeScript FAILED: ${res.error}`);
   $("diag").textContent = lines.join("\n");
+});
+
+$("autopair").addEventListener("click", async () => {
+  $("autopair").disabled = true;
+  $("pairmsg").textContent = "Asking the local pairing host…";
+  const res = await send("auto-pair");
+  if (res.ok) {
+    if (res.token) $("token").value = res.token;
+    $("pairmsg").textContent = "✓ Paired.";
+    renderStatus(res.status);
+  } else {
+    $("pairmsg").textContent = res.error || "Auto-pair failed — paste the token manually below.";
+  }
+  $("autopair").disabled = false;
+  await refresh();
 });
 
 $("save").addEventListener("click", async () => {

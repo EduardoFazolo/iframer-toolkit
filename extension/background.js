@@ -2,17 +2,13 @@
 //
 // Dials OUT to the iframer local server over WebSocket (the server can't reach
 // into Chrome; extensions can't listen, so the extension is always the client).
-// Receives step pipelines, runs them in the tab the user explicitly allowed,
-// and streams results back. iframer is the brain; this is the hands.
+// Its ONE job is to be a CDP relay: it attaches chrome.debugger to the tab the
+// server asks for and forwards the protocol both ways. The server connects to
+// that relay with connectOverCDP and drives the tab through iframer's real
+// pipeline. Discovery (`tabs`) uses chrome.tabs. Nothing is interpreted here.
 
-import { iframerRunStep } from "./interpreter.js";
-import { capture } from "./capture.js";
-import { cdp } from "./cdp.js";
-
-// Extra settle time after the last step so late/async XHRs (auth re-challenges,
-// deferred mutations) are still captured before we stop listening.
-const CAPTURE_DRAIN_MS = 2500;
-
+// Keep in sync with PORT_SCAN_ATTEMPTS in src/mcp/local-server.ts — the server
+// allocates its port from this exact window so the scan below can find it.
 const PORT_START = 3022;
 const PORT_END = 3042;
 const RECONNECT_MS = 2000;
@@ -26,8 +22,33 @@ async function getToken() {
   return token || "";
 }
 
-// Read the profile straight from Chrome — the signed-in account's email is the
-// natural profile name. Returns {email, id} or null if not signed in.
+// Native-messaging host (installed by `iframer install extension`). One call
+// answers everything: the pairing token, the server's registered port, and
+// whether that server process is actually alive. Resolves null when the host
+// isn't installed (→ legacy port scan).
+function nativeCall(msg) {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendNativeMessage("com.iframer.token", msg, (resp) => {
+        void chrome.runtime.lastError; // host not installed — that's fine
+        resolve(resp || null);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+// Token via the host, for auto-pairing. Falls back to the older get-token
+// command if the installed host copy predates get-info.
+async function fetchTokenNatively() {
+  let resp = await nativeCall({ cmd: "get-info" });
+  if (!resp || !resp.token) resp = await nativeCall({ cmd: "get-token" });
+  return resp && resp.token ? String(resp.token) : "";
+}
+
+// Read the signed-in account from Chrome — its email is the natural profile
+// DISPLAY NAME. Returns {email, id} or null if not signed in.
 function getChromeProfile() {
   return new Promise((resolve) => {
     try {
@@ -46,16 +67,19 @@ function getChromeProfile() {
   });
 }
 
-// Stable per-profile identity, auto-detected from Chrome. Prefers the signed-in
-// account (email as name, gaia id as id). Falls back to a persistent per-profile
-// UUID when Chrome isn't signed in. The popup label is an OPTIONAL override only.
+// Stable per-INSTALL identity. The id is always a persistent random UUID —
+// never the Google account (gaia) id: the same account signed into two
+// browsers would collide, and the server de-dupes connections by profileId
+// (it would evict the other browser as a "stale reconnect"). The account
+// email is used only as the human-readable name; the popup label overrides it.
 async function ensureProfile() {
   const store = await chrome.storage.local.get(["profileId", "profileLabel"]);
   const info = await getChromeProfile();
 
   let profileId = store.profileId;
-  if (!profileId) {
-    profileId = (info && info.id) || crypto.randomUUID();
+  // Migration: earlier versions stored the gaia id — regenerate it.
+  if (!profileId || (info && info.id && profileId === info.id)) {
+    profileId = crypto.randomUUID();
     await chrome.storage.local.set({ profileId });
   }
 
@@ -70,6 +94,10 @@ async function ensureProfile() {
 async function sendHello(sock) {
   try {
     const { profileId, profileName } = await ensureProfile();
+    // The await above yields — the server may have closed the socket in the
+    // meantime (e.g. it rejected our auth). send() on a closed socket logs a
+    // console error even inside try/catch, so check first.
+    if (sock.readyState !== WebSocket.OPEN) return;
     sock.send(
       JSON.stringify({
         type: "hello",
@@ -88,23 +116,73 @@ async function setStatus(patch) {
   await chrome.storage.local.set({ status: { ...prev, ...patch } });
 }
 
+// Back off when the server isn't there: each full failed scan of 21 ports logs
+// 21 ERR_CONNECTION_REFUSED lines, so retrying every 2s floods the extension's
+// error page. Grow the wait up to a minute; any explicit action (new token,
+// auto-pair) resets it.
+let nextScanAt = 0;
+let scanBackoffMs = 0;
+const SCAN_BACKOFF_MAX_MS = 60_000;
+
+function resetScanBackoff() {
+  nextScanAt = 0;
+  scanBackoffMs = 0;
+}
+
+function bumpScanBackoff() {
+  scanBackoffMs = Math.min(scanBackoffMs ? scanBackoffMs * 2 : 5_000, SCAN_BACKOFF_MAX_MS);
+  nextScanAt = Date.now() + scanBackoffMs;
+}
+
 async function connectLoop() {
   if (scanning || (ws && ws.readyState === WebSocket.OPEN)) return;
-  const token = await getToken();
-  if (!token) {
-    await setStatus({ connected: false, reason: "no-token" });
-    return;
-  }
+  if (Date.now() < nextScanAt) return;
   scanning = true;
   try {
+    // Ask the native host where the server is. When it answers, we never dial
+    // blind: a dead port dialed = a console error logged, so we only open a
+    // socket to a port the registry says a LIVE server process owns.
+    const info = await nativeCall({ cmd: "get-info" });
+
+    let token = await getToken();
+    if (info && info.ok && info.token && info.token !== token) {
+      token = String(info.token);
+      await chrome.storage.local.set({ token });
+    }
+    if (!token) {
+      await setStatus({ connected: false, reason: "no-token" });
+      bumpScanBackoff();
+      return;
+    }
+
+    if (info && info.ok && "alive" in info) {
+      if (!info.alive || !info.port) {
+        // Server simply isn't running (it starts with an iframer session).
+        // Don't attempt any connection — zero console noise.
+        await setStatus({ connected: false, reason: "server-not-running" });
+        bumpScanBackoff();
+        return;
+      }
+      const ok = await tryConnect(info.port, token);
+      if (ok) {
+        resetScanBackoff();
+        return;
+      }
+      await setStatus({ connected: false, reason: "server-not-found" });
+      bumpScanBackoff();
+      return;
+    }
+
+    // No native host (or an old copy) — legacy full port scan.
     for (let port = PORT_START; port <= PORT_END; port++) {
       const ok = await tryConnect(port, token);
       if (ok) {
-        scanning = false;
+        resetScanBackoff();
         return;
       }
     }
     await setStatus({ connected: false, reason: "server-not-found" });
+    bumpScanBackoff();
   } finally {
     scanning = false;
   }
@@ -115,7 +193,9 @@ function tryConnect(port, token) {
     let settled = false;
     let sock;
     try {
-      sock = new WebSocket(`ws://127.0.0.1:${port}/extension/ws?token=${encodeURIComponent(token)}`);
+      // No token in the URL — query strings land in request logs. The token
+      // goes in a first {type:"auth"} message instead; the server waits for it.
+      sock = new WebSocket(`ws://127.0.0.1:${port}/extension/ws`);
     } catch {
       resolve(false);
       return;
@@ -137,6 +217,9 @@ function tryConnect(port, token) {
       ws = sock;
       currentPort = port;
       wire(sock);
+      try {
+        sock.send(JSON.stringify({ type: "auth", token }));
+      } catch {}
       sendHello(sock);
       setStatus({ connected: true, port, reason: null });
       done(true);
@@ -160,11 +243,12 @@ function tryConnect(port, token) {
 
 function wire(sock) {
   sock.onmessage = (ev) => handleMessage(sock, ev.data);
-  sock.onclose = () => {
+  sock.onclose = (ev) => {
     if (ws === sock) {
       ws = null;
       currentPort = null;
-      setStatus({ connected: false, reason: "disconnected" });
+      // Auth is checked AFTER the socket opens, so a bad token surfaces here.
+      setStatus({ connected: false, reason: ev && ev.code === 4001 ? "bad-token" : "disconnected" });
     }
   };
   sock.onerror = () => {
@@ -195,10 +279,8 @@ async function handleMessage(sock, raw) {
       reply(sock, id, true, { pong: true });
     } else if (type === "list_tabs") {
       reply(sock, id, true, { tabs: await listTabs() });
-    } else if (type === "execute") {
-      reply(sock, id, true, await runPipeline(msg.tabId, msg.steps || [], msg.options || {}));
     } else if (type === "cdp_attach") {
-      reply(sock, id, true, await cdpAttach(msg.tabId));
+      reply(sock, id, true, await cdpAttach(msg.tabId, !!msg.focus));
     } else if (type === "cdp_command") {
       reply(sock, id, true, await cdpCommand(msg.tabId, msg.sessionId, msg.method, msg.params));
     } else if (type === "cdp_detach") {
@@ -228,17 +310,8 @@ async function listTabs() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function tabState(tabId) {
-  try {
-    const t = await chrome.tabs.get(tabId);
-    return { url: t.url || "", title: t.title || "" };
-  } catch {
-    return { url: "", title: "" };
-  }
-}
-
-// Chrome discards (freezes) background tabs to save memory — a discarded tab has
-// no content process, so executeScript fails with a host-access error. Wake it
+// Chrome discards (freezes) background tabs to save memory — a discarded tab
+// has no content process, so a debugger attach lands on a dead target. Wake it
 // by reloading before we try to drive it.
 async function ensureAwake(tabId) {
   try {
@@ -249,7 +322,7 @@ async function ensureAwake(tabId) {
       await sleep(1500); // let the SPA boot after document load
     }
   } catch {
-    /* tab gone — the step will surface the real error */
+    /* tab gone — the attach will surface the real error */
   }
 }
 
@@ -266,223 +339,39 @@ async function waitForLoad(tabId, timeoutMs = 30000) {
   }
 }
 
-async function injectStep(tabId, step) {
-  const world = step.type === "extract" || step.type === "evaluate" ? "MAIN" : "ISOLATED";
-  const [res] = await chrome.scripting.executeScript({
-    target: { tabId },
-    world,
-    func: iframerRunStep,
-    args: [step],
-  });
-  return res ? res.result : { __error: "No result from injected step." };
-}
-
-// Resolve a step's target to viewport-center coords (for trusted CDP input),
-// atomically in one injection — by selector/@ref OR by find-criteria (so the
-// coords match a live element, not a ref that a re-render may have dropped).
-// Runs in the isolated world — DOM only, no eval.
-async function getElementCenter(tabId, step) {
-  const [res] = await chrome.scripting.executeScript({
-    target: { tabId },
-    world: "ISOLATED",
-    args: [step],
-    func: (s) => {
-      const REF = "data-iframer-ref";
-      function visible(el) {
-        const r = el.getBoundingClientRect();
-        if (r.width === 0 && r.height === 0) return false;
-        const st = getComputedStyle(el);
-        return st.visibility !== "hidden" && st.display !== "none" && st.opacity !== "0";
-      }
-      function nameOf(el) {
-        const a = el.getAttribute("aria-label");
-        if (a) return a.trim();
-        if (el.getAttribute("placeholder")) return el.getAttribute("placeholder").trim();
-        return (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 120);
-      }
-      let el = null;
-      if (s.selector) {
-        el = s.selector.startsWith("@e")
-          ? document.querySelector(`[${REF}="${s.selector}"]`)
-          : document.querySelector(s.selector);
-      } else if (s.name || s.text || s.placeholder) {
-        const want = (s.name || s.text || s.placeholder || "").toLowerCase();
-        const exact = !!s.exact;
-        const sel = "a,button,input,textarea,select,summary,[role],[onclick],[contenteditable=true],[tabindex]:not([tabindex='-1'])";
-        const cands = Array.from(document.querySelectorAll(sel)).filter((e) => {
-          if (!visible(e)) return false;
-          const nm = nameOf(e).toLowerCase();
-          return exact ? nm === want : nm.includes(want);
-        });
-        cands.sort((a, b) => nameOf(a).length - nameOf(b).length);
-        el = cands[0] || null;
-      }
-      if (!el) return null;
-      try { el.scrollIntoView({ block: "center", inline: "center" }); } catch {}
-      const r = el.getBoundingClientRect();
-      return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height };
-    },
-  });
-  return res ? res.result : null;
-}
-
-async function runStep(tabId, step, cdpTarget) {
-  // Trusted input path (CDP): synthetic DOM events are ignored by some SPAs
-  // (Slack), so when the pipeline runs with options.trusted we send real,
-  // isTrusted mouse/key events via chrome.debugger.
-  if (cdpTarget && (step.type === "click" || step.type === "human-click" || step.type === "right-click")) {
-    const c = await getElementCenter(tabId, step);
-    if (!c) return { __error: `No element for: ${step.selector || step.name || step.text || step.placeholder || "(no target)"}` };
-    if (step.type === "right-click") await cdp.rightClick(cdpTarget, c.x, c.y);
-    else await cdp.click(cdpTarget, c.x, c.y);
-    return { clicked: true, trusted: true };
-  }
-  if (cdpTarget && step.type === "keyboard") {
-    await cdp.key(cdpTarget, step.key, { meta: step.meta, ctrl: step.ctrl, shift: step.shift, alt: step.alt });
-    return { pressed: step.key, trusted: true };
-  }
-
-  // Steps the background handles directly (tab-level, not page-level).
-  if (step.type === "navigate") {
-    await chrome.tabs.update(tabId, { url: step.url });
-    await waitForLoad(tabId);
-    return { navigated: true };
-  }
-  if (step.type === "wait") {
-    await sleep(typeof step.ms === "number" ? step.ms : 1000);
-    return { waited: true };
-  }
-  if (step.type === "screenshot") {
-    // The tab is focused (see focusTab) so captureVisibleTab works. Return the
-    // image as a data URL; the server persists it to a file the agent can read.
-    try {
-      const tab = await chrome.tabs.get(tabId);
-      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 60 });
-      return { dataUrl };
-    } catch (e) {
-      return { __error: `screenshot failed: ${e && e.message ? e.message : String(e)}` };
-    }
-  }
-  // Everything else runs inside the page.
-  return injectStep(tabId, step);
-}
-
-// Bring the target tab to the foreground before driving it. Chrome throttles
-// and can freeze background tabs — their DOM goes stale and CDP mouse events
-// don't hit-test — so a backgrounded tab silently no-ops clicks. Focusing it
-// (the state a human is in when they drive their own tab) is what makes clicks,
-// reads, and screenshots actually work. This is why it "just worked" on a tab
-// the user was already looking at.
-async function focusTab(tabId) {
+// Make the target tab drivable. It must be the ACTIVE tab of its window —
+// an inactive tab doesn't render, so CDP mouse events have nothing to
+// hit-test against. But the WINDOW doesn't need OS focus: we activate the
+// tab in place and (in cdpAttach) turn on CDP focus emulation so the page
+// believes it's focused. stealFocus=true additionally raises the window —
+// the old behavior, for the rare site that still misbehaves.
+async function focusTab(tabId, stealFocus) {
   try {
     const t = await chrome.tabs.get(tabId);
-    await chrome.windows.update(t.windowId, { focused: true });
+    // A minimized window produces no frames at all (screenshots stall, some
+    // sites wedge). Restore it WITHOUT taking focus — sitting behind the
+    // user's other windows is enough for rendering.
+    try {
+      const w = await chrome.windows.get(t.windowId);
+      if (w.state === "minimized") {
+        await chrome.windows.update(t.windowId, { state: "normal", focused: false });
+      }
+    } catch {
+      /* window query failed — proceed, attach will surface real errors */
+    }
+    if (stealFocus) await chrome.windows.update(t.windowId, { focused: true });
     await chrome.tabs.update(tabId, { active: true });
     await sleep(400); // let the tab un-throttle and paint
   } catch {
-    /* tab/window gone — the step will surface the real error */
+    /* tab/window gone — the attach will surface the real error */
   }
-}
-
-async function runPipeline(tabId, steps, options) {
-  const totalSteps = steps.length;
-  const started = Date.now();
-  const results = [];
-  const continueOnError = !!options.continueOnError;
-  await ensureAwake(tabId);
-  if (options.focus !== false) await focusTab(tabId);
-  const capturing = !!options.captureApi;
-  if (capturing) capture.start(tabId);
-
-  // Trusted input: attach the debugger ONCE for the whole pipeline (one banner).
-  let cdpTarget = null;
-  if (options.trusted) {
-    try {
-      cdpTarget = await cdp.attach(tabId);
-    } catch (e) {
-      // Attach can fail if DevTools is open on the tab or another debugger is
-      // attached. Fall back to synthetic input rather than aborting.
-      cdpTarget = null;
-    }
-  }
-  const cleanup = async () => {
-    if (cdpTarget) {
-      await cdp.detach(cdpTarget);
-      cdpTarget = null;
-    }
-  };
-
-  // Drain briefly so late/async XHRs land, then return the raw requests
-  // (iframer post-processes them into endpoints server-side).
-  async function collectCapture() {
-    if (!capturing) return undefined;
-    await sleep(CAPTURE_DRAIN_MS);
-    return capture.stop(tabId);
-  }
-
-  for (let i = 0; i < steps.length; i++) {
-    const step = steps[i];
-    if (capturing) capture.setStep(i);
-    let result;
-    try {
-      result = await runStep(tabId, step, cdpTarget);
-    } catch (e) {
-      result = { __error: e && e.message ? e.message : String(e) };
-    }
-    const failed = result && typeof result === "object" && "__error" in result;
-    if (failed) {
-      results.push({ stepIndex: i, ok: false, step, error: result.__error });
-      if (!continueOnError) {
-        const capturedRequests = await collectCapture();
-        await cleanup();
-        const st = await tabState(tabId);
-        return {
-          ok: false,
-          completedSteps: i,
-          totalSteps,
-          results,
-          finalState: st,
-          obstacles: [],
-          durationMs: Date.now() - started,
-          modeUsed: "extension",
-          capturedRequests,
-          error: {
-            failedAtStep: i,
-            failedStep: step,
-            errorType: "action-failed",
-            message: result.__error,
-            pageState: st,
-            suggestion: "Take a `snapshot` step to see current elements, then retry with a fresh ref.",
-            retryable: true,
-          },
-        };
-      }
-    } else {
-      results.push({ stepIndex: i, ok: true, step, result });
-    }
-  }
-
-  const capturedRequests = await collectCapture();
-  await cleanup();
-  const finalState = await tabState(tabId);
-  return {
-    ok: true,
-    completedSteps: totalSteps,
-    totalSteps,
-    results,
-    finalState,
-    obstacles: [],
-    durationMs: Date.now() - started,
-    modeUsed: "extension",
-    capturedRequests,
-  };
 }
 
 // ─── CDP relay ──────────────────────────────────────────────────────
 // Bridges chrome.debugger for a tab to iframer's server, which connects to it
-// with patchright's connectOverCDP and drives the tab through the REAL iframer
-// pipeline (find/click/snapshot/navigate/capture). This replaces the hand-rolled
-// interpreter with iframer's proven engine. Shows Chrome's debug banner.
+// with connectOverCDP and drives the tab through the REAL iframer pipeline
+// (find/click/snapshot/navigate/capture). Shows Chrome's debug banner while a
+// run is in progress; the debugger detaches when the run finishes.
 const attachedTabs = new Set();
 
 function dbgSend(target, method, params) {
@@ -495,12 +384,19 @@ function dbgSend(target, method, params) {
   });
 }
 
-async function cdpAttach(tabId) {
-  await focusTab(tabId); // live tab so CDP hit-testing/render works
+async function cdpAttach(tabId, stealFocus) {
+  await ensureAwake(tabId); // a discarded tab has no target to attach to
+  await focusTab(tabId, stealFocus); // active tab so CDP hit-testing/render works
   if (!attachedTabs.has(tabId)) {
     await chrome.debugger.attach({ tabId }, "1.3");
     attachedTabs.add(tabId);
   }
+  // Let the page run as if focused even when the window isn't: focus
+  // emulation makes document.hasFocus()/focus events behave, and the
+  // lifecycle override keeps Chrome from freezing an occluded window's tab.
+  // Best-effort — older Chromes may not know these commands.
+  try { await dbgSend({ tabId }, "Emulation.setFocusEmulationEnabled", { enabled: true }); } catch {}
+  try { await dbgSend({ tabId }, "Page.setWebLifecycleState", { state: "active" }); } catch {}
   const info = await dbgSend({ tabId }, "Target.getTargetInfo");
   return { targetInfo: info && info.targetInfo };
 }
@@ -570,9 +466,26 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         error = e && e.message ? e.message : String(e);
       }
       sendResponse({ ok: true, hostPermissions, grantedOrigins: perms.origins || [], tabUrl, okExec: ok, value, error });
+    } else if (msg.cmd === "auto-pair") {
+      const token = await fetchTokenNatively();
+      if (!token) {
+        sendResponse({
+          ok: false,
+          error: "Pairing host not reachable. Run `iframer install extension` in a terminal, then restart the browser.",
+        });
+        return;
+      }
+      await chrome.storage.local.set({ token });
+      resetScanBackoff();
+      try { if (ws) ws.close(); } catch {}
+      ws = null;
+      await connectLoop();
+      const { status } = await chrome.storage.local.get("status");
+      sendResponse({ ok: true, token, status: status || { connected: false } });
     } else if (msg.cmd === "set-token") {
       await chrome.storage.local.set({ token: msg.token || "" });
       // Force a fresh connection attempt with the new token.
+      resetScanBackoff();
       try { if (ws) ws.close(); } catch {}
       ws = null;
       await connectLoop();

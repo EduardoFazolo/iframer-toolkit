@@ -29,17 +29,21 @@ export class CdpRelay {
   private readonly tabSessionId = "pw-tab-1";
   private targetInfo: Record<string, unknown> | null = null;
   private ownerClientId = "";
+  // True only once addCdpListener succeeded — stop() must not remove a
+  // listener that belongs to another relay driving the same tab.
+  private listenerRegistered = false;
 
   constructor(
     private tabId: number,
     private clientId?: string,
+    private focus?: boolean,
   ) {}
 
   /** Attach the extension debugger, wire event forwarding, and start listening.
    *  Must complete BEFORE connectOverCDP is called. */
   async start(): Promise<void> {
     // 1) Attach chrome.debugger to the tab and get its real targetInfo.
-    const { targetInfo, clientId } = await extensionBridge.cdpAttach(this.tabId, this.clientId);
+    const { targetInfo, clientId } = await extensionBridge.cdpAttach(this.tabId, this.clientId, this.focus);
     this.ownerClientId = clientId;
     this.targetInfo = (targetInfo as Record<string, unknown>) || {
       targetId: `iframer-${this.tabId}`,
@@ -49,14 +53,16 @@ export class CdpRelay {
     };
 
     // 2) Forward chrome.debugger events (from THIS client/tab) up to Playwright.
-    extensionBridge.setCdpEventHandler((clientId2, ev: CdpEvent) => {
-      if (clientId2 !== this.ownerClientId || ev.tabId !== this.tabId) return;
+    // Registration is exclusive per (client, tab): a concurrent pipeline on the
+    // same tab fails loudly here instead of silently stealing our events.
+    extensionBridge.addCdpListener(this.ownerClientId, this.tabId, (ev: CdpEvent) => {
       this.sendToPw({
         method: ev.method,
         params: ev.params,
         sessionId: ev.sessionId || this.tabSessionId,
       });
     });
+    this.listenerRegistered = true;
 
     // 3) Listen for the Playwright CDP connection.
     await new Promise<void>((resolve, reject) => {
@@ -183,11 +189,47 @@ export class CdpRelay {
     // Forward everything else to chrome.debugger. Strip the fake top-level
     // sessionId (chrome addresses the page by {tabId}); pass real child ones.
     const realSessionId = sessionId === this.tabSessionId ? undefined : sessionId;
+    if (method === "Page.captureScreenshot") {
+      return this.captureScreenshotWithFallback(params, realSessionId);
+    }
     return extensionBridge.cdpCommand(this.ownerClientId, this.tabId, realSessionId, method, params);
   }
 
+  /** Screenshots need a compositor frame; a minimized/occluded window may
+   *  never produce one, stalling the command indefinitely. Give the normal
+   *  capture a short window, then fall back to fromSurface:false — capturing
+   *  straight from the renderer, which works without a visible surface (at
+   *  the cost of minor scale/color differences on some displays). */
+  private async captureScreenshotWithFallback(params: unknown, sessionId?: string): Promise<unknown> {
+    const base = (params && typeof params === "object" ? { ...(params as Record<string, unknown>) } : {}) as Record<
+      string,
+      unknown
+    >;
+    const attempt = (p: Record<string, unknown>) =>
+      extensionBridge.cdpCommand(this.ownerClientId, this.tabId, sessionId, "Page.captureScreenshot", p);
+    const first = attempt(base);
+    first.catch(() => undefined); // may settle after losing the race
+    try {
+      return await Promise.race([
+        first,
+        new Promise<never>((_, reject) => {
+          const t = setTimeout(() => reject(new Error("screenshot timed out (no compositor frame)")), 10_000);
+          t.unref?.();
+        }),
+      ]);
+    } catch {
+      return attempt({ ...base, fromSurface: false });
+    }
+  }
+
   async stop(): Promise<void> {
-    extensionBridge.setCdpEventHandler(null);
+    // Remove only OUR listener — other relays (other tabs, or the one that beat
+    // us to this tab) keep theirs.
+    const ownedTab = this.listenerRegistered;
+    if (ownedTab) {
+      extensionBridge.removeCdpListener(this.ownerClientId, this.tabId);
+      this.listenerRegistered = false;
+    }
     // Terminate sockets immediately so close() can't block on a lingering client.
     try {
       this.wss?.clients.forEach((c) => {
@@ -207,10 +249,14 @@ export class CdpRelay {
     if (this.httpServer) await withTimeout((cb) => this.httpServer!.close(cb));
     this.wss = null;
     this.httpServer = null;
-    try {
-      await extensionBridge.cdpDetach(this.ownerClientId, this.tabId);
-    } catch (e) {
-      log.warn(`cdp detach failed: ${e}`);
+    // Detach the debugger only if this relay actually owned the tab —
+    // otherwise we'd rip the debugger out from under the relay that does.
+    if (ownedTab) {
+      try {
+        await extensionBridge.cdpDetach(this.ownerClientId, this.tabId);
+      } catch (e) {
+        log.warn(`cdp detach failed: ${e}`);
+      }
     }
   }
 }

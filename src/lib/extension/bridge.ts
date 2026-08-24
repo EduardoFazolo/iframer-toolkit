@@ -5,7 +5,7 @@ import { getLocalToken } from "../auth/crypto";
 
 // ─── Extension bridge (multi-client) ────────────────────────────────
 //
-// The banner-free "run in my real Chrome tab" transport. Any number of MV3
+// The "run in my real Chrome tab" transport. Any number of MV3
 // extensions — across Chrome profiles or browsers — dial OUT to this server
 // (extensions can't listen on a port, so the server is always the WS server).
 // Each connection is a CLIENT that identifies itself (profile id/name, version)
@@ -61,7 +61,7 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>;
 }
 
-type OutboundType = "list_tabs" | "execute" | "ping" | "cdp_attach" | "cdp_command" | "cdp_detach";
+type OutboundType = "list_tabs" | "ping" | "cdp_attach" | "cdp_command" | "cdp_detach";
 
 export interface CdpEvent {
   tabId: number;
@@ -77,9 +77,15 @@ class ExtensionBridge {
   private nextReqId = 1;
   // tabId -> clientId, refreshed on every listTabs() so execute can route.
   private tabOwner = new Map<number, string>();
-  // Active CDP relay listener (one relay at a time). Receives forwarded
-  // chrome.debugger events from the extension.
-  private cdpEventHandler: ((clientId: string, ev: CdpEvent) => void) | null = null;
+  // Tab ids that two connected browsers BOTH reported (separate Chromium
+  // instances have independent tab-id spaces, so ids can collide). Routing
+  // one of these without an explicit clientId would silently pick a winner —
+  // refuse instead.
+  private collidingTabs = new Set<number>();
+  // CDP relay listeners, one per (clientId, tabId). Each active relay owns
+  // exactly one entry; a second relay on the same tab is refused at register
+  // time instead of silently stealing the first one's events.
+  private cdpListeners = new Map<string, (ev: CdpEvent) => void>();
 
   /** Attach the WS server to the already-listening HTTP server. Idempotent. */
   attach(server: HttpServer): void {
@@ -87,33 +93,62 @@ class ExtensionBridge {
 
     this.wss = new WebSocketServer({ server, path: "/extension/ws" });
     this.wss.on("connection", (ws: WebSocket, req) => {
-      const token = new URL(req.url || "", "http://127.0.0.1").searchParams.get("token");
       let expected = "";
       try {
         expected = getLocalToken();
       } catch {
         expected = "";
       }
-      if (!expected || token !== expected) {
+      if (!expected) {
         ws.close(4001, "unauthorized");
         return;
       }
 
-      const client: Client = {
-        clientId: crypto.randomUUID(),
-        socket: ws,
-        connectedAt: Date.now(),
-        tabs: [],
-        heartbeat: null,
-      };
-      this.clients.set(client.clientId, client);
-      this.startHeartbeat(client);
+      // Preferred auth: a first-message {type:"auth", token} — keeps the token
+      // out of URLs (query strings end up in request logs). A ?token= query
+      // param is still accepted for older extensions and the integration tests.
+      const queryToken = new URL(req.url || "", "http://127.0.0.1").searchParams.get("token");
+      if (queryToken !== null) {
+        if (queryToken !== expected) {
+          ws.close(4001, "unauthorized");
+          return;
+        }
+        this.acceptClient(ws);
+        return;
+      }
 
-      ws.on("message", (data: Buffer) => this.onMessage(client, data));
-      ws.on("close", () => this.dropClient(client, "socket closed"));
-      ws.on("error", () => {
-        /* close handler cleans up */
+      const timer = setTimeout(() => ws.close(4001, "auth timeout"), 3_000);
+      ws.once("message", (data: Buffer) => {
+        clearTimeout(timer);
+        try {
+          const m = JSON.parse(data.toString()) as { type?: string; token?: string };
+          if (m?.type === "auth" && m.token === expected) {
+            this.acceptClient(ws);
+            return;
+          }
+        } catch {
+          /* fall through to close */
+        }
+        ws.close(4001, "unauthorized");
       });
+    });
+  }
+
+  private acceptClient(ws: WebSocket): void {
+    const client: Client = {
+      clientId: crypto.randomUUID(),
+      socket: ws,
+      connectedAt: Date.now(),
+      tabs: [],
+      heartbeat: null,
+    };
+    this.clients.set(client.clientId, client);
+    this.startHeartbeat(client);
+
+    ws.on("message", (data: Buffer) => this.onMessage(client, data));
+    ws.on("close", () => this.dropClient(client, "socket closed"));
+    ws.on("error", () => {
+      /* close handler cleans up */
     });
   }
 
@@ -180,11 +215,13 @@ class ExtensionBridge {
       return;
     }
 
-    // CDP relay event forwarded from the extension's chrome.debugger.
+    // CDP relay event forwarded from the extension's chrome.debugger — route
+    // to the relay that owns this exact (client, tab).
     if (msg.type === "cdp_event") {
       const ev = msg as unknown as CdpEvent;
-      if (typeof ev.tabId === "number" && this.cdpEventHandler) {
-        this.cdpEventHandler(client.clientId, ev);
+      if (typeof ev.tabId === "number") {
+        const fn = this.cdpListeners.get(cdpKey(client.clientId, ev.tabId));
+        if (fn) fn(ev);
       }
       return;
     }
@@ -221,10 +258,6 @@ class ExtensionBridge {
     });
   }
 
-  isConnected(): boolean {
-    return this.clients.size > 0;
-  }
-
   hasClients(): boolean {
     return this.clients.size > 0;
   }
@@ -248,6 +281,7 @@ class ExtensionBridge {
   async listTabs(): Promise<{ tabs: ExtensionTab[]; clients: ClientInfo[] }> {
     const all: ExtensionTab[] = [];
     this.tabOwner.clear();
+    this.collidingTabs.clear();
 
     await Promise.all(
       [...this.clients.values()].map(async (client) => {
@@ -260,7 +294,11 @@ class ExtensionBridge {
             profileName: client.profileName,
           }));
           client.tabs = tagged;
-          for (const t of tagged) this.tabOwner.set(t.id, client.clientId);
+          for (const t of tagged) {
+            const prev = this.tabOwner.get(t.id);
+            if (prev !== undefined && prev !== client.clientId) this.collidingTabs.add(t.id);
+            this.tabOwner.set(t.id, client.clientId);
+          }
           all.push(...tagged);
         } catch {
           client.tabs = [];
@@ -290,16 +328,20 @@ class ExtensionBridge {
       return [...this.clients.values()][0];
     }
     let owner = this.tabOwner.get(tabId);
-    if (!owner) {
+    if (!owner || this.collidingTabs.has(tabId)) {
       await this.listTabs(); // refresh ownership
       owner = this.tabOwner.get(tabId);
+    }
+    if (this.collidingTabs.has(tabId)) {
+      throw new Error(
+        `Tab id ${tabId} exists in more than one connected browser (separate browsers ` +
+          `have independent tab-id spaces). Call \`tabs\` and pass the tab's clientId ` +
+          `alongside tabId to pick the right one.`,
+      );
     }
     if (owner) {
       const c = this.clients.get(owner);
       if (c) return c;
-    }
-    if (this.clients.size === 1) {
-      return [...this.clients.values()][0];
     }
     throw new Error(
       `Could not determine which browser profile owns tab ${tabId}. Call \`tabs\` to ` +
@@ -307,25 +349,27 @@ class ExtensionBridge {
     );
   }
 
-  execute(
-    tabId: number,
-    steps: unknown[],
-    options: Record<string, unknown> = {},
-    clientId?: string,
-  ): Promise<unknown> {
-    return this.resolveClient(tabId, clientId).then((client) =>
-      this.send(client, "execute", { tabId, steps, options }),
-    );
-  }
-
   // ─── CDP relay plumbing ───────────────────────────────────────────
-  setCdpEventHandler(fn: ((clientId: string, ev: CdpEvent) => void) | null): void {
-    this.cdpEventHandler = fn;
+
+  /** Register the relay that owns (clientId, tabId). Throws if another relay
+   *  already drives that tab — a loud error instead of a silent event steal. */
+  addCdpListener(clientId: string, tabId: number, fn: (ev: CdpEvent) => void): void {
+    const key = cdpKey(clientId, tabId);
+    if (this.cdpListeners.has(key)) {
+      throw new Error(`Tab ${tabId} is already being driven by another pipeline. Retry when it finishes.`);
+    }
+    this.cdpListeners.set(key, fn);
   }
 
-  async cdpAttach(tabId: number, clientId?: string): Promise<{ targetInfo: unknown; clientId: string }> {
+  removeCdpListener(clientId: string, tabId: number): void {
+    this.cdpListeners.delete(cdpKey(clientId, tabId));
+  }
+
+  async cdpAttach(tabId: number, clientId?: string, focus?: boolean): Promise<{ targetInfo: unknown; clientId: string }> {
     const client = await this.resolveClient(tabId, clientId);
-    const res = (await this.send<{ targetInfo: unknown }>(client, "cdp_attach", { tabId })) || { targetInfo: null };
+    const res = (await this.send<{ targetInfo: unknown }>(client, "cdp_attach", { tabId, focus: !!focus })) || {
+      targetInfo: null,
+    };
     return { targetInfo: res.targetInfo, clientId: client.clientId };
   }
 
@@ -350,6 +394,10 @@ class ExtensionBridge {
       /* extension gone — nothing to detach */
     }
   }
+}
+
+function cdpKey(clientId: string, tabId: number): string {
+  return `${clientId}:${tabId}`;
 }
 
 export const extensionBridge = new ExtensionBridge();
