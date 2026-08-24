@@ -139,7 +139,7 @@ function readServerInfo() {
 // src/mcp/local-server.ts
 var __dirname = "/Users/eduardoverona/tools/iframer-toolkit/src/mcp";
 var BASE_PORT = parseInt(process.env.IFRAMER_LOCAL_PORT || "3022", 10);
-var PORT_SCAN_ATTEMPTS = 200;
+var PORT_SCAN_ATTEMPTS = 21;
 var STARTUP_TIMEOUT_MS = 15000;
 var HEALTH_POLL_MS = 300;
 var SPAWN_LOCK_STALE_MS = 20000;
@@ -277,10 +277,11 @@ ${this.readLogTail()}`);
     try {
       const bunPath = require("child_process").execSync("which bun", { encoding: "utf8" }).trim();
       if (bunPath && import_fs3.default.existsSync(serverTs)) {
+        console.error("[iframer] running local server under bun — extension mode (connectOverCDP) will not work; run `bun run build` to get the node bundle");
         return { command: bunPath, args: ["run", serverTs] };
       }
     } catch {}
-    return { command: "node", args: [serverCjs] };
+    throw new Error("No runnable iframer server entry found: dist/local-server.cjs is missing, tsx is not " + "installed, and bun is unavailable. Run `bun install && bun run build` in the iframer repo.");
   }
   async restart() {
     const info = readServerInfo();
@@ -379,7 +380,7 @@ async function apiPost(endpoint, body) {
   return res.json();
 }
 async function apiGet(endpoint) {
-  const res = await fetch(`${BASE_URL}${endpoint}`, { headers: authHeaders() });
+  const res = await fetch(`${BASE_URL}${endpoint}`, { headers: authHeaders(), signal: AbortSignal.timeout(30000) });
   return res.json();
 }
 async function localApiPost(endpoint, body) {
@@ -396,13 +397,13 @@ async function localApiPost(endpoint, body) {
 async function localApiGet(endpoint) {
   await ensureLocalServer();
   const url = localServer.getBaseUrl();
-  const res = await fetch(`${url}${endpoint}`, { headers: authHeaders(LOCAL_TOKEN) });
+  const res = await fetch(`${url}${endpoint}`, { headers: authHeaders(LOCAL_TOKEN), signal: AbortSignal.timeout(30000) });
   return res.json();
 }
 async function localApiDelete(endpoint) {
   await ensureLocalServer();
   const url = localServer.getBaseUrl();
-  const res = await fetch(`${url}${endpoint}`, { method: "DELETE", headers: authHeaders(LOCAL_TOKEN) });
+  const res = await fetch(`${url}${endpoint}`, { method: "DELETE", headers: authHeaders(LOCAL_TOKEN), signal: AbortSignal.timeout(30000) });
   return res.json();
 }
 async function isDockerRunning() {
@@ -638,7 +639,7 @@ var stepSchema = import_zod2.z.discriminatedUnion("type", [
   import_zod2.z.object({ type: import_zod2.z.literal("wait-for"), selector: import_zod2.z.string(), timeout: import_zod2.z.number().optional() }),
   import_zod2.z.object({ type: import_zod2.z.literal("scroll"), deltaY: import_zod2.z.number().optional(), selector: import_zod2.z.string().optional().describe("Scroll within this element instead of the window") }),
   import_zod2.z.object({ type: import_zod2.z.literal("keyboard"), key: import_zod2.z.string(), meta: import_zod2.z.boolean().optional(), ctrl: import_zod2.z.boolean().optional(), shift: import_zod2.z.boolean().optional(), alt: import_zod2.z.boolean().optional() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("read"), selector: import_zod2.z.string().optional().describe("Element to read visible text from (CSS or @e ref). Omit for the whole page body."), maxChars: import_zod2.z.number().optional().describe("Cap the returned text length (default 20000)") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("read"), selector: import_zod2.z.string().optional().describe("Element to read visible text from (CSS or @e ref). Omit for the whole page body."), maxChars: import_zod2.z.number().optional().describe("Cap the returned text length (default 6000). Raise it only when you actually need more — larger reads cost proportionally more context.") }),
   import_zod2.z.object({ type: import_zod2.z.literal("type-code"), value: import_zod2.z.string(), selector: import_zod2.z.string().optional() }),
   import_zod2.z.object({ type: import_zod2.z.literal("login"), domain: import_zod2.z.string(), usernameSelector: import_zod2.z.string().optional(), passwordSelector: import_zod2.z.string().optional(), submitSelector: import_zod2.z.string().optional(), totpSelector: import_zod2.z.string().optional() }),
   import_zod2.z.object({ type: import_zod2.z.literal("solve-captcha") }),
@@ -675,6 +676,8 @@ Key step types:
 
 IMPORTANT — Element refs (@e1, @e2...): All selector fields accept @e refs from snapshot, find, or annotated screenshot. PREFER refs over CSS selectors.
 
+IMPORTANT — Saved anchors (@a:<name>): Selector fields also accept persisted, per-domain anchors from the \`remember\` tool. Call \`remember get <domain>\` before a UI task; if an anchor exists, target it directly (e.g. selector="@a:composer") — no snapshot needed. After finding a new element that works, \`remember save\` it. Unlike @e refs (which reset every snapshot), @a: anchors persist across runs.
+
 Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: errorContext with screenshot path, URL, errorType, suggestion, retryable.`, {
     steps: import_zod3.z.array(stepSchema).describe("Pipeline steps to execute sequentially"),
     options: import_zod3.z.object({
@@ -686,9 +689,9 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
       mode: import_zod3.z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("DO NOT SET THIS unless user explicitly requests a mode. iframer auto-selects and auto-escalates. Use 'extension' ONLY to drive a tab in the user's real Chrome via the iframer extension — requires options.tabId (get it from the `tabs` tool)."),
       autoEscalate: import_zod3.z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)"),
       instanceId: import_zod3.z.string().optional().describe("Run in a named parallel browser within this session (default: 'default'). Use distinct ids to drive several browsers at once, e.g. one per account — each keeps its own login/session state."),
-      tabId: import_zod3.z.number().optional().describe("Only with mode='extension': the id of the real Chrome tab to drive (from the `tabs` tool)."),
+      tabId: import_zod3.z.number().optional().describe("Only with mode='extension': the id of the real Chrome tab to drive (from the `tabs` tool). Input is trusted OS-level (chrome.debugger); Chrome shows its 'is being debugged' bar while the run is in progress."),
       clientId: import_zod3.z.string().optional().describe("Only with mode='extension', and only needed when several profiles/browsers are connected and a tab is ambiguous: the clientId of the profile that owns the tab (from the `tabs` tool)."),
-      trusted: import_zod3.z.boolean().optional().describe("Only with mode='extension': use trusted OS-level input (via chrome.debugger) for clicks/keyboard instead of synthetic DOM events. Needed for apps that ignore synthetic events (Slack, some editors). Shows Chrome's debug banner while running. Default false.")
+      focus: import_zod3.z.boolean().optional().describe("Only with mode='extension': bring the tab's window to the OS foreground while driving. Default false — the tab is driven in the background (activated in its window, focus-emulated) without interrupting the user. Set true only if a site ignores background input.")
     }).optional()
   }, async (params) => {
     try {
@@ -862,9 +865,9 @@ Found: ${res.ref} ${res.role} "${res.name}" (${res.matchCount} match${res.matchC
 --- Read (step ${r.stepIndex}${res.truncated ? ", truncated" : ""}) ---`);
         lines.push(res.text);
       }
-    } else if (r.result !== undefined && r.result !== null) {
+    } else if (r.step.type === "extract" || r.step.type === "evaluate") {
       lines.push(`
-step ${r.stepIndex}: ${JSON.stringify(r.result)}`);
+step ${r.stepIndex} (${r.step.type}): ${JSON.stringify(r.result)}`);
     }
   }
   if (data.obstacles && data.obstacles.length > 0) {
@@ -963,10 +966,9 @@ The outputDir defaults to ./<domain>/. Ask the user where to save if unclear.`, 
       staleTimeoutMs: import_zod4.z.number().optional().describe("Override the 20s stale-state timeout per step"),
       continueOnObstacle: import_zod4.z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
       continueOnError: import_zod4.z.boolean().optional().describe("Continue past failing steps (default: false)"),
-      mode: import_zod4.z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("Browser mode override. Use 'extension' to capture the API of a tab already open in the user's real Chrome (banner-free) — requires options.tabId from the `tabs` tool. Note: response BODIES aren't captured in extension mode (MV3 limitation); request/headers/auth/curl/endpoints are."),
+      mode: import_zod4.z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("Browser mode override. Use 'extension' to capture the API of a tab already open in the user's real Chrome — requires options.tabId from the `tabs` tool. Chrome shows its 'is being debugged' bar while the capture runs."),
       tabId: import_zod4.z.number().optional().describe("Only with mode='extension': the real Chrome tab to reverse-engineer (from the `tabs` tool)."),
-      clientId: import_zod4.z.string().optional().describe("Only with mode='extension', when multiple profiles are connected and the tab is ambiguous: the owning profile's clientId (from the `tabs` tool)."),
-      trusted: import_zod4.z.boolean().optional().describe("Only with mode='extension': use trusted OS-level input (chrome.debugger) for clicks/keyboard. Needed for apps that ignore synthetic events (Slack). Shows Chrome's debug banner. Default false.")
+      clientId: import_zod4.z.string().optional().describe("Only with mode='extension', when multiple profiles are connected and the tab is ambiguous: the owning profile's clientId (from the `tabs` tool).")
     }).optional()
   }, async (params) => {
     try {
@@ -1049,10 +1051,10 @@ Full captured data saved to: ${jsonPath}`);
       }
       let text = lines.join(`
 `);
-      if (text.length > 80000) {
-        text = text.slice(0, 80000) + `
+      if (text.length > 30000) {
+        text = text.slice(0, 30000) + `
 
-[... response truncated — read captured-api.json for full data]`;
+[... index truncated — read captured-api.json for the full endpoint list and all detail]`;
       }
       const content = [{ type: "text", text }];
       if (!captureResult.ok)
@@ -1092,18 +1094,11 @@ Auth:`);
     }
     const protocolSummary = Array.from(byProtocol.entries()).map(([p, eps]) => `${p}=${eps.length}`).join(", ");
     lines.push(`
-Endpoints (${api.endpoints.length}) [${protocolSummary}]:`);
+Endpoints (${api.endpoints.length}) [${protocolSummary}] — full detail in captured-api.json:`);
     for (const ep of api.endpoints) {
-      lines.push(`
-  [${ep.protocol}/${ep.verb}] ${ep.functionName}`);
-      lines.push(`    Action: ${ep.action}`);
-      lines.push(`    ${ep.method} ${ep.path}  →  ${ep.responseStatus}`);
-      if (ep.requestBody) {
-        const body = ep.requestBody;
-        const signalKeys = extractSignalKeys(body);
-        if (signalKeys)
-          lines.push(`    Params: ${signalKeys}`);
-      }
+      const params2 = ep.requestBody ? extractSignalKeys(ep.requestBody) : null;
+      const tail = params2 ? `  {${params2}}` : "";
+      lines.push(`  [${ep.protocol}/${ep.verb}] ${ep.method} ${ep.path} → ${ep.functionName}${tail}`);
     }
   }
   const mainDomain = capturedApi[0]?.domain || "api";
@@ -1180,6 +1175,9 @@ function extractSignalKeys(body) {
       continue;
     if (typeof v === "string" && v.length > 80) {
       signalEntries.push(`${k}=${v.slice(0, 40)}...`);
+    } else if (Array.isArray(v)) {
+      const items = v.slice(0, 8).map((x) => String(x)).join(",");
+      signalEntries.push(`${k}=[${items}${v.length > 8 ? ",…" : ""}]`);
     } else if (typeof v === "object" && v !== null) {
       const keys = Object.keys(v).slice(0, 5).join(",");
       signalEntries.push(`${k}={${keys}${Object.keys(v).length > 5 ? ",..." : ""}}`);
@@ -1696,7 +1694,7 @@ var import_zod8 = require("zod");
 function registerTabsTool(server) {
   server.tool("tabs", `List the tabs currently open in the user's REAL Chrome browser, through the iframer browser extension.
 
-Use this when the user says something like "use my open tab", "the tab I have here", "my Gmail tab", or references a site/screenshot they already have open. Match their reference against the returned tabs (by url or title), pick the tab id, then call \`execute\` with options.mode="extension" and options.tabId=<id> to drive that exact tab — banner-free, on their real logged-in session.
+Use this when the user says something like "use my open tab", "the tab I have here", "my Gmail tab", or references a site/screenshot they already have open. Match their reference against the returned tabs (by url or title), pick the tab id, then call \`execute\` with options.mode="extension" and options.tabId=<id> to drive that exact tab on their real logged-in session (Chrome shows its "is being debugged" bar while a run is in progress).
 
 Requires the iframer Chrome extension to be installed and connected (paired once with the token). Once connected, iframer can see and drive any open tab. If nothing is connected, this returns a clear message telling the user how to connect.
 
@@ -1709,7 +1707,7 @@ Returns: connected (bool), and tabs: [{ id, title, url, active, windowId }]. If 
         return err(`No iframer extension is connected.
 
 ` + `To use your real Chrome tabs:
-` + "1. Install the iframer extension (chrome://extensions → Load unpacked → the `extension/` folder).\n" + "2. Click the iframer icon and paste your pairing token (from `cat ~/.iframer/secret` or your IFRAMER_SECRET), then Save & connect.\n" + "Once the dot is green, run `tabs` again — iframer can then see and drive any open tab.");
+` + "1. Install the iframer extension (chrome://extensions → Load unpacked → the `extension/` folder).\n" + "2. Run `iframer install extension` in a terminal, then restart the browser — the extension pairs itself.\n" + "   (Manual fallback: click the iframer icon and paste the token from `cat ~/.iframer/secret`.)\n" + "Once the dot is green, run `tabs` again — iframer can then see and drive any open tab.");
       }
       const data = await localApiPost("/extension/tabs", {});
       let tabs = data.tabs || [];
@@ -1756,6 +1754,229 @@ Returns: connected (bool), and tabs: [{ id, title, url, active, windowId }]. If 
   });
 }
 
+// src/mcp/tools/anchors.ts
+var import_zod9 = require("zod");
+
+// src/lib/knowledge/component-map.ts
+var import_fs8 = __toESM(require("fs"));
+var import_path10 = __toESM(require("path"));
+function anchorsPath(domain) {
+  return import_path10.default.join(getKnowledgeDir(), `${sanitizeDomain(domain)}.anchors.json`);
+}
+function loadComponentMap(domain) {
+  const norm = normalizeDomain(domain);
+  try {
+    const raw = import_fs8.default.readFileSync(anchorsPath(norm), "utf8");
+    const parsed = JSON.parse(raw);
+    return {
+      domain: parsed.domain || norm,
+      anchors: parsed.anchors || {},
+      quirks: Array.isArray(parsed.quirks) ? parsed.quirks : []
+    };
+  } catch {
+    return { domain: norm, anchors: {}, quirks: [] };
+  }
+}
+function write(cm) {
+  import_fs8.default.mkdirSync(getKnowledgeDir(), { recursive: true });
+  import_fs8.default.writeFileSync(anchorsPath(cm.domain), JSON.stringify(cm, null, 2), "utf8");
+}
+function saveAnchor(domain, input, now) {
+  const cm = loadComponentMap(domain);
+  cm.anchors[input.name] = {
+    name: input.name,
+    selector: input.selector,
+    role: input.role,
+    description: input.description,
+    quirks: input.quirks && input.quirks.length ? input.quirks : undefined,
+    uses: 0,
+    fails: 0,
+    lastVerified: now
+  };
+  write(cm);
+}
+function removeAnchor(domain, name) {
+  const cm = loadComponentMap(domain);
+  if (!(name in cm.anchors))
+    return false;
+  delete cm.anchors[name];
+  write(cm);
+  return true;
+}
+function setDomainQuirks(domain, quirks) {
+  const cm = loadComponentMap(domain);
+  cm.quirks = Array.from(new Set([...cm.quirks, ...quirks]));
+  write(cm);
+}
+function listAnchorDomains() {
+  try {
+    return import_fs8.default.readdirSync(getKnowledgeDir()).filter((f) => f.endsWith(".anchors.json")).map((f) => f.replace(/\.anchors\.json$/, ""));
+  } catch {
+    return [];
+  }
+}
+
+// src/mcp/tools/anchors.ts
+function registerRememberTool(server) {
+  server.tool("remember", `Persisted per-domain map of a website's UI elements ("anchors"), so the agent recalls where things are instead of re-exploring the DOM every run.
+
+WORKFLOW:
+1. Before a UI task on a site, call \`remember get <domain>\`. If an anchor exists (e.g. "composer", "send-button"), use it directly: put \`@a:<name>\` in any selector field of an \`execute\` step (click/fill/etc.). It resolves to the saved selector — no snapshot needed.
+2. If the site is new or the anchor you need is missing, discover the element with a \`snapshot\` or \`find\` step, act on it, then \`remember save\` it (name + the selector that worked, plus any quirks) so future runs are instant.
+3. SELF-HEAL: if a step using \`@a:<name>\` FAILS, the page changed — do NOT keep retrying the same anchor. Re-discover with snapshot/find, then \`remember save\` the new selector under the same name (overwrites, resets the health counters). Prefer stable selectors (aria-label, data-qa, role+name) over brittle generated CSS.
+4. Record site quirks with \`remember quirk\` (e.g. "synthetic clicks ignored — use trusted/coordinate clicks", "@here triggers a confirmation modal — click Send"). \`get\` surfaces them so the agent isn't surprised.
+
+Anchors live at ~/.iframer/knowledge/<domain>.anchors.json, alongside the API knowledge cache.`, {
+    action: import_zod9.z.enum(["get", "save", "forget", "list", "quirk"]).describe("get: show a domain's anchors+quirks | save: create/overwrite an anchor | forget: delete an anchor | list: all domains with anchors | quirk: add site-wide quirk note(s)"),
+    domain: import_zod9.z.string().optional().describe("Site domain, e.g. 'slack.com' or 'app.slack.com' (required for all actions except list)."),
+    name: import_zod9.z.string().optional().describe("Anchor name for save/forget, e.g. 'composer', 'send-button', 'search'. Short, stable, kebab-case."),
+    selector: import_zod9.z.string().optional().describe("With save: the CSS selector that locates the element. Prefer stable attributes: [aria-label=...], [data-qa=...], role+name. Avoid brittle generated class chains."),
+    role: import_zod9.z.string().optional().describe("With save (optional): the element role, e.g. textbox, button, link."),
+    description: import_zod9.z.string().optional().describe("With save (optional): a short human note about the element."),
+    quirks: import_zod9.z.array(import_zod9.z.string()).optional().describe("With save: element-specific gotchas. With quirk: site-wide gotchas to append.")
+  }, async ({ action, domain, name, selector, role, description, quirks }) => {
+    try {
+      if (action === "list") {
+        const domains = listAnchorDomains();
+        if (domains.length === 0) {
+          return { content: [{ type: "text", text: "No anchors saved yet. Use `remember save` after locating an element with snapshot/find." }] };
+        }
+        const lines = [`Domains with saved anchors:
+`];
+        for (const d of domains) {
+          const cm = loadComponentMap(d);
+          lines.push(`  ${d} — ${Object.keys(cm.anchors).length} anchor(s)${cm.quirks.length ? `, ${cm.quirks.length} quirk(s)` : ""}`);
+        }
+        lines.push("\nCall `remember get <domain>` for details.");
+        return { content: [{ type: "text", text: lines.join(`
+`) }] };
+      }
+      if (!domain)
+        return err(`\`${action}\` requires a domain (e.g. 'app.slack.com').`);
+      if (action === "get") {
+        const cm = loadComponentMap(domain);
+        const names = Object.keys(cm.anchors);
+        if (names.length === 0 && cm.quirks.length === 0) {
+          return { content: [{ type: "text", text: `No anchors saved for ${domain} yet. Discover elements with snapshot/find, then \`remember save\` them.` }] };
+        }
+        const lines = [`Component map for ${domain}:
+`];
+        if (cm.quirks.length) {
+          lines.push("Site quirks:");
+          for (const q of cm.quirks)
+            lines.push(`  - ${q}`);
+          lines.push("");
+        }
+        lines.push(`Anchors (use as @a:<name> in any selector):`);
+        for (const a of Object.values(cm.anchors)) {
+          const health = a.fails > 0 ? `  [${a.uses}✓/${a.fails}✗${a.fails >= a.uses && a.fails >= 2 ? " — likely STALE, re-verify" : ""}]` : a.uses > 0 ? `  [${a.uses}✓]` : "";
+          lines.push(`  @a:${a.name}${a.role ? ` (${a.role})` : ""} → ${a.selector}${health}`);
+          if (a.description)
+            lines.push(`      ${a.description}`);
+          if (a.quirks?.length)
+            for (const q of a.quirks)
+              lines.push(`      • ${q}`);
+        }
+        return { content: [{ type: "text", text: lines.join(`
+`) }] };
+      }
+      if (action === "quirk") {
+        if (!quirks || quirks.length === 0)
+          return err("`quirk` requires a non-empty `quirks` array.");
+        setDomainQuirks(domain, quirks);
+        return { content: [{ type: "text", text: `Added ${quirks.length} quirk(s) to ${domain}.` }] };
+      }
+      if (action === "forget") {
+        if (!name)
+          return err("`forget` requires the anchor `name`.");
+        const removed = removeAnchor(domain, name);
+        return { content: [{ type: "text", text: removed ? `Removed anchor @a:${name} from ${domain}.` : `No anchor named '${name}' for ${domain}.` }] };
+      }
+      if (!name)
+        return err("`save` requires an anchor `name`.");
+      if (!selector)
+        return err("`save` requires a `selector` (the CSS that locates the element).");
+      saveAnchor(domain, { name, selector, role, description, quirks }, new Date().toISOString());
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Saved anchor @a:${name} for ${domain} → ${selector}
+Use it in any selector field: e.g. {"type":"click","selector":"@a:${name}"}.`
+          }
+        ]
+      };
+    } catch (e) {
+      return err(`remember failed: ${getErrorMessage(e)}`);
+    }
+  });
+}
+
+// src/mcp/telemetry.ts
+var import_fs9 = __toESM(require("fs"));
+var import_path11 = __toESM(require("path"));
+var CHARS_PER_TOKEN = 4;
+var est = (chars) => Math.round(chars / CHARS_PER_TOKEN);
+var enabled = process.env.IFRAMER_TELEMETRY !== "0";
+var sessionId = `${new Date().toISOString().slice(0, 10)}-${process.pid}`;
+function telemetryPath() {
+  return import_path11.default.join(getDataDir(), "telemetry.jsonl");
+}
+var sessionCalls = 0;
+var sessionChars = 0;
+function write2(rec) {
+  if (!enabled)
+    return;
+  try {
+    import_fs9.default.appendFileSync(telemetryPath(), JSON.stringify({ ts: new Date().toISOString(), session: sessionId, ...rec }) + `
+`);
+  } catch {}
+}
+function recordDefinitions(toolCount, defChars, instructionChars) {
+  write2({
+    kind: "definitions",
+    toolCount,
+    defChars,
+    instructionChars,
+    estTokens: est(defChars + instructionChars)
+  });
+}
+function recordCall(tool, inChars, outChars, ms, isError) {
+  sessionCalls++;
+  sessionChars += inChars + outChars;
+  write2({
+    kind: "call",
+    tool,
+    inChars,
+    outChars,
+    estTokens: est(inChars + outChars),
+    ms,
+    isError,
+    sessionCalls,
+    sessionEstTokens: est(sessionChars)
+  });
+}
+function contentChars(res) {
+  const r = res;
+  if (!r || !Array.isArray(r.content))
+    return 0;
+  let n = 0;
+  for (const c of r.content) {
+    if (typeof c?.text === "string")
+      n += c.text.length;
+    else if (typeof c?.data === "string")
+      n += c.data.length;
+  }
+  return n;
+}
+function safeJsonLen(v) {
+  try {
+    return v === undefined ? 0 : JSON.stringify(v).length;
+  } catch {
+    return 0;
+  }
+}
+
 // src/mcp/server.ts
 var IS_DEV = process.env.IFRAMER_URL?.includes("localhost") || process.env.IFRAMER_URL?.includes("127.0.0.1");
 var INSTRUCTIONS = IS_DEV ? `iframer-dev — local development instance of iframer (connects to ${BASE_URL}).
@@ -1776,7 +1997,8 @@ CRITICAL RULES:
 3. DO NOT present options when you can just act. Check status, credentials, execute.
 4. NEVER re-store credentials when login fails. Login failures are browser-mode problems, not credential problems.
 5. ALWAYS check "knowledge get <domain>" before launching a browser. Skip the browser if the cache has what you need.
-6. If execute fails, read the FULL error. It tells you the step, error type, and suggestion.
+6. For UI tasks on a site, check "remember get <domain>" first — saved anchors let you target elements as @a:<name> (in any selector) instead of re-finding them. After you locate a new element with snapshot/find and it works, "remember save" it. If an @a: anchor fails, the page changed: re-discover and "remember save" the new selector (don't retry the stale one).
+7. If execute fails, read the FULL error. It tells you the step, error type, and suggestion.
 7. If the browser crashes, call "session restart" and retry. Don't panic.
 8. ALWAYS call "session" action=stop when you are done with browser work. It saves session state and frees the browser. Idle browsers are auto-reclaimed, but don't rely on that.
 
@@ -1786,6 +2008,28 @@ CAPTCHA: In binary-headful mode, ask the user to solve it in the visible window.
 
 REVERSE ENGINEERING: Use the "reverse-engineer" tool when the user asks to capture/map/save API endpoints.`;
 var server = new import_mcp.McpServer({ name: "iframer", version: "3.0.0" }, { instructions: INSTRUCTIONS });
+var defChars = 0;
+var defCount = 0;
+{
+  const origTool = server.tool.bind(server);
+  server.tool = (...a) => {
+    const name = String(a[0]);
+    defCount++;
+    defChars += name.length + (typeof a[1] === "string" ? a[1].length : 0);
+    const hIdx = a.length - 1;
+    const handler = a[hIdx];
+    if (typeof handler === "function") {
+      a[hIdx] = async (...ha) => {
+        const started = Date.now();
+        const res = await handler(...ha);
+        const r = res;
+        recordCall(name, safeJsonLen(ha[0]), contentChars(res), Date.now() - started, !!r?.isError);
+        return res;
+      };
+    }
+    return origTool(...a);
+  };
+}
 registerStatusTool(server);
 registerBrowseTool(server);
 registerExecuteTool(server);
@@ -1794,8 +2038,18 @@ registerCredentialsTool(server);
 registerReverseEngineerTool(server);
 registerKnowledgeTool(server);
 registerTabsTool(server);
+registerRememberTool(server);
+recordDefinitions(defCount, defChars, INSTRUCTIONS.length);
 process.on("SIGTERM", () => process.exit(0));
 process.on("SIGINT", () => process.exit(0));
+process.stdin.on("end", () => process.exit(0));
+process.stdin.on("close", () => process.exit(0));
+var originalPpid = process.ppid;
+var orphanCheck = setInterval(() => {
+  if (process.ppid !== originalPpid || process.ppid === 1)
+    process.exit(0);
+}, 30000);
+orphanCheck.unref?.();
 process.on("uncaughtException", (err2) => {
   try {
     console.error(`[mcp] uncaughtException: ${err2?.message}`);

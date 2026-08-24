@@ -36,12 +36,19 @@
     <hr />
 
     <div class="row">
-      <label for="token">Pairing token</label>
+      <label>Pairing</label>
+      <div class="actions">
+        <button id="autopair">Pair automatically</button>
+      </div>
+      <div class="muted" id="pairmsg" style="margin-top:4px;">Needs <code>iframer install extension</code> run once in a terminal. Or paste the token below.</div>
+    </div>
+
+    <div class="row">
+      <label for="token">Pairing token (manual fallback)</label>
       <input id="token" type="password" placeholder="paste from ~/.iframer/secret" />
-      <div class="muted" style="margin-top:4px;">Run <code>cat ~/.iframer/secret</code> (or use your IFRAMER_SECRET) and paste it here.</div>
     </div>
     <div class="actions">
-      <button id="save">Save &amp; connect</button>
+      <button id="save" class="secondary">Save &amp; connect</button>
     </div>
 
     <div class="muted" id="tabnote" style="margin-top:10px;">

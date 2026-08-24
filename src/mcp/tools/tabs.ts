@@ -22,8 +22,7 @@ interface ClientInfo {
 }
 
 /**
- * List the tabs open in the user's real Chrome (via the banner-free extension
- * bridge). This is how the agent satisfies "use my tab HERE and do X": call
+ * List the tabs open in the user's real Chrome (via the extension bridge). This is how the agent satisfies "use my tab HERE and do X": call
  * `tabs`, match the user's reference (a URL, a site name, a screenshot) against
  * the returned list, then pass the chosen tab's id to `execute` with
  * options.mode="extension" and options.tabId.
@@ -33,7 +32,7 @@ export function registerTabsTool(server: McpServer) {
     "tabs",
     `List the tabs currently open in the user's REAL Chrome browser, through the iframer browser extension.
 
-Use this when the user says something like "use my open tab", "the tab I have here", "my Gmail tab", or references a site/screenshot they already have open. Match their reference against the returned tabs (by url or title), pick the tab id, then call \`execute\` with options.mode="extension" and options.tabId=<id> to drive that exact tab — banner-free, on their real logged-in session.
+Use this when the user says something like "use my open tab", "the tab I have here", "my Gmail tab", or references a site/screenshot they already have open. Match their reference against the returned tabs (by url or title), pick the tab id, then call \`execute\` with options.mode="extension" and options.tabId=<id> to drive that exact tab on their real logged-in session (Chrome shows its "is being debugged" bar while a run is in progress).
 
 Requires the iframer Chrome extension to be installed and connected (paired once with the token). Once connected, iframer can see and drive any open tab. If nothing is connected, this returns a clear message telling the user how to connect.
 
@@ -56,7 +55,8 @@ Returns: connected (bool), and tabs: [{ id, title, url, active, windowId }]. If 
             "No iframer extension is connected.\n\n" +
               "To use your real Chrome tabs:\n" +
               "1. Install the iframer extension (chrome://extensions → Load unpacked → the `extension/` folder).\n" +
-              "2. Click the iframer icon and paste your pairing token (from `cat ~/.iframer/secret` or your IFRAMER_SECRET), then Save & connect.\n" +
+              "2. Run `iframer install extension` in a terminal, then restart the browser — the extension pairs itself.\n" +
+              "   (Manual fallback: click the iframer icon and paste the token from `cat ~/.iframer/secret`.)\n" +
               "Once the dot is green, run `tabs` again — iframer can then see and drive any open tab.",
           );
         }

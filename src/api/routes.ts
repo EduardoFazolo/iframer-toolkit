@@ -228,7 +228,7 @@ export function registerRoutes(app: Express): void {
     res.json({ ok: true, message: "Login attempted", ...resultRest });
   }));
 
-  // ─── Extension bridge (banner-free real-tab control) ─────────────
+  // ─── Extension bridge (real-tab control) ─────────────────────────
 
   app.get("/extension/status", (_req, res) => {
     res.json({ ok: true, ...extensionBridge.status() });

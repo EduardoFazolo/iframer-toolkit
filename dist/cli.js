@@ -1251,7 +1251,12 @@ var init_chrome_downloader = __esm(() => {
 });
 
 // src/lib/browser/cloak-browser.ts
+function cloakEnabled() {
+  return process.env.IFRAMER_USE_CLOAKBROWSER === "1" || process.env.IFRAMER_USE_CLOAKBROWSER === "true";
+}
 async function tryImport() {
+  if (!cloakEnabled())
+    return null;
   try {
     return await import("cloakbrowser");
   } catch {
@@ -1967,6 +1972,15 @@ var init_humanize = __esm(() => {
 
 // src/lib/actions/resolve-selector.ts
 function resolveSelector(selector, ctx) {
+  if (selector.startsWith("@a:")) {
+    const name = selector.slice(3);
+    const anchor = ctx.anchors?.get(name);
+    if (!anchor) {
+      const available = ctx.anchors ? Array.from(ctx.anchors.keys()).join(", ") : "";
+      throw new Error(`Unknown anchor: @a:${name}${ctx.anchorDomain ? ` for ${ctx.anchorDomain}` : ""}. ` + `${available ? `Known anchors: ${available}. ` : "This domain has no saved anchors yet. "}` + `Run a snapshot/find to locate the element, act on it, then save it with the ` + `\`remember\` tool so future runs skip the search.`);
+    }
+    return anchor.selector;
+  }
   if (selector.startsWith("@e")) {
     const ref = ctx.refMap.get(selector);
     if (!ref) {
@@ -1976,6 +1990,9 @@ function resolveSelector(selector, ctx) {
     return ref.selector;
   }
   return selector;
+}
+function anchorNameOf(selector) {
+  return typeof selector === "string" && selector.startsWith("@a:") ? selector.slice(3) : null;
 }
 
 // src/lib/actions/handlers/navigation.ts
@@ -2037,8 +2054,18 @@ async function wait(page, step) {
 async function waitFor(page, step, ctx) {
   await page.waitForSelector(resolveSelector(step.selector, ctx), { timeout: step.timeout || TIMEOUTS.SELECTOR_WAIT });
 }
-async function scroll(page, step) {
-  await page.evaluate((dy) => window.scrollBy(0, dy || document.body.scrollHeight), step.deltaY ?? 0);
+async function scroll(page, step, ctx) {
+  const selector = step.selector ? resolveSelector(step.selector, ctx) : null;
+  await page.evaluate(({ dy, sel }) => {
+    if (sel) {
+      const el = document.querySelector(sel);
+      if (!el)
+        throw new Error(`scroll: no element for selector ${sel}`);
+      el.scrollBy(0, dy || el.scrollHeight);
+    } else {
+      window.scrollBy(0, dy || document.body.scrollHeight);
+    }
+  }, { dy: step.deltaY ?? 0, sel: selector });
 }
 async function keyboard(page, step) {
   const mods = [
@@ -2062,7 +2089,7 @@ async function read(page, step, ctx) {
   const text = raw.replace(/\n{3,}/g, `
 
 `).trim();
-  const max = step.maxChars || 20000;
+  const max = step.maxChars || 6000;
   return { text: text.slice(0, max), truncated: text.length > max };
 }
 async function typeCode(page, step, ctx) {
@@ -4677,6 +4704,57 @@ var init_tab_tracker = __esm(() => {
   log15 = createLogger("tabs");
 });
 
+// src/lib/knowledge/component-map.ts
+function anchorsPath(domain) {
+  return import_path9.default.join(getKnowledgeDir(), `${sanitizeDomain(domain)}.anchors.json`);
+}
+function loadComponentMap(domain) {
+  const norm = normalizeDomain(domain);
+  try {
+    const raw = import_fs10.default.readFileSync(anchorsPath(norm), "utf8");
+    const parsed = JSON.parse(raw);
+    return {
+      domain: parsed.domain || norm,
+      anchors: parsed.anchors || {},
+      quirks: Array.isArray(parsed.quirks) ? parsed.quirks : []
+    };
+  } catch {
+    return { domain: norm, anchors: {}, quirks: [] };
+  }
+}
+function loadAnchors(domain) {
+  const map = new Map;
+  const cm = loadComponentMap(domain);
+  for (const [name, a] of Object.entries(cm.anchors))
+    map.set(name, a);
+  return map;
+}
+function write(cm) {
+  import_fs10.default.mkdirSync(getKnowledgeDir(), { recursive: true });
+  import_fs10.default.writeFileSync(anchorsPath(cm.domain), JSON.stringify(cm, null, 2), "utf8");
+}
+function recordAnchorResult(domain, name, ok, now) {
+  try {
+    const cm = loadComponentMap(domain);
+    const a = cm.anchors[name];
+    if (!a)
+      return;
+    if (ok) {
+      a.uses += 1;
+      a.lastVerified = now;
+    } else {
+      a.fails += 1;
+    }
+    write(cm);
+  } catch {}
+}
+var import_fs10, import_path9;
+var init_component_map = __esm(() => {
+  init_knowledge();
+  import_fs10 = __toESM(require("fs"));
+  import_path9 = __toESM(require("path"));
+});
+
 // src/lib/pipeline.ts
 function safePageUrl(page) {
   try {
@@ -4744,6 +4822,19 @@ class PipelineRunner {
     const continueOnError = opts.continueOnError ?? false;
     const results = [];
     const obstacles = [];
+    const navStep = pipeline.steps.find((s) => s.type === "navigate");
+    try {
+      const host = new URL(navStep?.url || safePageUrl(initialPage) || "http://x").hostname;
+      if (host && host !== "x") {
+        this.ctx.anchors = loadAnchors(host);
+        this.ctx.anchorDomain = host;
+      }
+    } catch {}
+    const recordAnchor = (step, ok) => {
+      const name = anchorNameOf(step.selector);
+      if (name && this.ctx.anchorDomain)
+        recordAnchorResult(this.ctx.anchorDomain, name, ok, new Date().toISOString());
+    };
     const capture = opts.captureApi ? new ApiCapture(initialPage) : null;
     if (capture)
       capture.start();
@@ -4773,6 +4864,7 @@ class PipelineRunner {
         const pageState = await capturePageState(tracker.active(), this.ctx, { screenshot: true });
         stepResult = failedStepResult(step, asError.message, Date.now() - startTime, i);
         results.push(stepResult);
+        recordAnchor(step, false);
         return {
           ok: false,
           completedSteps: i,
@@ -4793,6 +4885,7 @@ class PipelineRunner {
           capturedApi: await finishCapture()
         };
       }
+      recordAnchor(step, true);
       const canOpenTab = step.type === "click" || step.type === "human-click";
       const currentPageNavigated = safePageUrl(page) !== urlBefore;
       if (canOpenTab && !currentPageNavigated) {
@@ -4898,6 +4991,7 @@ var init_pipeline = __esm(() => {
   init_api_capture();
   init_tab_tracker();
   init_constants();
+  init_component_map();
 });
 
 // src/lib/block-detection.ts
@@ -7958,36 +8052,59 @@ class ExtensionBridge {
   pending = new Map;
   nextReqId = 1;
   tabOwner = new Map;
-  cdpEventHandler = null;
+  collidingTabs = new Set;
+  cdpListeners = new Map;
   attach(server) {
     if (this.wss)
       return;
     this.wss = new import_websocket_server.default({ server, path: "/extension/ws" });
     this.wss.on("connection", (ws, req) => {
-      const token = new URL(req.url || "", "http://127.0.0.1").searchParams.get("token");
       let expected = "";
       try {
         expected = getLocalToken();
       } catch {
         expected = "";
       }
-      if (!expected || token !== expected) {
+      if (!expected) {
         ws.close(4001, "unauthorized");
         return;
       }
-      const client = {
-        clientId: import_crypto5.default.randomUUID(),
-        socket: ws,
-        connectedAt: Date.now(),
-        tabs: [],
-        heartbeat: null
-      };
-      this.clients.set(client.clientId, client);
-      this.startHeartbeat(client);
-      ws.on("message", (data) => this.onMessage(client, data));
-      ws.on("close", () => this.dropClient(client, "socket closed"));
-      ws.on("error", () => {});
+      const queryToken = new URL(req.url || "", "http://127.0.0.1").searchParams.get("token");
+      if (queryToken !== null) {
+        if (queryToken !== expected) {
+          ws.close(4001, "unauthorized");
+          return;
+        }
+        this.acceptClient(ws);
+        return;
+      }
+      const timer = setTimeout(() => ws.close(4001, "auth timeout"), 3000);
+      ws.once("message", (data) => {
+        clearTimeout(timer);
+        try {
+          const m = JSON.parse(data.toString());
+          if (m?.type === "auth" && m.token === expected) {
+            this.acceptClient(ws);
+            return;
+          }
+        } catch {}
+        ws.close(4001, "unauthorized");
+      });
     });
+  }
+  acceptClient(ws) {
+    const client = {
+      clientId: import_crypto5.default.randomUUID(),
+      socket: ws,
+      connectedAt: Date.now(),
+      tabs: [],
+      heartbeat: null
+    };
+    this.clients.set(client.clientId, client);
+    this.startHeartbeat(client);
+    ws.on("message", (data) => this.onMessage(client, data));
+    ws.on("close", () => this.dropClient(client, "socket closed"));
+    ws.on("error", () => {});
   }
   startHeartbeat(client) {
     client.heartbeat = setInterval(() => {
@@ -8037,8 +8154,10 @@ class ExtensionBridge {
     }
     if (msg.type === "cdp_event") {
       const ev = msg;
-      if (typeof ev.tabId === "number" && this.cdpEventHandler) {
-        this.cdpEventHandler(client.clientId, ev);
+      if (typeof ev.tabId === "number") {
+        const fn = this.cdpListeners.get(cdpKey(client.clientId, ev.tabId));
+        if (fn)
+          fn(ev);
       }
       return;
     }
@@ -8075,9 +8194,6 @@ class ExtensionBridge {
       }
     });
   }
-  isConnected() {
-    return this.clients.size > 0;
-  }
   hasClients() {
     return this.clients.size > 0;
   }
@@ -8097,6 +8213,7 @@ class ExtensionBridge {
   async listTabs() {
     const all = [];
     this.tabOwner.clear();
+    this.collidingTabs.clear();
     await Promise.all([...this.clients.values()].map(async (client) => {
       try {
         const res = await this.send(client, "list_tabs", {}) || { tabs: [] };
@@ -8107,8 +8224,12 @@ class ExtensionBridge {
           profileName: client.profileName
         }));
         client.tabs = tagged;
-        for (const t of tagged)
+        for (const t of tagged) {
+          const prev = this.tabOwner.get(t.id);
+          if (prev !== undefined && prev !== client.clientId)
+            this.collidingTabs.add(t.id);
           this.tabOwner.set(t.id, client.clientId);
+        }
         all.push(...tagged);
       } catch {
         client.tabs = [];
@@ -8130,29 +8251,35 @@ class ExtensionBridge {
       return [...this.clients.values()][0];
     }
     let owner = this.tabOwner.get(tabId);
-    if (!owner) {
+    if (!owner || this.collidingTabs.has(tabId)) {
       await this.listTabs();
       owner = this.tabOwner.get(tabId);
+    }
+    if (this.collidingTabs.has(tabId)) {
+      throw new Error(`Tab id ${tabId} exists in more than one connected browser (separate browsers ` + `have independent tab-id spaces). Call \`tabs\` and pass the tab's clientId ` + `alongside tabId to pick the right one.`);
     }
     if (owner) {
       const c = this.clients.get(owner);
       if (c)
         return c;
     }
-    if (this.clients.size === 1) {
-      return [...this.clients.values()][0];
-    }
     throw new Error(`Could not determine which browser profile owns tab ${tabId}. Call \`tabs\` to ` + `refresh the list, then pass the tab's clientId alongside tabId.`);
   }
-  execute(tabId, steps, options = {}, clientId) {
-    return this.resolveClient(tabId, clientId).then((client) => this.send(client, "execute", { tabId, steps, options }));
+  addCdpListener(clientId, tabId, fn) {
+    const key = cdpKey(clientId, tabId);
+    if (this.cdpListeners.has(key)) {
+      throw new Error(`Tab ${tabId} is already being driven by another pipeline. Retry when it finishes.`);
+    }
+    this.cdpListeners.set(key, fn);
   }
-  setCdpEventHandler(fn) {
-    this.cdpEventHandler = fn;
+  removeCdpListener(clientId, tabId) {
+    this.cdpListeners.delete(cdpKey(clientId, tabId));
   }
-  async cdpAttach(tabId, clientId) {
+  async cdpAttach(tabId, clientId, focus) {
     const client = await this.resolveClient(tabId, clientId);
-    const res = await this.send(client, "cdp_attach", { tabId }) || { targetInfo: null };
+    const res = await this.send(client, "cdp_attach", { tabId, focus: !!focus }) || {
+      targetInfo: null
+    };
     return { targetInfo: res.targetInfo, clientId: client.clientId };
   }
   async cdpCommand(clientId, tabId, sessionId, method, params) {
@@ -8170,6 +8297,9 @@ class ExtensionBridge {
     } catch {}
   }
 }
+function cdpKey(clientId, tabId) {
+  return `${clientId}:${tabId}`;
+}
 var import_crypto5, REQUEST_TIMEOUT_MS = 180000, HEARTBEAT_MS = 15000, extensionBridge;
 var init_bridge = __esm(() => {
   init_wrapper();
@@ -8182,6 +8312,7 @@ var init_bridge = __esm(() => {
 class CdpRelay {
   tabId;
   clientId;
+  focus;
   httpServer = null;
   wss = null;
   pw = null;
@@ -8190,12 +8321,14 @@ class CdpRelay {
   tabSessionId = "pw-tab-1";
   targetInfo = null;
   ownerClientId = "";
-  constructor(tabId, clientId) {
+  listenerRegistered = false;
+  constructor(tabId, clientId, focus) {
     this.tabId = tabId;
     this.clientId = clientId;
+    this.focus = focus;
   }
   async start() {
-    const { targetInfo, clientId } = await extensionBridge.cdpAttach(this.tabId, this.clientId);
+    const { targetInfo, clientId } = await extensionBridge.cdpAttach(this.tabId, this.clientId, this.focus);
     this.ownerClientId = clientId;
     this.targetInfo = targetInfo || {
       targetId: `iframer-${this.tabId}`,
@@ -8203,15 +8336,14 @@ class CdpRelay {
       title: "",
       url: ""
     };
-    extensionBridge.setCdpEventHandler((clientId2, ev) => {
-      if (clientId2 !== this.ownerClientId || ev.tabId !== this.tabId)
-        return;
+    extensionBridge.addCdpListener(this.ownerClientId, this.tabId, (ev) => {
       this.sendToPw({
         method: ev.method,
         params: ev.params,
         sessionId: ev.sessionId || this.tabSessionId
       });
     });
+    this.listenerRegistered = true;
     await new Promise((resolve, reject) => {
       this.httpServer = import_http.default.createServer((req, res) => {
         if (req.url === "/json/version" || req.url === "/json/version/") {
@@ -8325,10 +8457,36 @@ class CdpRelay {
         break;
     }
     const realSessionId = sessionId === this.tabSessionId ? undefined : sessionId;
+    if (method === "Page.captureScreenshot") {
+      return this.captureScreenshotWithFallback(params, realSessionId);
+    }
     return extensionBridge.cdpCommand(this.ownerClientId, this.tabId, realSessionId, method, params);
   }
+  async captureScreenshotWithFallback(params, sessionId) {
+    const base = params && typeof params === "object" ? { ...params } : {};
+    const attempt = (p) => extensionBridge.cdpCommand(this.ownerClientId, this.tabId, sessionId, "Page.captureScreenshot", p);
+    const first = attempt(base);
+    first.catch(() => {
+      return;
+    });
+    try {
+      return await Promise.race([
+        first,
+        new Promise((_, reject) => {
+          const t = setTimeout(() => reject(new Error("screenshot timed out (no compositor frame)")), 1e4);
+          t.unref?.();
+        })
+      ]);
+    } catch {
+      return attempt({ ...base, fromSurface: false });
+    }
+  }
   async stop() {
-    extensionBridge.setCdpEventHandler(null);
+    const ownedTab = this.listenerRegistered;
+    if (ownedTab) {
+      extensionBridge.removeCdpListener(this.ownerClientId, this.tabId);
+      this.listenerRegistered = false;
+    }
     try {
       this.wss?.clients.forEach((c) => {
         try {
@@ -8361,10 +8519,12 @@ class CdpRelay {
       await withTimeout((cb) => this.httpServer.close(cb));
     this.wss = null;
     this.httpServer = null;
-    try {
-      await extensionBridge.cdpDetach(this.ownerClientId, this.tabId);
-    } catch (e) {
-      log17.warn(`cdp detach failed: ${e}`);
+    if (ownedTab) {
+      try {
+        await extensionBridge.cdpDetach(this.ownerClientId, this.tabId);
+      } catch (e) {
+        log17.warn(`cdp detach failed: ${e}`);
+      }
     }
   }
 }
@@ -8382,6 +8542,7 @@ var init_cdp_relay = __esm(() => {
 class PipelineExecutor {
   deps;
   pendingElicitOtp;
+  extensionTabLocks = new Map;
   constructor(deps) {
     this.deps = deps;
   }
@@ -8396,7 +8557,20 @@ class PipelineExecutor {
   async executeInner(userId, token, pipeline) {
     const opts = pipeline.options || {};
     if (typeof opts.extensionTabId === "number") {
-      return this.executeExtension(userId, token, pipeline, opts.extensionTabId, opts.clientId);
+      const tabId = opts.extensionTabId;
+      const lockKey = `${opts.clientId || "auto"}:${tabId}`;
+      const prev = this.extensionTabLocks.get(lockKey);
+      const run = (prev ? prev.catch(() => {
+        return;
+      }) : Promise.resolve()).then(() => this.executeExtension(userId, token, pipeline, tabId, opts.clientId));
+      this.extensionTabLocks.set(lockKey, run);
+      run.catch(() => {
+        return;
+      }).finally(() => {
+        if (this.extensionTabLocks.get(lockKey) === run)
+          this.extensionTabLocks.delete(lockKey);
+      });
+      return run;
     }
     const forcedMode = opts.mode;
     const autoEscalate = opts.autoEscalate !== false;
@@ -8458,7 +8632,7 @@ class PipelineExecutor {
   }
   async executeExtension(userId, token, pipeline, tabId, clientId) {
     const startTime = Date.now();
-    const relay = new CdpRelay(tabId, clientId);
+    const relay = new CdpRelay(tabId, clientId, pipeline.options?.focus);
     let browser;
     try {
       await relay.start();
@@ -8478,7 +8652,25 @@ class PipelineExecutor {
       if (this.pendingElicitOtp)
         ctx.elicitOtp = this.pendingElicitOtp;
       const runner = new PipelineRunner(ctx);
-      const result = await runner.run(page, pipeline);
+      const capMs = Math.min(60000 + pipeline.steps.length * 15000, 150000);
+      let watchdog;
+      let result;
+      try {
+        const runPromise = runner.run(page, pipeline);
+        runPromise.catch(() => {
+          return;
+        });
+        result = await Promise.race([
+          runPromise,
+          new Promise((_, reject) => {
+            watchdog = setTimeout(() => reject(new Error(`pipeline exceeded ${Math.round(capMs / 1000)}s — the tab may have stopped ` + `rendering (minimized window?). Un-minimize the Chrome window or retry ` + `with options.focus=true.`)), capMs);
+            watchdog.unref?.();
+          })
+        ]);
+      } finally {
+        if (watchdog)
+          clearTimeout(watchdog);
+      }
       this.deps.refStore.sync(userId, ctx);
       result.modeUsed = "extension";
       if (result.ok) {
@@ -8490,6 +8682,8 @@ class PipelineExecutor {
       }
       return result;
     } catch (err) {
+      const msg = getErrorMessage(err);
+      const stalled = msg.includes("pipeline exceeded");
       return {
         ok: false,
         completedSteps: 0,
@@ -8503,10 +8697,10 @@ class PipelineExecutor {
           failedAtStep: 0,
           failedStep: pipeline.steps[0],
           errorType: "action-failed",
-          message: `Extension mode failed: ${getErrorMessage(err)}`,
+          message: `Extension mode failed: ${msg}`,
           pageState: { url: "", title: "" },
-          suggestion: "Ensure the iframer extension is connected (green dot) and the tab is still open. See chrome://extensions.",
-          retryable: true
+          suggestion: stalled ? "STOP retrying and tell the user what happened: the Chrome tab being driven stopped " + "responding — its window is likely minimized or the page is wedged. Ask them to " + "un-minimize the Chrome window (leaving it behind other windows is fine), or ask " + "permission to rerun with options.focus=true to bring it to the front." : "Ensure the iframer extension is connected (green dot) and the tab is still open. See chrome://extensions.",
+          retryable: !stalled
         }
       };
     } finally {
@@ -9085,7 +9279,7 @@ class Iframer {
     }
   }
 }
-var import_path9, import_url, log19, DEFAULT_SCREENSHOT_DIR, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3 = 20000;
+var import_path10, import_url, log19, DEFAULT_SCREENSHOT_DIR, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3 = 20000;
 var init_iframer = __esm(() => {
   init_session_manager();
   init_launcher();
@@ -9101,24 +9295,24 @@ var init_iframer = __esm(() => {
   init_fetch_service();
   init_capture_manager();
   init_credential_store();
-  import_path9 = __toESM(require("path"));
+  import_path10 = __toESM(require("path"));
   import_url = require("url");
   log19 = createLogger("iframer");
-  DEFAULT_SCREENSHOT_DIR = import_path9.default.join(import_path9.default.dirname(import_url.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/src/lib/iframer.ts")), "../../.screenshots");
+  DEFAULT_SCREENSHOT_DIR = import_path10.default.join(import_path10.default.dirname(import_url.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/src/lib/iframer.ts")), "../../.screenshots");
   DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
 });
 
 // bin/cli.js
 var __dirname = "/Users/eduardoverona/tools/iframer-toolkit/bin";
-var fs10 = require("fs");
+var fs11 = require("fs");
 var os4 = require("os");
-var path10 = require("path");
+var path11 = require("path");
 var { execSync: execSync3 } = require("child_process");
 var readline = require("readline");
 var HOME_DIR = os4.homedir();
-var CONFIG_DIR = process.env.IFRAMER_DATA_DIR || path10.join(HOME_DIR, ".iframer");
-var CLAUDE_CONFIG_PATH = path10.join(HOME_DIR, ".claude.json");
-var CODEX_CONFIG_PATH = path10.join(HOME_DIR, ".codex", "config.toml");
+var CONFIG_DIR = process.env.IFRAMER_DATA_DIR || path11.join(HOME_DIR, ".iframer");
+var CLAUDE_CONFIG_PATH = path11.join(HOME_DIR, ".claude.json");
+var CODEX_CONFIG_PATH = path11.join(HOME_DIR, ".codex", "config.toml");
 var DEFAULT_SERVER = process.env.IFRAMER_URL || "http://localhost:3021";
 var API_KEY = process.env.IFRAMER_SECRET;
 var USE_LOCAL = process.env.IFRAMER_MODE === "local" || !process.env.IFRAMER_URL;
@@ -9127,21 +9321,21 @@ function resolveLocalToken() {
   if (process.env.IFRAMER_SECRET)
     return process.env.IFRAMER_SECRET;
   const candidates = [
-    path10.join(CONFIG_DIR, "secret"),
-    path10.join(process.env.XDG_RUNTIME_DIR || os4.tmpdir(), "iframer-secret")
+    path11.join(CONFIG_DIR, "secret"),
+    path11.join(process.env.XDG_RUNTIME_DIR || os4.tmpdir(), "iframer-secret")
   ];
   for (const file of candidates) {
     try {
-      const existing = fs10.readFileSync(file, "utf8").trim();
+      const existing = fs11.readFileSync(file, "utf8").trim();
       if (existing)
         return existing;
     } catch {}
   }
   for (const file of candidates) {
     try {
-      fs10.mkdirSync(path10.dirname(file), { recursive: true });
+      fs11.mkdirSync(path11.dirname(file), { recursive: true });
       const secret = require("crypto").randomBytes(32).toString("hex");
-      fs10.writeFileSync(file, secret, { mode: 384 });
+      fs11.writeFileSync(file, secret, { mode: 384 });
       return secret;
     } catch {}
   }
@@ -9228,20 +9422,20 @@ async function apiDelete(endpoint) {
   return res.json();
 }
 function resolveMcpRuntime() {
-  const mcpServerTS = path10.join(__dirname, "..", "src", "mcp", "server.ts");
-  const mcpServerCJS = path10.join(__dirname, "mcp-server.cjs");
+  const mcpServerTS = path11.join(__dirname, "..", "src", "mcp", "server.ts");
+  const mcpServerCJS = path11.join(__dirname, "mcp-server.cjs");
   let bunPath;
   try {
     bunPath = execSync3("which bun", { encoding: "utf8" }).trim();
   } catch {}
-  if (bunPath && fs10.existsSync(mcpServerTS)) {
+  if (bunPath && fs11.existsSync(mcpServerTS)) {
     return {
       command: bunPath,
       args: ["run", mcpServerTS],
       message: "  Using bun to run MCP server from source (no build needed)"
     };
   }
-  if (fs10.existsSync(mcpServerCJS)) {
+  if (fs11.existsSync(mcpServerCJS)) {
     return {
       command: "node",
       args: [mcpServerCJS],
@@ -9257,8 +9451,8 @@ function resolveIframerSecret() {
   if (secret)
     return secret;
   try {
-    const envPath = path10.join(__dirname, "..", ".env");
-    const envContent = fs10.readFileSync(envPath, "utf8");
+    const envPath = path11.join(__dirname, "..", ".env");
+    const envContent = fs11.readFileSync(envPath, "utf8");
     const match = envContent.match(/^IFRAMER_SECRET=(.+)$/m);
     if (match)
       secret = match[1].trim();
@@ -9267,23 +9461,23 @@ function resolveIframerSecret() {
 }
 function installSkill() {
   const candidates = [
-    path10.join(__dirname, "..", "skills", "iframer.md"),
-    path10.join(__dirname, "skills", "iframer.md")
+    path11.join(__dirname, "..", "skills", "iframer.md"),
+    path11.join(__dirname, "skills", "iframer.md")
   ];
   let source = null;
   for (const c of candidates) {
-    if (fs10.existsSync(c)) {
+    if (fs11.existsSync(c)) {
       source = c;
       break;
     }
   }
   if (!source)
     return false;
-  const destDir = path10.join(HOME_DIR, ".claude", "commands");
-  const dest = path10.join(destDir, "iframer.md");
+  const destDir = path11.join(HOME_DIR, ".claude", "commands");
+  const dest = path11.join(destDir, "iframer.md");
   try {
-    fs10.mkdirSync(destDir, { recursive: true });
-    fs10.copyFileSync(source, dest);
+    fs11.mkdirSync(destDir, { recursive: true });
+    fs11.copyFileSync(source, dest);
     return true;
   } catch (err) {
     console.error(`  Warning: could not install skill: ${err.message}`);
@@ -9291,10 +9485,10 @@ function installSkill() {
   }
 }
 function removeSkill() {
-  const dest = path10.join(HOME_DIR, ".claude", "commands", "iframer.md");
+  const dest = path11.join(HOME_DIR, ".claude", "commands", "iframer.md");
   try {
-    if (fs10.existsSync(dest)) {
-      fs10.unlinkSync(dest);
+    if (fs11.existsSync(dest)) {
+      fs11.unlinkSync(dest);
       return true;
     }
   } catch {}
@@ -9302,8 +9496,8 @@ function removeSkill() {
 }
 function writeMachineSecret(secret) {
   try {
-    fs10.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs10.writeFileSync(path10.join(CONFIG_DIR, "secret"), secret, { mode: 384 });
+    fs11.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs11.writeFileSync(path11.join(CONFIG_DIR, "secret"), secret, { mode: 384 });
     return true;
   } catch (err) {
     console.error(`  Warning: could not write ~/.iframer/secret: ${err.message}`);
@@ -9312,7 +9506,7 @@ function writeMachineSecret(secret) {
 }
 function loadClaudeConfig() {
   try {
-    return JSON.parse(fs10.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    return JSON.parse(fs11.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
   } catch {
     return {};
   }
@@ -9322,13 +9516,13 @@ function installClaudeMcp(mcpName, mcpEntry) {
   if (!config.mcpServers)
     config.mcpServers = {};
   config.mcpServers[mcpName] = mcpEntry;
-  fs10.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
+  fs11.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
   return CLAUDE_CONFIG_PATH;
 }
 function removeClaudeMcp(mcpName) {
   let config;
   try {
-    config = JSON.parse(fs10.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    config = JSON.parse(fs11.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
   } catch {
     return { removed: false, path: CLAUDE_CONFIG_PATH };
   }
@@ -9336,7 +9530,7 @@ function removeClaudeMcp(mcpName) {
     return { removed: false, path: CLAUDE_CONFIG_PATH };
   }
   delete config.mcpServers[mcpName];
-  fs10.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
+  fs11.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
   return { removed: true, path: CLAUDE_CONFIG_PATH };
 }
 function escapeTomlString(value) {
@@ -9388,10 +9582,10 @@ function renderCodexMcpBlock(mcpName, mcpEntry) {
 `);
 }
 function installCodexMcp(mcpName, mcpEntry) {
-  fs10.mkdirSync(path10.dirname(CODEX_CONFIG_PATH), { recursive: true });
+  fs11.mkdirSync(path11.dirname(CODEX_CONFIG_PATH), { recursive: true });
   let content = "";
   try {
-    content = fs10.readFileSync(CODEX_CONFIG_PATH, "utf8");
+    content = fs11.readFileSync(CODEX_CONFIG_PATH, "utf8");
   } catch {}
   const existing = findCodexMcpSection(content, mcpName);
   if (existing) {
@@ -9400,7 +9594,7 @@ function installCodexMcp(mcpName, mcpEntry) {
   }
   const trimmed = content.trimEnd();
   const block = renderCodexMcpBlock(mcpName, mcpEntry);
-  fs10.writeFileSync(CODEX_CONFIG_PATH, trimmed ? `${trimmed}
+  fs11.writeFileSync(CODEX_CONFIG_PATH, trimmed ? `${trimmed}
 
 ${block}
 ` : `${block}
@@ -9410,7 +9604,7 @@ ${block}
 function removeCodexMcp(mcpName) {
   let content;
   try {
-    content = fs10.readFileSync(CODEX_CONFIG_PATH, "utf8");
+    content = fs11.readFileSync(CODEX_CONFIG_PATH, "utf8");
   } catch {
     return { removed: false, path: CODEX_CONFIG_PATH };
   }
@@ -9422,7 +9616,7 @@ function removeCodexMcp(mcpName) {
 `).replace(/\n{3,}/g, `
 
 `).trimEnd();
-  fs10.writeFileSync(CODEX_CONFIG_PATH, next ? `${next}
+  fs11.writeFileSync(CODEX_CONFIG_PATH, next ? `${next}
 ` : "");
   return { removed: true, path: CODEX_CONFIG_PATH };
 }
@@ -9432,8 +9626,8 @@ async function getLocalIframer() {
     return _iframer;
   try {
     const { Iframer: Iframer2 } = await Promise.resolve().then(() => (init_iframer(), exports_iframer));
-    const screenshotDir = path10.join(os4.tmpdir(), "iframer-screenshots");
-    fs10.mkdirSync(screenshotDir, { recursive: true });
+    const screenshotDir = path11.join(os4.tmpdir(), "iframer-screenshots");
+    fs11.mkdirSync(screenshotDir, { recursive: true });
     _iframer = new Iframer2({
       screenshotDir,
       publicUrl: `file://${screenshotDir}`,
@@ -9469,17 +9663,17 @@ function hasFlag(args, flag) {
 function handleResponse(data, screenshotPath) {
   const { screenshot: screenshot2, tileScreenshots, ...rest } = data;
   if (screenshot2 && screenshotPath) {
-    fs10.writeFileSync(screenshotPath, Buffer.from(screenshot2, "base64"));
+    fs11.writeFileSync(screenshotPath, Buffer.from(screenshot2, "base64"));
     rest._screenshotSaved = screenshotPath;
   }
   if (tileScreenshots && tileScreenshots.length > 0) {
     const tileDir = "/tmp/browser-tiles";
-    fs10.mkdirSync(tileDir, { recursive: true });
+    fs11.mkdirSync(tileDir, { recursive: true });
     const tilePaths = [];
     for (const tile of tileScreenshots) {
       if (tile.screenshot) {
         const tilePath = `${tileDir}/tile-${tile.index}.png`;
-        fs10.writeFileSync(tilePath, Buffer.from(tile.screenshot, "base64"));
+        fs11.writeFileSync(tilePath, Buffer.from(tile.screenshot, "base64"));
         tilePaths.push(tilePath);
       }
     }
@@ -9511,11 +9705,13 @@ if (command === "install") {
       command = "install-chrome";
     else if (target === "mcp")
       command = "install-mcp";
+    else if (target === "extension")
+      command = "install-extension";
     else if (target === "deps" || target === "dependencies" || target === "all")
       command = "install-all";
     else {
       console.error(`  Unknown install target: ${target}`);
-      console.error("  Usage: iframer install <chromium|mcp>");
+      console.error("  Usage: iframer install <chromium|mcp|extension>");
       process.exit(1);
     }
   }
@@ -9529,9 +9725,11 @@ if (command === "remove") {
       command = "remove-chrome";
     else if (target === "mcp")
       command = "remove-mcp";
+    else if (target === "extension")
+      command = "remove-extension";
     else {
       console.error(`  Unknown remove target: ${target}`);
-      console.error("  Usage: iframer remove <chromium|mcp>");
+      console.error("  Usage: iframer remove <chromium|mcp|extension>");
       process.exit(1);
     }
   }
@@ -9542,19 +9740,109 @@ async function installChrome() {
 }
 function isMcpInstalled(mcpName) {
   try {
-    const config = JSON.parse(fs10.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    const config = JSON.parse(fs11.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
     return !!(config.mcpServers && config.mcpServers[mcpName]);
   } catch {
     return false;
   }
 }
+var EXTENSION_ID = "mjfdkiicioigljhenkgaldhihllfdpll";
+var NM_HOST_NAME = "com.iframer.token";
+function nativeMessagingBrowserDirs() {
+  if (process.platform === "darwin") {
+    const as = path11.join(HOME_DIR, "Library", "Application Support");
+    return [
+      { browser: "Chrome", dir: path11.join(as, "Google", "Chrome"), always: true },
+      { browser: "Chrome Beta", dir: path11.join(as, "Google", "Chrome Beta") },
+      { browser: "Chrome Canary", dir: path11.join(as, "Google", "Chrome Canary") },
+      { browser: "Chromium", dir: path11.join(as, "Chromium") },
+      { browser: "Brave", dir: path11.join(as, "BraveSoftware", "Brave-Browser") },
+      { browser: "Edge", dir: path11.join(as, "Microsoft Edge") },
+      { browser: "Vivaldi", dir: path11.join(as, "Vivaldi") },
+      { browser: "Arc", dir: path11.join(as, "Arc", "User Data") }
+    ];
+  }
+  const cfg = process.env.XDG_CONFIG_HOME || path11.join(HOME_DIR, ".config");
+  return [
+    { browser: "Chrome", dir: path11.join(cfg, "google-chrome"), always: true },
+    { browser: "Chrome Beta", dir: path11.join(cfg, "google-chrome-beta") },
+    { browser: "Chromium", dir: path11.join(cfg, "chromium") },
+    { browser: "Brave", dir: path11.join(cfg, "BraveSoftware", "Brave-Browser") },
+    { browser: "Edge", dir: path11.join(cfg, "microsoft-edge") },
+    { browser: "Vivaldi", dir: path11.join(cfg, "vivaldi") }
+  ];
+}
+function installExtensionHost() {
+  if (process.platform !== "darwin" && process.platform !== "linux") {
+    console.error("  Extension auto-pairing is only supported on macOS and Linux.");
+    process.exit(1);
+  }
+  resolveLocalToken();
+  const srcHost = path11.join(__dirname, "..", "extension", "native-host.cjs");
+  if (!fs11.existsSync(srcHost)) {
+    console.error(`  Host script not found: ${srcHost}`);
+    process.exit(1);
+  }
+  fs11.mkdirSync(CONFIG_DIR, { recursive: true });
+  const hostScript = path11.join(CONFIG_DIR, "extension-token-host.cjs");
+  fs11.copyFileSync(srcHost, hostScript);
+  const wrapper = path11.join(CONFIG_DIR, "extension-token-host.sh");
+  fs11.writeFileSync(wrapper, [
+    "#!/bin/sh",
+    `for BIN in "${process.execPath}" "$(command -v node 2>/dev/null)" /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node; do`,
+    `  [ -n "$BIN" ] && [ -x "$BIN" ] && exec "$BIN" "${hostScript}"`,
+    "done",
+    "exit 1",
+    ""
+  ].join(`
+`), { mode: 493 });
+  const manifest = JSON.stringify({
+    name: NM_HOST_NAME,
+    description: "iframer pairing-token host",
+    path: wrapper,
+    type: "stdio",
+    allowed_origins: [`chrome-extension://${EXTENSION_ID}/`]
+  }, null, 2);
+  const installed = [];
+  for (const { browser, dir, always } of nativeMessagingBrowserDirs()) {
+    if (!always && !fs11.existsSync(dir))
+      continue;
+    try {
+      const nmDir = path11.join(dir, "NativeMessagingHosts");
+      fs11.mkdirSync(nmDir, { recursive: true });
+      fs11.writeFileSync(path11.join(nmDir, `${NM_HOST_NAME}.json`), manifest);
+      installed.push(browser);
+    } catch (e) {
+      console.error(`  ${browser}: failed (${e.message})`);
+    }
+  }
+  return installed;
+}
+function removeExtensionHost() {
+  const removed = [];
+  for (const { browser, dir } of nativeMessagingBrowserDirs()) {
+    const file = path11.join(dir, "NativeMessagingHosts", `${NM_HOST_NAME}.json`);
+    try {
+      if (fs11.existsSync(file)) {
+        fs11.unlinkSync(file);
+        removed.push(browser);
+      }
+    } catch {}
+  }
+  for (const f of ["extension-token-host.cjs", "extension-token-host.sh"]) {
+    try {
+      fs11.unlinkSync(path11.join(CONFIG_DIR, f));
+    } catch {}
+  }
+  return removed;
+}
 async function removeChrome() {
-  const chromeDir = path10.join(CONFIG_DIR, "chrome");
-  if (!fs10.existsSync(chromeDir)) {
+  const chromeDir = path11.join(CONFIG_DIR, "chrome");
+  if (!fs11.existsSync(chromeDir)) {
     console.log("  Chrome for Testing not found, nothing to remove.");
     return;
   }
-  fs10.rmSync(chromeDir, { recursive: true, force: true });
+  fs11.rmSync(chromeDir, { recursive: true, force: true });
   console.log(`  Removed ${chromeDir}`);
 }
 async function main() {
@@ -9707,8 +9995,8 @@ async function main() {
       if (input.startsWith("[") || input.startsWith("{")) {
         const parsed = JSON.parse(input);
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
-      } else if (fs10.existsSync(input)) {
-        const parsed = JSON.parse(fs10.readFileSync(input, "utf-8"));
+      } else if (fs11.existsSync(input)) {
+        const parsed = JSON.parse(fs11.readFileSync(input, "utf-8"));
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
       } else {
         console.error(`  File not found: ${input}`);
@@ -9813,7 +10101,7 @@ async function main() {
           process.exit(1);
         }
         const buffer = Buffer.from(await res.arrayBuffer());
-        fs10.writeFileSync(outPath, buffer);
+        fs11.writeFileSync(outPath, buffer);
         console.log(outPath);
       }
       break;
@@ -9982,8 +10270,8 @@ async function main() {
       } else if (input.startsWith("[") || input.startsWith("{")) {
         const parsed = JSON.parse(input);
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
-      } else if (fs10.existsSync(input)) {
-        const parsed = JSON.parse(fs10.readFileSync(input, "utf-8"));
+      } else if (fs11.existsSync(input)) {
+        const parsed = JSON.parse(fs11.readFileSync(input, "utf-8"));
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
       } else {
         console.error(`  Not a URL or file: ${input}`);
@@ -10003,8 +10291,8 @@ async function main() {
       }
       if (result.capturedApi && result.capturedApi.length > 0) {
         const outputDir = parseFlag(args, "--output") || `./${result.capturedApi[0].domain}`;
-        fs10.mkdirSync(outputDir, { recursive: true });
-        fs10.writeFileSync(path10.join(outputDir, "captured-api.json"), JSON.stringify(result.capturedApi, null, 2));
+        fs11.mkdirSync(outputDir, { recursive: true });
+        fs11.writeFileSync(path11.join(outputDir, "captured-api.json"), JSON.stringify(result.capturedApi, null, 2));
         console.log(`  Captured ${result.capturedApi.reduce((sum, api) => sum + api.endpoints.length, 0)} endpoints`);
         console.log(`  Saved to: ${outputDir}/captured-api.json`);
         for (const api of result.capturedApi) {
@@ -10186,7 +10474,7 @@ async function main() {
       let secretSource = secret ? "env/.env" : null;
       if (!secret) {
         try {
-          secret = fs10.readFileSync(path10.join(CONFIG_DIR, "secret"), "utf8").trim();
+          secret = fs11.readFileSync(path11.join(CONFIG_DIR, "secret"), "utf8").trim();
           if (secret)
             secretSource = "~/.iframer/secret";
         } catch {}
@@ -10231,6 +10519,109 @@ async function main() {
   [2/2] MCP server registration`);
       command = "remove-mcp";
       return main();
+    }
+    case "telemetry": {
+      const file = path11.join(CONFIG_DIR, "telemetry.jsonl");
+      if (args.includes("--clear")) {
+        try {
+          fs11.unlinkSync(file);
+        } catch {}
+        console.log("  Telemetry log cleared.");
+        break;
+      }
+      let lines;
+      try {
+        lines = fs11.readFileSync(file, "utf8").trim().split(`
+`).filter(Boolean);
+      } catch {
+        console.log("  No telemetry recorded yet. It logs automatically as agents use iframer");
+        console.log("  (new MCP sessions only — restart a session if it predates telemetry).");
+        break;
+      }
+      const sessions2 = new Map;
+      for (const line of lines) {
+        let r;
+        try {
+          r = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        let s = sessions2.get(r.session);
+        if (!s) {
+          s = { calls: 0, tokens: 0, defTokens: 0, tools: new Map, first: r.ts, last: r.ts };
+          sessions2.set(r.session, s);
+        }
+        s.last = r.ts;
+        if (r.kind === "definitions")
+          s.defTokens = r.estTokens || 0;
+        else if (r.kind === "call") {
+          s.calls++;
+          s.tokens += r.estTokens || 0;
+          const t = s.tools.get(r.tool) || { calls: 0, tokens: 0 };
+          t.calls++;
+          t.tokens += r.estTokens || 0;
+          s.tools.set(r.tool, t);
+        }
+      }
+      const fmt = (n) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+      let grandCalls = 0, grandTokens = 0;
+      const toolTotals = new Map;
+      for (const s of sessions2.values()) {
+        grandCalls += s.calls;
+        grandTokens += s.tokens;
+        for (const [name, t] of s.tools) {
+          const g = toolTotals.get(name) || { calls: 0, tokens: 0 };
+          g.calls += t.calls;
+          g.tokens += t.tokens;
+          toolTotals.set(name, g);
+        }
+      }
+      console.log(`
+  iframer MCP token telemetry (estimated at ~4 chars/token, local only)
+`);
+      console.log(`  All time: ${sessions2.size} session(s), ${grandCalls} call(s), ~${fmt(grandTokens)} tokens of tool traffic`);
+      console.log(`
+  Per tool (all time):`);
+      for (const [name, t] of [...toolTotals.entries()].sort((a, b) => b[1].tokens - a[1].tokens)) {
+        console.log(`    ${name.padEnd(18)} ${String(t.calls).padStart(4)} calls  ~${fmt(t.tokens).padStart(7)} tokens`);
+      }
+      console.log(`
+  Recent sessions:`);
+      const recent = [...sessions2.entries()].slice(-5);
+      for (const [id, s] of recent) {
+        console.log(`    ${id.padEnd(20)} ${String(s.calls).padStart(4)} calls  ~${fmt(s.tokens).padStart(7)} tokens (+~${fmt(s.defTokens)} definitions overhead, once per session)`);
+      }
+      console.log(`
+  Note: definitions overhead excludes zod schema text — Claude Code's /context`);
+      console.log(`  shows the exact per-session definition footprint. Clear log: iframer telemetry --clear
+`);
+      break;
+    }
+    case "install-extension": {
+      console.log(`  Installing the extension pairing host (native messaging)...
+`);
+      const installed = installExtensionHost();
+      if (installed.length === 0) {
+        console.log("  No Chromium-family browser directories found — nothing installed.");
+        break;
+      }
+      console.log(`  Pairing host installed for: ${installed.join(", ")}`);
+      console.log(`
+  The iframer extension now pairs itself — no token pasting.`);
+      console.log("  If the extension is already loaded, quit + reopen the browser (native");
+      console.log("  messaging hosts are picked up on browser start), then check the popup dot.");
+      console.log(`  Manual pasting in the popup still works as a fallback.
+`);
+      break;
+    }
+    case "remove-extension": {
+      const removed = removeExtensionHost();
+      if (removed.length === 0) {
+        console.log("  Extension pairing host was not installed.");
+      } else {
+        console.log(`  Pairing host removed from: ${removed.join(", ")}`);
+      }
+      break;
     }
     case "remove-mcp": {
       const isDev = args.includes("--dev");
@@ -10302,6 +10693,11 @@ async function main() {
     knowledge get <domain>          Same as --cache <domain>
     knowledge clear [domain]        Same as --clear-cache
 
+  Telemetry:
+    telemetry                       Report estimated session tokens consumed by MCP tool calls
+    telemetry --clear               Wipe the telemetry log
+    (opt out: IFRAMER_TELEMETRY=0 in the MCP env)
+
   Browser:
     modes                           Show available browser modes
     install chromium                Download Chrome for Testing
@@ -10318,9 +10714,11 @@ async function main() {
     install                         Install everything (Chromium + MCP)
     install chromium                Download Chrome for Testing
     install mcp [--dev]             Register iframer MCP in Claude Code and Codex
+    install extension               Let the browser extension pair itself (no token pasting)
     remove                          Remove everything (Chromium + MCP)
     remove chromium                 Delete downloaded Chrome for Testing
     remove mcp [--dev]              Unregister iframer MCP from Claude Code and Codex
+    remove extension                Remove the extension pairing host
 
   Environment:
     IFRAMER_URL                     Docker API URL (default: http://localhost:3021)

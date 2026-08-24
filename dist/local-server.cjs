@@ -101,15 +101,15 @@ async function injectStorage(page, sessionData) {
 
 // index.ts
 var import_express = __toESM(require("express"));
-var import_path10 = __toESM(require("path"));
-var import_fs11 = __toESM(require("fs"));
+var import_path11 = __toESM(require("path"));
+var import_fs12 = __toESM(require("fs"));
 var import_url2 = require("url");
 
 // src/api/routes.ts
 var import_patchright3 = require("patchright");
 
 // src/lib/iframer.ts
-var import_path9 = __toESM(require("path"));
+var import_path10 = __toESM(require("path"));
 var import_url = require("url");
 
 // src/lib/browser/session-manager.ts
@@ -1228,7 +1228,12 @@ async function ensureChrome() {
 // src/lib/browser/cloak-browser.ts
 var log5 = createLogger("cloak");
 var _available = null;
+function cloakEnabled() {
+  return process.env.IFRAMER_USE_CLOAKBROWSER === "1" || process.env.IFRAMER_USE_CLOAKBROWSER === "true";
+}
 async function tryImport() {
+  if (!cloakEnabled())
+    return null;
   try {
     return await import("cloakbrowser");
   } catch {
@@ -1986,6 +1991,15 @@ function sleep3(ms) {
 }
 // src/lib/actions/resolve-selector.ts
 function resolveSelector(selector, ctx) {
+  if (selector.startsWith("@a:")) {
+    const name = selector.slice(3);
+    const anchor = ctx.anchors?.get(name);
+    if (!anchor) {
+      const available = ctx.anchors ? Array.from(ctx.anchors.keys()).join(", ") : "";
+      throw new Error(`Unknown anchor: @a:${name}${ctx.anchorDomain ? ` for ${ctx.anchorDomain}` : ""}. ` + `${available ? `Known anchors: ${available}. ` : "This domain has no saved anchors yet. "}` + `Run a snapshot/find to locate the element, act on it, then save it with the ` + `\`remember\` tool so future runs skip the search.`);
+    }
+    return anchor.selector;
+  }
   if (selector.startsWith("@e")) {
     const ref = ctx.refMap.get(selector);
     if (!ref) {
@@ -1995,6 +2009,9 @@ function resolveSelector(selector, ctx) {
     return ref.selector;
   }
   return selector;
+}
+function anchorNameOf(selector) {
+  return typeof selector === "string" && selector.startsWith("@a:") ? selector.slice(3) : null;
 }
 
 // src/lib/actions/handlers/navigation.ts
@@ -2057,8 +2074,18 @@ async function wait(page, step) {
 async function waitFor(page, step, ctx) {
   await page.waitForSelector(resolveSelector(step.selector, ctx), { timeout: step.timeout || TIMEOUTS.SELECTOR_WAIT });
 }
-async function scroll(page, step) {
-  await page.evaluate((dy) => window.scrollBy(0, dy || document.body.scrollHeight), step.deltaY ?? 0);
+async function scroll(page, step, ctx) {
+  const selector = step.selector ? resolveSelector(step.selector, ctx) : null;
+  await page.evaluate(({ dy, sel }) => {
+    if (sel) {
+      const el = document.querySelector(sel);
+      if (!el)
+        throw new Error(`scroll: no element for selector ${sel}`);
+      el.scrollBy(0, dy || el.scrollHeight);
+    } else {
+      window.scrollBy(0, dy || document.body.scrollHeight);
+    }
+  }, { dy: step.deltaY ?? 0, sel: selector });
 }
 async function keyboard(page, step) {
   const mods = [
@@ -2082,7 +2109,7 @@ async function read(page, step, ctx) {
   const text = raw.replace(/\n{3,}/g, `
 
 `).trim();
-  const max = step.maxChars || 20000;
+  const max = step.maxChars || 6000;
   return { text: text.slice(0, max), truncated: text.length > max };
 }
 async function typeCode(page, step, ctx) {
@@ -4548,6 +4575,53 @@ function safeUrl(p) {
   }
 }
 
+// src/lib/knowledge/component-map.ts
+var import_fs10 = __toESM(require("fs"));
+var import_path9 = __toESM(require("path"));
+function anchorsPath(domain) {
+  return import_path9.default.join(getKnowledgeDir(), `${sanitizeDomain(domain)}.anchors.json`);
+}
+function loadComponentMap(domain) {
+  const norm = normalizeDomain(domain);
+  try {
+    const raw = import_fs10.default.readFileSync(anchorsPath(norm), "utf8");
+    const parsed = JSON.parse(raw);
+    return {
+      domain: parsed.domain || norm,
+      anchors: parsed.anchors || {},
+      quirks: Array.isArray(parsed.quirks) ? parsed.quirks : []
+    };
+  } catch {
+    return { domain: norm, anchors: {}, quirks: [] };
+  }
+}
+function loadAnchors(domain) {
+  const map = new Map;
+  const cm = loadComponentMap(domain);
+  for (const [name, a] of Object.entries(cm.anchors))
+    map.set(name, a);
+  return map;
+}
+function write(cm) {
+  import_fs10.default.mkdirSync(getKnowledgeDir(), { recursive: true });
+  import_fs10.default.writeFileSync(anchorsPath(cm.domain), JSON.stringify(cm, null, 2), "utf8");
+}
+function recordAnchorResult(domain, name, ok, now) {
+  try {
+    const cm = loadComponentMap(domain);
+    const a = cm.anchors[name];
+    if (!a)
+      return;
+    if (ok) {
+      a.uses += 1;
+      a.lastVerified = now;
+    } else {
+      a.fails += 1;
+    }
+    write(cm);
+  } catch {}
+}
+
 // src/lib/pipeline.ts
 var DEFAULT_STALE_TIMEOUT_MS2 = 20000;
 function safePageUrl(page) {
@@ -4616,6 +4690,19 @@ class PipelineRunner {
     const continueOnError = opts.continueOnError ?? false;
     const results = [];
     const obstacles = [];
+    const navStep = pipeline.steps.find((s) => s.type === "navigate");
+    try {
+      const host = new URL(navStep?.url || safePageUrl(initialPage) || "http://x").hostname;
+      if (host && host !== "x") {
+        this.ctx.anchors = loadAnchors(host);
+        this.ctx.anchorDomain = host;
+      }
+    } catch {}
+    const recordAnchor = (step, ok) => {
+      const name = anchorNameOf(step.selector);
+      if (name && this.ctx.anchorDomain)
+        recordAnchorResult(this.ctx.anchorDomain, name, ok, new Date().toISOString());
+    };
     const capture = opts.captureApi ? new ApiCapture(initialPage) : null;
     if (capture)
       capture.start();
@@ -4645,6 +4732,7 @@ class PipelineRunner {
         const pageState = await capturePageState(tracker.active(), this.ctx, { screenshot: true });
         stepResult = failedStepResult(step, asError.message, Date.now() - startTime, i);
         results.push(stepResult);
+        recordAnchor(step, false);
         return {
           ok: false,
           completedSteps: i,
@@ -4665,6 +4753,7 @@ class PipelineRunner {
           capturedApi: await finishCapture()
         };
       }
+      recordAnchor(step, true);
       const canOpenTab = step.type === "click" || step.type === "human-click";
       const currentPageNavigated = safePageUrl(page) !== urlBefore;
       if (canOpenTab && !currentPageNavigated) {
@@ -4927,36 +5016,59 @@ class ExtensionBridge {
   pending = new Map;
   nextReqId = 1;
   tabOwner = new Map;
-  cdpEventHandler = null;
+  collidingTabs = new Set;
+  cdpListeners = new Map;
   attach(server) {
     if (this.wss)
       return;
     this.wss = new import_ws.WebSocketServer({ server, path: "/extension/ws" });
     this.wss.on("connection", (ws, req) => {
-      const token = new URL(req.url || "", "http://127.0.0.1").searchParams.get("token");
       let expected = "";
       try {
         expected = getLocalToken();
       } catch {
         expected = "";
       }
-      if (!expected || token !== expected) {
+      if (!expected) {
         ws.close(4001, "unauthorized");
         return;
       }
-      const client = {
-        clientId: import_crypto5.default.randomUUID(),
-        socket: ws,
-        connectedAt: Date.now(),
-        tabs: [],
-        heartbeat: null
-      };
-      this.clients.set(client.clientId, client);
-      this.startHeartbeat(client);
-      ws.on("message", (data) => this.onMessage(client, data));
-      ws.on("close", () => this.dropClient(client, "socket closed"));
-      ws.on("error", () => {});
+      const queryToken = new URL(req.url || "", "http://127.0.0.1").searchParams.get("token");
+      if (queryToken !== null) {
+        if (queryToken !== expected) {
+          ws.close(4001, "unauthorized");
+          return;
+        }
+        this.acceptClient(ws);
+        return;
+      }
+      const timer = setTimeout(() => ws.close(4001, "auth timeout"), 3000);
+      ws.once("message", (data) => {
+        clearTimeout(timer);
+        try {
+          const m = JSON.parse(data.toString());
+          if (m?.type === "auth" && m.token === expected) {
+            this.acceptClient(ws);
+            return;
+          }
+        } catch {}
+        ws.close(4001, "unauthorized");
+      });
     });
+  }
+  acceptClient(ws) {
+    const client = {
+      clientId: import_crypto5.default.randomUUID(),
+      socket: ws,
+      connectedAt: Date.now(),
+      tabs: [],
+      heartbeat: null
+    };
+    this.clients.set(client.clientId, client);
+    this.startHeartbeat(client);
+    ws.on("message", (data) => this.onMessage(client, data));
+    ws.on("close", () => this.dropClient(client, "socket closed"));
+    ws.on("error", () => {});
   }
   startHeartbeat(client) {
     client.heartbeat = setInterval(() => {
@@ -5006,8 +5118,10 @@ class ExtensionBridge {
     }
     if (msg.type === "cdp_event") {
       const ev = msg;
-      if (typeof ev.tabId === "number" && this.cdpEventHandler) {
-        this.cdpEventHandler(client.clientId, ev);
+      if (typeof ev.tabId === "number") {
+        const fn = this.cdpListeners.get(cdpKey(client.clientId, ev.tabId));
+        if (fn)
+          fn(ev);
       }
       return;
     }
@@ -5044,9 +5158,6 @@ class ExtensionBridge {
       }
     });
   }
-  isConnected() {
-    return this.clients.size > 0;
-  }
   hasClients() {
     return this.clients.size > 0;
   }
@@ -5066,6 +5177,7 @@ class ExtensionBridge {
   async listTabs() {
     const all = [];
     this.tabOwner.clear();
+    this.collidingTabs.clear();
     await Promise.all([...this.clients.values()].map(async (client) => {
       try {
         const res = await this.send(client, "list_tabs", {}) || { tabs: [] };
@@ -5076,8 +5188,12 @@ class ExtensionBridge {
           profileName: client.profileName
         }));
         client.tabs = tagged;
-        for (const t of tagged)
+        for (const t of tagged) {
+          const prev = this.tabOwner.get(t.id);
+          if (prev !== undefined && prev !== client.clientId)
+            this.collidingTabs.add(t.id);
           this.tabOwner.set(t.id, client.clientId);
+        }
         all.push(...tagged);
       } catch {
         client.tabs = [];
@@ -5099,29 +5215,35 @@ class ExtensionBridge {
       return [...this.clients.values()][0];
     }
     let owner = this.tabOwner.get(tabId);
-    if (!owner) {
+    if (!owner || this.collidingTabs.has(tabId)) {
       await this.listTabs();
       owner = this.tabOwner.get(tabId);
+    }
+    if (this.collidingTabs.has(tabId)) {
+      throw new Error(`Tab id ${tabId} exists in more than one connected browser (separate browsers ` + `have independent tab-id spaces). Call \`tabs\` and pass the tab's clientId ` + `alongside tabId to pick the right one.`);
     }
     if (owner) {
       const c = this.clients.get(owner);
       if (c)
         return c;
     }
-    if (this.clients.size === 1) {
-      return [...this.clients.values()][0];
-    }
     throw new Error(`Could not determine which browser profile owns tab ${tabId}. Call \`tabs\` to ` + `refresh the list, then pass the tab's clientId alongside tabId.`);
   }
-  execute(tabId, steps, options = {}, clientId) {
-    return this.resolveClient(tabId, clientId).then((client) => this.send(client, "execute", { tabId, steps, options }));
+  addCdpListener(clientId, tabId, fn) {
+    const key = cdpKey(clientId, tabId);
+    if (this.cdpListeners.has(key)) {
+      throw new Error(`Tab ${tabId} is already being driven by another pipeline. Retry when it finishes.`);
+    }
+    this.cdpListeners.set(key, fn);
   }
-  setCdpEventHandler(fn) {
-    this.cdpEventHandler = fn;
+  removeCdpListener(clientId, tabId) {
+    this.cdpListeners.delete(cdpKey(clientId, tabId));
   }
-  async cdpAttach(tabId, clientId) {
+  async cdpAttach(tabId, clientId, focus) {
     const client = await this.resolveClient(tabId, clientId);
-    const res = await this.send(client, "cdp_attach", { tabId }) || { targetInfo: null };
+    const res = await this.send(client, "cdp_attach", { tabId, focus: !!focus }) || {
+      targetInfo: null
+    };
     return { targetInfo: res.targetInfo, clientId: client.clientId };
   }
   async cdpCommand(clientId, tabId, sessionId, method, params) {
@@ -5139,6 +5261,9 @@ class ExtensionBridge {
     } catch {}
   }
 }
+function cdpKey(clientId, tabId) {
+  return `${clientId}:${tabId}`;
+}
 var extensionBridge = new ExtensionBridge;
 
 // src/lib/extension/cdp-relay.ts
@@ -5147,6 +5272,7 @@ var log17 = createLogger("cdp-relay");
 class CdpRelay {
   tabId;
   clientId;
+  focus;
   httpServer = null;
   wss = null;
   pw = null;
@@ -5155,12 +5281,14 @@ class CdpRelay {
   tabSessionId = "pw-tab-1";
   targetInfo = null;
   ownerClientId = "";
-  constructor(tabId, clientId) {
+  listenerRegistered = false;
+  constructor(tabId, clientId, focus) {
     this.tabId = tabId;
     this.clientId = clientId;
+    this.focus = focus;
   }
   async start() {
-    const { targetInfo, clientId } = await extensionBridge.cdpAttach(this.tabId, this.clientId);
+    const { targetInfo, clientId } = await extensionBridge.cdpAttach(this.tabId, this.clientId, this.focus);
     this.ownerClientId = clientId;
     this.targetInfo = targetInfo || {
       targetId: `iframer-${this.tabId}`,
@@ -5168,15 +5296,14 @@ class CdpRelay {
       title: "",
       url: ""
     };
-    extensionBridge.setCdpEventHandler((clientId2, ev) => {
-      if (clientId2 !== this.ownerClientId || ev.tabId !== this.tabId)
-        return;
+    extensionBridge.addCdpListener(this.ownerClientId, this.tabId, (ev) => {
       this.sendToPw({
         method: ev.method,
         params: ev.params,
         sessionId: ev.sessionId || this.tabSessionId
       });
     });
+    this.listenerRegistered = true;
     await new Promise((resolve, reject) => {
       this.httpServer = import_http.default.createServer((req, res) => {
         if (req.url === "/json/version" || req.url === "/json/version/") {
@@ -5290,10 +5417,36 @@ class CdpRelay {
         break;
     }
     const realSessionId = sessionId === this.tabSessionId ? undefined : sessionId;
+    if (method === "Page.captureScreenshot") {
+      return this.captureScreenshotWithFallback(params, realSessionId);
+    }
     return extensionBridge.cdpCommand(this.ownerClientId, this.tabId, realSessionId, method, params);
   }
+  async captureScreenshotWithFallback(params, sessionId) {
+    const base = params && typeof params === "object" ? { ...params } : {};
+    const attempt = (p) => extensionBridge.cdpCommand(this.ownerClientId, this.tabId, sessionId, "Page.captureScreenshot", p);
+    const first = attempt(base);
+    first.catch(() => {
+      return;
+    });
+    try {
+      return await Promise.race([
+        first,
+        new Promise((_, reject) => {
+          const t = setTimeout(() => reject(new Error("screenshot timed out (no compositor frame)")), 1e4);
+          t.unref?.();
+        })
+      ]);
+    } catch {
+      return attempt({ ...base, fromSurface: false });
+    }
+  }
   async stop() {
-    extensionBridge.setCdpEventHandler(null);
+    const ownedTab = this.listenerRegistered;
+    if (ownedTab) {
+      extensionBridge.removeCdpListener(this.ownerClientId, this.tabId);
+      this.listenerRegistered = false;
+    }
     try {
       this.wss?.clients.forEach((c) => {
         try {
@@ -5326,10 +5479,12 @@ class CdpRelay {
       await withTimeout((cb) => this.httpServer.close(cb));
     this.wss = null;
     this.httpServer = null;
-    try {
-      await extensionBridge.cdpDetach(this.ownerClientId, this.tabId);
-    } catch (e) {
-      log17.warn(`cdp detach failed: ${e}`);
+    if (ownedTab) {
+      try {
+        await extensionBridge.cdpDetach(this.ownerClientId, this.tabId);
+      } catch (e) {
+        log17.warn(`cdp detach failed: ${e}`);
+      }
     }
   }
 }
@@ -5340,6 +5495,7 @@ var log18 = createLogger("iframer");
 class PipelineExecutor {
   deps;
   pendingElicitOtp;
+  extensionTabLocks = new Map;
   constructor(deps) {
     this.deps = deps;
   }
@@ -5354,7 +5510,20 @@ class PipelineExecutor {
   async executeInner(userId, token, pipeline) {
     const opts = pipeline.options || {};
     if (typeof opts.extensionTabId === "number") {
-      return this.executeExtension(userId, token, pipeline, opts.extensionTabId, opts.clientId);
+      const tabId = opts.extensionTabId;
+      const lockKey = `${opts.clientId || "auto"}:${tabId}`;
+      const prev = this.extensionTabLocks.get(lockKey);
+      const run = (prev ? prev.catch(() => {
+        return;
+      }) : Promise.resolve()).then(() => this.executeExtension(userId, token, pipeline, tabId, opts.clientId));
+      this.extensionTabLocks.set(lockKey, run);
+      run.catch(() => {
+        return;
+      }).finally(() => {
+        if (this.extensionTabLocks.get(lockKey) === run)
+          this.extensionTabLocks.delete(lockKey);
+      });
+      return run;
     }
     const forcedMode = opts.mode;
     const autoEscalate = opts.autoEscalate !== false;
@@ -5416,7 +5585,7 @@ class PipelineExecutor {
   }
   async executeExtension(userId, token, pipeline, tabId, clientId) {
     const startTime = Date.now();
-    const relay = new CdpRelay(tabId, clientId);
+    const relay = new CdpRelay(tabId, clientId, pipeline.options?.focus);
     let browser;
     try {
       await relay.start();
@@ -5436,7 +5605,25 @@ class PipelineExecutor {
       if (this.pendingElicitOtp)
         ctx.elicitOtp = this.pendingElicitOtp;
       const runner = new PipelineRunner(ctx);
-      const result = await runner.run(page, pipeline);
+      const capMs = Math.min(60000 + pipeline.steps.length * 15000, 150000);
+      let watchdog;
+      let result;
+      try {
+        const runPromise = runner.run(page, pipeline);
+        runPromise.catch(() => {
+          return;
+        });
+        result = await Promise.race([
+          runPromise,
+          new Promise((_, reject) => {
+            watchdog = setTimeout(() => reject(new Error(`pipeline exceeded ${Math.round(capMs / 1000)}s — the tab may have stopped ` + `rendering (minimized window?). Un-minimize the Chrome window or retry ` + `with options.focus=true.`)), capMs);
+            watchdog.unref?.();
+          })
+        ]);
+      } finally {
+        if (watchdog)
+          clearTimeout(watchdog);
+      }
       this.deps.refStore.sync(userId, ctx);
       result.modeUsed = "extension";
       if (result.ok) {
@@ -5448,6 +5635,8 @@ class PipelineExecutor {
       }
       return result;
     } catch (err) {
+      const msg = getErrorMessage(err);
+      const stalled = msg.includes("pipeline exceeded");
       return {
         ok: false,
         completedSteps: 0,
@@ -5461,10 +5650,10 @@ class PipelineExecutor {
           failedAtStep: 0,
           failedStep: pipeline.steps[0],
           errorType: "action-failed",
-          message: `Extension mode failed: ${getErrorMessage(err)}`,
+          message: `Extension mode failed: ${msg}`,
           pageState: { url: "", title: "" },
-          suggestion: "Ensure the iframer extension is connected (green dot) and the tab is still open. See chrome://extensions.",
-          retryable: true
+          suggestion: stalled ? "STOP retrying and tell the user what happened: the Chrome tab being driven stopped " + "responding — its window is likely minimized or the page is wedged. Ask them to " + "un-minimize the Chrome window (leaving it behind other windows is fine), or ask " + "permission to rerun with options.focus=true to bring it to the front." : "Ensure the iframer extension is connected (green dot) and the tab is still open. See chrome://extensions.",
+          retryable: !stalled
         }
       };
     } finally {
@@ -5817,7 +6006,7 @@ class CredentialStore {
 
 // src/lib/iframer.ts
 var log19 = createLogger("iframer");
-var DEFAULT_SCREENSHOT_DIR = import_path9.default.join(import_path9.default.dirname(import_url.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/src/lib/iframer.ts")), "../../.screenshots");
+var DEFAULT_SCREENSHOT_DIR = import_path10.default.join(import_path10.default.dirname(import_url.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/src/lib/iframer.ts")), "../../.screenshots");
 var DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
 var DEFAULT_STALE_TIMEOUT_MS3 = 20000;
 
@@ -6031,7 +6220,7 @@ function errorHandler(err, _req, res, _next) {
 }
 
 // src/api/routes.ts
-var import_fs10 = __toESM(require("fs"));
+var import_fs11 = __toESM(require("fs"));
 function auth(req) {
   return req;
 }
@@ -6044,7 +6233,7 @@ function registerRoutes(app) {
     const browsers = [];
     try {
       const execPath = import_patchright3.chromium.executablePath();
-      browsers.push({ name: "chromium", installed: import_fs10.default.existsSync(execPath), executablePath: execPath });
+      browsers.push({ name: "chromium", installed: import_fs11.default.existsSync(execPath), executablePath: execPath });
     } catch {
       browsers.push({ name: "chromium", installed: false, executablePath: null });
     }
@@ -6266,8 +6455,8 @@ var PORT = parseInt(process.env.PORT || "3021", 10);
 var REAP_INTERVAL_MS = 60000;
 var IDLE_EXIT_MS = parseInt(process.env.IFRAMER_SERVER_IDLE_EXIT_MS || String(30 * 60 * 1000), 10);
 var SHUTDOWN_DEADLINE_MS = 1e4;
-var SCREENSHOT_DIR = import_path10.default.join(import_path10.default.dirname(import_url2.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/index.ts")), ".screenshots");
-import_fs11.default.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+var SCREENSHOT_DIR = import_path11.default.join(import_path11.default.dirname(import_url2.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/index.ts")), ".screenshots");
+import_fs12.default.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 app.use("/screenshots", import_express.default.static(SCREENSHOT_DIR));
 app.use(import_express.default.json());
 var lastActivity = Date.now();
@@ -6284,8 +6473,8 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
   console.error(`[local-server] unhandledRejection (survived): ${reason}`);
 });
-var server = app.listen(PORT, () => {
-  console.log(`iframer listening on ${PORT}`);
+var server = app.listen(PORT, "127.0.0.1", () => {
+  console.log(`iframer listening on 127.0.0.1:${PORT}`);
   writeServerInfo({ pid: process.pid, port: PORT, startedAt: new Date().toISOString() });
 });
 extensionBridge.attach(server);

@@ -2,7 +2,7 @@ import type { Page } from "patchright";
 
 // ─── Browser Modes ─────────────────────────────────────────────────
 
-export type BrowserMode = "headless" | "binary-headful" | "docker-headful";
+export type BrowserMode = "headless" | "binary-headful" | "docker-headful" | "extension";
 
 // ─── Pipeline Step Types ────────────────────────────────────────────
 
@@ -43,6 +43,19 @@ export interface ElementRef {
   description?: string;  // extra context (placeholder, type, state)
 }
 
+/** A durable, per-domain named element locator — the persisted counterpart of
+ *  an ephemeral @e ref. Referenced in selectors as `@a:<name>`. */
+export interface Anchor {
+  name: string;          // "composer", "send-button", "search"
+  selector: string;      // CSS selector (prefer stable attrs like aria-label)
+  role?: string;         // textbox, button, ...
+  description?: string;  // human note
+  quirks?: string[];     // e.g. ["synthetic clicks ignored — use trusted", "@here → confirm modal"]
+  uses: number;          // successful resolutions (self-heal signal)
+  fails: number;         // failed resolutions (self-heal signal)
+  lastVerified: string;  // ISO timestamp of last save/success
+}
+
 // ─── Pipeline ───────────────────────────────────────────────────────
 
 export interface Pipeline {
@@ -62,6 +75,7 @@ export interface PipelineOptions {
   instanceId?: string;            // Named browser within this session (default: "default") — run several in parallel, e.g. one per account
   extensionTabId?: number;        // Set to drive a real Chrome tab via the browser extension (CDP relay). Bypasses launch/escalation.
   clientId?: string;              // With extensionTabId: which connected extension profile owns the tab (when ambiguous).
+  focus?: boolean;                // With extensionTabId: raise the tab's window to the OS foreground while driving (default false — the tab is activated in place and driven with CDP focus emulation, without stealing the user's focus).
 }
 
 // ─── Captured API Types ────────────────────────────────────────────
@@ -319,6 +333,11 @@ export interface ExecutionContext {
   staleTimeoutMs: number;
   refMap: Map<string, ElementRef>;
   nextRefId: number;
+  /** Persisted per-domain anchors (@a:<name>), loaded at run start for the
+   *  page's domain. Undefined until loaded; empty map if the domain has none. */
+  anchors?: Map<string, Anchor>;
+  /** The domain `anchors` was loaded for — used to record use/fail results. */
+  anchorDomain?: string;
   store: import("./storage").StorageBackend;
   /** Pending localStorage/sessionStorage to re-inject after each navigate.
    *  Origin-scoped, so calling injectStorage is idempotent across navigations. */

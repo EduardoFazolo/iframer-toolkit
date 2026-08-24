@@ -476,10 +476,11 @@ if (command === "install") {
     const target = args.shift();
     if (target === "chromium" || target === "chrome") command = "install-chrome";
     else if (target === "mcp") command = "install-mcp";
+    else if (target === "extension") command = "install-extension";
     else if (target === "deps" || target === "dependencies" || target === "all") command = "install-all";
     else {
       console.error(`  Unknown install target: ${target}`);
-      console.error("  Usage: iframer install <chromium|mcp>");
+      console.error("  Usage: iframer install <chromium|mcp|extension>");
       process.exit(1);
     }
   }
@@ -493,9 +494,10 @@ if (command === "remove") {
     const target = args.shift();
     if (target === "chromium" || target === "chrome") command = "remove-chrome";
     else if (target === "mcp") command = "remove-mcp";
+    else if (target === "extension") command = "remove-extension";
     else {
       console.error(`  Unknown remove target: ${target}`);
-      console.error("  Usage: iframer remove <chromium|mcp>");
+      console.error("  Usage: iframer remove <chromium|mcp|extension>");
       process.exit(1);
     }
   }
@@ -513,6 +515,120 @@ function isMcpInstalled(mcpName) {
   } catch {
     return false;
   }
+}
+
+// ─── Extension auto-pairing (native messaging host) ──────────────────
+// Installs a Chrome native-messaging host that hands the pairing token to the
+// iframer extension, so no profile ever needs the token pasted by hand. The
+// host is locked to the extension's ID, which is pinned by the "key" field in
+// extension/manifest.json.
+const EXTENSION_ID = "mjfdkiicioigljhenkgaldhihllfdpll";
+const NM_HOST_NAME = "com.iframer.token";
+
+/** Chromium-family browser data dirs that can hold a NativeMessagingHosts
+ *  folder. `always` = create even if the browser dir doesn't exist yet. */
+function nativeMessagingBrowserDirs() {
+  if (process.platform === "darwin") {
+    const as = path.join(HOME_DIR, "Library", "Application Support");
+    return [
+      { browser: "Chrome", dir: path.join(as, "Google", "Chrome"), always: true },
+      { browser: "Chrome Beta", dir: path.join(as, "Google", "Chrome Beta") },
+      { browser: "Chrome Canary", dir: path.join(as, "Google", "Chrome Canary") },
+      { browser: "Chromium", dir: path.join(as, "Chromium") },
+      { browser: "Brave", dir: path.join(as, "BraveSoftware", "Brave-Browser") },
+      { browser: "Edge", dir: path.join(as, "Microsoft Edge") },
+      { browser: "Vivaldi", dir: path.join(as, "Vivaldi") },
+      { browser: "Arc", dir: path.join(as, "Arc", "User Data") },
+    ];
+  }
+  const cfg = process.env.XDG_CONFIG_HOME || path.join(HOME_DIR, ".config");
+  return [
+    { browser: "Chrome", dir: path.join(cfg, "google-chrome"), always: true },
+    { browser: "Chrome Beta", dir: path.join(cfg, "google-chrome-beta") },
+    { browser: "Chromium", dir: path.join(cfg, "chromium") },
+    { browser: "Brave", dir: path.join(cfg, "BraveSoftware", "Brave-Browser") },
+    { browser: "Edge", dir: path.join(cfg, "microsoft-edge") },
+    { browser: "Vivaldi", dir: path.join(cfg, "vivaldi") },
+  ];
+}
+
+function installExtensionHost() {
+  if (process.platform !== "darwin" && process.platform !== "linux") {
+    console.error("  Extension auto-pairing is only supported on macOS and Linux.");
+    process.exit(1);
+  }
+  // Make sure the secret exists — it's what the host will serve.
+  resolveLocalToken();
+
+  // Copy the host script somewhere stable (survives the repo moving), plus a
+  // wrapper that pins the absolute runtime path — Chrome launches the host
+  // without a login shell, so `#!/usr/bin/env node` can miss nvm-style setups.
+  const srcHost = path.join(__dirname, "..", "extension", "native-host.cjs");
+  if (!fs.existsSync(srcHost)) {
+    console.error(`  Host script not found: ${srcHost}`);
+    process.exit(1);
+  }
+  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  const hostScript = path.join(CONFIG_DIR, "extension-token-host.cjs");
+  fs.copyFileSync(srcHost, hostScript);
+  // Chrome spawns the host with a minimal PATH (no nvm/homebrew), so pin the
+  // runtime that installed this — with common fallbacks in case it moves.
+  const wrapper = path.join(CONFIG_DIR, "extension-token-host.sh");
+  fs.writeFileSync(
+    wrapper,
+    [
+      "#!/bin/sh",
+      `for BIN in "${process.execPath}" "$(command -v node 2>/dev/null)" /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node; do`,
+      `  [ -n "$BIN" ] && [ -x "$BIN" ] && exec "$BIN" "${hostScript}"`,
+      "done",
+      "exit 1",
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+
+  const manifest = JSON.stringify(
+    {
+      name: NM_HOST_NAME,
+      description: "iframer pairing-token host",
+      path: wrapper,
+      type: "stdio",
+      allowed_origins: [`chrome-extension://${EXTENSION_ID}/`],
+    },
+    null,
+    2,
+  );
+
+  const installed = [];
+  for (const { browser, dir, always } of nativeMessagingBrowserDirs()) {
+    if (!always && !fs.existsSync(dir)) continue;
+    try {
+      const nmDir = path.join(dir, "NativeMessagingHosts");
+      fs.mkdirSync(nmDir, { recursive: true });
+      fs.writeFileSync(path.join(nmDir, `${NM_HOST_NAME}.json`), manifest);
+      installed.push(browser);
+    } catch (e) {
+      console.error(`  ${browser}: failed (${e.message})`);
+    }
+  }
+  return installed;
+}
+
+function removeExtensionHost() {
+  const removed = [];
+  for (const { browser, dir } of nativeMessagingBrowserDirs()) {
+    const file = path.join(dir, "NativeMessagingHosts", `${NM_HOST_NAME}.json`);
+    try {
+      if (fs.existsSync(file)) {
+        fs.unlinkSync(file);
+        removed.push(browser);
+      }
+    } catch {}
+  }
+  for (const f of ["extension-token-host.cjs", "extension-token-host.sh"]) {
+    try { fs.unlinkSync(path.join(CONFIG_DIR, f)); } catch {}
+  }
+  return removed;
 }
 
 async function removeChrome() {
@@ -1243,6 +1359,93 @@ async function main() {
       return main();
     }
 
+    // ─── Telemetry report ────────────────────────────────────────────
+
+    case "telemetry": {
+      const file = path.join(CONFIG_DIR, "telemetry.jsonl");
+      if (args.includes("--clear")) {
+        try { fs.unlinkSync(file); } catch {}
+        console.log("  Telemetry log cleared.");
+        break;
+      }
+      let lines;
+      try {
+        lines = fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean);
+      } catch {
+        console.log("  No telemetry recorded yet. It logs automatically as agents use iframer");
+        console.log("  (new MCP sessions only — restart a session if it predates telemetry).");
+        break;
+      }
+      const sessions = new Map(); // session -> {calls, tokens, tools: Map, defTokens, first, last}
+      for (const line of lines) {
+        let r;
+        try { r = JSON.parse(line); } catch { continue; }
+        let s = sessions.get(r.session);
+        if (!s) { s = { calls: 0, tokens: 0, defTokens: 0, tools: new Map(), first: r.ts, last: r.ts }; sessions.set(r.session, s); }
+        s.last = r.ts;
+        if (r.kind === "definitions") s.defTokens = r.estTokens || 0;
+        else if (r.kind === "call") {
+          s.calls++;
+          s.tokens += r.estTokens || 0;
+          const t = s.tools.get(r.tool) || { calls: 0, tokens: 0 };
+          t.calls++; t.tokens += r.estTokens || 0;
+          s.tools.set(r.tool, t);
+        }
+      }
+      const fmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+      let grandCalls = 0, grandTokens = 0;
+      const toolTotals = new Map();
+      for (const s of sessions.values()) {
+        grandCalls += s.calls; grandTokens += s.tokens;
+        for (const [name, t] of s.tools) {
+          const g = toolTotals.get(name) || { calls: 0, tokens: 0 };
+          g.calls += t.calls; g.tokens += t.tokens;
+          toolTotals.set(name, g);
+        }
+      }
+      console.log(`\n  iframer MCP token telemetry (estimated at ~4 chars/token, local only)\n`);
+      console.log(`  All time: ${sessions.size} session(s), ${grandCalls} call(s), ~${fmt(grandTokens)} tokens of tool traffic`);
+      console.log(`\n  Per tool (all time):`);
+      for (const [name, t] of [...toolTotals.entries()].sort((a, b) => b[1].tokens - a[1].tokens)) {
+        console.log(`    ${name.padEnd(18)} ${String(t.calls).padStart(4)} calls  ~${fmt(t.tokens).padStart(7)} tokens`);
+      }
+      console.log(`\n  Recent sessions:`);
+      const recent = [...sessions.entries()].slice(-5);
+      for (const [id, s] of recent) {
+        console.log(`    ${id.padEnd(20)} ${String(s.calls).padStart(4)} calls  ~${fmt(s.tokens).padStart(7)} tokens (+~${fmt(s.defTokens)} definitions overhead, once per session)`);
+      }
+      console.log(`\n  Note: definitions overhead excludes zod schema text — Claude Code's /context`);
+      console.log(`  shows the exact per-session definition footprint. Clear log: iframer telemetry --clear\n`);
+      break;
+    }
+
+    // ─── Extension auto-pairing ──────────────────────────────────────
+
+    case "install-extension": {
+      console.log("  Installing the extension pairing host (native messaging)...\n");
+      const installed = installExtensionHost();
+      if (installed.length === 0) {
+        console.log("  No Chromium-family browser directories found — nothing installed.");
+        break;
+      }
+      console.log(`  Pairing host installed for: ${installed.join(", ")}`);
+      console.log("\n  The iframer extension now pairs itself — no token pasting.");
+      console.log("  If the extension is already loaded, quit + reopen the browser (native");
+      console.log("  messaging hosts are picked up on browser start), then check the popup dot.");
+      console.log("  Manual pasting in the popup still works as a fallback.\n");
+      break;
+    }
+
+    case "remove-extension": {
+      const removed = removeExtensionHost();
+      if (removed.length === 0) {
+        console.log("  Extension pairing host was not installed.");
+      } else {
+        console.log(`  Pairing host removed from: ${removed.join(", ")}`);
+      }
+      break;
+    }
+
     // ─── Remove MCP ──────────────────────────────────────────────────
 
     case "remove-mcp": {
@@ -1315,6 +1518,11 @@ async function main() {
     knowledge get <domain>          Same as --cache <domain>
     knowledge clear [domain]        Same as --clear-cache
 
+  Telemetry:
+    telemetry                       Report estimated session tokens consumed by MCP tool calls
+    telemetry --clear               Wipe the telemetry log
+    (opt out: IFRAMER_TELEMETRY=0 in the MCP env)
+
   Browser:
     modes                           Show available browser modes
     install chromium                Download Chrome for Testing
@@ -1331,9 +1539,11 @@ async function main() {
     install                         Install everything (Chromium + MCP)
     install chromium                Download Chrome for Testing
     install mcp [--dev]             Register iframer MCP in Claude Code and Codex
+    install extension               Let the browser extension pair itself (no token pasting)
     remove                          Remove everything (Chromium + MCP)
     remove chromium                 Delete downloaded Chrome for Testing
     remove mcp [--dev]              Unregister iframer MCP from Claude Code and Codex
+    remove extension                Remove the extension pairing host
 
   Environment:
     IFRAMER_URL                     Docker API URL (default: http://localhost:3021)

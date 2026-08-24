@@ -13,7 +13,7 @@ export const stepSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("wait-for"), selector: z.string(), timeout: z.number().optional() }),
   z.object({ type: z.literal("scroll"), deltaY: z.number().optional(), selector: z.string().optional().describe("Scroll within this element instead of the window") }),
   z.object({ type: z.literal("keyboard"), key: z.string(), meta: z.boolean().optional(), ctrl: z.boolean().optional(), shift: z.boolean().optional(), alt: z.boolean().optional() }),
-  z.object({ type: z.literal("read"), selector: z.string().optional().describe("Element to read visible text from (CSS or @e ref). Omit for the whole page body."), maxChars: z.number().optional().describe("Cap the returned text length (default 20000)") }),
+  z.object({ type: z.literal("read"), selector: z.string().optional().describe("Element to read visible text from (CSS or @e ref). Omit for the whole page body."), maxChars: z.number().optional().describe("Cap the returned text length (default 6000). Raise it only when you actually need more — larger reads cost proportionally more context.") }),
   z.object({ type: z.literal("type-code"), value: z.string(), selector: z.string().optional() }),
   z.object({ type: z.literal("login"), domain: z.string(), usernameSelector: z.string().optional(), passwordSelector: z.string().optional(), submitSelector: z.string().optional(), totpSelector: z.string().optional() }),
   z.object({ type: z.literal("solve-captcha") }),
