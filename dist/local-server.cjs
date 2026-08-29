@@ -1887,6 +1887,7 @@ async function humanClick(page, selector) {
   const element = await page.waitForSelector(selector, { timeout: TIMEOUTS.SELECTOR_WAIT });
   if (!element)
     throw new Error(`Element not found: ${selector}`);
+  await element.scrollIntoViewIfNeeded().catch(() => {});
   const box = await element.boundingBox();
   if (!box)
     throw new Error(`Element not visible: ${selector}`);
@@ -1921,17 +1922,19 @@ async function assertFocused(page, selector, clicked) {
     throw new Error(`human-type aborted: after ${clicked ? "clicking" : "skip-click on"} "${selector}", it is NOT focused ` + `(focus is on ${r.active}). Typing now would send keystrokes to the page, where single keys act as ` + `shortcuts — a real hazard. Fix the selector, or focus the field first and pass skipClick. No keys were sent.`);
   }
 }
+var SPEED_FACTOR = { slow: 1.5, normal: 1, fast: 0.35 };
 async function humanType(page, selector, text, opts = {}) {
   if (!opts.skipClick) {
     await humanClick(page, selector);
     await sleep3(randRange(TIMING.POST_CLICK));
   }
   await assertFocused(page, selector, !opts.skipClick);
+  const factor = SPEED_FACTOR[opts.speed || "normal"] ?? 1;
   for (const char of text) {
     await page.keyboard.type(char);
-    await sleep3(randRange(TIMING.CHAR_DELAY));
+    await sleep3(randRange(TIMING.CHAR_DELAY) * factor);
     if (Math.random() < 0.05) {
-      await sleep3(randRange(TIMING.WORD_PAUSE));
+      await sleep3(randRange(TIMING.WORD_PAUSE) * factor);
     }
   }
 }
@@ -2187,7 +2190,7 @@ async function rightClick(page, step, ctx) {
   }
 }
 async function humanTypeStep(page, step, ctx) {
-  await humanType(page, resolveSelector(step.selector, ctx), step.value, { skipClick: step.skipClick });
+  await humanType(page, resolveSelector(step.selector, ctx), step.value, { skipClick: step.skipClick, speed: step.speed });
 }
 async function evaluate(page, step) {
   return page.evaluate(step.expression);
@@ -4019,14 +4022,22 @@ class StaleStateError extends Error {
 class RecaptchaDetector {
   async detect(page) {
     try {
-      const found = await page.evaluate(() => {
-        const hasAnchorFrame = !!document.querySelector('iframe[src*="recaptcha/api2/anchor"], iframe[title*="reCAPTCHA"]');
-        const hasSitekey = !!document.querySelector("[data-sitekey], .g-recaptcha");
-        return hasAnchorFrame || hasSitekey;
-      });
-      if (found) {
+      const active = await page.evaluate(() => [
+        'iframe[src*="recaptcha/api2/anchor"], iframe[title*="reCAPTCHA"]',
+        'iframe[src*="recaptcha/api2/bframe"]',
+        '.g-recaptcha:not([data-size="invisible"]), [data-sitekey]:not([data-size="invisible"])'
+      ].some((sel) => {
+        const el = document.querySelector(sel);
+        if (!el)
+          return false;
+        const r = el.getBoundingClientRect();
+        if (r.width < 20 || r.height < 20)
+          return false;
+        const s = getComputedStyle(el);
+        return s.visibility !== "hidden" && s.display !== "none" && s.opacity !== "0";
+      }));
+      if (active)
         return { type: "captcha", confidence: 0.95 };
-      }
     } catch {}
     return null;
   }
@@ -4035,10 +4046,21 @@ class RecaptchaDetector {
 class HCaptchaDetector {
   async detect(page) {
     try {
-      const found = await page.evaluate(() => {
-        return !!(document.querySelector('iframe[src*="hcaptcha.com"]') || document.querySelector("[data-hcaptcha-widget-id]") || document.querySelector('iframe[title*="hCaptcha"]'));
-      });
-      if (found)
+      const active = await page.evaluate(() => [
+        'iframe[src*="hcaptcha.com"]',
+        'iframe[title*="hCaptcha"]',
+        "[data-hcaptcha-widget-id]"
+      ].some((sel) => {
+        const el = document.querySelector(sel);
+        if (!el)
+          return false;
+        const r = el.getBoundingClientRect();
+        if (r.width < 20 || r.height < 20)
+          return false;
+        const s = getComputedStyle(el);
+        return s.visibility !== "hidden" && s.display !== "none" && s.opacity !== "0";
+      }));
+      if (active)
         return { type: "hcaptcha", confidence: 0.95 };
     } catch {}
     return null;

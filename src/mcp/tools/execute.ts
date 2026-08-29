@@ -207,13 +207,9 @@ export function formatExecuteResult(data: PipelineResult): string[] {
     lines.push(`URL: ${data.finalState.url}`);
   }
 
-  // Knowledge cache hint
-  if (data.ok && data.finalState?.url) {
-    try {
-      const domain = new URL(data.finalState.url).hostname.replace(/^www\./, "");
-      lines.push(`\nKnowledge cache updated for ${domain}. Before the next browser run on this domain, call \`knowledge get ${domain}\` — you may be able to skip the browser entirely.`);
-    } catch {}
-  }
+  // (The per-run "call knowledge get <domain>" nag was removed — it was noise on
+  // every response that agents never acted on. The cache still updates silently;
+  // the pre-flight instruction in the tool description covers when to read it.)
 
   // Report any tabs the pipeline followed (a click that opened a new tab).
   for (const r of data.results || []) {

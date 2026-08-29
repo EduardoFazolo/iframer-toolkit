@@ -110,7 +110,7 @@ export async function rightClick(page: Page, step: Step<"right-click">, ctx: Exe
 }
 
 export async function humanTypeStep(page: Page, step: Step<"human-type">, ctx: ExecutionContext): Promise<void> {
-  await humanType(page, resolveSelector(step.selector, ctx), step.value, { skipClick: step.skipClick });
+  await humanType(page, resolveSelector(step.selector, ctx), step.value, { skipClick: step.skipClick, speed: step.speed });
 }
 
 export async function evaluate(page: Page, step: Step<"evaluate">): Promise<unknown> {
