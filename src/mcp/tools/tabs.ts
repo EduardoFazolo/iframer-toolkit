@@ -36,15 +36,101 @@ Use this when the user says something like "use my open tab", "the tab I have he
 
 Requires the iframer Chrome extension to be installed and connected (paired once with the token). Once connected, iframer can see and drive any open tab. If nothing is connected, this returns a clear message telling the user how to connect.
 
-Returns: connected (bool), and tabs: [{ id, title, url, active, windowId }]. If several tabs match the user's reference, ask them which one rather than guessing.`,
+Returns: connected (bool), and tabs: [{ id, title, url, active, windowId }]. If several tabs match the user's reference, ask them which one rather than guessing.
+
+action="open" opens a NEW tab in the user's real Chrome (native — not a page popup) at options.url, and returns its tab id so you can immediately drive it with \`execute\` mode="extension".
+
+Tab GROUP management (native Chrome tab groups):
+- action="group": put tabIds into a group (new, or add to an existing groupId); optionally title/color/collapsed.
+- action="ungroup": remove tabIds from their group.
+- action="update-group": rename/recolor/collapse an EXISTING group by groupId (no tabIds needed).
+- action="groups": list all current groups (id, title, color, collapsed) — use to find a groupId to update.`,
     {
+      action: z.enum(["list", "open", "group", "ungroup", "update-group", "groups"]).optional().describe("'list' (default) lists open tabs; 'open' opens a new tab; 'group'/'ungroup' add/remove tabIds to a group; 'update-group' renames/recolors an existing group by groupId; 'groups' lists all groups."),
+      url: z.string().optional().describe("With action='open': the URL to open (omit for a blank tab)."),
+      active: z.boolean().optional().describe("With action='open': focus the new tab (default true)."),
+      tabIds: z.array(z.number()).optional().describe("With action='group': the tab ids to group (must be in the same window)."),
+      title: z.string().optional().describe("With action='group': the group's label."),
+      color: z.enum(["grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange"]).optional().describe("With action='group': the group's color."),
+      collapsed: z.boolean().optional().describe("With action='group': collapse the group."),
+      groupId: z.number().optional().describe("With action='group': add tabs to this existing group instead of creating a new one."),
+      clientId: z.string().optional().describe("With action='open'/'group' and multiple profiles connected: which profile to act in."),
       filter: z
         .string()
         .optional()
-        .describe("Optional case-insensitive substring to match against tab url or title (e.g. 'gmail', 'github.com'). Omit to list every open tab."),
+        .describe("With action='list': case-insensitive substring to match against tab url or title (e.g. 'gmail', 'github.com'). Omit to list every open tab."),
     },
-    async ({ filter }) => {
+    async ({ action, url, active, tabIds, title, color, collapsed, groupId, clientId, filter }) => {
       try {
+        if (action === "open") {
+          const res = (await localApiPost("/extension/tab/create", { url, active, clientId })) as {
+            ok?: boolean;
+            tab?: ExtensionTab;
+            error?: string;
+          };
+          if (!res.ok || !res.tab) return err(res.error || "Failed to open tab.");
+          const t = res.tab;
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Opened tab [id ${t.id}] ${t.title || t.url}\n${t.url}\nDrive it with: execute mode="extension", tabId=${t.id}.`,
+              },
+            ],
+          };
+        }
+
+        if (action === "group") {
+          if (!tabIds || tabIds.length === 0) return err("action='group' requires tabIds (array of tab ids).");
+          const res = (await localApiPost("/extension/tab/group", { tabIds, title, color, collapsed, groupId, clientId })) as {
+            ok?: boolean;
+            group?: { groupId: number; title: string; color: string; collapsed: boolean };
+            error?: string;
+          };
+          if (!res.ok || !res.group) return err(res.error || "Failed to group tabs.");
+          const g = res.group;
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Grouped ${tabIds.length} tab(s) into group ${g.groupId}${g.title ? ` "${g.title}"` : ""}${g.color ? ` (${g.color})` : ""}${g.collapsed ? ", collapsed" : ""}.`,
+              },
+            ],
+          };
+        }
+
+        if (action === "ungroup") {
+          if (!tabIds || tabIds.length === 0) return err("action='ungroup' requires tabIds.");
+          const res = (await localApiPost("/extension/tab/ungroup", { tabIds, clientId })) as { ok?: boolean; error?: string };
+          if (!res.ok) return err(res.error || "Failed to ungroup tabs.");
+          return { content: [{ type: "text" as const, text: `Ungrouped ${tabIds.length} tab(s).` }] };
+        }
+
+        if (action === "update-group") {
+          if (typeof groupId !== "number") return err("action='update-group' requires groupId (from action='groups'). Pass any of title, color, collapsed.");
+          const res = (await localApiPost("/extension/group/update", { groupId, title, color, collapsed, clientId })) as {
+            ok?: boolean;
+            group?: { groupId: number; title: string; color: string; collapsed: boolean };
+            error?: string;
+          };
+          if (!res.ok || !res.group) return err(res.error || "Failed to update group.");
+          const g = res.group;
+          return { content: [{ type: "text" as const, text: `Updated group ${g.groupId} → title "${g.title}", color ${g.color}${g.collapsed ? ", collapsed" : ""}.` }] };
+        }
+
+        if (action === "groups") {
+          const res = (await localApiPost("/extension/groups", { clientId })) as {
+            ok?: boolean;
+            groups?: Array<{ groupId: number; title: string; color: string; collapsed: boolean; windowId: number }>;
+            error?: string;
+          };
+          if (!res.ok) return err(res.error || "Failed to list groups.");
+          const groups = res.groups || [];
+          if (groups.length === 0) return { content: [{ type: "text" as const, text: "No tab groups open." }] };
+          const lines = [`${groups.length} tab group(s):`, ""];
+          for (const g of groups) lines.push(`  [group ${g.groupId}] "${g.title || "(untitled)"}" — ${g.color}${g.collapsed ? ", collapsed" : ""} (window ${g.windowId})`);
+          return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+        }
         // Cheap connectivity probe first, so we can give a precise nudge.
         const status = (await localApiGet("/extension/status")) as {
           ok?: boolean;

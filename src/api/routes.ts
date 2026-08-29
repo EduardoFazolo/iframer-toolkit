@@ -239,6 +239,56 @@ export function registerRoutes(app: Express): void {
     res.json({ ok: true, ...result });
   }));
 
+  // Hot-reload connected extensions (dev aid — new background.js without a
+  // manual chrome://extensions reload).
+  app.post("/extension/reload", asyncHandler(async (_req: Request, res: Response) => {
+    const result = await extensionBridge.reloadAll();
+    res.json({ ok: true, ...result });
+  }));
+
+  // Open a new tab in the user's real Chrome (native chrome.tabs.create).
+  app.post("/extension/tab/create", asyncHandler(async (req: Request, res: Response) => {
+    const { url, active, windowId, clientId } = req.body || {};
+    if (url !== undefined && typeof url !== "string") throw new AppError(400, "url must be a string");
+    const result = await extensionBridge.createTab(url || "", { active, windowId }, clientId);
+    res.json({ ok: true, ...result });
+  }));
+
+  // Group tabs into a native Chrome tab group (chrome.tabs.group + tabGroups.update).
+  app.post("/extension/tab/group", asyncHandler(async (req: Request, res: Response) => {
+    const { tabIds, title, color, collapsed, groupId, clientId } = req.body || {};
+    if (!Array.isArray(tabIds) || tabIds.length === 0 || !tabIds.every((t) => typeof t === "number")) {
+      throw new AppError(400, "tabIds must be a non-empty array of numbers");
+    }
+    const result = await extensionBridge.groupTabs(tabIds, { title, color, collapsed, groupId }, clientId);
+    res.json({ ok: true, group: result });
+  }));
+
+  // Remove tabs from their group (chrome.tabs.ungroup).
+  app.post("/extension/tab/ungroup", asyncHandler(async (req: Request, res: Response) => {
+    const { tabIds, clientId } = req.body || {};
+    if (!Array.isArray(tabIds) || tabIds.length === 0 || !tabIds.every((t) => typeof t === "number")) {
+      throw new AppError(400, "tabIds must be a non-empty array of numbers");
+    }
+    const result = await extensionBridge.ungroupTabs(tabIds, clientId);
+    res.json({ ok: true, ...result });
+  }));
+
+  // Rename / recolor / collapse an existing group (chrome.tabGroups.update).
+  app.post("/extension/group/update", asyncHandler(async (req: Request, res: Response) => {
+    const { groupId, title, color, collapsed, clientId } = req.body || {};
+    if (typeof groupId !== "number") throw new AppError(400, "groupId (number) is required");
+    const result = await extensionBridge.updateGroup(groupId, { title, color, collapsed }, clientId);
+    res.json({ ok: true, group: result });
+  }));
+
+  // List all tab groups (chrome.tabGroups.query).
+  app.post("/extension/groups", asyncHandler(async (req: Request, res: Response) => {
+    const { clientId } = req.body || {};
+    const result = await extensionBridge.listGroups(clientId);
+    res.json({ ok: true, ...result });
+  }));
+
   // Drive a REAL Chrome tab through iframer's full pipeline via the extension
   // CDP relay (connectOverCDP). Same engine as every other mode.
   app.post("/extension/execute", asyncHandler(async (req: Request, res: Response) => {

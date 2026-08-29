@@ -70,6 +70,9 @@ export interface StepResultMap {
   scroll: void;
   keyboard: void;
   read: { text: string; truncated?: boolean };
+  upload: { uploaded: number; files: string[] };
+  paste: { pasted: number };
+  download: { path: string; size: number; status: number };
   "type-code": { typed: number };
   login: LoginResult;
   "solve-captcha": CaptchaSolveResult;

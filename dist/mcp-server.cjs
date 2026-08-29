@@ -629,7 +629,7 @@ var import_zod2 = require("zod");
 var stepSchema = import_zod2.z.discriminatedUnion("type", [
   import_zod2.z.object({ type: import_zod2.z.literal("navigate"), url: import_zod2.z.string(), waitUntil: import_zod2.z.string().optional() }),
   import_zod2.z.object({ type: import_zod2.z.literal("click"), selector: import_zod2.z.string() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("fill"), selector: import_zod2.z.string(), value: import_zod2.z.string() }),
+  import_zod2.z.object({ type: import_zod2.z.literal("fill"), selector: import_zod2.z.string(), value: import_zod2.z.string().describe("Sets an input/textarea's value. Framework-aware: fires the React-safe native setter + input/change/blur, so controlled forms (React, react-hook-form, Formik, Vue) register the value AND mark the field touched. This is the fix for 'I filled the field but submit says it's still empty' — always use fill for form fields, not evaluate.") }),
   import_zod2.z.object({ type: import_zod2.z.literal("human-click"), selector: import_zod2.z.string().optional(), x: import_zod2.z.number().optional(), y: import_zod2.z.number().optional() }),
   import_zod2.z.object({ type: import_zod2.z.literal("right-click"), selector: import_zod2.z.string().optional(), x: import_zod2.z.number().optional(), y: import_zod2.z.number().optional() }),
   import_zod2.z.object({ type: import_zod2.z.literal("human-type"), selector: import_zod2.z.string(), value: import_zod2.z.string() }),
@@ -640,6 +640,9 @@ var stepSchema = import_zod2.z.discriminatedUnion("type", [
   import_zod2.z.object({ type: import_zod2.z.literal("scroll"), deltaY: import_zod2.z.number().optional(), selector: import_zod2.z.string().optional().describe("Scroll within this element instead of the window") }),
   import_zod2.z.object({ type: import_zod2.z.literal("keyboard"), key: import_zod2.z.string(), meta: import_zod2.z.boolean().optional(), ctrl: import_zod2.z.boolean().optional(), shift: import_zod2.z.boolean().optional(), alt: import_zod2.z.boolean().optional() }),
   import_zod2.z.object({ type: import_zod2.z.literal("read"), selector: import_zod2.z.string().optional().describe("Element to read visible text from (CSS or @e ref). Omit for the whole page body."), maxChars: import_zod2.z.number().optional().describe("Cap the returned text length (default 6000). Raise it only when you actually need more — larger reads cost proportionally more context.") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("upload"), selector: import_zod2.z.string().describe("The <input type=file> to set (CSS, @e ref, or @a anchor)."), files: import_zod2.z.array(import_zod2.z.string()).describe("Absolute local file path(s) to upload. Paths must exist on this machine (same machine as the browser).") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("paste"), selector: import_zod2.z.string().optional().describe("Field to paste the OS clipboard into (CSS, @e ref, or @a anchor). Omit to insert at the currently focused element. Reliable — inserts via CDP Input.insertText, unlike a ⌘V keyboard step (the extension relay ignores modifier keys).") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("download"), url: import_zod2.z.string().describe("URL of the file to download. Fetched through the browser's session (cookies included, so auth'd downloads work) and written to disk server-side — no Save-As dialog."), path: import_zod2.z.string().optional().describe("Absolute local path to save to. Omit to save into ~/.iframer/downloads/ with the URL's filename. Read the returned path to open the file.") }),
   import_zod2.z.object({ type: import_zod2.z.literal("type-code"), value: import_zod2.z.string(), selector: import_zod2.z.string().optional() }),
   import_zod2.z.object({ type: import_zod2.z.literal("login"), domain: import_zod2.z.string(), usernameSelector: import_zod2.z.string().optional(), passwordSelector: import_zod2.z.string().optional(), submitSelector: import_zod2.z.string().optional(), totpSelector: import_zod2.z.string().optional() }),
   import_zod2.z.object({ type: import_zod2.z.literal("solve-captcha") }),
@@ -677,6 +680,8 @@ Key step types:
 IMPORTANT — Element refs (@e1, @e2...): All selector fields accept @e refs from snapshot, find, or annotated screenshot. PREFER refs over CSS selectors.
 
 IMPORTANT — Saved anchors (@a:<name>): Selector fields also accept persisted, per-domain anchors from the \`remember\` tool. Call \`remember get <domain>\` before a UI task; if an anchor exists, target it directly (e.g. selector="@a:composer") — no snapshot needed. After finding a new element that works, \`remember save\` it. Unlike @e refs (which reset every snapshot), @a: anchors persist across runs.
+
+FILLING FORMS: Always use the \`fill\` step for text inputs/textareas — NOT \`evaluate\` to set .value. \`fill\` is framework-aware: it fires the React-safe native setter plus input/change/blur, so controlled forms (React, react-hook-form, Formik, Vue) actually register the value and mark the field "touched". This prevents the common "I filled every field but submit still says they're required/empty" failure — which is a form-framework state issue, not a real empty field. If a submit is still rejected as incomplete after filling, re-run \`fill\` on the flagged field (it re-triggers the blur/validation) rather than assuming the value didn't land.
 
 Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: errorContext with screenshot path, URL, errorType, suggestion, retryable.`, {
     steps: import_zod3.z.array(stepSchema).describe("Pipeline steps to execute sequentially"),
@@ -1698,10 +1703,89 @@ Use this when the user says something like "use my open tab", "the tab I have he
 
 Requires the iframer Chrome extension to be installed and connected (paired once with the token). Once connected, iframer can see and drive any open tab. If nothing is connected, this returns a clear message telling the user how to connect.
 
-Returns: connected (bool), and tabs: [{ id, title, url, active, windowId }]. If several tabs match the user's reference, ask them which one rather than guessing.`, {
-    filter: import_zod8.z.string().optional().describe("Optional case-insensitive substring to match against tab url or title (e.g. 'gmail', 'github.com'). Omit to list every open tab.")
-  }, async ({ filter }) => {
+Returns: connected (bool), and tabs: [{ id, title, url, active, windowId }]. If several tabs match the user's reference, ask them which one rather than guessing.
+
+action="open" opens a NEW tab in the user's real Chrome (native — not a page popup) at options.url, and returns its tab id so you can immediately drive it with \`execute\` mode="extension".
+
+Tab GROUP management (native Chrome tab groups):
+- action="group": put tabIds into a group (new, or add to an existing groupId); optionally title/color/collapsed.
+- action="ungroup": remove tabIds from their group.
+- action="update-group": rename/recolor/collapse an EXISTING group by groupId (no tabIds needed).
+- action="groups": list all current groups (id, title, color, collapsed) — use to find a groupId to update.`, {
+    action: import_zod8.z.enum(["list", "open", "group", "ungroup", "update-group", "groups"]).optional().describe("'list' (default) lists open tabs; 'open' opens a new tab; 'group'/'ungroup' add/remove tabIds to a group; 'update-group' renames/recolors an existing group by groupId; 'groups' lists all groups."),
+    url: import_zod8.z.string().optional().describe("With action='open': the URL to open (omit for a blank tab)."),
+    active: import_zod8.z.boolean().optional().describe("With action='open': focus the new tab (default true)."),
+    tabIds: import_zod8.z.array(import_zod8.z.number()).optional().describe("With action='group': the tab ids to group (must be in the same window)."),
+    title: import_zod8.z.string().optional().describe("With action='group': the group's label."),
+    color: import_zod8.z.enum(["grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange"]).optional().describe("With action='group': the group's color."),
+    collapsed: import_zod8.z.boolean().optional().describe("With action='group': collapse the group."),
+    groupId: import_zod8.z.number().optional().describe("With action='group': add tabs to this existing group instead of creating a new one."),
+    clientId: import_zod8.z.string().optional().describe("With action='open'/'group' and multiple profiles connected: which profile to act in."),
+    filter: import_zod8.z.string().optional().describe("With action='list': case-insensitive substring to match against tab url or title (e.g. 'gmail', 'github.com'). Omit to list every open tab.")
+  }, async ({ action, url, active, tabIds, title, color, collapsed, groupId, clientId, filter }) => {
     try {
+      if (action === "open") {
+        const res = await localApiPost("/extension/tab/create", { url, active, clientId });
+        if (!res.ok || !res.tab)
+          return err(res.error || "Failed to open tab.");
+        const t = res.tab;
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Opened tab [id ${t.id}] ${t.title || t.url}
+${t.url}
+Drive it with: execute mode="extension", tabId=${t.id}.`
+            }
+          ]
+        };
+      }
+      if (action === "group") {
+        if (!tabIds || tabIds.length === 0)
+          return err("action='group' requires tabIds (array of tab ids).");
+        const res = await localApiPost("/extension/tab/group", { tabIds, title, color, collapsed, groupId, clientId });
+        if (!res.ok || !res.group)
+          return err(res.error || "Failed to group tabs.");
+        const g = res.group;
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Grouped ${tabIds.length} tab(s) into group ${g.groupId}${g.title ? ` "${g.title}"` : ""}${g.color ? ` (${g.color})` : ""}${g.collapsed ? ", collapsed" : ""}.`
+            }
+          ]
+        };
+      }
+      if (action === "ungroup") {
+        if (!tabIds || tabIds.length === 0)
+          return err("action='ungroup' requires tabIds.");
+        const res = await localApiPost("/extension/tab/ungroup", { tabIds, clientId });
+        if (!res.ok)
+          return err(res.error || "Failed to ungroup tabs.");
+        return { content: [{ type: "text", text: `Ungrouped ${tabIds.length} tab(s).` }] };
+      }
+      if (action === "update-group") {
+        if (typeof groupId !== "number")
+          return err("action='update-group' requires groupId (from action='groups'). Pass any of title, color, collapsed.");
+        const res = await localApiPost("/extension/group/update", { groupId, title, color, collapsed, clientId });
+        if (!res.ok || !res.group)
+          return err(res.error || "Failed to update group.");
+        const g = res.group;
+        return { content: [{ type: "text", text: `Updated group ${g.groupId} → title "${g.title}", color ${g.color}${g.collapsed ? ", collapsed" : ""}.` }] };
+      }
+      if (action === "groups") {
+        const res = await localApiPost("/extension/groups", { clientId });
+        if (!res.ok)
+          return err(res.error || "Failed to list groups.");
+        const groups = res.groups || [];
+        if (groups.length === 0)
+          return { content: [{ type: "text", text: "No tab groups open." }] };
+        const lines2 = [`${groups.length} tab group(s):`, ""];
+        for (const g of groups)
+          lines2.push(`  [group ${g.groupId}] "${g.title || "(untitled)"}" — ${g.color}${g.collapsed ? ", collapsed" : ""} (window ${g.windowId})`);
+        return { content: [{ type: "text", text: lines2.join(`
+`) }] };
+      }
       const status = await localApiGet("/extension/status");
       if (!status.connected) {
         return err(`No iframer extension is connected.
@@ -1912,6 +1996,85 @@ Use it in any selector field: e.g. {"type":"click","selector":"@a:${name}"}.`
   });
 }
 
+// src/mcp/tools/clipboard.ts
+var import_zod10 = require("zod");
+
+// src/lib/clipboard.ts
+var import_child_process2 = require("child_process");
+function platformTools(mode) {
+  if (process.platform === "darwin")
+    return [[mode === "read" ? "pbpaste" : "pbcopy"]];
+  if (mode === "read")
+    return [["wl-paste", "-n"], ["xclip", "-selection", "clipboard", "-o"], ["xsel", "-b", "-o"]];
+  return [["wl-copy"], ["xclip", "-selection", "clipboard", "-i"], ["xsel", "-b", "-i"]];
+}
+function run(cmd, input) {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = import_child_process2.spawn(cmd[0], cmd.slice(1));
+    } catch {
+      resolve({ ok: false, out: "", err: `spawn ${cmd[0]} failed` });
+      return;
+    }
+    let out = "";
+    let errOut = "";
+    child.stdout?.on("data", (d) => out += d);
+    child.stderr?.on("data", (d) => errOut += d);
+    child.on("error", (e) => resolve({ ok: false, out: "", err: e.message }));
+    child.on("close", (code) => resolve({ ok: code === 0, out, err: errOut }));
+    if (input !== undefined) {
+      child.stdin?.write(input);
+      child.stdin?.end();
+    }
+  });
+}
+async function clipboardWrite(text) {
+  const tools = platformTools("write");
+  for (const cmd of tools) {
+    if ((await run(cmd, text)).ok)
+      return;
+  }
+  throw new Error(`No working clipboard tool found (${tools.map((t) => t[0]).join(", ")}).`);
+}
+async function clipboardRead() {
+  const tools = platformTools("read");
+  let lastErr = "";
+  for (const cmd of tools) {
+    const r = await run(cmd);
+    if (r.ok)
+      return r.out;
+    lastErr = r.err;
+  }
+  throw new Error(`No working clipboard tool found (${tools.map((t) => t[0]).join(", ")}). ${lastErr}`);
+}
+
+// src/mcp/tools/clipboard.ts
+function registerClipboardTool(server) {
+  server.tool("clipboard", `Read or write the machine's clipboard (the same one the user's Chrome pastes from — iframer runs locally).
+
+Use this instead of trying to grant a page clipboard permission (not possible via the extension):
+- To READ something a site copied (a code, a link): clipboard get.
+- To WRITE text to the clipboard: clipboard set <text>.
+- To PASTE the clipboard into a page field: use the \`paste\` execute step (do NOT rely on a ⌘V keyboard step — the extension relay ignores modifier keys).`, {
+    action: import_zod10.z.enum(["get", "set"]).describe("get: read clipboard text | set: write text to clipboard"),
+    text: import_zod10.z.string().optional().describe("With action='set': the text to put on the clipboard.")
+  }, async ({ action, text }) => {
+    try {
+      if (action === "set") {
+        if (text === undefined)
+          return err("action='set' requires `text`.");
+        await clipboardWrite(text);
+        return { content: [{ type: "text", text: `Clipboard set (${text.length} chars). To paste into a field, use the \`paste\` execute step.` }] };
+      }
+      const value = await clipboardRead();
+      return { content: [{ type: "text", text: value.length ? value : "(clipboard is empty)" }] };
+    } catch (e) {
+      return err(`clipboard failed: ${getErrorMessage(e)}`);
+    }
+  });
+}
+
 // src/mcp/telemetry.ts
 var import_fs9 = __toESM(require("fs"));
 var import_path11 = __toESM(require("path"));
@@ -2039,6 +2202,7 @@ registerReverseEngineerTool(server);
 registerKnowledgeTool(server);
 registerTabsTool(server);
 registerRememberTool(server);
+registerClipboardTool(server);
 recordDefinitions(defCount, defChars, INSTRUCTIONS.length);
 process.on("SIGTERM", () => process.exit(0));
 process.on("SIGINT", () => process.exit(0));

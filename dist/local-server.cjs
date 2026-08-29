@@ -41,6 +41,7 @@ var __export = (target, all) => {
       set: __exportSetter.bind(all, name)
     });
 };
+var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 
 // src/lib/session/persistence.ts
 var exports_persistence = {};
@@ -98,6 +99,20 @@ async function injectStorage(page, sessionData) {
     }, ss);
   }
 }
+
+// src/lib/paths.ts
+var exports_paths = {};
+__export(exports_paths, {
+  getDataDir: () => getDataDir
+});
+function getDataDir() {
+  return process.env.IFRAMER_DATA_DIR || import_path.default.join(import_os.default.homedir(), ".iframer");
+}
+var import_path, import_os;
+var init_paths = __esm(() => {
+  import_path = __toESM(require("path"));
+  import_os = __toESM(require("os"));
+});
 
 // index.ts
 var import_express = __toESM(require("express"));
@@ -824,19 +839,11 @@ async function cleanupAllSessions() {
 }
 
 // src/lib/auth/crypto.ts
+init_paths();
 var import_crypto = __toESM(require("crypto"));
 var import_fs3 = __toESM(require("fs"));
 var import_os2 = __toESM(require("os"));
 var import_path2 = __toESM(require("path"));
-
-// src/lib/paths.ts
-var import_path = __toESM(require("path"));
-var import_os = __toESM(require("os"));
-function getDataDir() {
-  return process.env.IFRAMER_DATA_DIR || import_path.default.join(import_os.default.homedir(), ".iframer");
-}
-
-// src/lib/auth/crypto.ts
 var SALT = "iframer-session";
 var INFO = "encryption";
 var KEY_LENGTH = 32;
@@ -1080,6 +1087,7 @@ class SqliteStore {
 }
 
 // src/lib/storage.ts
+init_paths();
 function createStore(options = {}) {
   const dataDir = options.dataDir || getDataDir();
   return new SqliteStore(dataDir);
@@ -1280,6 +1288,7 @@ async function launchCloakBrowser(options) {
 }
 
 // src/lib/browser/registry.ts
+init_paths();
 var import_fs7 = __toESM(require("fs"));
 var import_path6 = __toESM(require("path"));
 var import_child_process3 = require("child_process");
@@ -1624,6 +1633,7 @@ class BrowserDaemon {
 // src/lib/domain-modes.ts
 var import_fs8 = __toESM(require("fs"));
 var import_path7 = __toESM(require("path"));
+init_paths();
 var log8 = createLogger("domain-modes");
 function defaultFile() {
   return import_path7.default.join(getDataDir(), "domain-modes.json");
@@ -1785,6 +1795,48 @@ var import_playwright_core = require("playwright-core");
 // src/lib/actions/types.ts
 function failedStepResult(step, error, durationMs, stepIndex = -1) {
   return { stepIndex, step, ok: false, error, durationMs };
+}
+
+// src/lib/clipboard.ts
+var import_child_process4 = require("child_process");
+function platformTools(mode) {
+  if (process.platform === "darwin")
+    return [[mode === "read" ? "pbpaste" : "pbcopy"]];
+  if (mode === "read")
+    return [["wl-paste", "-n"], ["xclip", "-selection", "clipboard", "-o"], ["xsel", "-b", "-o"]];
+  return [["wl-copy"], ["xclip", "-selection", "clipboard", "-i"], ["xsel", "-b", "-i"]];
+}
+function run(cmd, input) {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = import_child_process4.spawn(cmd[0], cmd.slice(1));
+    } catch {
+      resolve({ ok: false, out: "", err: `spawn ${cmd[0]} failed` });
+      return;
+    }
+    let out = "";
+    let errOut = "";
+    child.stdout?.on("data", (d) => out += d);
+    child.stderr?.on("data", (d) => errOut += d);
+    child.on("error", (e) => resolve({ ok: false, out: "", err: e.message }));
+    child.on("close", (code) => resolve({ ok: code === 0, out, err: errOut }));
+    if (input !== undefined) {
+      child.stdin?.write(input);
+      child.stdin?.end();
+    }
+  });
+}
+async function clipboardRead() {
+  const tools = platformTools("read");
+  let lastErr = "";
+  for (const cmd of tools) {
+    const r = await run(cmd);
+    if (r.ok)
+      return r.out;
+    lastErr = r.err;
+  }
+  throw new Error(`No working clipboard tool found (${tools.map((t) => t[0]).join(", ")}). ${lastErr}`);
 }
 
 // src/lib/browser/humanize.ts
@@ -2039,7 +2091,42 @@ async function click(page, step, ctx) {
   await page.click(resolveSelector(step.selector, ctx));
 }
 async function fill(page, step, ctx) {
-  await page.fill(resolveSelector(step.selector, ctx), step.value);
+  const selector = resolveSelector(step.selector, ctx);
+  const value = step.value;
+  await page.fill(selector, value);
+  const stuck = await page.evaluate(({ sel, val }) => {
+    const el = document.querySelector(sel);
+    if (!el)
+      return false;
+    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+    try {
+      el.focus();
+    } catch {}
+    try {
+      setter ? setter.call(el, val) : el.value = val;
+    } catch {
+      el.value = val;
+    }
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    try {
+      el.blur();
+    } catch {}
+    return el.value === val;
+  }, { sel: selector, val: value });
+  if (!stuck) {
+    const loc = page.locator(selector);
+    try {
+      await loc.click();
+      await loc.fill("");
+      await loc.pressSequentially(value, { delay: 15 });
+      await page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        el?.blur?.();
+      }, selector);
+    } catch {}
+  }
 }
 async function humanClickStep(page, step, ctx) {
   if (step.selector) {
@@ -2111,6 +2198,45 @@ async function read(page, step, ctx) {
 `).trim();
   const max = step.maxChars || 6000;
   return { text: text.slice(0, max), truncated: text.length > max };
+}
+async function upload(page, step, ctx) {
+  if (!step.files || step.files.length === 0)
+    throw new Error("upload: `files` must be a non-empty array of local paths");
+  await page.setInputFiles(resolveSelector(step.selector, ctx), step.files);
+  return { uploaded: step.files.length, files: step.files };
+}
+async function paste(page, step, ctx) {
+  const text = await clipboardRead();
+  if (step.selector) {
+    await page.click(resolveSelector(step.selector, ctx));
+  }
+  await page.keyboard.insertText(text);
+  return { pasted: text.length };
+}
+async function download(page, step) {
+  if (!step.url)
+    throw new Error("download: `url` is required");
+  const resp = await page.request.get(step.url);
+  const status = resp.status();
+  if (!resp.ok())
+    throw new Error(`download: HTTP ${status} for ${step.url}`);
+  const buf = await resp.body();
+  const fs9 = await import("fs");
+  const pathMod = await import("path");
+  const { getDataDir: getDataDir2 } = await Promise.resolve().then(() => (init_paths(), exports_paths));
+  let outPath;
+  if (step.path && pathMod.isAbsolute(step.path)) {
+    outPath = step.path;
+  } else {
+    let name = "download";
+    try {
+      name = decodeURIComponent(new URL(step.url).pathname.split("/").pop() || "") || "download";
+    } catch {}
+    outPath = pathMod.join(getDataDir2(), "downloads", step.path || name);
+  }
+  fs9.mkdirSync(pathMod.dirname(outPath), { recursive: true });
+  fs9.writeFileSync(outPath, buf);
+  return { path: outPath, size: buf.length, status };
 }
 async function typeCode(page, step, ctx) {
   const code = String(step.value || "");
@@ -3138,6 +3264,7 @@ async function findSubmitButton(page, opts) {
 // src/lib/knowledge.ts
 var import_fs9 = __toESM(require("fs"));
 var import_path8 = __toESM(require("path"));
+init_paths();
 var log13 = createLogger("knowledge");
 function getKnowledgeDir() {
   return import_path8.default.join(getDataDir(), "knowledge");
@@ -3693,6 +3820,9 @@ var registry = {
   scroll,
   keyboard,
   read,
+  upload,
+  paste,
+  download,
   "type-code": typeCode,
   find,
   screenshot,
@@ -5229,6 +5359,56 @@ class ExtensionBridge {
     }
     throw new Error(`Could not determine which browser profile owns tab ${tabId}. Call \`tabs\` to ` + `refresh the list, then pass the tab's clientId alongside tabId.`);
   }
+  resolveClientNoTab(clientId) {
+    if (clientId) {
+      const c = this.clients.get(clientId);
+      if (!c)
+        throw new Error(`No connected extension with clientId ${clientId}.`);
+      return c;
+    }
+    if (this.clients.size === 0) {
+      throw new Error("No iframer extension is connected. Open Chrome, install/enable the iframer " + "extension, and pair it (paste the token, dot goes green).");
+    }
+    if (this.clients.size === 1)
+      return [...this.clients.values()][0];
+    throw new Error("Multiple browser profiles are connected — pass clientId to say which one to act in. " + "Call `tabs` to see the profiles and their clientIds.");
+  }
+  async reloadAll() {
+    const clients = [...this.clients.values()];
+    await Promise.all(clients.map((c) => this.send(c, "reload", {}).catch(() => {})));
+    return { reloaded: clients.length };
+  }
+  async groupTabs(tabIds, opts = {}, clientId) {
+    const client = clientId ? this.resolveClientNoTab(clientId) : await this.resolveClient(tabIds[0]);
+    return this.send(client, "group_tabs", {
+      tabIds,
+      title: opts.title,
+      color: opts.color,
+      collapsed: opts.collapsed,
+      groupId: opts.groupId
+    });
+  }
+  async ungroupTabs(tabIds, clientId) {
+    const client = clientId ? this.resolveClientNoTab(clientId) : await this.resolveClient(tabIds[0]);
+    return this.send(client, "ungroup_tabs", { tabIds });
+  }
+  async updateGroup(groupId, opts, clientId) {
+    const client = this.resolveClientNoTab(clientId);
+    return this.send(client, "update_group", { groupId, ...opts });
+  }
+  async listGroups(clientId) {
+    const client = this.resolveClientNoTab(clientId);
+    return this.send(client, "list_groups", {});
+  }
+  async createTab(url, opts = {}, clientId) {
+    const client = this.resolveClientNoTab(clientId);
+    const res = await this.send(client, "create_tab", {
+      url,
+      active: opts.active,
+      windowId: opts.windowId
+    });
+    return { tab: { ...res.tab, clientId: client.clientId, profileId: client.profileId, profileName: client.profileName }, clientId: client.clientId };
+  }
   addCdpListener(clientId, tabId, fn) {
     const key = cdpKey(clientId, tabId);
     if (this.cdpListeners.has(key)) {
@@ -5513,17 +5693,17 @@ class PipelineExecutor {
       const tabId = opts.extensionTabId;
       const lockKey = `${opts.clientId || "auto"}:${tabId}`;
       const prev = this.extensionTabLocks.get(lockKey);
-      const run = (prev ? prev.catch(() => {
+      const run2 = (prev ? prev.catch(() => {
         return;
       }) : Promise.resolve()).then(() => this.executeExtension(userId, token, pipeline, tabId, opts.clientId));
-      this.extensionTabLocks.set(lockKey, run);
-      run.catch(() => {
+      this.extensionTabLocks.set(lockKey, run2);
+      run2.catch(() => {
         return;
       }).finally(() => {
-        if (this.extensionTabLocks.get(lockKey) === run)
+        if (this.extensionTabLocks.get(lockKey) === run2)
           this.extensionTabLocks.delete(lockKey);
       });
-      return run;
+      return run2;
     }
     const forcedMode = opts.mode;
     const autoEscalate = opts.autoEscalate !== false;
@@ -6407,6 +6587,45 @@ function registerRoutes(app) {
   });
   app.post("/extension/tabs", asyncHandler(async (_req, res) => {
     const result = await extensionBridge.listTabs();
+    res.json({ ok: true, ...result });
+  }));
+  app.post("/extension/reload", asyncHandler(async (_req, res) => {
+    const result = await extensionBridge.reloadAll();
+    res.json({ ok: true, ...result });
+  }));
+  app.post("/extension/tab/create", asyncHandler(async (req, res) => {
+    const { url, active, windowId, clientId } = req.body || {};
+    if (url !== undefined && typeof url !== "string")
+      throw new AppError(400, "url must be a string");
+    const result = await extensionBridge.createTab(url || "", { active, windowId }, clientId);
+    res.json({ ok: true, ...result });
+  }));
+  app.post("/extension/tab/group", asyncHandler(async (req, res) => {
+    const { tabIds, title, color, collapsed, groupId, clientId } = req.body || {};
+    if (!Array.isArray(tabIds) || tabIds.length === 0 || !tabIds.every((t) => typeof t === "number")) {
+      throw new AppError(400, "tabIds must be a non-empty array of numbers");
+    }
+    const result = await extensionBridge.groupTabs(tabIds, { title, color, collapsed, groupId }, clientId);
+    res.json({ ok: true, group: result });
+  }));
+  app.post("/extension/tab/ungroup", asyncHandler(async (req, res) => {
+    const { tabIds, clientId } = req.body || {};
+    if (!Array.isArray(tabIds) || tabIds.length === 0 || !tabIds.every((t) => typeof t === "number")) {
+      throw new AppError(400, "tabIds must be a non-empty array of numbers");
+    }
+    const result = await extensionBridge.ungroupTabs(tabIds, clientId);
+    res.json({ ok: true, ...result });
+  }));
+  app.post("/extension/group/update", asyncHandler(async (req, res) => {
+    const { groupId, title, color, collapsed, clientId } = req.body || {};
+    if (typeof groupId !== "number")
+      throw new AppError(400, "groupId (number) is required");
+    const result = await extensionBridge.updateGroup(groupId, { title, color, collapsed }, clientId);
+    res.json({ ok: true, group: result });
+  }));
+  app.post("/extension/groups", asyncHandler(async (req, res) => {
+    const { clientId } = req.body || {};
+    const result = await extensionBridge.listGroups(clientId);
     res.json({ ok: true, ...result });
   }));
   app.post("/extension/execute", asyncHandler(async (req, res) => {

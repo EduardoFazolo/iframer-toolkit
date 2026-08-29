@@ -3,7 +3,7 @@ import { z } from "zod";
 export const stepSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("navigate"), url: z.string(), waitUntil: z.string().optional() }),
   z.object({ type: z.literal("click"), selector: z.string() }),
-  z.object({ type: z.literal("fill"), selector: z.string(), value: z.string() }),
+  z.object({ type: z.literal("fill"), selector: z.string(), value: z.string().describe("Sets an input/textarea's value. Framework-aware: fires the React-safe native setter + input/change/blur, so controlled forms (React, react-hook-form, Formik, Vue) register the value AND mark the field touched. This is the fix for 'I filled the field but submit says it's still empty' — always use fill for form fields, not evaluate.") }),
   z.object({ type: z.literal("human-click"), selector: z.string().optional(), x: z.number().optional(), y: z.number().optional() }),
   z.object({ type: z.literal("right-click"), selector: z.string().optional(), x: z.number().optional(), y: z.number().optional() }),
   z.object({ type: z.literal("human-type"), selector: z.string(), value: z.string() }),
@@ -14,6 +14,9 @@ export const stepSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("scroll"), deltaY: z.number().optional(), selector: z.string().optional().describe("Scroll within this element instead of the window") }),
   z.object({ type: z.literal("keyboard"), key: z.string(), meta: z.boolean().optional(), ctrl: z.boolean().optional(), shift: z.boolean().optional(), alt: z.boolean().optional() }),
   z.object({ type: z.literal("read"), selector: z.string().optional().describe("Element to read visible text from (CSS or @e ref). Omit for the whole page body."), maxChars: z.number().optional().describe("Cap the returned text length (default 6000). Raise it only when you actually need more — larger reads cost proportionally more context.") }),
+  z.object({ type: z.literal("upload"), selector: z.string().describe("The <input type=file> to set (CSS, @e ref, or @a anchor)."), files: z.array(z.string()).describe("Absolute local file path(s) to upload. Paths must exist on this machine (same machine as the browser).") }),
+  z.object({ type: z.literal("paste"), selector: z.string().optional().describe("Field to paste the OS clipboard into (CSS, @e ref, or @a anchor). Omit to insert at the currently focused element. Reliable — inserts via CDP Input.insertText, unlike a ⌘V keyboard step (the extension relay ignores modifier keys).") }),
+  z.object({ type: z.literal("download"), url: z.string().describe("URL of the file to download. Fetched through the browser's session (cookies included, so auth'd downloads work) and written to disk server-side — no Save-As dialog."), path: z.string().optional().describe("Absolute local path to save to. Omit to save into ~/.iframer/downloads/ with the URL's filename. Read the returned path to open the file.") }),
   z.object({ type: z.literal("type-code"), value: z.string(), selector: z.string().optional() }),
   z.object({ type: z.literal("login"), domain: z.string(), usernameSelector: z.string().optional(), passwordSelector: z.string().optional(), submitSelector: z.string().optional(), totpSelector: z.string().optional() }),
   z.object({ type: z.literal("solve-captcha") }),
