@@ -12,12 +12,12 @@ export type PipelineStep =
   | { type: "fill"; selector: string; value: string }
   | { type: "human-click"; selector?: string; x?: number; y?: number }
   | { type: "right-click"; selector?: string; x?: number; y?: number }
-  | { type: "human-type"; selector: string; value: string }
+  | { type: "human-type"; selector: string; value: string; skipClick?: boolean }
   | { type: "evaluate"; expression: string }
   | { type: "extract"; expression: string }
   | { type: "wait"; ms: number }
   | { type: "wait-for"; selector: string; timeout?: number }
-  | { type: "scroll"; deltaY?: number; selector?: string }
+  | { type: "scroll"; deltaY?: number; selector?: string; human?: boolean }
   | { type: "keyboard"; key: string; meta?: boolean; ctrl?: boolean; shift?: boolean; alt?: boolean }
   | { type: "read"; selector?: string; maxChars?: number }
   | { type: "upload"; selector: string; files: string[] }

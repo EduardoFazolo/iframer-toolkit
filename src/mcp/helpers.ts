@@ -57,15 +57,17 @@ export async function apiDelete<T = Record<string, unknown>>(endpoint: string): 
   return res.json() as Promise<T>;
 }
 
-/** POST to the local background server (:3022). */
-export async function localApiPost<T = Record<string, unknown>>(endpoint: string, body?: unknown): Promise<T> {
+/** POST to the local background server (:3022). `timeoutMs` overrides the
+ *  default 180s abort — needed for pipelines with long human typing, which the
+ *  server's watchdog sizes to the text length. */
+export async function localApiPost<T = Record<string, unknown>>(endpoint: string, body?: unknown, timeoutMs = 180_000): Promise<T> {
   await ensureLocalServer();
   const url = localServer.getBaseUrl();
   const res = await fetch(`${url}${endpoint}`, {
     method: "POST",
     headers: authHeaders(LOCAL_TOKEN),
     body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(180_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   return res.json() as Promise<T>;
 }

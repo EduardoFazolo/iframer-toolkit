@@ -70,12 +70,18 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
                 "find the id of the tab the user wants to drive.",
             );
           }
+          // Match the server watchdog's typing-aware cap (+buffer) so long
+          // human-type isn't cut off by the client fetch abort.
+          const typeChars = (params.steps || []).reduce((n: number, s: { type?: string; value?: unknown }) => {
+            return (s.type === "human-type" || s.type === "type-code") && typeof s.value === "string" ? n + s.value.length : n;
+          }, 0);
+          const timeoutMs = Math.min(60_000 + (params.steps?.length || 0) * 15_000 + typeChars * 250, 1_200_000) + 30_000;
           const extResult = await localApiPost<PipelineResult>("/extension/execute", {
             tabId,
             clientId: params.options?.clientId,
             steps: params.steps,
             options: params.options,
-          });
+          }, timeoutMs);
           const extLines = formatExecuteResult(extResult);
           const content: TextContent[] = [{ type: "text", text: extLines.join("\n") }];
           if (!extResult.ok) return { content, isError: true };
