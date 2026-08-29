@@ -12,7 +12,7 @@ export type PipelineStep =
   | { type: "fill"; selector: string; value: string }
   | { type: "human-click"; selector?: string; x?: number; y?: number }
   | { type: "right-click"; selector?: string; x?: number; y?: number }
-  | { type: "human-type"; selector: string; value: string; skipClick?: boolean }
+  | { type: "human-type"; selector: string; value: string; skipClick?: boolean; speed?: "slow" | "normal" | "fast" }
   | { type: "evaluate"; expression: string }
   | { type: "extract"; expression: string }
   | { type: "wait"; ms: number }

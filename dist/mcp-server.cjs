@@ -632,7 +632,7 @@ var stepSchema = import_zod2.z.discriminatedUnion("type", [
   import_zod2.z.object({ type: import_zod2.z.literal("fill"), selector: import_zod2.z.string(), value: import_zod2.z.string().describe("Sets an input/textarea's value. Framework-aware: fires the React-safe native setter + input/change/blur, so controlled forms (React, react-hook-form, Formik, Vue) register the value AND mark the field touched. This is the fix for 'I filled the field but submit says it's still empty' — always use fill for form fields, not evaluate.") }),
   import_zod2.z.object({ type: import_zod2.z.literal("human-click"), selector: import_zod2.z.string().optional(), x: import_zod2.z.number().optional(), y: import_zod2.z.number().optional() }),
   import_zod2.z.object({ type: import_zod2.z.literal("right-click"), selector: import_zod2.z.string().optional(), x: import_zod2.z.number().optional(), y: import_zod2.z.number().optional() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("human-type"), selector: import_zod2.z.string(), value: import_zod2.z.string(), skipClick: import_zod2.z.boolean().optional().describe("Skip the click-to-focus and type into the already-focused element. Use for editors that blur on a synthetic click (e.g. Draft.js). Either way, typing aborts safely if the target isn't actually focused.") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("human-type"), selector: import_zod2.z.string(), value: import_zod2.z.string(), skipClick: import_zod2.z.boolean().optional().describe("Skip the click-to-focus and type into the already-focused element. Use for editors that blur on a synthetic click (e.g. Draft.js). Either way, typing aborts safely if the target isn't actually focused."), speed: import_zod2.z.enum(["slow", "normal", "fast"]).optional().describe("Typing speed. 'normal' (~130ms/char, realistic, default), 'fast' (~45ms/char) for long non-sensitive text, 'slow' for extra realism.") }),
   import_zod2.z.object({ type: import_zod2.z.literal("evaluate"), expression: import_zod2.z.string() }),
   import_zod2.z.object({ type: import_zod2.z.literal("extract"), expression: import_zod2.z.string() }),
   import_zod2.z.object({ type: import_zod2.z.literal("wait"), ms: import_zod2.z.number() }),
@@ -831,13 +831,6 @@ function formatExecuteResult(data) {
     lines.push(`
 Final page: ${data.finalState.title}`);
     lines.push(`URL: ${data.finalState.url}`);
-  }
-  if (data.ok && data.finalState?.url) {
-    try {
-      const domain = new URL(data.finalState.url).hostname.replace(/^www\./, "");
-      lines.push(`
-Knowledge cache updated for ${domain}. Before the next browser run on this domain, call \`knowledge get ${domain}\` — you may be able to skip the browser entirely.`);
-    } catch {}
   }
   for (const r of data.results || []) {
     if (r.tabSwitchedTo) {

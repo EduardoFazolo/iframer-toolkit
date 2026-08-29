@@ -63,6 +63,9 @@ export async function humanMove(page: Page, toX: number, toY: number): Promise<v
 export async function humanClick(page: Page, selector: string): Promise<void> {
   const element = await page.waitForSelector(selector, { timeout: TIMEOUTS.SELECTOR_WAIT });
   if (!element) throw new Error(`Element not found: ${selector}`);
+  // Below-the-fold targets must be scrolled into view first, or boundingBox
+  // returns off-screen coords and the mouse moves to a point that clicks nothing.
+  await element.scrollIntoViewIfNeeded().catch(() => {});
   const box = await element.boundingBox();
   if (!box) throw new Error(`Element not visible: ${selector}`);
 
@@ -110,11 +113,15 @@ async function assertFocused(page: Page, selector: string, clicked: boolean): Pr
   }
 }
 
+// Per-char delay multiplier. "normal" keeps the realistic ~130ms/char; "fast"
+// is for bulk, non-sensitive text where realism matters less than wall-clock.
+const SPEED_FACTOR: Record<string, number> = { slow: 1.5, normal: 1, fast: 0.35 };
+
 export async function humanType(
   page: Page,
   selector: string,
   text: string,
-  opts: { skipClick?: boolean } = {},
+  opts: { skipClick?: boolean; speed?: "slow" | "normal" | "fast" } = {},
 ): Promise<void> {
   // Put focus in the field. skipClick trusts the caller focused it already —
   // needed for editors that BLUR on a synthetic click (e.g. Draft.js on X).
@@ -127,11 +134,12 @@ export async function humanType(
   // otherwise turns each character into a global keyboard shortcut.
   await assertFocused(page, selector, !opts.skipClick);
 
+  const factor = SPEED_FACTOR[opts.speed || "normal"] ?? 1;
   for (const char of text) {
     await page.keyboard.type(char);
-    await sleep(randRange(TIMING.CHAR_DELAY));
+    await sleep(randRange(TIMING.CHAR_DELAY) * factor);
     if (Math.random() < 0.05) {
-      await sleep(randRange(TIMING.WORD_PAUSE));
+      await sleep(randRange(TIMING.WORD_PAUSE) * factor);
     }
   }
 }
