@@ -1859,6 +1859,7 @@ async function humanClick(page, selector) {
   const element = await page.waitForSelector(selector, { timeout: TIMEOUTS.SELECTOR_WAIT });
   if (!element)
     throw new Error(`Element not found: ${selector}`);
+  await element.scrollIntoViewIfNeeded().catch(() => {});
   const box = await element.boundingBox();
   if (!box)
     throw new Error(`Element not visible: ${selector}`);
@@ -1879,15 +1880,56 @@ async function humanClickXY(page, x, y) {
   await page.mouse.up();
   await sleep3(randRange(TIMING.POST_CLICK));
 }
-async function humanType(page, selector, text) {
-  await humanClick(page, selector);
-  await sleep3(randRange(TIMING.POST_CLICK));
+async function assertFocused(page, selector, clicked) {
+  const r = await page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    if (!el)
+      return { ok: false, active: "(target not found)" };
+    const a = document.activeElement;
+    const ok = !!a && (a === el || el.contains(a));
+    const desc = a ? `${a.tagName.toLowerCase()}${a.id ? "#" + a.id : ""}` : "nothing";
+    return { ok, active: desc };
+  }, selector);
+  if (!r.ok) {
+    throw new Error(`human-type aborted: after ${clicked ? "clicking" : "skip-click on"} "${selector}", it is NOT focused ` + `(focus is on ${r.active}). Typing now would send keystrokes to the page, where single keys act as ` + `shortcuts — a real hazard. Fix the selector, or focus the field first and pass skipClick. No keys were sent.`);
+  }
+}
+async function humanType(page, selector, text, opts = {}) {
+  if (!opts.skipClick) {
+    await humanClick(page, selector);
+    await sleep3(randRange(TIMING.POST_CLICK));
+  }
+  await assertFocused(page, selector, !opts.skipClick);
+  const factor = SPEED_FACTOR[opts.speed || "normal"] ?? 1;
   for (const char of text) {
     await page.keyboard.type(char);
-    await sleep3(randRange(TIMING.CHAR_DELAY));
+    await sleep3(randRange(TIMING.CHAR_DELAY) * factor);
     if (Math.random() < 0.05) {
-      await sleep3(randRange(TIMING.WORD_PAUSE));
+      await sleep3(randRange(TIMING.WORD_PAUSE) * factor);
     }
+  }
+}
+async function humanScroll(page, deltaY) {
+  const abs = Math.abs(deltaY);
+  if (abs === 0)
+    return;
+  const dir = Math.sign(deltaY) || 1;
+  const ticks = Math.max(3, Math.min(20, Math.round(abs / rand(80, 140))));
+  let done = 0;
+  for (let i = 0;i < ticks; i++) {
+    const t = (i + 1) / ticks;
+    const ease = Math.sin(t * Math.PI);
+    let step = Math.round(abs / ticks * (0.6 + ease * 0.8) + rand(-8, 8));
+    step = Math.max(10, step);
+    if (done + step > abs)
+      step = abs - done;
+    await page.mouse.wheel(0, dir * step);
+    done += step;
+    await sleep3(rand(30, 90));
+    if (Math.random() < 0.15)
+      await sleep3(rand(120, 300));
+    if (done >= abs)
+      break;
   }
 }
 async function clickRecaptchaCheckbox(page) {
@@ -2013,10 +2055,11 @@ async function clickChallengeVerify(page) {
 function sleep3(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
-var mousePositions;
+var mousePositions, SPEED_FACTOR;
 var init_humanize = __esm(() => {
   init_constants();
   mousePositions = new WeakMap;
+  SPEED_FACTOR = { slow: 1.5, normal: 1, fast: 0.35 };
 });
 
 // src/lib/actions/resolve-selector.ts
@@ -2124,7 +2167,7 @@ async function rightClick(page, step, ctx) {
   }
 }
 async function humanTypeStep(page, step, ctx) {
-  await humanType(page, resolveSelector(step.selector, ctx), step.value);
+  await humanType(page, resolveSelector(step.selector, ctx), step.value, { skipClick: step.skipClick, speed: step.speed });
 }
 async function evaluate(page, step) {
   return page.evaluate(step.expression);
@@ -2140,6 +2183,17 @@ async function waitFor(page, step, ctx) {
 }
 async function scroll(page, step, ctx) {
   const selector = step.selector ? resolveSelector(step.selector, ctx) : null;
+  if (step.human) {
+    const dy = step.deltaY ?? 600;
+    if (selector) {
+      const el = await page.$(selector);
+      const box = el ? await el.boundingBox() : null;
+      if (box)
+        await humanMove(page, box.x + box.width / 2, box.y + box.height / 2);
+    }
+    await humanScroll(page, dy);
+    return;
+  }
   await page.evaluate(({ dy, sel }) => {
     if (sel) {
       const el = document.querySelector(sel);
@@ -4075,14 +4129,22 @@ var init_stale_monitor = __esm(() => {
 class RecaptchaDetector {
   async detect(page) {
     try {
-      const found = await page.evaluate(() => {
-        const hasAnchorFrame = !!document.querySelector('iframe[src*="recaptcha/api2/anchor"], iframe[title*="reCAPTCHA"]');
-        const hasSitekey = !!document.querySelector("[data-sitekey], .g-recaptcha");
-        return hasAnchorFrame || hasSitekey;
-      });
-      if (found) {
+      const active = await page.evaluate(() => [
+        'iframe[src*="recaptcha/api2/anchor"], iframe[title*="reCAPTCHA"]',
+        'iframe[src*="recaptcha/api2/bframe"]',
+        '.g-recaptcha:not([data-size="invisible"]), [data-sitekey]:not([data-size="invisible"])'
+      ].some((sel) => {
+        const el = document.querySelector(sel);
+        if (!el)
+          return false;
+        const r = el.getBoundingClientRect();
+        if (r.width < 20 || r.height < 20)
+          return false;
+        const s = getComputedStyle(el);
+        return s.visibility !== "hidden" && s.display !== "none" && s.opacity !== "0";
+      }));
+      if (active)
         return { type: "captcha", confidence: 0.95 };
-      }
     } catch {}
     return null;
   }
@@ -4091,10 +4153,21 @@ class RecaptchaDetector {
 class HCaptchaDetector {
   async detect(page) {
     try {
-      const found = await page.evaluate(() => {
-        return !!(document.querySelector('iframe[src*="hcaptcha.com"]') || document.querySelector("[data-hcaptcha-widget-id]") || document.querySelector('iframe[title*="hCaptcha"]'));
-      });
-      if (found)
+      const active = await page.evaluate(() => [
+        'iframe[src*="hcaptcha.com"]',
+        'iframe[title*="hCaptcha"]',
+        "[data-hcaptcha-widget-id]"
+      ].some((sel) => {
+        const el = document.querySelector(sel);
+        if (!el)
+          return false;
+        const r = el.getBoundingClientRect();
+        if (r.width < 20 || r.height < 20)
+          return false;
+        const s = getComputedStyle(el);
+        return s.visibility !== "hidden" && s.display !== "none" && s.opacity !== "0";
+      }));
+      if (active)
         return { type: "hcaptcha", confidence: 0.95 };
     } catch {}
     return null;
@@ -4911,6 +4984,10 @@ function isRetryable(errorType) {
   return errorType === "stale-state" || errorType === "timeout" || errorType === "element-not-found";
 }
 function getSuggestion(errorType, step) {
+  const usedEphemeralRef = typeof step.selector === "string" && step.selector.startsWith("@e");
+  if (usedEphemeralRef && (errorType === "element-not-found" || errorType === "timeout" || errorType === "stale-state")) {
+    return "The @e ref went stale — the page (likely a React/SPA) re-rendered and dropped it since the snapshot. Take a fresh `snapshot`/`find` right before acting, or save the element as a durable `@a:` anchor with the `remember` tool.";
+  }
   switch (errorType) {
     case "stale-state":
       return "The page stopped responding. The step may have triggered a very slow load or the server may be unreachable.";
@@ -8859,7 +8936,11 @@ class PipelineExecutor {
       if (this.pendingElicitOtp)
         ctx.elicitOtp = this.pendingElicitOtp;
       const runner = new PipelineRunner(ctx);
-      const capMs = Math.min(60000 + pipeline.steps.length * 15000, 150000);
+      const typeChars = pipeline.steps.reduce((n, s) => {
+        const v = s.value;
+        return (s.type === "human-type" || s.type === "type-code") && typeof v === "string" ? n + v.length : n;
+      }, 0);
+      const capMs = Math.min(60000 + pipeline.steps.length * 15000 + typeChars * 250, 1200000);
       let watchdog;
       let result;
       try {

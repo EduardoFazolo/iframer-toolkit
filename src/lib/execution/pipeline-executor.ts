@@ -193,7 +193,15 @@ export class PipelineExecutor {
       // a stalled run also blocks the per-tab queue behind it. Cap the whole
       // pipeline WELL under the MCP client's 180s fetch abort so the agent
       // gets a real, retryable error instead of a dead tool call.
-      const capMs = Math.min(60_000 + pipeline.steps.length * 15_000, 150_000);
+      // Human typing is deliberately slow (~130ms/char + word pauses), so a
+      // long human-type/type-code legitimately needs minutes — add a typing
+      // budget to the cap instead of killing it. Base still catches true hangs;
+      // hard max (20min) is the backstop.
+      const typeChars = pipeline.steps.reduce((n, s) => {
+        const v = (s as { value?: unknown }).value;
+        return (s.type === "human-type" || s.type === "type-code") && typeof v === "string" ? n + v.length : n;
+      }, 0);
+      const capMs = Math.min(60_000 + pipeline.steps.length * 15_000 + typeChars * 250, 1_200_000);
       let watchdog: ReturnType<typeof setTimeout> | undefined;
       let result: PipelineResult;
       try {
