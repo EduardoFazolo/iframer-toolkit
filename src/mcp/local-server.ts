@@ -13,7 +13,10 @@ import { readServerInfo, isPidAlive } from "../lib/browser/registry";
 // The old model (one server per MCP session, killed with its parent) leaked
 // a Chrome every time a session was interrupted, forgotten, or left behind.
 const BASE_PORT = parseInt(process.env.IFRAMER_LOCAL_PORT || "3022", 10);
-const PORT_SCAN_ATTEMPTS = 200;
+// MUST stay within the range the Chrome extension scans to find this server
+// (extension/background.js: PORT_START=3022 .. PORT_END=3042, 21 ports). A
+// server bound outside that window is invisible to the extension forever.
+const PORT_SCAN_ATTEMPTS = 21;
 const STARTUP_TIMEOUT_MS = 15_000;
 const HEALTH_POLL_MS = 300;
 const SPAWN_LOCK_STALE_MS = 20_000;
@@ -147,26 +150,43 @@ export class LocalServerManager {
   }
 
   private resolveRuntime(): { command: string; args: string[] } {
-    // Prefer bun + source (dev mode)
-    try {
-      const bunPath = require("child_process")
-        .execSync("which bun", { encoding: "utf8" })
-        .trim();
-      const serverTs = path.join(__dirname, "..", "..", "index.ts");
-      if (fs.existsSync(serverTs)) {
-        return { command: bunPath, args: ["run", serverTs] };
-      }
-    } catch {}
+    // MUST run under node, not bun: extension mode uses playwright-core's
+    // connectOverCDP, whose WebSocket transport hangs under bun. All other
+    // modes work under node too, so node is the correct runtime everywhere.
+    const serverTs = path.join(__dirname, "..", "..", "index.ts");
 
-    // Fallback: node + built bundle
+    // 1) node + built bundle (production / after `bun run build`).
     const serverCjs = path.join(__dirname, "..", "..", "dist", "local-server.cjs");
     if (fs.existsSync(serverCjs)) {
       return { command: "node", args: [serverCjs] };
     }
 
-    // Last resort: try index.ts with whatever `node` can do
-    const serverTs = path.join(__dirname, "..", "..", "index.ts");
-    return { command: "node", args: ["--import", "tsx", serverTs] };
+    // 2) node + TS source via tsx (dev), if tsx is resolvable.
+    if (fs.existsSync(serverTs)) {
+      try {
+        require.resolve("tsx");
+        return { command: "node", args: ["--import", "tsx", serverTs] };
+      } catch {
+        /* tsx not installed — fall through */
+      }
+    }
+
+    // 3) Last resort: bun + source. Everything works EXCEPT extension mode
+    //    (connectOverCDP), which will error clearly if used.
+    try {
+      const bunPath = require("child_process").execSync("which bun", { encoding: "utf8" }).trim();
+      if (bunPath && fs.existsSync(serverTs)) {
+        console.error("[iframer] running local server under bun — extension mode (connectOverCDP) will not work; run `bun run build` to get the node bundle");
+        return { command: bunPath, args: ["run", serverTs] };
+      }
+    } catch {}
+
+    // Nothing runnable — spawning `node dist/local-server.cjs` here would just
+    // die with MODULE_NOT_FOUND and a confusing startup timeout.
+    throw new Error(
+      "No runnable iframer server entry found: dist/local-server.cjs is missing, tsx is not " +
+        "installed, and bun is unavailable. Run `bun install && bun run build` in the iframer repo.",
+    );
   }
 
   /** Ask the shared server to exit (it kills its browsers with a hard

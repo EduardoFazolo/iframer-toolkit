@@ -41,6 +41,7 @@ var __export = (target, all) => {
       set: __exportSetter.bind(all, name)
     });
 };
+var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 
 // src/lib/session/persistence.ts
 var exports_persistence = {};
@@ -99,17 +100,31 @@ async function injectStorage(page, sessionData) {
   }
 }
 
+// src/lib/paths.ts
+var exports_paths = {};
+__export(exports_paths, {
+  getDataDir: () => getDataDir
+});
+function getDataDir() {
+  return process.env.IFRAMER_DATA_DIR || import_path.default.join(import_os.default.homedir(), ".iframer");
+}
+var import_path, import_os;
+var init_paths = __esm(() => {
+  import_path = __toESM(require("path"));
+  import_os = __toESM(require("os"));
+});
+
 // index.ts
 var import_express = __toESM(require("express"));
-var import_path10 = __toESM(require("path"));
-var import_fs11 = __toESM(require("fs"));
+var import_path12 = __toESM(require("path"));
+var import_fs13 = __toESM(require("fs"));
 var import_url2 = require("url");
 
 // src/api/routes.ts
 var import_patchright3 = require("patchright");
 
 // src/lib/iframer.ts
-var import_path9 = __toESM(require("path"));
+var import_path11 = __toESM(require("path"));
 var import_url = require("url");
 
 // src/lib/browser/session-manager.ts
@@ -824,19 +839,11 @@ async function cleanupAllSessions() {
 }
 
 // src/lib/auth/crypto.ts
+init_paths();
 var import_crypto = __toESM(require("crypto"));
 var import_fs3 = __toESM(require("fs"));
 var import_os2 = __toESM(require("os"));
 var import_path2 = __toESM(require("path"));
-
-// src/lib/paths.ts
-var import_path = __toESM(require("path"));
-var import_os = __toESM(require("os"));
-function getDataDir() {
-  return process.env.IFRAMER_DATA_DIR || import_path.default.join(import_os.default.homedir(), ".iframer");
-}
-
-// src/lib/auth/crypto.ts
 var SALT = "iframer-session";
 var INFO = "encryption";
 var KEY_LENGTH = 32;
@@ -1080,6 +1087,7 @@ class SqliteStore {
 }
 
 // src/lib/storage.ts
+init_paths();
 function createStore(options = {}) {
   const dataDir = options.dataDir || getDataDir();
   return new SqliteStore(dataDir);
@@ -1228,7 +1236,12 @@ async function ensureChrome() {
 // src/lib/browser/cloak-browser.ts
 var log5 = createLogger("cloak");
 var _available = null;
+function cloakEnabled() {
+  return process.env.IFRAMER_USE_CLOAKBROWSER === "1" || process.env.IFRAMER_USE_CLOAKBROWSER === "true";
+}
 async function tryImport() {
+  if (!cloakEnabled())
+    return null;
   try {
     return await import("cloakbrowser");
   } catch {
@@ -1275,6 +1288,7 @@ async function launchCloakBrowser(options) {
 }
 
 // src/lib/browser/registry.ts
+init_paths();
 var import_fs7 = __toESM(require("fs"));
 var import_path6 = __toESM(require("path"));
 var import_child_process3 = require("child_process");
@@ -1619,6 +1633,7 @@ class BrowserDaemon {
 // src/lib/domain-modes.ts
 var import_fs8 = __toESM(require("fs"));
 var import_path7 = __toESM(require("path"));
+init_paths();
 var log8 = createLogger("domain-modes");
 function defaultFile() {
   return import_path7.default.join(getDataDir(), "domain-modes.json");
@@ -1774,9 +1789,54 @@ class RefStore {
   }
 }
 
+// src/lib/execution/pipeline-executor.ts
+var import_playwright_core = require("playwright-core");
+
 // src/lib/actions/types.ts
 function failedStepResult(step, error, durationMs, stepIndex = -1) {
   return { stepIndex, step, ok: false, error, durationMs };
+}
+
+// src/lib/clipboard.ts
+var import_child_process4 = require("child_process");
+function platformTools(mode) {
+  if (process.platform === "darwin")
+    return [[mode === "read" ? "pbpaste" : "pbcopy"]];
+  if (mode === "read")
+    return [["wl-paste", "-n"], ["xclip", "-selection", "clipboard", "-o"], ["xsel", "-b", "-o"]];
+  return [["wl-copy"], ["xclip", "-selection", "clipboard", "-i"], ["xsel", "-b", "-i"]];
+}
+function run(cmd, input) {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = import_child_process4.spawn(cmd[0], cmd.slice(1));
+    } catch {
+      resolve({ ok: false, out: "", err: `spawn ${cmd[0]} failed` });
+      return;
+    }
+    let out = "";
+    let errOut = "";
+    child.stdout?.on("data", (d) => out += d);
+    child.stderr?.on("data", (d) => errOut += d);
+    child.on("error", (e) => resolve({ ok: false, out: "", err: e.message }));
+    child.on("close", (code) => resolve({ ok: code === 0, out, err: errOut }));
+    if (input !== undefined) {
+      child.stdin?.write(input);
+      child.stdin?.end();
+    }
+  });
+}
+async function clipboardRead() {
+  const tools = platformTools("read");
+  let lastErr = "";
+  for (const cmd of tools) {
+    const r = await run(cmd);
+    if (r.ok)
+      return r.out;
+    lastErr = r.err;
+  }
+  throw new Error(`No working clipboard tool found (${tools.map((t) => t[0]).join(", ")}). ${lastErr}`);
 }
 
 // src/lib/browser/humanize.ts
@@ -1983,6 +2043,15 @@ function sleep3(ms) {
 }
 // src/lib/actions/resolve-selector.ts
 function resolveSelector(selector, ctx) {
+  if (selector.startsWith("@a:")) {
+    const name = selector.slice(3);
+    const anchor = ctx.anchors?.get(name);
+    if (!anchor) {
+      const available = ctx.anchors ? Array.from(ctx.anchors.keys()).join(", ") : "";
+      throw new Error(`Unknown anchor: @a:${name}${ctx.anchorDomain ? ` for ${ctx.anchorDomain}` : ""}. ` + `${available ? `Known anchors: ${available}. ` : "This domain has no saved anchors yet. "}` + `Run a snapshot/find to locate the element, act on it, then save it with the ` + `\`remember\` tool so future runs skip the search.`);
+    }
+    return anchor.selector;
+  }
   if (selector.startsWith("@e")) {
     const ref = ctx.refMap.get(selector);
     if (!ref) {
@@ -1992,6 +2061,9 @@ function resolveSelector(selector, ctx) {
     return ref.selector;
   }
   return selector;
+}
+function anchorNameOf(selector) {
+  return typeof selector === "string" && selector.startsWith("@a:") ? selector.slice(3) : null;
 }
 
 // src/lib/actions/handlers/navigation.ts
@@ -2019,7 +2091,42 @@ async function click(page, step, ctx) {
   await page.click(resolveSelector(step.selector, ctx));
 }
 async function fill(page, step, ctx) {
-  await page.fill(resolveSelector(step.selector, ctx), step.value);
+  const selector = resolveSelector(step.selector, ctx);
+  const value = step.value;
+  await page.fill(selector, value);
+  const stuck = await page.evaluate(({ sel, val }) => {
+    const el = document.querySelector(sel);
+    if (!el)
+      return false;
+    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+    try {
+      el.focus();
+    } catch {}
+    try {
+      setter ? setter.call(el, val) : el.value = val;
+    } catch {
+      el.value = val;
+    }
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    try {
+      el.blur();
+    } catch {}
+    return el.value === val;
+  }, { sel: selector, val: value });
+  if (!stuck) {
+    const loc = page.locator(selector);
+    try {
+      await loc.click();
+      await loc.fill("");
+      await loc.pressSequentially(value, { delay: 15 });
+      await page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        el?.blur?.();
+      }, selector);
+    } catch {}
+  }
 }
 async function humanClickStep(page, step, ctx) {
   if (step.selector) {
@@ -2054,11 +2161,82 @@ async function wait(page, step) {
 async function waitFor(page, step, ctx) {
   await page.waitForSelector(resolveSelector(step.selector, ctx), { timeout: step.timeout || TIMEOUTS.SELECTOR_WAIT });
 }
-async function scroll(page, step) {
-  await page.evaluate((dy) => window.scrollBy(0, dy || document.body.scrollHeight), step.deltaY ?? 0);
+async function scroll(page, step, ctx) {
+  const selector = step.selector ? resolveSelector(step.selector, ctx) : null;
+  await page.evaluate(({ dy, sel }) => {
+    if (sel) {
+      const el = document.querySelector(sel);
+      if (!el)
+        throw new Error(`scroll: no element for selector ${sel}`);
+      el.scrollBy(0, dy || el.scrollHeight);
+    } else {
+      window.scrollBy(0, dy || document.body.scrollHeight);
+    }
+  }, { dy: step.deltaY ?? 0, sel: selector });
 }
 async function keyboard(page, step) {
-  await page.keyboard.press(step.key);
+  const mods = [
+    step.meta ? "Meta" : null,
+    step.ctrl ? "Control" : null,
+    step.shift ? "Shift" : null,
+    step.alt ? "Alt" : null
+  ].filter(Boolean);
+  await page.keyboard.press(mods.length ? `${mods.join("+")}+${step.key}` : step.key);
+}
+async function read(page, step, ctx) {
+  const selector = step.selector ? resolveSelector(step.selector, ctx) : "body";
+  const raw = await page.evaluate((sel) => {
+    const el = sel === "body" ? document.body : document.querySelector(sel);
+    if (!el)
+      return null;
+    return el.innerText || el.textContent || "";
+  }, selector);
+  if (raw == null)
+    throw new Error(`read: no element for selector ${selector}`);
+  const text = raw.replace(/\n{3,}/g, `
+
+`).trim();
+  const max = step.maxChars || 6000;
+  return { text: text.slice(0, max), truncated: text.length > max };
+}
+async function upload(page, step, ctx) {
+  if (!step.files || step.files.length === 0)
+    throw new Error("upload: `files` must be a non-empty array of local paths");
+  await page.setInputFiles(resolveSelector(step.selector, ctx), step.files);
+  return { uploaded: step.files.length, files: step.files };
+}
+async function paste(page, step, ctx) {
+  const text = await clipboardRead();
+  if (step.selector) {
+    await page.click(resolveSelector(step.selector, ctx));
+  }
+  await page.keyboard.insertText(text);
+  return { pasted: text.length };
+}
+async function download(page, step) {
+  if (!step.url)
+    throw new Error("download: `url` is required");
+  const resp = await page.request.get(step.url);
+  const status = resp.status();
+  if (!resp.ok())
+    throw new Error(`download: HTTP ${status} for ${step.url}`);
+  const buf = await resp.body();
+  const fs9 = await import("fs");
+  const pathMod = await import("path");
+  const { getDataDir: getDataDir2 } = await Promise.resolve().then(() => (init_paths(), exports_paths));
+  let outPath;
+  if (step.path && pathMod.isAbsolute(step.path)) {
+    outPath = step.path;
+  } else {
+    let name = "download";
+    try {
+      name = decodeURIComponent(new URL(step.url).pathname.split("/").pop() || "") || "download";
+    } catch {}
+    outPath = pathMod.join(getDataDir2(), "downloads", step.path || name);
+  }
+  fs9.mkdirSync(pathMod.dirname(outPath), { recursive: true });
+  fs9.writeFileSync(outPath, buf);
+  return { path: outPath, size: buf.length, status };
 }
 async function typeCode(page, step, ctx) {
   const code = String(step.value || "");
@@ -3086,6 +3264,7 @@ async function findSubmitButton(page, opts) {
 // src/lib/knowledge.ts
 var import_fs9 = __toESM(require("fs"));
 var import_path8 = __toESM(require("path"));
+init_paths();
 var log13 = createLogger("knowledge");
 function getKnowledgeDir() {
   return import_path8.default.join(getDataDir(), "knowledge");
@@ -3640,6 +3819,10 @@ var registry = {
   "wait-for": waitFor,
   scroll,
   keyboard,
+  read,
+  upload,
+  paste,
+  download,
   "type-code": typeCode,
   find,
   screenshot,
@@ -4343,95 +4526,98 @@ class ApiCapture {
       await new Promise((r) => setTimeout(r, 100));
     }
   }
-  extractAuth(requests) {
-    const auth = { cookies: {}, tokens: {} };
-    for (const req of requests) {
-      for (const [key, value] of Object.entries(req.requestHeaders)) {
-        const lower = key.toLowerCase();
-        if (lower === "authorization" && !auth.authorization) {
-          auth.authorization = value;
-        } else if (lower === "cookie") {
-          const cookies = parseCookies(value);
-          Object.assign(auth.cookies, cookies);
-        } else if (isAuthHeader(key) && lower !== "authorization" && lower !== "cookie") {
-          auth.tokens[key] = value;
-        }
-      }
-    }
-    return auth;
-  }
-  splitHeaders(headers) {
-    const endpointHeaders = {};
-    for (const [key, value] of Object.entries(headers)) {
-      const lower = key.toLowerCase();
-      if (BROWSER_NOISE_HEADERS.has(lower))
-        continue;
-      if (isAuthHeader(key))
-        continue;
-      if (lower === "user-agent")
-        continue;
-      endpointHeaders[key] = value;
-    }
-    return endpointHeaders;
-  }
   getResults() {
-    const byDomain = new Map;
-    for (const req of this.requests) {
-      try {
-        const host = new URL(req.url).origin;
-        if (!byDomain.has(host))
-          byDomain.set(host, []);
-        byDomain.get(host)?.push(req);
-      } catch {}
+    return buildCapturedApi(this.requests);
+  }
+}
+function extractAuth(requests) {
+  const auth = { cookies: {}, tokens: {} };
+  for (const req of requests) {
+    for (const [key, value] of Object.entries(req.requestHeaders)) {
+      const lower = key.toLowerCase();
+      if (lower === "authorization" && !auth.authorization) {
+        auth.authorization = value;
+      } else if (lower === "cookie") {
+        const cookies = parseCookies(value);
+        Object.assign(auth.cookies, cookies);
+      } else if (isAuthHeader(key) && lower !== "authorization" && lower !== "cookie") {
+        auth.tokens[key] = value;
+      }
     }
-    const apis = [];
-    for (const [baseUrl, requests] of byDomain) {
-      const auth = this.extractAuth(requests);
-      const endpointMap = new Map;
-      for (const req of requests) {
-        const paramPath = parameterizePath(req.path);
-        const { protocol, action } = classifyRequest(req);
-        const key = `${protocol}:${action}`;
-        const endpointHeaders = this.splitHeaders(req.requestHeaders);
-        if (!endpointMap.has(key)) {
-          const verb = inferVerb(protocol, action, req.method, req.responseBody);
-          const functionName = buildFunctionName(protocol, action, req.method, verb);
-          endpointMap.set(key, {
-            method: req.method,
-            path: paramPath,
-            rawPaths: [req.path],
-            queryParams: req.queryParams,
-            headers: endpointHeaders,
-            requestBody: req.requestBody,
-            responseStatus: req.responseStatus,
-            responseBody: req.responseBody,
-            triggeredAtStep: req.triggeredAtStep,
-            curl: buildCurl(req.method, req.url, endpointHeaders, auth, req.requestBody),
-            protocol,
-            action,
-            verb,
-            functionName
-          });
-        } else {
-          const existing = endpointMap.get(key);
-          if (!existing)
-            continue;
-          if (!existing.rawPaths.includes(req.path)) {
-            existing.rawPaths.push(req.path);
-          }
+  }
+  return auth;
+}
+function splitHeaders(headers) {
+  const endpointHeaders = {};
+  for (const [key, value] of Object.entries(headers)) {
+    const lower = key.toLowerCase();
+    if (BROWSER_NOISE_HEADERS.has(lower))
+      continue;
+    if (isAuthHeader(key))
+      continue;
+    if (lower === "user-agent")
+      continue;
+    endpointHeaders[key] = value;
+  }
+  return endpointHeaders;
+}
+function buildCapturedApi(requests) {
+  const byDomain = new Map;
+  for (const req of requests) {
+    try {
+      const host = new URL(req.url).origin;
+      if (!byDomain.has(host))
+        byDomain.set(host, []);
+      byDomain.get(host)?.push(req);
+    } catch {}
+  }
+  const apis = [];
+  for (const [baseUrl, domainRequests] of byDomain) {
+    const auth = extractAuth(domainRequests);
+    const endpointMap = new Map;
+    for (const req of domainRequests) {
+      const paramPath = parameterizePath(req.path);
+      const { protocol, action } = classifyRequest(req);
+      const key = `${protocol}:${action}`;
+      const endpointHeaders = splitHeaders(req.requestHeaders);
+      if (!endpointMap.has(key)) {
+        const verb = inferVerb(protocol, action, req.method, req.responseBody);
+        const functionName = buildFunctionName(protocol, action, req.method, verb);
+        endpointMap.set(key, {
+          method: req.method,
+          path: paramPath,
+          rawPaths: [req.path],
+          queryParams: req.queryParams,
+          headers: endpointHeaders,
+          requestBody: req.requestBody,
+          responseStatus: req.responseStatus,
+          responseBody: req.responseBody,
+          triggeredAtStep: req.triggeredAtStep,
+          curl: buildCurl(req.method, req.url, endpointHeaders, auth, req.requestBody),
+          protocol,
+          action,
+          verb,
+          functionName
+        });
+      } else {
+        const existing = endpointMap.get(key);
+        if (!existing)
+          continue;
+        if (!existing.rawPaths.includes(req.path)) {
+          existing.rawPaths.push(req.path);
         }
       }
-      const domain = new URL(baseUrl).hostname.replace(/\./g, "_");
-      apis.push({
-        domain,
-        baseUrl,
-        auth,
-        endpoints: Array.from(endpointMap.values()).sort((a, b) => a.triggeredAtStep - b.triggeredAtStep),
-        capturedAt: new Date().toISOString()
-      });
     }
-    return apis.sort((a, b) => b.endpoints.length - a.endpoints.length);
+    const domain = new URL(baseUrl).hostname.replace(/\./g, "_");
+    apis.push({
+      domain,
+      baseUrl,
+      auth,
+      endpoints: Array.from(endpointMap.values()).sort((a, b) => a.triggeredAtStep - b.triggeredAtStep),
+      capturedAt: new Date().toISOString()
+    });
   }
+  return apis.sort((a, b) => b.endpoints.length - a.endpoints.length);
 }
 
 // src/lib/browser/tab-tracker.ts
@@ -4519,6 +4705,53 @@ function safeUrl(p) {
   }
 }
 
+// src/lib/knowledge/component-map.ts
+var import_fs10 = __toESM(require("fs"));
+var import_path9 = __toESM(require("path"));
+function anchorsPath(domain) {
+  return import_path9.default.join(getKnowledgeDir(), `${sanitizeDomain(domain)}.anchors.json`);
+}
+function loadComponentMap(domain) {
+  const norm = normalizeDomain(domain);
+  try {
+    const raw = import_fs10.default.readFileSync(anchorsPath(norm), "utf8");
+    const parsed = JSON.parse(raw);
+    return {
+      domain: parsed.domain || norm,
+      anchors: parsed.anchors || {},
+      quirks: Array.isArray(parsed.quirks) ? parsed.quirks : []
+    };
+  } catch {
+    return { domain: norm, anchors: {}, quirks: [] };
+  }
+}
+function loadAnchors(domain) {
+  const map = new Map;
+  const cm = loadComponentMap(domain);
+  for (const [name, a] of Object.entries(cm.anchors))
+    map.set(name, a);
+  return map;
+}
+function write(cm) {
+  import_fs10.default.mkdirSync(getKnowledgeDir(), { recursive: true });
+  import_fs10.default.writeFileSync(anchorsPath(cm.domain), JSON.stringify(cm, null, 2), "utf8");
+}
+function recordAnchorResult(domain, name, ok, now) {
+  try {
+    const cm = loadComponentMap(domain);
+    const a = cm.anchors[name];
+    if (!a)
+      return;
+    if (ok) {
+      a.uses += 1;
+      a.lastVerified = now;
+    } else {
+      a.fails += 1;
+    }
+    write(cm);
+  } catch {}
+}
+
 // src/lib/pipeline.ts
 var DEFAULT_STALE_TIMEOUT_MS2 = 20000;
 function safePageUrl(page) {
@@ -4587,6 +4820,19 @@ class PipelineRunner {
     const continueOnError = opts.continueOnError ?? false;
     const results = [];
     const obstacles = [];
+    const navStep = pipeline.steps.find((s) => s.type === "navigate");
+    try {
+      const host = new URL(navStep?.url || safePageUrl(initialPage) || "http://x").hostname;
+      if (host && host !== "x") {
+        this.ctx.anchors = loadAnchors(host);
+        this.ctx.anchorDomain = host;
+      }
+    } catch {}
+    const recordAnchor = (step, ok) => {
+      const name = anchorNameOf(step.selector);
+      if (name && this.ctx.anchorDomain)
+        recordAnchorResult(this.ctx.anchorDomain, name, ok, new Date().toISOString());
+    };
     const capture = opts.captureApi ? new ApiCapture(initialPage) : null;
     if (capture)
       capture.start();
@@ -4616,6 +4862,7 @@ class PipelineRunner {
         const pageState = await capturePageState(tracker.active(), this.ctx, { screenshot: true });
         stepResult = failedStepResult(step, asError.message, Date.now() - startTime, i);
         results.push(stepResult);
+        recordAnchor(step, false);
         return {
           ok: false,
           completedSteps: i,
@@ -4636,6 +4883,7 @@ class PipelineRunner {
           capturedApi: await finishCapture()
         };
       }
+      recordAnchor(step, true);
       const canOpenTab = step.type === "click" || step.type === "human-click";
       const currentPageNavigated = safePageUrl(page) !== urlBefore;
       if (canOpenTab && !currentPageNavigated) {
@@ -4881,12 +5129,583 @@ function extractKnowledgeFromRun(pipeline, result, sessionData, mode) {
   });
 }
 
+// src/lib/extension/cdp-relay.ts
+var import_http = __toESM(require("http"));
+var import_ws2 = require("ws");
+var import_crypto7 = require("crypto");
+
+// src/lib/extension/bridge.ts
+var import_ws = require("ws");
+var import_crypto5 = __toESM(require("crypto"));
+
+// src/lib/version.ts
+var import_fs11 = __toESM(require("fs"));
+var import_path10 = __toESM(require("path"));
+var __dirname = "/Users/eduardoverona/tools/iframer-toolkit/src/lib";
+var cached = null;
+function getVersion() {
+  if (cached)
+    return cached;
+  if (process.env.IFRAMER_VERSION)
+    return cached = process.env.IFRAMER_VERSION;
+  const candidates = [
+    import_path10.default.join(__dirname, "..", "..", "package.json"),
+    import_path10.default.join(__dirname, "..", "package.json"),
+    import_path10.default.join(process.cwd(), "package.json")
+  ];
+  for (const p of candidates) {
+    try {
+      const v = JSON.parse(import_fs11.default.readFileSync(p, "utf8")).version;
+      if (v)
+        return cached = v;
+    } catch {}
+  }
+  return cached = "0.0.0";
+}
+
+// src/lib/extension/bridge.ts
+var REQUEST_TIMEOUT_MS = 180000;
+var HEARTBEAT_MS = 15000;
+
+class ExtensionBridge {
+  wss = null;
+  clients = new Map;
+  pending = new Map;
+  nextReqId = 1;
+  tabOwner = new Map;
+  collidingTabs = new Set;
+  cdpListeners = new Map;
+  attach(server) {
+    if (this.wss)
+      return;
+    this.wss = new import_ws.WebSocketServer({ server, path: "/extension/ws" });
+    this.wss.on("connection", (ws, req) => {
+      let expected = "";
+      try {
+        expected = getLocalToken();
+      } catch {
+        expected = "";
+      }
+      if (!expected) {
+        ws.close(4001, "unauthorized");
+        return;
+      }
+      const queryToken = new URL(req.url || "", "http://127.0.0.1").searchParams.get("token");
+      if (queryToken !== null) {
+        if (queryToken !== expected) {
+          ws.close(4001, "unauthorized");
+          return;
+        }
+        this.acceptClient(ws);
+        return;
+      }
+      const timer = setTimeout(() => ws.close(4001, "auth timeout"), 3000);
+      ws.once("message", (data) => {
+        clearTimeout(timer);
+        try {
+          const m = JSON.parse(data.toString());
+          if (m?.type === "auth" && m.token === expected) {
+            this.acceptClient(ws);
+            return;
+          }
+        } catch {}
+        ws.close(4001, "unauthorized");
+      });
+    });
+  }
+  acceptClient(ws) {
+    const client = {
+      clientId: import_crypto5.default.randomUUID(),
+      socket: ws,
+      connectedAt: Date.now(),
+      tabs: [],
+      heartbeat: null
+    };
+    this.clients.set(client.clientId, client);
+    this.startHeartbeat(client);
+    try {
+      ws.send(JSON.stringify({ type: "server_info", version: getVersion() }));
+    } catch {}
+    ws.on("message", (data) => this.onMessage(client, data));
+    ws.on("close", () => this.dropClient(client, "socket closed"));
+    ws.on("error", () => {});
+  }
+  startHeartbeat(client) {
+    client.heartbeat = setInterval(() => {
+      this.send(client, "ping", {}).catch(() => {});
+    }, HEARTBEAT_MS);
+    client.heartbeat.unref?.();
+  }
+  dropClient(client, _reason) {
+    if (client.heartbeat)
+      clearInterval(client.heartbeat);
+    if (this.clients.get(client.clientId) === client) {
+      this.clients.delete(client.clientId);
+    }
+    for (const [tabId, owner] of this.tabOwner) {
+      if (owner === client.clientId)
+        this.tabOwner.delete(tabId);
+    }
+    for (const [id, p] of this.pending) {
+      if (p.clientId === client.clientId) {
+        clearTimeout(p.timer);
+        p.reject(new Error("Extension disconnected before responding."));
+        this.pending.delete(id);
+      }
+    }
+  }
+  onMessage(client, data) {
+    let msg;
+    try {
+      msg = JSON.parse(data.toString());
+    } catch {
+      return;
+    }
+    if (msg.type === "hello") {
+      client.profileId = msg.profileId;
+      client.profileName = msg.profileName;
+      client.extVersion = msg.extVersion;
+      if (msg.profileId) {
+        for (const other of this.clients.values()) {
+          if (other !== client && other.profileId === msg.profileId) {
+            try {
+              other.socket.close(4002, "replaced by same profile reconnect");
+            } catch {}
+          }
+        }
+      }
+      return;
+    }
+    if (msg.type === "cdp_event") {
+      const ev = msg;
+      if (typeof ev.tabId === "number") {
+        const fn = this.cdpListeners.get(cdpKey(client.clientId, ev.tabId));
+        if (fn)
+          fn(ev);
+      }
+      return;
+    }
+    if (typeof msg.id !== "number")
+      return;
+    const p = this.pending.get(msg.id);
+    if (!p || p.clientId !== client.clientId)
+      return;
+    this.pending.delete(msg.id);
+    clearTimeout(p.timer);
+    if (msg.ok)
+      p.resolve(msg.result);
+    else
+      p.reject(new Error(msg.error || "Extension reported an error."));
+  }
+  send(client, type, payload) {
+    const ws = client.socket;
+    if (!ws || ws.readyState !== import_ws.WebSocket.OPEN) {
+      return Promise.reject(new Error("Extension client is not connected."));
+    }
+    const id = this.nextReqId++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`Extension did not respond within ${REQUEST_TIMEOUT_MS}ms (${type}).`));
+      }, REQUEST_TIMEOUT_MS);
+      this.pending.set(id, { clientId: client.clientId, resolve, reject, timer });
+      try {
+        ws.send(JSON.stringify({ id, type, ...payload }));
+      } catch (e) {
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      }
+    });
+  }
+  hasClients() {
+    return this.clients.size > 0;
+  }
+  status() {
+    return {
+      connected: this.clients.size > 0,
+      clients: [...this.clients.values()].map((c) => ({
+        clientId: c.clientId,
+        profileId: c.profileId,
+        profileName: c.profileName,
+        extVersion: c.extVersion,
+        connectedAt: new Date(c.connectedAt).toISOString(),
+        tabCount: c.tabs.length
+      }))
+    };
+  }
+  async listTabs() {
+    const all = [];
+    this.tabOwner.clear();
+    this.collidingTabs.clear();
+    await Promise.all([...this.clients.values()].map(async (client) => {
+      try {
+        const res = await this.send(client, "list_tabs", {}) || { tabs: [] };
+        const tagged = (res.tabs || []).map((t) => ({
+          ...t,
+          clientId: client.clientId,
+          profileId: client.profileId,
+          profileName: client.profileName
+        }));
+        client.tabs = tagged;
+        for (const t of tagged) {
+          const prev = this.tabOwner.get(t.id);
+          if (prev !== undefined && prev !== client.clientId)
+            this.collidingTabs.add(t.id);
+          this.tabOwner.set(t.id, client.clientId);
+        }
+        all.push(...tagged);
+      } catch {
+        client.tabs = [];
+      }
+    }));
+    return { tabs: all, clients: this.status().clients };
+  }
+  async resolveClient(tabId, clientId) {
+    if (clientId) {
+      const c = this.clients.get(clientId);
+      if (!c)
+        throw new Error(`No connected extension with clientId ${clientId}.`);
+      return c;
+    }
+    if (this.clients.size === 0) {
+      throw new Error("No iframer extension is connected. Open Chrome, install/enable the iframer " + "extension, and pair it (paste the token, dot goes green).");
+    }
+    if (this.clients.size === 1) {
+      return [...this.clients.values()][0];
+    }
+    let owner = this.tabOwner.get(tabId);
+    if (!owner || this.collidingTabs.has(tabId)) {
+      await this.listTabs();
+      owner = this.tabOwner.get(tabId);
+    }
+    if (this.collidingTabs.has(tabId)) {
+      throw new Error(`Tab id ${tabId} exists in more than one connected browser (separate browsers ` + `have independent tab-id spaces). Call \`tabs\` and pass the tab's clientId ` + `alongside tabId to pick the right one.`);
+    }
+    if (owner) {
+      const c = this.clients.get(owner);
+      if (c)
+        return c;
+    }
+    throw new Error(`Could not determine which browser profile owns tab ${tabId}. Call \`tabs\` to ` + `refresh the list, then pass the tab's clientId alongside tabId.`);
+  }
+  resolveClientNoTab(clientId) {
+    if (clientId) {
+      const c = this.clients.get(clientId);
+      if (!c)
+        throw new Error(`No connected extension with clientId ${clientId}.`);
+      return c;
+    }
+    if (this.clients.size === 0) {
+      throw new Error("No iframer extension is connected. Open Chrome, install/enable the iframer " + "extension, and pair it (paste the token, dot goes green).");
+    }
+    if (this.clients.size === 1)
+      return [...this.clients.values()][0];
+    throw new Error("Multiple browser profiles are connected — pass clientId to say which one to act in. " + "Call `tabs` to see the profiles and their clientIds.");
+  }
+  async reloadAll() {
+    const clients = [...this.clients.values()];
+    await Promise.all(clients.map((c) => this.send(c, "reload", {}).catch(() => {})));
+    return { reloaded: clients.length };
+  }
+  async groupTabs(tabIds, opts = {}, clientId) {
+    const client = clientId ? this.resolveClientNoTab(clientId) : await this.resolveClient(tabIds[0]);
+    return this.send(client, "group_tabs", {
+      tabIds,
+      title: opts.title,
+      color: opts.color,
+      collapsed: opts.collapsed,
+      groupId: opts.groupId
+    });
+  }
+  async ungroupTabs(tabIds, clientId) {
+    const client = clientId ? this.resolveClientNoTab(clientId) : await this.resolveClient(tabIds[0]);
+    return this.send(client, "ungroup_tabs", { tabIds });
+  }
+  async updateGroup(groupId, opts, clientId) {
+    const client = this.resolveClientNoTab(clientId);
+    return this.send(client, "update_group", { groupId, ...opts });
+  }
+  async listGroups(clientId) {
+    const client = this.resolveClientNoTab(clientId);
+    return this.send(client, "list_groups", {});
+  }
+  async createTab(url, opts = {}, clientId) {
+    const client = this.resolveClientNoTab(clientId);
+    const res = await this.send(client, "create_tab", {
+      url,
+      active: opts.active,
+      windowId: opts.windowId
+    });
+    return { tab: { ...res.tab, clientId: client.clientId, profileId: client.profileId, profileName: client.profileName }, clientId: client.clientId };
+  }
+  addCdpListener(clientId, tabId, fn) {
+    const key = cdpKey(clientId, tabId);
+    if (this.cdpListeners.has(key)) {
+      throw new Error(`Tab ${tabId} is already being driven by another pipeline. Retry when it finishes.`);
+    }
+    this.cdpListeners.set(key, fn);
+  }
+  removeCdpListener(clientId, tabId) {
+    this.cdpListeners.delete(cdpKey(clientId, tabId));
+  }
+  async cdpAttach(tabId, clientId, focus) {
+    const client = await this.resolveClient(tabId, clientId);
+    const res = await this.send(client, "cdp_attach", { tabId, focus: !!focus }) || {
+      targetInfo: null
+    };
+    return { targetInfo: res.targetInfo, clientId: client.clientId };
+  }
+  async cdpCommand(clientId, tabId, sessionId, method, params) {
+    const client = this.clients.get(clientId);
+    if (!client)
+      throw new Error(`CDP: client ${clientId} is gone.`);
+    return this.send(client, "cdp_command", { tabId, sessionId, method, params });
+  }
+  async cdpDetach(clientId, tabId) {
+    const client = this.clients.get(clientId);
+    if (!client)
+      return;
+    try {
+      await this.send(client, "cdp_detach", { tabId });
+    } catch {}
+  }
+}
+function cdpKey(clientId, tabId) {
+  return `${clientId}:${tabId}`;
+}
+var extensionBridge = new ExtensionBridge;
+
+// src/lib/extension/cdp-relay.ts
+var log17 = createLogger("cdp-relay");
+
+class CdpRelay {
+  tabId;
+  clientId;
+  focus;
+  httpServer = null;
+  wss = null;
+  pw = null;
+  port = 0;
+  path = `/cdp/${import_crypto7.randomUUID()}`;
+  tabSessionId = "pw-tab-1";
+  targetInfo = null;
+  ownerClientId = "";
+  listenerRegistered = false;
+  constructor(tabId, clientId, focus) {
+    this.tabId = tabId;
+    this.clientId = clientId;
+    this.focus = focus;
+  }
+  async start() {
+    const { targetInfo, clientId } = await extensionBridge.cdpAttach(this.tabId, this.clientId, this.focus);
+    this.ownerClientId = clientId;
+    this.targetInfo = targetInfo || {
+      targetId: `iframer-${this.tabId}`,
+      type: "page",
+      title: "",
+      url: ""
+    };
+    extensionBridge.addCdpListener(this.ownerClientId, this.tabId, (ev) => {
+      this.sendToPw({
+        method: ev.method,
+        params: ev.params,
+        sessionId: ev.sessionId || this.tabSessionId
+      });
+    });
+    this.listenerRegistered = true;
+    await new Promise((resolve, reject) => {
+      this.httpServer = import_http.default.createServer((req, res) => {
+        if (req.url === "/json/version" || req.url === "/json/version/") {
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({
+            Browser: "Chrome/iframer-extension",
+            "Protocol-Version": "1.3",
+            "User-Agent": "iframer-cdp-relay/1.0",
+            "V8-Version": "",
+            "WebKit-Version": "",
+            webSocketDebuggerUrl: `ws://127.0.0.1:${this.port}${this.path}`
+          }));
+          return;
+        }
+        res.writeHead(404);
+        res.end();
+      });
+      this.httpServer.on("upgrade", (req) => {
+        if (process.env.IFRAMER_RELAY_DEBUG)
+          log17.info(`[relay] upgrade request url=${req.url}`);
+      });
+      this.wss = new import_ws2.WebSocketServer({ server: this.httpServer, path: this.path });
+      this.wss.on("connection", (ws) => {
+        if (process.env.IFRAMER_RELAY_DEBUG)
+          log17.info(`[relay] playwright connected`);
+        if (this.pw) {
+          ws.close(4000, "relay already has a client");
+          return;
+        }
+        this.pw = ws;
+        ws.on("message", (data) => this.onPwMessage(data));
+        ws.on("close", () => {
+          if (this.pw === ws)
+            this.pw = null;
+        });
+        ws.on("error", () => {});
+      });
+      this.httpServer.on("error", reject);
+      this.httpServer.listen(0, "127.0.0.1", () => {
+        const addr = this.httpServer.address();
+        this.port = typeof addr === "object" && addr ? addr.port : 0;
+        resolve();
+      });
+    });
+  }
+  cdpEndpoint() {
+    return `ws://127.0.0.1:${this.port}${this.path}`;
+  }
+  httpEndpoint() {
+    return `http://127.0.0.1:${this.port}`;
+  }
+  sendToPw(msg) {
+    if (this.pw && this.pw.readyState === import_ws2.WebSocket.OPEN) {
+      try {
+        this.pw.send(JSON.stringify(msg));
+      } catch {}
+    }
+  }
+  async onPwMessage(data) {
+    if (process.env.IFRAMER_RELAY_DEBUG)
+      log17.info(`[relay] raw pw msg (${data?.length ?? 0} bytes): ${data?.toString().slice(0, 120)}`);
+    let msg;
+    try {
+      msg = JSON.parse(data.toString());
+    } catch {
+      return;
+    }
+    const { id, sessionId, method, params } = msg;
+    if (process.env.IFRAMER_RELAY_DEBUG)
+      log17.info(`[relay] pw→ ${method} (id=${id}, sess=${sessionId || "-"})`);
+    if (!method)
+      return;
+    try {
+      const result = await this.handleCdpCommand(method, params, sessionId);
+      if (typeof id === "number")
+        this.sendToPw({ id, sessionId, result });
+    } catch (e) {
+      if (typeof id === "number") {
+        this.sendToPw({ id, sessionId, error: { message: e instanceof Error ? e.message : String(e) } });
+      }
+    }
+  }
+  async handleCdpCommand(method, params, sessionId) {
+    switch (method) {
+      case "Browser.getVersion":
+        return { protocolVersion: "1.3", product: "Chrome/iframer-extension", userAgent: "iframer-cdp-relay/1.0" };
+      case "Browser.setDownloadBehavior":
+        return {};
+      case "Browser.close":
+        return {};
+      case "Target.setDiscoverTargets":
+        return {};
+      case "Target.getTargets":
+        return { targetInfos: this.targetInfo ? [{ ...this.targetInfo, attached: true }] : [] };
+      case "Target.setAutoAttach":
+        if (!sessionId) {
+          this.sendToPw({
+            method: "Target.attachedToTarget",
+            params: {
+              sessionId: this.tabSessionId,
+              targetInfo: { ...this.targetInfo, attached: true },
+              waitingForDebugger: false
+            }
+          });
+          return {};
+        }
+        break;
+      case "Target.getTargetInfo":
+        if (!sessionId)
+          return { targetInfo: this.targetInfo };
+        break;
+    }
+    const realSessionId = sessionId === this.tabSessionId ? undefined : sessionId;
+    if (method === "Page.captureScreenshot") {
+      return this.captureScreenshotWithFallback(params, realSessionId);
+    }
+    return extensionBridge.cdpCommand(this.ownerClientId, this.tabId, realSessionId, method, params);
+  }
+  async captureScreenshotWithFallback(params, sessionId) {
+    const base = params && typeof params === "object" ? { ...params } : {};
+    const attempt = (p) => extensionBridge.cdpCommand(this.ownerClientId, this.tabId, sessionId, "Page.captureScreenshot", p);
+    const first = attempt(base);
+    first.catch(() => {
+      return;
+    });
+    try {
+      return await Promise.race([
+        first,
+        new Promise((_, reject) => {
+          const t = setTimeout(() => reject(new Error("screenshot timed out (no compositor frame)")), 1e4);
+          t.unref?.();
+        })
+      ]);
+    } catch {
+      return attempt({ ...base, fromSurface: false });
+    }
+  }
+  async stop() {
+    const ownedTab = this.listenerRegistered;
+    if (ownedTab) {
+      extensionBridge.removeCdpListener(this.ownerClientId, this.tabId);
+      this.listenerRegistered = false;
+    }
+    try {
+      this.wss?.clients.forEach((c) => {
+        try {
+          c.terminate();
+        } catch {}
+      });
+    } catch {}
+    try {
+      this.pw?.terminate();
+    } catch {}
+    this.pw = null;
+    const withTimeout = (fn) => new Promise((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (!done) {
+          done = true;
+          resolve();
+        }
+      };
+      try {
+        fn(finish);
+      } catch {
+        finish();
+      }
+      setTimeout(finish, 1000).unref?.();
+    });
+    if (this.wss)
+      await withTimeout((cb) => this.wss.close(cb));
+    if (this.httpServer)
+      await withTimeout((cb) => this.httpServer.close(cb));
+    this.wss = null;
+    this.httpServer = null;
+    if (ownedTab) {
+      try {
+        await extensionBridge.cdpDetach(this.ownerClientId, this.tabId);
+      } catch (e) {
+        log17.warn(`cdp detach failed: ${e}`);
+      }
+    }
+  }
+}
+
 // src/lib/execution/pipeline-executor.ts
-var log17 = createLogger("iframer");
+var log18 = createLogger("iframer");
 
 class PipelineExecutor {
   deps;
   pendingElicitOtp;
+  extensionTabLocks = new Map;
   constructor(deps) {
     this.deps = deps;
   }
@@ -4900,6 +5719,22 @@ class PipelineExecutor {
   }
   async executeInner(userId, token, pipeline) {
     const opts = pipeline.options || {};
+    if (typeof opts.extensionTabId === "number") {
+      const tabId = opts.extensionTabId;
+      const lockKey = `${opts.clientId || "auto"}:${tabId}`;
+      const prev = this.extensionTabLocks.get(lockKey);
+      const run2 = (prev ? prev.catch(() => {
+        return;
+      }) : Promise.resolve()).then(() => this.executeExtension(userId, token, pipeline, tabId, opts.clientId));
+      this.extensionTabLocks.set(lockKey, run2);
+      run2.catch(() => {
+        return;
+      }).finally(() => {
+        if (this.extensionTabLocks.get(lockKey) === run2)
+          this.extensionTabLocks.delete(lockKey);
+      });
+      return run2;
+    }
     const forcedMode = opts.mode;
     const autoEscalate = opts.autoEscalate !== false;
     const instanceId = opts.instanceId || DEFAULT_INSTANCE;
@@ -4921,7 +5756,7 @@ class PipelineExecutor {
         this.deps.domainModes.recordFailure(domain, failedMode, result.error?.message || "blocked");
       const nextMode = this.deps.domainModes.getNextMode(failedMode, availableModes);
       if (nextMode) {
-        log17.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
+        log18.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
         if (failedMode !== "docker-headful") {
           await this.deps.daemon.stopMode(failedMode, instanceId);
         }
@@ -4934,7 +5769,7 @@ class PipelineExecutor {
           this.deps.domainModes.recordFailure(domain, nextMode, result.error?.message || "blocked");
           const thirdMode = this.deps.domainModes.getNextMode(nextMode, availableModes);
           if (thirdMode) {
-            log17.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
+            log18.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
             if (nextMode !== "docker-headful") {
               await this.deps.daemon.stopMode(nextMode, instanceId);
             }
@@ -4957,6 +5792,89 @@ class PipelineExecutor {
       return this.executeDocker(userId, token, pipeline);
     }
     return this.executeLocal(userId, token, pipeline, mode, instanceId);
+  }
+  async executeExtension(userId, token, pipeline, tabId, clientId) {
+    const startTime = Date.now();
+    const relay = new CdpRelay(tabId, clientId, pipeline.options?.focus);
+    let browser;
+    try {
+      await relay.start();
+      browser = await import_playwright_core.chromium.connectOverCDP(relay.httpEndpoint(), { timeout: 30000 });
+      const context = browser.contexts()[0];
+      if (!context)
+        throw new Error("no CDP browser context for the tab");
+      let page = context.pages()[0];
+      if (!page) {
+        page = await context.waitForEvent("page", { timeout: 5000 }).catch(() => {
+          return;
+        });
+      }
+      if (!page)
+        throw new Error("no page available for the tab (is it still open?)");
+      const ctx = this.deps.refStore.makeContext(userId, token);
+      if (this.pendingElicitOtp)
+        ctx.elicitOtp = this.pendingElicitOtp;
+      const runner = new PipelineRunner(ctx);
+      const capMs = Math.min(60000 + pipeline.steps.length * 15000, 150000);
+      let watchdog;
+      let result;
+      try {
+        const runPromise = runner.run(page, pipeline);
+        runPromise.catch(() => {
+          return;
+        });
+        result = await Promise.race([
+          runPromise,
+          new Promise((_, reject) => {
+            watchdog = setTimeout(() => reject(new Error(`pipeline exceeded ${Math.round(capMs / 1000)}s — the tab may have stopped ` + `rendering (minimized window?). Un-minimize the Chrome window or retry ` + `with options.focus=true.`)), capMs);
+            watchdog.unref?.();
+          })
+        ]);
+      } finally {
+        if (watchdog)
+          clearTimeout(watchdog);
+      }
+      this.deps.refStore.sync(userId, ctx);
+      result.modeUsed = "extension";
+      if (result.ok) {
+        try {
+          extractKnowledgeFromRun(pipeline, result, null, "extension");
+        } catch (e) {
+          log18.warn(`knowledge update failed: ${getErrorMessage(e)}`);
+        }
+      }
+      return result;
+    } catch (err) {
+      const msg = getErrorMessage(err);
+      const stalled = msg.includes("pipeline exceeded");
+      return {
+        ok: false,
+        completedSteps: 0,
+        totalSteps: pipeline.steps.length,
+        results: [],
+        finalState: { url: "", title: "" },
+        obstacles: [],
+        durationMs: Date.now() - startTime,
+        modeUsed: "extension",
+        error: {
+          failedAtStep: 0,
+          failedStep: pipeline.steps[0],
+          errorType: "action-failed",
+          message: `Extension mode failed: ${msg}`,
+          pageState: { url: "", title: "" },
+          suggestion: stalled ? "STOP retrying and tell the user what happened: the Chrome tab being driven stopped " + "responding — its window is likely minimized or the page is wedged. Ask them to " + "un-minimize the Chrome window (leaving it behind other windows is fine), or ask " + "permission to rerun with options.focus=true to bring it to the front." : "Ensure the iframer extension is connected (green dot) and the tab is still open. See chrome://extensions.",
+          retryable: !stalled
+        }
+      };
+    } finally {
+      try {
+        if (browser)
+          await browser.close();
+      } catch {}
+      try {
+        await relay.stop();
+      } catch {}
+    }
   }
   async executeDocker(userId, token, pipeline) {
     let session = getSession(userId);
@@ -5049,7 +5967,7 @@ class PipelineExecutor {
         try {
           extractKnowledgeFromRun(pipeline, result, updatedSession, mode);
         } catch (err) {
-          log17.warn(`knowledge update failed: ${getErrorMessage(err)}`);
+          log18.warn(`knowledge update failed: ${getErrorMessage(err)}`);
         }
       }
       this.deps.refStore.sync(userId, ctx);
@@ -5297,8 +6215,8 @@ class CredentialStore {
 }
 
 // src/lib/iframer.ts
-var log18 = createLogger("iframer");
-var DEFAULT_SCREENSHOT_DIR = import_path9.default.join(import_path9.default.dirname(import_url.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/src/lib/iframer.ts")), "../../.screenshots");
+var log19 = createLogger("iframer");
+var DEFAULT_SCREENSHOT_DIR = import_path11.default.join(import_path11.default.dirname(import_url.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/src/lib/iframer.ts")), "../../.screenshots");
 var DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
 var DEFAULT_STALE_TIMEOUT_MS3 = 20000;
 
@@ -5409,7 +6327,7 @@ class Iframer {
             sessionSaved = true;
           }
         } catch (err) {
-          log18.warn(`stopSession: failed to extract daemon state for ${inst.mode}::${inst.instanceId}: ${getErrorMessage(err)}`);
+          log19.warn(`stopSession: failed to extract daemon state for ${inst.mode}::${inst.instanceId}: ${getErrorMessage(err)}`);
         }
       }
     }
@@ -5512,7 +6430,7 @@ function errorHandler(err, _req, res, _next) {
 }
 
 // src/api/routes.ts
-var import_fs10 = __toESM(require("fs"));
+var import_fs12 = __toESM(require("fs"));
 function auth(req) {
   return req;
 }
@@ -5525,7 +6443,7 @@ function registerRoutes(app) {
     const browsers = [];
     try {
       const execPath = import_patchright3.chromium.executablePath();
-      browsers.push({ name: "chromium", installed: import_fs10.default.existsSync(execPath), executablePath: execPath });
+      browsers.push({ name: "chromium", installed: import_fs12.default.existsSync(execPath), executablePath: execPath });
     } catch {
       browsers.push({ name: "chromium", installed: false, executablePath: null });
     }
@@ -5694,6 +6612,66 @@ function registerRoutes(app) {
     const { ok: _ok, ...resultRest } = result;
     res.json({ ok: true, message: "Login attempted", ...resultRest });
   }));
+  app.get("/extension/status", (_req, res) => {
+    res.json({ ok: true, version: getVersion(), ...extensionBridge.status() });
+  });
+  app.post("/extension/tabs", asyncHandler(async (_req, res) => {
+    const result = await extensionBridge.listTabs();
+    res.json({ ok: true, ...result });
+  }));
+  app.post("/extension/reload", asyncHandler(async (_req, res) => {
+    const result = await extensionBridge.reloadAll();
+    res.json({ ok: true, ...result });
+  }));
+  app.post("/extension/tab/create", asyncHandler(async (req, res) => {
+    const { url, active, windowId, clientId } = req.body || {};
+    if (url !== undefined && typeof url !== "string")
+      throw new AppError(400, "url must be a string");
+    const result = await extensionBridge.createTab(url || "", { active, windowId }, clientId);
+    res.json({ ok: true, ...result });
+  }));
+  app.post("/extension/tab/group", asyncHandler(async (req, res) => {
+    const { tabIds, title, color, collapsed, groupId, clientId } = req.body || {};
+    if (!Array.isArray(tabIds) || tabIds.length === 0 || !tabIds.every((t) => typeof t === "number")) {
+      throw new AppError(400, "tabIds must be a non-empty array of numbers");
+    }
+    const result = await extensionBridge.groupTabs(tabIds, { title, color, collapsed, groupId }, clientId);
+    res.json({ ok: true, group: result });
+  }));
+  app.post("/extension/tab/ungroup", asyncHandler(async (req, res) => {
+    const { tabIds, clientId } = req.body || {};
+    if (!Array.isArray(tabIds) || tabIds.length === 0 || !tabIds.every((t) => typeof t === "number")) {
+      throw new AppError(400, "tabIds must be a non-empty array of numbers");
+    }
+    const result = await extensionBridge.ungroupTabs(tabIds, clientId);
+    res.json({ ok: true, ...result });
+  }));
+  app.post("/extension/group/update", asyncHandler(async (req, res) => {
+    const { groupId, title, color, collapsed, clientId } = req.body || {};
+    if (typeof groupId !== "number")
+      throw new AppError(400, "groupId (number) is required");
+    const result = await extensionBridge.updateGroup(groupId, { title, color, collapsed }, clientId);
+    res.json({ ok: true, group: result });
+  }));
+  app.post("/extension/groups", asyncHandler(async (req, res) => {
+    const { clientId } = req.body || {};
+    const result = await extensionBridge.listGroups(clientId);
+    res.json({ ok: true, ...result });
+  }));
+  app.post("/extension/execute", asyncHandler(async (req, res) => {
+    const { tabId, steps, options, clientId } = req.body || {};
+    if (typeof tabId !== "number")
+      throw new AppError(400, "tabId (number) is required");
+    if (!Array.isArray(steps) || steps.length === 0) {
+      throw new AppError(400, "steps must be a non-empty array");
+    }
+    const r = auth(req);
+    const result = await iframer.execute(r.userId, r.token, {
+      steps,
+      options: { ...options || {}, extensionTabId: tabId, clientId }
+    });
+    res.json(result);
+  }));
   app.post("/fetch", asyncHandler(async (req, res) => {
     const { url } = req.body || {};
     if (!url)
@@ -5726,8 +6704,8 @@ var PORT = parseInt(process.env.PORT || "3021", 10);
 var REAP_INTERVAL_MS = 60000;
 var IDLE_EXIT_MS = parseInt(process.env.IFRAMER_SERVER_IDLE_EXIT_MS || String(30 * 60 * 1000), 10);
 var SHUTDOWN_DEADLINE_MS = 1e4;
-var SCREENSHOT_DIR = import_path10.default.join(import_path10.default.dirname(import_url2.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/index.ts")), ".screenshots");
-import_fs11.default.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+var SCREENSHOT_DIR = import_path12.default.join(import_path12.default.dirname(import_url2.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/index.ts")), ".screenshots");
+import_fs13.default.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 app.use("/screenshots", import_express.default.static(SCREENSHOT_DIR));
 app.use(import_express.default.json());
 var lastActivity = Date.now();
@@ -5744,10 +6722,11 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
   console.error(`[local-server] unhandledRejection (survived): ${reason}`);
 });
-var server = app.listen(PORT, () => {
-  console.log(`iframer listening on ${PORT}`);
+var server = app.listen(PORT, "127.0.0.1", () => {
+  console.log(`iframer listening on 127.0.0.1:${PORT}`);
   writeServerInfo({ pid: process.pid, port: PORT, startedAt: new Date().toISOString() });
 });
+extensionBridge.attach(server);
 var shutdownStarted = false;
 async function gracefulShutdown(reason) {
   if (shutdownStarted)
@@ -5790,7 +6769,7 @@ var reapTimer = setInterval(async () => {
     await reapOrphanBrowsers();
   } catch {}
   const idleMs = Date.now() - lastActivity;
-  if (idleMs > IDLE_EXIT_MS && !iframer.browserHealth().alive) {
+  if (idleMs > IDLE_EXIT_MS && !iframer.browserHealth().alive && !extensionBridge.hasClients()) {
     gracefulShutdown(`idle for ${Math.round(idleMs / 60000)}min with no browsers`);
   }
 }, REAP_INTERVAL_MS);

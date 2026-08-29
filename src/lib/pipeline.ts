@@ -18,6 +18,8 @@ import { capturePageState } from "./page-state";
 import { ApiCapture } from "./api-capture";
 import { TabTracker } from "./browser/tab-tracker";
 import { TIMEOUTS } from "./constants";
+import { loadAnchors, recordAnchorResult } from "./knowledge/component-map";
+import { anchorNameOf } from "./actions/resolve-selector";
 
 const DEFAULT_STALE_TIMEOUT_MS = 20_000;
 
@@ -91,6 +93,24 @@ export class PipelineRunner {
     const results: StepResult[] = [];
     const obstacles: ObstacleEncounter[] = [];
 
+    // Load this domain's persisted anchors (@a:<name>) so steps can reference
+    // remembered elements instead of re-discovering them. Domain from the first
+    // navigate step, else the current page (extension mode drives an open tab).
+    const navStep = pipeline.steps.find((s) => s.type === "navigate") as { url?: string } | undefined;
+    try {
+      const host = new URL(navStep?.url || safePageUrl(initialPage) || "http://x").hostname;
+      if (host && host !== "x") {
+        this.ctx.anchors = loadAnchors(host);
+        this.ctx.anchorDomain = host;
+      }
+    } catch {
+      /* no resolvable domain — @a: refs will error clearly if used */
+    }
+    const recordAnchor = (step: PipelineStep, ok: boolean) => {
+      const name = anchorNameOf((step as { selector?: unknown }).selector);
+      if (name && this.ctx.anchorDomain) recordAnchorResult(this.ctx.anchorDomain, name, ok, new Date().toISOString());
+    };
+
     // API capture — hook network events when enabled. Bound to the initial page;
     // capturing traffic from followed tabs is a separate follow-up.
     const capture = opts.captureApi ? new ApiCapture(initialPage) : null;
@@ -126,6 +146,7 @@ export class PipelineRunner {
         stepResult = failedStepResult(step, asError.message, Date.now() - startTime, i);
 
         results.push(stepResult);
+        recordAnchor(step, false); // self-heal: a failing @a: anchor is likely stale
 
         return {
           ok: false,
@@ -147,6 +168,8 @@ export class PipelineRunner {
           capturedApi: await finishCapture(),
         };
       }
+
+      recordAnchor(step, true); // @a: anchor resolved and the step ran
 
       // Follow a NEW tab only when a click opened one AND the clicked page did
       // NOT itself navigate. That distinguishes a genuine target=_blank (feed

@@ -1,6 +1,6 @@
 {
   "name": "iframer-toolkit",
-  "version": "0.9.0",
+  "version": "0.10.1",
   "description": "Browser access toolkit for AI agents — CLI and MCP server for headless/headful browsing, login flows, and pipeline execution.",
   "keywords": [
     "iframer",
@@ -29,6 +29,7 @@
   "files": [
     "dist/",
     "skills/",
+    "extension/",
     "README.md",
     "LICENSE"
   ],
@@ -46,10 +47,13 @@
     "mcp:remove": "node bin/cli.js remove-mcp",
     "build:cli": "bun build bin/cli.js --target node --format cjs --outfile dist/cli.js --external better-sqlite3 --external patchright --external fingerprint-generator --external @anthropic-ai/sdk --external @modelcontextprotocol/sdk --external zod --external cloakbrowser --external playwright-core",
     "build:mcp": "bun build src/mcp/server.ts --target node --format cjs --outfile dist/mcp-server.cjs --external better-sqlite3 --external patchright --external fingerprint-generator --external @anthropic-ai/sdk --external @modelcontextprotocol/sdk --external zod --external cloakbrowser --external playwright-core",
-    "build:local-server": "bun build index.ts --target node --format cjs --outfile dist/local-server.cjs --external better-sqlite3 --external patchright --external fingerprint-generator --external @anthropic-ai/sdk --external @modelcontextprotocol/sdk --external zod --external cloakbrowser --external playwright-core --external express",
-    "build": "bun run build:cli && bun run build:mcp && bun run build:local-server",
+    "build:local-server": "bun build index.ts --target node --format cjs --outfile dist/local-server.cjs --external better-sqlite3 --external patchright --external fingerprint-generator --external @anthropic-ai/sdk --external @modelcontextprotocol/sdk --external zod --external cloakbrowser --external playwright-core --external express --external ws",
+    "build:stamp": "node scripts/stamp-extension-version.mjs",
+    "build": "bun run build:stamp && bun run build:cli && bun run build:mcp && bun run build:local-server",
     "test": "bun test tests/unit",
-    "prepublishOnly": "bun run build"
+    "test:extension": "node tests/integration/extension-bridge.mjs",
+    "prepublishOnly": "bun run build",
+    "test:cdp-relay": "bun tests/integration/cdp-relay.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
@@ -57,6 +61,8 @@
     "better-sqlite3": "^12.8.0",
     "fingerprint-generator": "^2.1.81",
     "patchright": "^1.58.2",
+    "playwright-core": "^1.58.0",
+    "ws": "^8.18.0",
     "zod": "^4.3.6"
   },
   "optionalDependencies": {
@@ -66,8 +72,10 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.6",
     "@types/node": "^25.5.0",
+    "@types/ws": "^8.5.12",
     "bun-types": "^1.3.11",
     "express": "^4.18.2",
+    "tsx": "^4.23.12",
     "typescript": "^6.0.2"
   }
 }

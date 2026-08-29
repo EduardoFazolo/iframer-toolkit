@@ -29,6 +29,7 @@ var __toESM = (mod, isNodeMode, target) => {
     cache.set(mod, to);
   return to;
 };
+var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
 var __returnValue = (v) => v;
 function __exportSetter(name, newValue) {
   this[name] = __returnValue.bind(null, newValue);
@@ -827,6 +828,10 @@ var init_session_manager = __esm(() => {
 });
 
 // src/lib/paths.ts
+var exports_paths = {};
+__export(exports_paths, {
+  getDataDir: () => getDataDir
+});
 function getDataDir() {
   return process.env.IFRAMER_DATA_DIR || import_path.default.join(import_os.default.homedir(), ".iframer");
 }
@@ -837,6 +842,30 @@ var init_paths = __esm(() => {
 });
 
 // src/lib/auth/crypto.ts
+function getLocalToken() {
+  if (process.env.IFRAMER_SECRET)
+    return process.env.IFRAMER_SECRET;
+  const candidates = [
+    import_path2.default.join(getDataDir(), "secret"),
+    import_path2.default.join(process.env.XDG_RUNTIME_DIR || import_os2.default.tmpdir(), "iframer-secret")
+  ];
+  for (const file of candidates) {
+    try {
+      const existing = import_fs3.default.readFileSync(file, "utf8").trim();
+      if (existing)
+        return existing;
+    } catch {}
+  }
+  for (const file of candidates) {
+    try {
+      import_fs3.default.mkdirSync(import_path2.default.dirname(file), { recursive: true });
+      const secret = import_crypto.default.randomBytes(32).toString("hex");
+      import_fs3.default.writeFileSync(file, secret, { mode: 384 });
+      return secret;
+    } catch {}
+  }
+  throw new Error("iframer: could not read or create a persistent encryption secret in any " + `writable location (${candidates.join(", ")}). Set IFRAMER_SECRET to a ` + "stable value shared between the MCP server and CLI (openssl rand -hex 32).");
+}
 function deriveKey(token, purpose = INFO) {
   return new Promise((resolve, reject) => {
     import_crypto.default.hkdf("sha256", token, SALT, purpose, KEY_LENGTH, (err, key) => {
@@ -885,17 +914,20 @@ function generateTOTP(secret, period = 30, digits = 6) {
   const code = ((hmac[offset] & 127) << 24 | (hmac[offset + 1] & 255) << 16 | (hmac[offset + 2] & 255) << 8 | hmac[offset + 3] & 255) % Math.pow(10, digits);
   return code.toString().padStart(digits, "0");
 }
-var import_crypto, SALT = "iframer-session", INFO = "encryption", KEY_LENGTH = 32, IV_LENGTH = 12, TAG_LENGTH = 16;
+var import_crypto, import_fs3, import_os2, import_path2, SALT = "iframer-session", INFO = "encryption", KEY_LENGTH = 32, IV_LENGTH = 12, TAG_LENGTH = 16;
 var init_crypto = __esm(() => {
   init_paths();
   import_crypto = __toESM(require("crypto"));
+  import_fs3 = __toESM(require("fs"));
+  import_os2 = __toESM(require("os"));
+  import_path2 = __toESM(require("path"));
 });
 
 // src/lib/screenshot.ts
 function saveScreenshot(buffer, filename, screenshotDir, publicUrl) {
-  import_fs3.default.mkdirSync(screenshotDir, { recursive: true });
-  const filePath = import_path2.default.join(screenshotDir, filename);
-  import_fs3.default.writeFileSync(filePath, buffer);
+  import_fs4.default.mkdirSync(screenshotDir, { recursive: true });
+  const filePath = import_path3.default.join(screenshotDir, filename);
+  import_fs4.default.writeFileSync(filePath, buffer);
   maybePrune(screenshotDir);
   return `${publicUrl}/screenshots/${filename}`;
 }
@@ -911,10 +943,10 @@ function pruneScreenshots(dir, opts = {}) {
   const maxFiles = opts.maxFiles ?? MAX_FILES;
   const now = opts.now ?? Date.now();
   try {
-    const entries = import_fs3.default.readdirSync(dir).filter((f) => f.endsWith(".jpg") || f.endsWith(".jpeg") || f.endsWith(".png")).map((f) => {
-      const full = import_path2.default.join(dir, f);
+    const entries = import_fs4.default.readdirSync(dir).filter((f) => f.endsWith(".jpg") || f.endsWith(".jpeg") || f.endsWith(".png")).map((f) => {
+      const full = import_path3.default.join(dir, f);
       try {
-        return { full, mtimeMs: import_fs3.default.statSync(full).mtimeMs };
+        return { full, mtimeMs: import_fs4.default.statSync(full).mtimeMs };
       } catch {
         return null;
       }
@@ -924,7 +956,7 @@ function pruneScreenshots(dir, opts = {}) {
     for (const e of entries) {
       if (now - e.mtimeMs > maxAgeMs) {
         try {
-          import_fs3.default.unlinkSync(e.full);
+          import_fs4.default.unlinkSync(e.full);
           removed++;
         } catch {}
       } else {
@@ -935,7 +967,7 @@ function pruneScreenshots(dir, opts = {}) {
       survivors.sort((a, b) => a.mtimeMs - b.mtimeMs);
       for (const e of survivors.slice(0, survivors.length - maxFiles)) {
         try {
-          import_fs3.default.unlinkSync(e.full);
+          import_fs4.default.unlinkSync(e.full);
           removed++;
         } catch {}
       }
@@ -948,11 +980,11 @@ function pruneScreenshots(dir, opts = {}) {
     return 0;
   }
 }
-var import_fs3, import_path2, log3, MAX_AGE_MS, MAX_FILES, PRUNE_THROTTLE_MS, lastPruneAt = 0;
+var import_fs4, import_path3, log3, MAX_AGE_MS, MAX_FILES, PRUNE_THROTTLE_MS, lastPruneAt = 0;
 var init_screenshot = __esm(() => {
   init_logger();
-  import_fs3 = __toESM(require("fs"));
-  import_path2 = __toESM(require("path"));
+  import_fs4 = __toESM(require("fs"));
+  import_path3 = __toESM(require("path"));
   log3 = createLogger("screenshot");
   MAX_AGE_MS = parseInt(process.env.IFRAMER_SCREENSHOT_MAX_AGE_MS || String(24 * 60 * 60 * 1000), 10);
   MAX_FILES = parseInt(process.env.IFRAMER_SCREENSHOT_MAX_FILES || "500", 10);
@@ -998,8 +1030,8 @@ function createNodeDb(dbPath) {
 class SqliteStore {
   db;
   constructor(dataDir) {
-    import_fs4.default.mkdirSync(dataDir, { recursive: true });
-    const dbPath = import_path3.default.join(dataDir, "iframer.db");
+    import_fs5.default.mkdirSync(dataDir, { recursive: true });
+    const dbPath = import_path4.default.join(dataDir, "iframer.db");
     this.db = IS_BUN ? createBunDb(dbPath) : createNodeDb(dbPath);
     this.db.run(`
       CREATE TABLE IF NOT EXISTS sessions (
@@ -1055,10 +1087,10 @@ class SqliteStore {
     this.db.close();
   }
 }
-var import_path3, import_fs4, IS_BUN;
+var import_path4, import_fs5, IS_BUN;
 var init_sqlite_store = __esm(() => {
-  import_path3 = __toESM(require("path"));
-  import_fs4 = __toESM(require("fs"));
+  import_path4 = __toESM(require("path"));
+  import_fs5 = __toESM(require("fs"));
   IS_BUN = typeof globalThis.Bun !== "undefined";
 });
 
@@ -1095,19 +1127,19 @@ function getPlatform() {
 function getChromeExecutablePath(installDir) {
   const platform = process.platform;
   if (platform === "darwin") {
-    const entries = import_fs5.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
+    const entries = import_fs6.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
     const dir = entries[0] || "chrome-mac-arm64";
-    return import_path4.default.join(installDir, dir, "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing");
+    return import_path5.default.join(installDir, dir, "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing");
   }
   if (platform === "linux") {
-    const entries = import_fs5.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
+    const entries = import_fs6.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
     const dir = entries[0] || "chrome-linux64";
-    return import_path4.default.join(installDir, dir, "chrome");
+    return import_path5.default.join(installDir, dir, "chrome");
   }
   if (platform === "win32") {
-    const entries = import_fs5.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
+    const entries = import_fs6.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
     const dir = entries[0] || "chrome-win64";
-    return import_path4.default.join(installDir, dir, "chrome.exe");
+    return import_path5.default.join(installDir, dir, "chrome.exe");
   }
   throw new Error(`Unsupported platform: ${platform}`);
 }
@@ -1128,35 +1160,35 @@ async function downloadChrome(installDir = DEFAULT_INSTALL_DIR) {
   const version = channel.version;
   log4.debug(`Version ${version} for ${platform}`);
   log4.debug(`URL: ${url}`);
-  import_fs5.default.mkdirSync(installDir, { recursive: true });
-  const zipPath = import_path4.default.join(installDir, "chrome.zip");
+  import_fs6.default.mkdirSync(installDir, { recursive: true });
+  const zipPath = import_path5.default.join(installDir, "chrome.zip");
   const dlRes = await fetch(url);
   if (!dlRes.ok)
     throw new Error(`Download failed: ${dlRes.status}`);
   const buf = Buffer.from(await dlRes.arrayBuffer());
-  import_fs5.default.writeFileSync(zipPath, buf);
+  import_fs6.default.writeFileSync(zipPath, buf);
   log4.info(`Downloaded ${(buf.length / 1024 / 1024).toFixed(1)}MB`);
   import_child_process2.execSync(`unzip -o -q "${zipPath}" -d "${installDir}"`, { stdio: "inherit" });
-  import_fs5.default.unlinkSync(zipPath);
+  import_fs6.default.unlinkSync(zipPath);
   const execPath = getChromeExecutablePath(installDir);
-  if (!import_fs5.default.existsSync(execPath)) {
+  if (!import_fs6.default.existsSync(execPath)) {
     throw new Error(`Chrome executable not found after extraction: ${execPath}`);
   }
   if (process.platform !== "win32") {
-    import_fs5.default.chmodSync(execPath, 493);
+    import_fs6.default.chmodSync(execPath, 493);
   }
-  import_fs5.default.writeFileSync(import_path4.default.join(installDir, "version.json"), JSON.stringify({ version, platform, downloadedAt: new Date().toISOString() }));
+  import_fs6.default.writeFileSync(import_path5.default.join(installDir, "version.json"), JSON.stringify({ version, platform, downloadedAt: new Date().toISOString() }));
   log4.info(`Installed at: ${execPath}`);
   return execPath;
 }
 function findChromeForTesting() {
   if (process.env.CHROME_EXECUTABLE) {
-    if (import_fs5.default.existsSync(process.env.CHROME_EXECUTABLE))
+    if (import_fs6.default.existsSync(process.env.CHROME_EXECUTABLE))
       return process.env.CHROME_EXECUTABLE;
   }
   try {
     const execPath = getChromeExecutablePath(DEFAULT_INSTALL_DIR);
-    if (import_fs5.default.existsSync(execPath))
+    if (import_fs6.default.existsSync(execPath))
       return execPath;
   } catch {}
   return null;
@@ -1176,8 +1208,8 @@ function findChrome() {
     "/usr/bin/chromium",
     ...(() => {
       try {
-        const dirs = import_fs5.default.readdirSync("/ms-playwright").filter((d) => d.startsWith("chromium-")).sort().reverse();
-        return dirs.map((d) => import_path4.default.join("/ms-playwright", d, "chrome-linux", "chrome"));
+        const dirs = import_fs6.default.readdirSync("/ms-playwright").filter((d) => d.startsWith("chromium-")).sort().reverse();
+        return dirs.map((d) => import_path5.default.join("/ms-playwright", d, "chrome-linux", "chrome"));
       } catch {
         return [];
       }
@@ -1187,7 +1219,7 @@ function findChrome() {
     "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
   ];
   for (const p of systemPaths) {
-    if (import_fs5.default.existsSync(p))
+    if (import_fs6.default.existsSync(p))
       return p;
   }
   return null;
@@ -1211,19 +1243,24 @@ async function ensureChrome() {
     throw new Error("No Chrome found. Download failed and no system Chrome available.");
   }
 }
-var import_fs5, import_path4, import_os2, import_child_process2, log4, CHROME_VERSIONS_URL = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json", DEFAULT_INSTALL_DIR;
+var import_fs6, import_path5, import_os3, import_child_process2, log4, CHROME_VERSIONS_URL = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json", DEFAULT_INSTALL_DIR;
 var init_chrome_downloader = __esm(() => {
   init_logger();
-  import_fs5 = __toESM(require("fs"));
-  import_path4 = __toESM(require("path"));
-  import_os2 = __toESM(require("os"));
+  import_fs6 = __toESM(require("fs"));
+  import_path5 = __toESM(require("path"));
+  import_os3 = __toESM(require("os"));
   import_child_process2 = require("child_process");
   log4 = createLogger("chrome");
-  DEFAULT_INSTALL_DIR = import_path4.default.join(import_os2.default.homedir(), ".iframer", "chrome");
+  DEFAULT_INSTALL_DIR = import_path5.default.join(import_os3.default.homedir(), ".iframer", "chrome");
 });
 
 // src/lib/browser/cloak-browser.ts
+function cloakEnabled() {
+  return process.env.IFRAMER_USE_CLOAKBROWSER === "1" || process.env.IFRAMER_USE_CLOAKBROWSER === "true";
+}
 async function tryImport() {
+  if (!cloakEnabled())
+    return null;
   try {
     return await import("cloakbrowser");
   } catch {
@@ -1276,8 +1313,8 @@ var init_cloak_browser = __esm(() => {
 
 // src/lib/browser/registry.ts
 function browsersDir() {
-  const dir = import_path5.default.join(getDataDir(), "browsers");
-  import_fs6.default.mkdirSync(dir, { recursive: true });
+  const dir = import_path6.default.join(getDataDir(), "browsers");
+  import_fs7.default.mkdirSync(dir, { recursive: true });
   return dir;
 }
 function isPidAlive(pid) {
@@ -1314,14 +1351,14 @@ function findChromePidByMarker(marker) {
 }
 function registerBrowser(rec) {
   try {
-    import_fs6.default.writeFileSync(import_path5.default.join(browsersDir(), `${rec.chromePid}.json`), JSON.stringify(rec, null, 2));
+    import_fs7.default.writeFileSync(import_path6.default.join(browsersDir(), `${rec.chromePid}.json`), JSON.stringify(rec, null, 2));
   } catch (err) {
     log6.warn(`failed to write browser record for pid ${rec.chromePid}: ${err}`);
   }
 }
 function unregisterBrowser(chromePid) {
   try {
-    import_fs6.default.unlinkSync(import_path5.default.join(browsersDir(), `${chromePid}.json`));
+    import_fs7.default.unlinkSync(import_path6.default.join(browsersDir(), `${chromePid}.json`));
   } catch {}
 }
 async function forceKillBrowser(rec) {
@@ -1341,12 +1378,12 @@ async function forceKillBrowser(rec) {
   }
   return !isPidAlive(rec.chromePid);
 }
-var import_fs6, import_path5, import_child_process3, log6, sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+var import_fs7, import_path6, import_child_process3, log6, sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 var init_registry = __esm(() => {
   init_paths();
   init_logger();
-  import_fs6 = __toESM(require("fs"));
-  import_path5 = __toESM(require("path"));
+  import_fs7 = __toESM(require("fs"));
+  import_path6 = __toESM(require("path"));
   import_child_process3 = require("child_process");
   log6 = createLogger("registry");
 });
@@ -1562,7 +1599,7 @@ var init_daemon = __esm(() => {
 
 // src/lib/domain-modes.ts
 function defaultFile() {
-  return import_path6.default.join(getDataDir(), "domain-modes.json");
+  return import_path7.default.join(getDataDir(), "domain-modes.json");
 }
 
 class DomainModeStore {
@@ -1641,8 +1678,8 @@ class DomainModeStore {
   }
   load() {
     try {
-      if (import_fs7.default.existsSync(this.filePath)) {
-        this.data = JSON.parse(import_fs7.default.readFileSync(this.filePath, "utf-8"));
+      if (import_fs8.default.existsSync(this.filePath)) {
+        this.data = JSON.parse(import_fs8.default.readFileSync(this.filePath, "utf-8"));
       }
     } catch {
       this.data = {};
@@ -1650,19 +1687,19 @@ class DomainModeStore {
   }
   save() {
     try {
-      import_fs7.default.mkdirSync(import_path6.default.dirname(this.filePath), { recursive: true });
-      import_fs7.default.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2));
+      import_fs8.default.mkdirSync(import_path7.default.dirname(this.filePath), { recursive: true });
+      import_fs8.default.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2));
     } catch (err) {
       log8.error("Failed to save:", err);
     }
   }
 }
-var import_fs7, import_path6, log8, TTL_DAYS = 14, ESCALATION_LADDER;
+var import_fs8, import_path7, log8, TTL_DAYS = 14, ESCALATION_LADDER;
 var init_domain_modes = __esm(() => {
   init_logger();
   init_paths();
-  import_fs7 = __toESM(require("fs"));
-  import_path6 = __toESM(require("path"));
+  import_fs8 = __toESM(require("fs"));
+  import_path7 = __toESM(require("path"));
   log8 = createLogger("domain-modes");
   ESCALATION_LADDER = ["headless", "docker-headful", "binary-headful"];
 });
@@ -1730,6 +1767,51 @@ function failedStepResult(step, error, durationMs, stepIndex = -1) {
   return { stepIndex, step, ok: false, error, durationMs };
 }
 
+// src/lib/clipboard.ts
+function platformTools(mode) {
+  if (process.platform === "darwin")
+    return [[mode === "read" ? "pbpaste" : "pbcopy"]];
+  if (mode === "read")
+    return [["wl-paste", "-n"], ["xclip", "-selection", "clipboard", "-o"], ["xsel", "-b", "-o"]];
+  return [["wl-copy"], ["xclip", "-selection", "clipboard", "-i"], ["xsel", "-b", "-i"]];
+}
+function run(cmd, input) {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = import_child_process4.spawn(cmd[0], cmd.slice(1));
+    } catch {
+      resolve({ ok: false, out: "", err: `spawn ${cmd[0]} failed` });
+      return;
+    }
+    let out = "";
+    let errOut = "";
+    child.stdout?.on("data", (d) => out += d);
+    child.stderr?.on("data", (d) => errOut += d);
+    child.on("error", (e) => resolve({ ok: false, out: "", err: e.message }));
+    child.on("close", (code) => resolve({ ok: code === 0, out, err: errOut }));
+    if (input !== undefined) {
+      child.stdin?.write(input);
+      child.stdin?.end();
+    }
+  });
+}
+async function clipboardRead() {
+  const tools = platformTools("read");
+  let lastErr = "";
+  for (const cmd of tools) {
+    const r = await run(cmd);
+    if (r.ok)
+      return r.out;
+    lastErr = r.err;
+  }
+  throw new Error(`No working clipboard tool found (${tools.map((t) => t[0]).join(", ")}). ${lastErr}`);
+}
+var import_child_process4;
+var init_clipboard = __esm(() => {
+  import_child_process4 = require("child_process");
+});
+
 // src/lib/browser/humanize.ts
 function rand(min, max) {
   return Math.random() * (max - min) + min;
@@ -1766,8 +1848,8 @@ async function humanMove(page, toX, toY) {
   const lastPos = mousePositions.get(page);
   const fromX = lastPos?.x ?? randRange(TIMING.IDLE_MOUSE_X);
   const fromY = lastPos?.y ?? randRange(TIMING.IDLE_MOUSE_Y);
-  const path7 = generatePath(fromX, fromY, toX, toY);
-  for (const point of path7) {
+  const path8 = generatePath(fromX, fromY, toX, toY);
+  for (const point of path8) {
     await mouse.move(point.x, point.y);
     await sleep3(rand(2, 12));
   }
@@ -1939,6 +2021,15 @@ var init_humanize = __esm(() => {
 
 // src/lib/actions/resolve-selector.ts
 function resolveSelector(selector, ctx) {
+  if (selector.startsWith("@a:")) {
+    const name = selector.slice(3);
+    const anchor = ctx.anchors?.get(name);
+    if (!anchor) {
+      const available = ctx.anchors ? Array.from(ctx.anchors.keys()).join(", ") : "";
+      throw new Error(`Unknown anchor: @a:${name}${ctx.anchorDomain ? ` for ${ctx.anchorDomain}` : ""}. ` + `${available ? `Known anchors: ${available}. ` : "This domain has no saved anchors yet. "}` + `Run a snapshot/find to locate the element, act on it, then save it with the ` + `\`remember\` tool so future runs skip the search.`);
+    }
+    return anchor.selector;
+  }
   if (selector.startsWith("@e")) {
     const ref = ctx.refMap.get(selector);
     if (!ref) {
@@ -1948,6 +2039,9 @@ function resolveSelector(selector, ctx) {
     return ref.selector;
   }
   return selector;
+}
+function anchorNameOf(selector) {
+  return typeof selector === "string" && selector.startsWith("@a:") ? selector.slice(3) : null;
 }
 
 // src/lib/actions/handlers/navigation.ts
@@ -1974,7 +2068,42 @@ async function click(page, step, ctx) {
   await page.click(resolveSelector(step.selector, ctx));
 }
 async function fill(page, step, ctx) {
-  await page.fill(resolveSelector(step.selector, ctx), step.value);
+  const selector = resolveSelector(step.selector, ctx);
+  const value = step.value;
+  await page.fill(selector, value);
+  const stuck = await page.evaluate(({ sel, val }) => {
+    const el = document.querySelector(sel);
+    if (!el)
+      return false;
+    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+    try {
+      el.focus();
+    } catch {}
+    try {
+      setter ? setter.call(el, val) : el.value = val;
+    } catch {
+      el.value = val;
+    }
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    try {
+      el.blur();
+    } catch {}
+    return el.value === val;
+  }, { sel: selector, val: value });
+  if (!stuck) {
+    const loc = page.locator(selector);
+    try {
+      await loc.click();
+      await loc.fill("");
+      await loc.pressSequentially(value, { delay: 15 });
+      await page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        el?.blur?.();
+      }, selector);
+    } catch {}
+  }
 }
 async function humanClickStep(page, step, ctx) {
   if (step.selector) {
@@ -2009,11 +2138,82 @@ async function wait(page, step) {
 async function waitFor(page, step, ctx) {
   await page.waitForSelector(resolveSelector(step.selector, ctx), { timeout: step.timeout || TIMEOUTS.SELECTOR_WAIT });
 }
-async function scroll(page, step) {
-  await page.evaluate((dy) => window.scrollBy(0, dy || document.body.scrollHeight), step.deltaY ?? 0);
+async function scroll(page, step, ctx) {
+  const selector = step.selector ? resolveSelector(step.selector, ctx) : null;
+  await page.evaluate(({ dy, sel }) => {
+    if (sel) {
+      const el = document.querySelector(sel);
+      if (!el)
+        throw new Error(`scroll: no element for selector ${sel}`);
+      el.scrollBy(0, dy || el.scrollHeight);
+    } else {
+      window.scrollBy(0, dy || document.body.scrollHeight);
+    }
+  }, { dy: step.deltaY ?? 0, sel: selector });
 }
 async function keyboard(page, step) {
-  await page.keyboard.press(step.key);
+  const mods = [
+    step.meta ? "Meta" : null,
+    step.ctrl ? "Control" : null,
+    step.shift ? "Shift" : null,
+    step.alt ? "Alt" : null
+  ].filter(Boolean);
+  await page.keyboard.press(mods.length ? `${mods.join("+")}+${step.key}` : step.key);
+}
+async function read(page, step, ctx) {
+  const selector = step.selector ? resolveSelector(step.selector, ctx) : "body";
+  const raw = await page.evaluate((sel) => {
+    const el = sel === "body" ? document.body : document.querySelector(sel);
+    if (!el)
+      return null;
+    return el.innerText || el.textContent || "";
+  }, selector);
+  if (raw == null)
+    throw new Error(`read: no element for selector ${selector}`);
+  const text = raw.replace(/\n{3,}/g, `
+
+`).trim();
+  const max = step.maxChars || 6000;
+  return { text: text.slice(0, max), truncated: text.length > max };
+}
+async function upload(page, step, ctx) {
+  if (!step.files || step.files.length === 0)
+    throw new Error("upload: `files` must be a non-empty array of local paths");
+  await page.setInputFiles(resolveSelector(step.selector, ctx), step.files);
+  return { uploaded: step.files.length, files: step.files };
+}
+async function paste(page, step, ctx) {
+  const text = await clipboardRead();
+  if (step.selector) {
+    await page.click(resolveSelector(step.selector, ctx));
+  }
+  await page.keyboard.insertText(text);
+  return { pasted: text.length };
+}
+async function download(page, step) {
+  if (!step.url)
+    throw new Error("download: `url` is required");
+  const resp = await page.request.get(step.url);
+  const status = resp.status();
+  if (!resp.ok())
+    throw new Error(`download: HTTP ${status} for ${step.url}`);
+  const buf = await resp.body();
+  const fs9 = await import("fs");
+  const pathMod = await import("path");
+  const { getDataDir: getDataDir2 } = await Promise.resolve().then(() => (init_paths(), exports_paths));
+  let outPath;
+  if (step.path && pathMod.isAbsolute(step.path)) {
+    outPath = step.path;
+  } else {
+    let name = "download";
+    try {
+      name = decodeURIComponent(new URL(step.url).pathname.split("/").pop() || "") || "download";
+    } catch {}
+    outPath = pathMod.join(getDataDir2(), "downloads", step.path || name);
+  }
+  fs9.mkdirSync(pathMod.dirname(outPath), { recursive: true });
+  fs9.writeFileSync(outPath, buf);
+  return { path: outPath, size: buf.length, status };
 }
 async function typeCode(page, step, ctx) {
   const code = String(step.value || "");
@@ -2031,6 +2231,7 @@ async function typeCode(page, step, ctx) {
 }
 var log9;
 var init_navigation = __esm(() => {
+  init_clipboard();
   init_stealth();
   init_humanize();
   init_logger();
@@ -2069,12 +2270,12 @@ async function find(page, step, ctx) {
   const elInfo = await element.evaluate((el) => {
     const tag = el.tagName.toLowerCase();
     const text = (el.textContent?.trim() || "").slice(0, 60);
-    const path7 = [];
+    const path8 = [];
     let current = el;
     while (current && current !== document.body && current !== document.documentElement) {
       let seg = current.tagName.toLowerCase();
       if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-        path7.unshift(`#${current.id}`);
+        path8.unshift(`#${current.id}`);
         break;
       }
       const parent = current.parentElement;
@@ -2086,10 +2287,10 @@ async function find(page, step, ctx) {
           seg += `:nth-of-type(${idx})`;
         }
       }
-      path7.unshift(seg);
+      path8.unshift(seg);
       current = parent;
     }
-    return { tag, text, selector: path7.join(" > ") };
+    return { tag, text, selector: path8.join(" > ") };
   });
   const ref = `@e${ctx.nextRefId++}`;
   const displayRole = step.role || elInfo.tag;
@@ -2161,12 +2362,12 @@ async function takeSnapshot(page, ctx, options) {
       return true;
     }
     function buildSelector(el) {
-      const path7 = [];
+      const path8 = [];
       let current = el;
       while (current && current !== document.body && current !== document.documentElement) {
         let seg = current.tagName.toLowerCase();
         if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-          path7.unshift(`#${current.id}`);
+          path8.unshift(`#${current.id}`);
           break;
         }
         const parent = current.parentElement;
@@ -2178,10 +2379,10 @@ async function takeSnapshot(page, ctx, options) {
             seg += `:nth-of-type(${idx})`;
           }
         }
-        path7.unshift(seg);
+        path8.unshift(seg);
         current = parent;
       }
-      return path7.join(" > ");
+      return path8.join(" > ");
     }
     function getName(el) {
       const ariaLabel = el.getAttribute("aria-label");
@@ -2355,12 +2556,12 @@ async function annotatedScreenshot(page, ctx) {
       return true;
     }
     function buildSelector(el) {
-      const path7 = [];
+      const path8 = [];
       let current = el;
       while (current && current !== document.body && current !== document.documentElement) {
         let seg = current.tagName.toLowerCase();
         if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-          path7.unshift(`#${current.id}`);
+          path8.unshift(`#${current.id}`);
           break;
         }
         const parent = current.parentElement;
@@ -2372,10 +2573,10 @@ async function annotatedScreenshot(page, ctx) {
             seg += `:nth-of-type(${idx})`;
           }
         }
-        path7.unshift(seg);
+        path8.unshift(seg);
         current = parent;
       }
-      return path7.join(" > ");
+      return path8.join(" > ");
     }
     function getName(el) {
       const ariaLabel = el.getAttribute("aria-label");
@@ -3088,11 +3289,11 @@ __export(exports_knowledge, {
   clearKnowledge: () => clearKnowledge
 });
 function getKnowledgeDir() {
-  return import_path7.default.join(getDataDir(), "knowledge");
+  return import_path8.default.join(getDataDir(), "knowledge");
 }
 function getKnowledgePath(domain) {
   const safe = sanitizeDomain(domain);
-  return import_path7.default.join(getKnowledgeDir(), `${safe}.md`);
+  return import_path8.default.join(getKnowledgeDir(), `${safe}.md`);
 }
 function normalizeDomain(input) {
   let d = (input || "").trim().toLowerCase();
@@ -3126,12 +3327,12 @@ function sanitizeDomain(input) {
   return normalized.replace(/[^a-z0-9.-]/g, "_");
 }
 function ensureDir() {
-  import_fs8.default.mkdirSync(getKnowledgeDir(), { recursive: true });
+  import_fs9.default.mkdirSync(getKnowledgeDir(), { recursive: true });
 }
 function readKnowledge(domain) {
   const p = getKnowledgePath(domain);
   try {
-    return import_fs8.default.readFileSync(p, "utf8");
+    return import_fs9.default.readFileSync(p, "utf8");
   } catch {
     return null;
   }
@@ -3146,7 +3347,7 @@ function listKnowledge() {
   const dir = getKnowledgeDir();
   let entries = [];
   try {
-    entries = import_fs8.default.readdirSync(dir);
+    entries = import_fs9.default.readdirSync(dir);
   } catch {
     return [];
   }
@@ -3154,10 +3355,10 @@ function listKnowledge() {
   for (const file of entries) {
     if (!file.endsWith(".md"))
       continue;
-    const full = import_path7.default.join(dir, file);
+    const full = import_path8.default.join(dir, file);
     try {
-      const stat = import_fs8.default.statSync(full);
-      const raw = import_fs8.default.readFileSync(full, "utf8");
+      const stat = import_fs9.default.statSync(full);
+      const raw = import_fs9.default.readFileSync(full, "utf8");
       const parsed = parseMarkdown(raw);
       results.push({
         domain: parsed?.domain ?? file.replace(/\.md$/, ""),
@@ -3175,7 +3376,7 @@ function clearKnowledge(domain) {
   if (domain) {
     const p = getKnowledgePath(domain);
     try {
-      import_fs8.default.unlinkSync(p);
+      import_fs9.default.unlinkSync(p);
       return { removed: 1 };
     } catch {
       return { removed: 0 };
@@ -3183,11 +3384,11 @@ function clearKnowledge(domain) {
   }
   let removed = 0;
   try {
-    const entries = import_fs8.default.readdirSync(dir);
+    const entries = import_fs9.default.readdirSync(dir);
     for (const f of entries) {
       if (f.endsWith(".md")) {
         try {
-          import_fs8.default.unlinkSync(import_path7.default.join(dir, f));
+          import_fs9.default.unlinkSync(import_path8.default.join(dir, f));
           removed++;
         } catch {}
       }
@@ -3208,7 +3409,7 @@ function mergeKnowledge(domain, updates) {
     notes: dedupeNotes([...existing?.notes ?? [], ...updates.notes ?? []])
   };
   const md = renderMarkdown(merged);
-  import_fs8.default.writeFileSync(getKnowledgePath(domain), md, "utf8");
+  import_fs9.default.writeFileSync(getKnowledgePath(domain), md, "utf8");
   log13.info(`knowledge updated: ${merged.domain} (${merged.endpoints.length} endpoints)`);
 }
 function dedupeEndpoints(endpoints) {
@@ -3378,12 +3579,12 @@ function extractBackticks(re, text) {
   const items = [...m[1].matchAll(/`([^`]+)`/g)].map((x) => x[1]);
   return items.length > 0 ? items : undefined;
 }
-var import_fs8, import_path7, log13;
+var import_fs9, import_path8, log13;
 var init_knowledge = __esm(() => {
   init_logger();
   init_paths();
-  import_fs8 = __toESM(require("fs"));
-  import_path7 = __toESM(require("path"));
+  import_fs9 = __toESM(require("fs"));
+  import_path8 = __toESM(require("path"));
   log13 = createLogger("knowledge");
 });
 
@@ -3733,6 +3934,10 @@ var init_registry2 = __esm(() => {
     "wait-for": waitFor,
     scroll,
     keyboard,
+    read,
+    upload,
+    paste,
+    download,
     "type-code": typeCode,
     find,
     screenshot,
@@ -4064,8 +4269,8 @@ function isLikelyId(segment) {
 function isRecord(x) {
   return typeof x === "object" && x !== null && !Array.isArray(x);
 }
-function parameterizePath(path8) {
-  const parts = path8.split("/");
+function parameterizePath(path9) {
+  const parts = path9.split("/");
   let idCount = 0;
   const parameterized = parts.map((part) => {
     if (part && isLikelyId(part)) {
@@ -4169,16 +4374,16 @@ function gqlActionFromBody(body) {
   return;
 }
 function classifyRequest(req) {
-  const path8 = req.path;
-  const lowerPath = path8.toLowerCase();
+  const path9 = req.path;
+  const lowerPath = path9.toLowerCase();
   const ct = (req.requestHeaders["content-type"] || req.requestHeaders["Content-Type"] || "").toLowerCase();
   const body = req.requestBody;
   if (ct.includes("application/grpc")) {
-    return { protocol: "grpc-web", action: path8.replace(/^\//, "") };
+    return { protocol: "grpc-web", action: path9.replace(/^\//, "") };
   }
   const soapAction = req.requestHeaders["soapaction"] || req.requestHeaders["SOAPAction"];
   if (soapAction || ct.includes("text/xml") || ct.includes("application/soap+xml")) {
-    return { protocol: "soap", action: (soapAction || path8).replace(/^["/]|["/]$/g, "") };
+    return { protocol: "soap", action: (soapAction || path9).replace(/^["/]|["/]$/g, "") };
   }
   if (/\/graphql\b/.test(lowerPath) || hasGraphQLShape(body)) {
     return { protocol: "graphql", action: gqlActionFromBody(body) ?? "anonymous" };
@@ -4194,7 +4399,7 @@ function classifyRequest(req) {
     if (friendly)
       return { protocol: "form-rpc", action: friendly };
   }
-  return { protocol: "rest", action: `${req.method} ${parameterizePath(path8)}` };
+  return { protocol: "rest", action: `${req.method} ${parameterizePath(path9)}` };
 }
 function inferVerb(protocol, action, method, responseBody) {
   const lower = action.toLowerCase();
@@ -4239,8 +4444,8 @@ function buildFunctionName(protocol, action, method, verb) {
   if (protocol === "rest") {
     const parts = action.split(" ");
     const httpMethod = parts[0];
-    const path8 = parts.slice(1).join(" ");
-    const segs = path8.split("/").filter((s) => s && !s.startsWith("{"));
+    const path9 = parts.slice(1).join(" ");
+    const segs = path9.split("/").filter((s) => s && !s.startsWith("{"));
     const verbPrefix = httpMethod === "GET" ? verb === "list" ? "list" : "get" : httpMethod === "POST" ? "create" : httpMethod === "PUT" ? "update" : httpMethod === "PATCH" ? "patch" : httpMethod === "DELETE" ? "delete" : httpMethod.toLowerCase();
     return camelCase(`${verbPrefix} ${segs.join(" ")}`) || camelCase(action);
   }
@@ -4391,95 +4596,98 @@ class ApiCapture {
       await new Promise((r) => setTimeout(r, 100));
     }
   }
-  extractAuth(requests) {
-    const auth = { cookies: {}, tokens: {} };
-    for (const req of requests) {
-      for (const [key, value] of Object.entries(req.requestHeaders)) {
-        const lower = key.toLowerCase();
-        if (lower === "authorization" && !auth.authorization) {
-          auth.authorization = value;
-        } else if (lower === "cookie") {
-          const cookies = parseCookies(value);
-          Object.assign(auth.cookies, cookies);
-        } else if (isAuthHeader(key) && lower !== "authorization" && lower !== "cookie") {
-          auth.tokens[key] = value;
-        }
-      }
-    }
-    return auth;
-  }
-  splitHeaders(headers) {
-    const endpointHeaders = {};
-    for (const [key, value] of Object.entries(headers)) {
-      const lower = key.toLowerCase();
-      if (BROWSER_NOISE_HEADERS.has(lower))
-        continue;
-      if (isAuthHeader(key))
-        continue;
-      if (lower === "user-agent")
-        continue;
-      endpointHeaders[key] = value;
-    }
-    return endpointHeaders;
-  }
   getResults() {
-    const byDomain = new Map;
-    for (const req of this.requests) {
-      try {
-        const host = new URL(req.url).origin;
-        if (!byDomain.has(host))
-          byDomain.set(host, []);
-        byDomain.get(host)?.push(req);
-      } catch {}
+    return buildCapturedApi(this.requests);
+  }
+}
+function extractAuth(requests) {
+  const auth = { cookies: {}, tokens: {} };
+  for (const req of requests) {
+    for (const [key, value] of Object.entries(req.requestHeaders)) {
+      const lower = key.toLowerCase();
+      if (lower === "authorization" && !auth.authorization) {
+        auth.authorization = value;
+      } else if (lower === "cookie") {
+        const cookies = parseCookies(value);
+        Object.assign(auth.cookies, cookies);
+      } else if (isAuthHeader(key) && lower !== "authorization" && lower !== "cookie") {
+        auth.tokens[key] = value;
+      }
     }
-    const apis = [];
-    for (const [baseUrl, requests] of byDomain) {
-      const auth = this.extractAuth(requests);
-      const endpointMap = new Map;
-      for (const req of requests) {
-        const paramPath = parameterizePath(req.path);
-        const { protocol, action } = classifyRequest(req);
-        const key = `${protocol}:${action}`;
-        const endpointHeaders = this.splitHeaders(req.requestHeaders);
-        if (!endpointMap.has(key)) {
-          const verb = inferVerb(protocol, action, req.method, req.responseBody);
-          const functionName = buildFunctionName(protocol, action, req.method, verb);
-          endpointMap.set(key, {
-            method: req.method,
-            path: paramPath,
-            rawPaths: [req.path],
-            queryParams: req.queryParams,
-            headers: endpointHeaders,
-            requestBody: req.requestBody,
-            responseStatus: req.responseStatus,
-            responseBody: req.responseBody,
-            triggeredAtStep: req.triggeredAtStep,
-            curl: buildCurl(req.method, req.url, endpointHeaders, auth, req.requestBody),
-            protocol,
-            action,
-            verb,
-            functionName
-          });
-        } else {
-          const existing = endpointMap.get(key);
-          if (!existing)
-            continue;
-          if (!existing.rawPaths.includes(req.path)) {
-            existing.rawPaths.push(req.path);
-          }
+  }
+  return auth;
+}
+function splitHeaders(headers) {
+  const endpointHeaders = {};
+  for (const [key, value] of Object.entries(headers)) {
+    const lower = key.toLowerCase();
+    if (BROWSER_NOISE_HEADERS.has(lower))
+      continue;
+    if (isAuthHeader(key))
+      continue;
+    if (lower === "user-agent")
+      continue;
+    endpointHeaders[key] = value;
+  }
+  return endpointHeaders;
+}
+function buildCapturedApi(requests) {
+  const byDomain = new Map;
+  for (const req of requests) {
+    try {
+      const host = new URL(req.url).origin;
+      if (!byDomain.has(host))
+        byDomain.set(host, []);
+      byDomain.get(host)?.push(req);
+    } catch {}
+  }
+  const apis = [];
+  for (const [baseUrl, domainRequests] of byDomain) {
+    const auth = extractAuth(domainRequests);
+    const endpointMap = new Map;
+    for (const req of domainRequests) {
+      const paramPath = parameterizePath(req.path);
+      const { protocol, action } = classifyRequest(req);
+      const key = `${protocol}:${action}`;
+      const endpointHeaders = splitHeaders(req.requestHeaders);
+      if (!endpointMap.has(key)) {
+        const verb = inferVerb(protocol, action, req.method, req.responseBody);
+        const functionName = buildFunctionName(protocol, action, req.method, verb);
+        endpointMap.set(key, {
+          method: req.method,
+          path: paramPath,
+          rawPaths: [req.path],
+          queryParams: req.queryParams,
+          headers: endpointHeaders,
+          requestBody: req.requestBody,
+          responseStatus: req.responseStatus,
+          responseBody: req.responseBody,
+          triggeredAtStep: req.triggeredAtStep,
+          curl: buildCurl(req.method, req.url, endpointHeaders, auth, req.requestBody),
+          protocol,
+          action,
+          verb,
+          functionName
+        });
+      } else {
+        const existing = endpointMap.get(key);
+        if (!existing)
+          continue;
+        if (!existing.rawPaths.includes(req.path)) {
+          existing.rawPaths.push(req.path);
         }
       }
-      const domain = new URL(baseUrl).hostname.replace(/\./g, "_");
-      apis.push({
-        domain,
-        baseUrl,
-        auth,
-        endpoints: Array.from(endpointMap.values()).sort((a, b) => a.triggeredAtStep - b.triggeredAtStep),
-        capturedAt: new Date().toISOString()
-      });
     }
-    return apis.sort((a, b) => b.endpoints.length - a.endpoints.length);
+    const domain = new URL(baseUrl).hostname.replace(/\./g, "_");
+    apis.push({
+      domain,
+      baseUrl,
+      auth,
+      endpoints: Array.from(endpointMap.values()).sort((a, b) => a.triggeredAtStep - b.triggeredAtStep),
+      capturedAt: new Date().toISOString()
+    });
   }
+  return apis.sort((a, b) => b.endpoints.length - a.endpoints.length);
 }
 var SKIP_RESOURCE_TYPES, SKIP_EXTENSIONS, BROWSER_NOISE_HEADERS, AUTH_HEADER_PATTERNS, ID_PATTERNS;
 var init_api_capture = __esm(() => {
@@ -4623,6 +4831,57 @@ var init_tab_tracker = __esm(() => {
   log15 = createLogger("tabs");
 });
 
+// src/lib/knowledge/component-map.ts
+function anchorsPath(domain) {
+  return import_path9.default.join(getKnowledgeDir(), `${sanitizeDomain(domain)}.anchors.json`);
+}
+function loadComponentMap(domain) {
+  const norm = normalizeDomain(domain);
+  try {
+    const raw = import_fs10.default.readFileSync(anchorsPath(norm), "utf8");
+    const parsed = JSON.parse(raw);
+    return {
+      domain: parsed.domain || norm,
+      anchors: parsed.anchors || {},
+      quirks: Array.isArray(parsed.quirks) ? parsed.quirks : []
+    };
+  } catch {
+    return { domain: norm, anchors: {}, quirks: [] };
+  }
+}
+function loadAnchors(domain) {
+  const map = new Map;
+  const cm = loadComponentMap(domain);
+  for (const [name, a] of Object.entries(cm.anchors))
+    map.set(name, a);
+  return map;
+}
+function write(cm) {
+  import_fs10.default.mkdirSync(getKnowledgeDir(), { recursive: true });
+  import_fs10.default.writeFileSync(anchorsPath(cm.domain), JSON.stringify(cm, null, 2), "utf8");
+}
+function recordAnchorResult(domain, name, ok, now) {
+  try {
+    const cm = loadComponentMap(domain);
+    const a = cm.anchors[name];
+    if (!a)
+      return;
+    if (ok) {
+      a.uses += 1;
+      a.lastVerified = now;
+    } else {
+      a.fails += 1;
+    }
+    write(cm);
+  } catch {}
+}
+var import_fs10, import_path9;
+var init_component_map = __esm(() => {
+  init_knowledge();
+  import_fs10 = __toESM(require("fs"));
+  import_path9 = __toESM(require("path"));
+});
+
 // src/lib/pipeline.ts
 function safePageUrl(page) {
   try {
@@ -4690,6 +4949,19 @@ class PipelineRunner {
     const continueOnError = opts.continueOnError ?? false;
     const results = [];
     const obstacles = [];
+    const navStep = pipeline.steps.find((s) => s.type === "navigate");
+    try {
+      const host = new URL(navStep?.url || safePageUrl(initialPage) || "http://x").hostname;
+      if (host && host !== "x") {
+        this.ctx.anchors = loadAnchors(host);
+        this.ctx.anchorDomain = host;
+      }
+    } catch {}
+    const recordAnchor = (step, ok) => {
+      const name = anchorNameOf(step.selector);
+      if (name && this.ctx.anchorDomain)
+        recordAnchorResult(this.ctx.anchorDomain, name, ok, new Date().toISOString());
+    };
     const capture = opts.captureApi ? new ApiCapture(initialPage) : null;
     if (capture)
       capture.start();
@@ -4719,6 +4991,7 @@ class PipelineRunner {
         const pageState = await capturePageState(tracker.active(), this.ctx, { screenshot: true });
         stepResult = failedStepResult(step, asError.message, Date.now() - startTime, i);
         results.push(stepResult);
+        recordAnchor(step, false);
         return {
           ok: false,
           completedSteps: i,
@@ -4739,6 +5012,7 @@ class PipelineRunner {
           capturedApi: await finishCapture()
         };
       }
+      recordAnchor(step, true);
       const canOpenTab = step.type === "click" || step.type === "human-click";
       const currentPageNavigated = safePageUrl(page) !== urlBefore;
       if (canOpenTab && !currentPageNavigated) {
@@ -4844,6 +5118,7 @@ var init_pipeline = __esm(() => {
   init_api_capture();
   init_tab_tracker();
   init_constants();
+  init_component_map();
 });
 
 // src/lib/block-detection.ts
@@ -5004,10 +5279,3477 @@ var init_extract_from_run = __esm(() => {
   init_knowledge();
 });
 
+// node_modules/ws/lib/constants.js
+var require_constants = __commonJS((exports2, module2) => {
+  var BINARY_TYPES = ["nodebuffer", "arraybuffer", "fragments"];
+  var hasBlob = typeof Blob !== "undefined";
+  if (hasBlob)
+    BINARY_TYPES.push("blob");
+  module2.exports = {
+    BINARY_TYPES,
+    CLOSE_TIMEOUT: 30000,
+    EMPTY_BUFFER: Buffer.alloc(0),
+    GUID: "258EAFA5-E914-47DA-95CA-C5AB0DC85B11",
+    hasBlob,
+    kForOnEventAttribute: Symbol("kIsForOnEventAttribute"),
+    kListener: Symbol("kListener"),
+    kStatusCode: Symbol("status-code"),
+    kWebSocket: Symbol("websocket"),
+    NOOP: () => {}
+  };
+});
+
+// node_modules/ws/lib/buffer-util.js
+var require_buffer_util = __commonJS((exports2, module2) => {
+  var { EMPTY_BUFFER } = require_constants();
+  var FastBuffer = Buffer[Symbol.species];
+  function concat(list, totalLength) {
+    if (list.length === 0)
+      return EMPTY_BUFFER;
+    if (list.length === 1)
+      return list[0];
+    const target = Buffer.allocUnsafe(totalLength);
+    let offset = 0;
+    for (let i = 0;i < list.length; i++) {
+      const buf = list[i];
+      target.set(buf, offset);
+      offset += buf.length;
+    }
+    if (offset < totalLength) {
+      return new FastBuffer(target.buffer, target.byteOffset, offset);
+    }
+    return target;
+  }
+  function _mask(source, mask, output, offset, length) {
+    for (let i = 0;i < length; i++) {
+      output[offset + i] = source[i] ^ mask[i & 3];
+    }
+  }
+  function _unmask(buffer, mask) {
+    for (let i = 0;i < buffer.length; i++) {
+      buffer[i] ^= mask[i & 3];
+    }
+  }
+  function toArrayBuffer(buf) {
+    if (buf.length === buf.buffer.byteLength) {
+      return buf.buffer;
+    }
+    return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.length);
+  }
+  function toBuffer(data) {
+    toBuffer.readOnly = true;
+    if (Buffer.isBuffer(data))
+      return data;
+    let buf;
+    if (data instanceof ArrayBuffer) {
+      buf = new FastBuffer(data);
+    } else if (ArrayBuffer.isView(data)) {
+      buf = new FastBuffer(data.buffer, data.byteOffset, data.byteLength);
+    } else {
+      buf = Buffer.from(data);
+      toBuffer.readOnly = false;
+    }
+    return buf;
+  }
+  module2.exports = {
+    concat,
+    mask: _mask,
+    toArrayBuffer,
+    toBuffer,
+    unmask: _unmask
+  };
+  if (!process.env.WS_NO_BUFFER_UTIL) {
+    try {
+      const bufferUtil = (()=>{throw new Error("Cannot require module "+"bufferutil");})();
+      module2.exports.mask = function(source, mask, output, offset, length) {
+        if (length < 48)
+          _mask(source, mask, output, offset, length);
+        else
+          bufferUtil.mask(source, mask, output, offset, length);
+      };
+      module2.exports.unmask = function(buffer, mask) {
+        if (buffer.length < 32)
+          _unmask(buffer, mask);
+        else
+          bufferUtil.unmask(buffer, mask);
+      };
+    } catch (e) {}
+  }
+});
+
+// node_modules/ws/lib/limiter.js
+var require_limiter = __commonJS((exports2, module2) => {
+  var kDone = Symbol("kDone");
+  var kRun = Symbol("kRun");
+
+  class Limiter {
+    constructor(concurrency) {
+      this[kDone] = () => {
+        this.pending--;
+        this[kRun]();
+      };
+      this.concurrency = concurrency || Infinity;
+      this.jobs = [];
+      this.pending = 0;
+    }
+    add(job) {
+      this.jobs.push(job);
+      this[kRun]();
+    }
+    [kRun]() {
+      if (this.pending === this.concurrency)
+        return;
+      if (this.jobs.length) {
+        const job = this.jobs.shift();
+        this.pending++;
+        job(this[kDone]);
+      }
+    }
+  }
+  module2.exports = Limiter;
+});
+
+// node_modules/ws/lib/permessage-deflate.js
+var require_permessage_deflate = __commonJS((exports2, module2) => {
+  var zlib = require("zlib");
+  var bufferUtil = require_buffer_util();
+  var Limiter = require_limiter();
+  var { kStatusCode } = require_constants();
+  var FastBuffer = Buffer[Symbol.species];
+  var TRAILER = Buffer.from([0, 0, 255, 255]);
+  var kPerMessageDeflate = Symbol("permessage-deflate");
+  var kTotalLength = Symbol("total-length");
+  var kCallback = Symbol("callback");
+  var kBuffers = Symbol("buffers");
+  var kError = Symbol("error");
+  var zlibLimiter;
+
+  class PerMessageDeflate {
+    constructor(options) {
+      this._options = options || {};
+      this._threshold = this._options.threshold !== undefined ? this._options.threshold : 1024;
+      this._maxPayload = this._options.maxPayload | 0;
+      this._isServer = !!this._options.isServer;
+      this._deflate = null;
+      this._inflate = null;
+      this.params = null;
+      if (!zlibLimiter) {
+        const concurrency = this._options.concurrencyLimit !== undefined ? this._options.concurrencyLimit : 10;
+        zlibLimiter = new Limiter(concurrency);
+      }
+    }
+    static get extensionName() {
+      return "permessage-deflate";
+    }
+    offer() {
+      const params = {};
+      if (this._options.serverNoContextTakeover) {
+        params.server_no_context_takeover = true;
+      }
+      if (this._options.clientNoContextTakeover) {
+        params.client_no_context_takeover = true;
+      }
+      if (this._options.serverMaxWindowBits) {
+        params.server_max_window_bits = this._options.serverMaxWindowBits;
+      }
+      if (this._options.clientMaxWindowBits) {
+        params.client_max_window_bits = this._options.clientMaxWindowBits;
+      } else if (this._options.clientMaxWindowBits == null) {
+        params.client_max_window_bits = true;
+      }
+      return params;
+    }
+    accept(configurations) {
+      configurations = this.normalizeParams(configurations);
+      this.params = this._isServer ? this.acceptAsServer(configurations) : this.acceptAsClient(configurations);
+      return this.params;
+    }
+    cleanup() {
+      if (this._inflate) {
+        this._inflate.close();
+        this._inflate = null;
+      }
+      if (this._deflate) {
+        const callback = this._deflate[kCallback];
+        this._deflate.close();
+        this._deflate = null;
+        if (callback) {
+          callback(new Error("The deflate stream was closed while data was being processed"));
+        }
+      }
+    }
+    acceptAsServer(offers) {
+      const opts = this._options;
+      const accepted = offers.find((params) => {
+        if (opts.serverNoContextTakeover === false && params.server_no_context_takeover || params.server_max_window_bits && (opts.serverMaxWindowBits === false || typeof opts.serverMaxWindowBits === "number" && opts.serverMaxWindowBits > params.server_max_window_bits) || typeof opts.clientMaxWindowBits === "number" && (typeof params.client_max_window_bits === "number" ? opts.clientMaxWindowBits > params.client_max_window_bits : !params.client_max_window_bits)) {
+          return false;
+        }
+        return true;
+      });
+      if (!accepted) {
+        throw new Error("None of the extension offers can be accepted");
+      }
+      if (opts.serverNoContextTakeover) {
+        accepted.server_no_context_takeover = true;
+      }
+      if (opts.clientNoContextTakeover) {
+        accepted.client_no_context_takeover = true;
+      }
+      if (typeof opts.serverMaxWindowBits === "number") {
+        accepted.server_max_window_bits = opts.serverMaxWindowBits;
+      }
+      if (typeof opts.clientMaxWindowBits === "number") {
+        accepted.client_max_window_bits = opts.clientMaxWindowBits;
+      } else if (accepted.client_max_window_bits === true || opts.clientMaxWindowBits === false) {
+        delete accepted.client_max_window_bits;
+      }
+      return accepted;
+    }
+    acceptAsClient(response) {
+      const params = response[0];
+      if (this._options.clientNoContextTakeover === false && params.client_no_context_takeover) {
+        throw new Error('Unexpected parameter "client_no_context_takeover"');
+      }
+      if (!params.client_max_window_bits) {
+        if (typeof this._options.clientMaxWindowBits === "number") {
+          params.client_max_window_bits = this._options.clientMaxWindowBits;
+        }
+      } else if (this._options.clientMaxWindowBits === false || typeof this._options.clientMaxWindowBits === "number" && params.client_max_window_bits > this._options.clientMaxWindowBits) {
+        throw new Error('Unexpected or invalid parameter "client_max_window_bits"');
+      }
+      return params;
+    }
+    normalizeParams(configurations) {
+      configurations.forEach((params) => {
+        Object.keys(params).forEach((key) => {
+          let value = params[key];
+          if (value.length > 1) {
+            throw new Error(`Parameter "${key}" must have only a single value`);
+          }
+          value = value[0];
+          if (key === "client_max_window_bits") {
+            if (value !== true) {
+              const num = +value;
+              if (!Number.isInteger(num) || num < 8 || num > 15) {
+                throw new TypeError(`Invalid value for parameter "${key}": ${value}`);
+              }
+              value = num;
+            } else if (!this._isServer) {
+              throw new TypeError(`Invalid value for parameter "${key}": ${value}`);
+            }
+          } else if (key === "server_max_window_bits") {
+            const num = +value;
+            if (!Number.isInteger(num) || num < 8 || num > 15) {
+              throw new TypeError(`Invalid value for parameter "${key}": ${value}`);
+            }
+            value = num;
+          } else if (key === "client_no_context_takeover" || key === "server_no_context_takeover") {
+            if (value !== true) {
+              throw new TypeError(`Invalid value for parameter "${key}": ${value}`);
+            }
+          } else {
+            throw new Error(`Unknown parameter "${key}"`);
+          }
+          params[key] = value;
+        });
+      });
+      return configurations;
+    }
+    decompress(data, fin, callback) {
+      zlibLimiter.add((done) => {
+        this._decompress(data, fin, (err, result) => {
+          done();
+          callback(err, result);
+        });
+      });
+    }
+    compress(data, fin, callback) {
+      zlibLimiter.add((done) => {
+        this._compress(data, fin, (err, result) => {
+          done();
+          callback(err, result);
+        });
+      });
+    }
+    _decompress(data, fin, callback) {
+      const endpoint = this._isServer ? "client" : "server";
+      if (!this._inflate) {
+        const key = `${endpoint}_max_window_bits`;
+        const windowBits = typeof this.params[key] !== "number" ? zlib.Z_DEFAULT_WINDOWBITS : this.params[key];
+        this._inflate = zlib.createInflateRaw({
+          ...this._options.zlibInflateOptions,
+          windowBits
+        });
+        this._inflate[kPerMessageDeflate] = this;
+        this._inflate[kTotalLength] = 0;
+        this._inflate[kBuffers] = [];
+        this._inflate.on("error", inflateOnError);
+        this._inflate.on("data", inflateOnData);
+      }
+      this._inflate[kCallback] = callback;
+      this._inflate.write(data);
+      if (fin)
+        this._inflate.write(TRAILER);
+      this._inflate.flush(() => {
+        const err = this._inflate[kError];
+        if (err) {
+          this._inflate.close();
+          this._inflate = null;
+          callback(err);
+          return;
+        }
+        const data2 = bufferUtil.concat(this._inflate[kBuffers], this._inflate[kTotalLength]);
+        if (this._inflate._readableState.endEmitted) {
+          this._inflate.close();
+          this._inflate = null;
+        } else {
+          this._inflate[kTotalLength] = 0;
+          this._inflate[kBuffers] = [];
+          if (fin && this.params[`${endpoint}_no_context_takeover`]) {
+            this._inflate.reset();
+          }
+        }
+        callback(null, data2);
+      });
+    }
+    _compress(data, fin, callback) {
+      const endpoint = this._isServer ? "server" : "client";
+      if (!this._deflate) {
+        const key = `${endpoint}_max_window_bits`;
+        const windowBits = typeof this.params[key] !== "number" ? zlib.Z_DEFAULT_WINDOWBITS : this.params[key];
+        this._deflate = zlib.createDeflateRaw({
+          ...this._options.zlibDeflateOptions,
+          windowBits
+        });
+        this._deflate[kTotalLength] = 0;
+        this._deflate[kBuffers] = [];
+        this._deflate.on("data", deflateOnData);
+      }
+      this._deflate[kCallback] = callback;
+      this._deflate.write(data);
+      this._deflate.flush(zlib.Z_SYNC_FLUSH, () => {
+        if (!this._deflate) {
+          return;
+        }
+        let data2 = bufferUtil.concat(this._deflate[kBuffers], this._deflate[kTotalLength]);
+        if (fin) {
+          data2 = new FastBuffer(data2.buffer, data2.byteOffset, data2.length - 4);
+        }
+        this._deflate[kCallback] = null;
+        this._deflate[kTotalLength] = 0;
+        this._deflate[kBuffers] = [];
+        if (fin && this.params[`${endpoint}_no_context_takeover`]) {
+          this._deflate.reset();
+        }
+        callback(null, data2);
+      });
+    }
+  }
+  module2.exports = PerMessageDeflate;
+  function deflateOnData(chunk) {
+    this[kBuffers].push(chunk);
+    this[kTotalLength] += chunk.length;
+  }
+  function inflateOnData(chunk) {
+    this[kTotalLength] += chunk.length;
+    if (this[kPerMessageDeflate]._maxPayload < 1 || this[kTotalLength] <= this[kPerMessageDeflate]._maxPayload) {
+      this[kBuffers].push(chunk);
+      return;
+    }
+    this[kError] = new RangeError("Max payload size exceeded");
+    this[kError].code = "WS_ERR_UNSUPPORTED_MESSAGE_LENGTH";
+    this[kError][kStatusCode] = 1009;
+    this.removeListener("data", inflateOnData);
+    this.reset();
+  }
+  function inflateOnError(err) {
+    this[kPerMessageDeflate]._inflate = null;
+    if (this[kError]) {
+      this[kCallback](this[kError]);
+      return;
+    }
+    err[kStatusCode] = 1007;
+    this[kCallback](err);
+  }
+});
+
+// node_modules/ws/lib/validation.js
+var require_validation = __commonJS((exports2, module2) => {
+  var { isUtf8 } = require("buffer");
+  var { hasBlob } = require_constants();
+  var tokenChars = [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    1,
+    1,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    1,
+    1,
+    0,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    0,
+    0,
+    0,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    0,
+    1,
+    0,
+    1,
+    0
+  ];
+  function isValidStatusCode(code) {
+    return code >= 1000 && code <= 1014 && code !== 1004 && code !== 1005 && code !== 1006 || code >= 3000 && code <= 4999;
+  }
+  function _isValidUTF8(buf) {
+    const len = buf.length;
+    let i = 0;
+    while (i < len) {
+      if ((buf[i] & 128) === 0) {
+        i++;
+      } else if ((buf[i] & 224) === 192) {
+        if (i + 1 === len || (buf[i + 1] & 192) !== 128 || (buf[i] & 254) === 192) {
+          return false;
+        }
+        i += 2;
+      } else if ((buf[i] & 240) === 224) {
+        if (i + 2 >= len || (buf[i + 1] & 192) !== 128 || (buf[i + 2] & 192) !== 128 || buf[i] === 224 && (buf[i + 1] & 224) === 128 || buf[i] === 237 && (buf[i + 1] & 224) === 160) {
+          return false;
+        }
+        i += 3;
+      } else if ((buf[i] & 248) === 240) {
+        if (i + 3 >= len || (buf[i + 1] & 192) !== 128 || (buf[i + 2] & 192) !== 128 || (buf[i + 3] & 192) !== 128 || buf[i] === 240 && (buf[i + 1] & 240) === 128 || buf[i] === 244 && buf[i + 1] > 143 || buf[i] > 244) {
+          return false;
+        }
+        i += 4;
+      } else {
+        return false;
+      }
+    }
+    return true;
+  }
+  function isBlob(value) {
+    return hasBlob && typeof value === "object" && typeof value.arrayBuffer === "function" && typeof value.type === "string" && typeof value.stream === "function" && (value[Symbol.toStringTag] === "Blob" || value[Symbol.toStringTag] === "File");
+  }
+  module2.exports = {
+    isBlob,
+    isValidStatusCode,
+    isValidUTF8: _isValidUTF8,
+    tokenChars
+  };
+  if (isUtf8) {
+    module2.exports.isValidUTF8 = function(buf) {
+      return buf.length < 24 ? _isValidUTF8(buf) : isUtf8(buf);
+    };
+  } else if (!process.env.WS_NO_UTF_8_VALIDATE) {
+    try {
+      const isValidUTF8 = (()=>{throw new Error("Cannot require module "+"utf-8-validate");})();
+      module2.exports.isValidUTF8 = function(buf) {
+        return buf.length < 32 ? _isValidUTF8(buf) : isValidUTF8(buf);
+      };
+    } catch (e) {}
+  }
+});
+
+// node_modules/ws/lib/receiver.js
+var require_receiver = __commonJS((exports2, module2) => {
+  var { Writable } = require("stream");
+  var PerMessageDeflate = require_permessage_deflate();
+  var {
+    BINARY_TYPES,
+    EMPTY_BUFFER,
+    kStatusCode,
+    kWebSocket
+  } = require_constants();
+  var { concat, toArrayBuffer, unmask } = require_buffer_util();
+  var { isValidStatusCode, isValidUTF8 } = require_validation();
+  var FastBuffer = Buffer[Symbol.species];
+  var GET_INFO = 0;
+  var GET_PAYLOAD_LENGTH_16 = 1;
+  var GET_PAYLOAD_LENGTH_64 = 2;
+  var GET_MASK = 3;
+  var GET_DATA = 4;
+  var INFLATING = 5;
+  var DEFER_EVENT = 6;
+
+  class Receiver extends Writable {
+    constructor(options = {}) {
+      super();
+      this._allowSynchronousEvents = options.allowSynchronousEvents !== undefined ? options.allowSynchronousEvents : true;
+      this._binaryType = options.binaryType || BINARY_TYPES[0];
+      this._extensions = options.extensions || {};
+      this._isServer = !!options.isServer;
+      this._maxBufferedChunks = options.maxBufferedChunks | 0;
+      this._maxFragments = options.maxFragments | 0;
+      this._maxPayload = options.maxPayload | 0;
+      this._skipUTF8Validation = !!options.skipUTF8Validation;
+      this[kWebSocket] = undefined;
+      this._bufferedBytes = 0;
+      this._buffers = [];
+      this._compressed = false;
+      this._payloadLength = 0;
+      this._mask = undefined;
+      this._fragmented = 0;
+      this._masked = false;
+      this._fin = false;
+      this._opcode = 0;
+      this._totalPayloadLength = 0;
+      this._messageLength = 0;
+      this._numFragments = 0;
+      this._fragments = [];
+      this._errored = false;
+      this._loop = false;
+      this._state = GET_INFO;
+    }
+    _write(chunk, encoding, cb) {
+      if (this._opcode === 8 && this._state == GET_INFO)
+        return cb();
+      if (this._maxBufferedChunks > 0 && this._buffers.length >= this._maxBufferedChunks) {
+        cb(this.createError(RangeError, "Too many buffered chunks", false, 1008, "WS_ERR_TOO_MANY_BUFFERED_PARTS"));
+        return;
+      }
+      this._bufferedBytes += chunk.length;
+      this._buffers.push(chunk);
+      this.startLoop(cb);
+    }
+    consume(n) {
+      this._bufferedBytes -= n;
+      if (n === this._buffers[0].length)
+        return this._buffers.shift();
+      if (n < this._buffers[0].length) {
+        const buf = this._buffers[0];
+        this._buffers[0] = new FastBuffer(buf.buffer, buf.byteOffset + n, buf.length - n);
+        return new FastBuffer(buf.buffer, buf.byteOffset, n);
+      }
+      const dst = Buffer.allocUnsafe(n);
+      do {
+        const buf = this._buffers[0];
+        const offset = dst.length - n;
+        if (n >= buf.length) {
+          dst.set(this._buffers.shift(), offset);
+        } else {
+          dst.set(new Uint8Array(buf.buffer, buf.byteOffset, n), offset);
+          this._buffers[0] = new FastBuffer(buf.buffer, buf.byteOffset + n, buf.length - n);
+        }
+        n -= buf.length;
+      } while (n > 0);
+      return dst;
+    }
+    startLoop(cb) {
+      this._loop = true;
+      do {
+        switch (this._state) {
+          case GET_INFO:
+            this.getInfo(cb);
+            break;
+          case GET_PAYLOAD_LENGTH_16:
+            this.getPayloadLength16(cb);
+            break;
+          case GET_PAYLOAD_LENGTH_64:
+            this.getPayloadLength64(cb);
+            break;
+          case GET_MASK:
+            this.getMask();
+            break;
+          case GET_DATA:
+            this.getData(cb);
+            break;
+          case INFLATING:
+          case DEFER_EVENT:
+            this._loop = false;
+            return;
+        }
+      } while (this._loop);
+      if (!this._errored)
+        cb();
+    }
+    getInfo(cb) {
+      if (this._bufferedBytes < 2) {
+        this._loop = false;
+        return;
+      }
+      const buf = this.consume(2);
+      if ((buf[0] & 48) !== 0) {
+        const error = this.createError(RangeError, "RSV2 and RSV3 must be clear", true, 1002, "WS_ERR_UNEXPECTED_RSV_2_3");
+        cb(error);
+        return;
+      }
+      const compressed = (buf[0] & 64) === 64;
+      if (compressed && !this._extensions[PerMessageDeflate.extensionName]) {
+        const error = this.createError(RangeError, "RSV1 must be clear", true, 1002, "WS_ERR_UNEXPECTED_RSV_1");
+        cb(error);
+        return;
+      }
+      this._fin = (buf[0] & 128) === 128;
+      this._opcode = buf[0] & 15;
+      this._payloadLength = buf[1] & 127;
+      if (this._opcode === 0) {
+        if (compressed) {
+          const error = this.createError(RangeError, "RSV1 must be clear", true, 1002, "WS_ERR_UNEXPECTED_RSV_1");
+          cb(error);
+          return;
+        }
+        if (!this._fragmented) {
+          const error = this.createError(RangeError, "invalid opcode 0", true, 1002, "WS_ERR_INVALID_OPCODE");
+          cb(error);
+          return;
+        }
+        this._opcode = this._fragmented;
+      } else if (this._opcode === 1 || this._opcode === 2) {
+        if (this._fragmented) {
+          const error = this.createError(RangeError, `invalid opcode ${this._opcode}`, true, 1002, "WS_ERR_INVALID_OPCODE");
+          cb(error);
+          return;
+        }
+        this._compressed = compressed;
+      } else if (this._opcode > 7 && this._opcode < 11) {
+        if (!this._fin) {
+          const error = this.createError(RangeError, "FIN must be set", true, 1002, "WS_ERR_EXPECTED_FIN");
+          cb(error);
+          return;
+        }
+        if (compressed) {
+          const error = this.createError(RangeError, "RSV1 must be clear", true, 1002, "WS_ERR_UNEXPECTED_RSV_1");
+          cb(error);
+          return;
+        }
+        if (this._payloadLength > 125 || this._opcode === 8 && this._payloadLength === 1) {
+          const error = this.createError(RangeError, `invalid payload length ${this._payloadLength}`, true, 1002, "WS_ERR_INVALID_CONTROL_PAYLOAD_LENGTH");
+          cb(error);
+          return;
+        }
+      } else {
+        const error = this.createError(RangeError, `invalid opcode ${this._opcode}`, true, 1002, "WS_ERR_INVALID_OPCODE");
+        cb(error);
+        return;
+      }
+      if (!this._fin && !this._fragmented)
+        this._fragmented = this._opcode;
+      this._masked = (buf[1] & 128) === 128;
+      if (this._isServer) {
+        if (!this._masked) {
+          const error = this.createError(RangeError, "MASK must be set", true, 1002, "WS_ERR_EXPECTED_MASK");
+          cb(error);
+          return;
+        }
+      } else if (this._masked) {
+        const error = this.createError(RangeError, "MASK must be clear", true, 1002, "WS_ERR_UNEXPECTED_MASK");
+        cb(error);
+        return;
+      }
+      if (this._payloadLength === 126)
+        this._state = GET_PAYLOAD_LENGTH_16;
+      else if (this._payloadLength === 127)
+        this._state = GET_PAYLOAD_LENGTH_64;
+      else
+        this.haveLength(cb);
+    }
+    getPayloadLength16(cb) {
+      if (this._bufferedBytes < 2) {
+        this._loop = false;
+        return;
+      }
+      this._payloadLength = this.consume(2).readUInt16BE(0);
+      this.haveLength(cb);
+    }
+    getPayloadLength64(cb) {
+      if (this._bufferedBytes < 8) {
+        this._loop = false;
+        return;
+      }
+      const buf = this.consume(8);
+      const num = buf.readUInt32BE(0);
+      if (num > Math.pow(2, 53 - 32) - 1) {
+        const error = this.createError(RangeError, "Unsupported WebSocket frame: payload length > 2^53 - 1", false, 1009, "WS_ERR_UNSUPPORTED_DATA_PAYLOAD_LENGTH");
+        cb(error);
+        return;
+      }
+      this._payloadLength = num * Math.pow(2, 32) + buf.readUInt32BE(4);
+      this.haveLength(cb);
+    }
+    haveLength(cb) {
+      if (this._payloadLength && this._opcode < 8) {
+        this._totalPayloadLength += this._payloadLength;
+        if (this._totalPayloadLength > this._maxPayload && this._maxPayload > 0) {
+          const error = this.createError(RangeError, "Max payload size exceeded", false, 1009, "WS_ERR_UNSUPPORTED_MESSAGE_LENGTH");
+          cb(error);
+          return;
+        }
+      }
+      if (this._masked)
+        this._state = GET_MASK;
+      else
+        this._state = GET_DATA;
+    }
+    getMask() {
+      if (this._bufferedBytes < 4) {
+        this._loop = false;
+        return;
+      }
+      this._mask = this.consume(4);
+      this._state = GET_DATA;
+    }
+    getData(cb) {
+      let data = EMPTY_BUFFER;
+      if (this._payloadLength) {
+        if (this._bufferedBytes < this._payloadLength) {
+          this._loop = false;
+          return;
+        }
+        data = this.consume(this._payloadLength);
+        if (this._masked && (this._mask[0] | this._mask[1] | this._mask[2] | this._mask[3]) !== 0) {
+          unmask(data, this._mask);
+        }
+      }
+      if (this._opcode > 7) {
+        this.controlMessage(data, cb);
+        return;
+      }
+      if (this._maxFragments > 0 && ++this._numFragments > this._maxFragments) {
+        const error = this.createError(RangeError, "Too many message fragments", false, 1008, "WS_ERR_TOO_MANY_BUFFERED_PARTS");
+        cb(error);
+        return;
+      }
+      if (this._compressed) {
+        this._state = INFLATING;
+        this.decompress(data, cb);
+        return;
+      }
+      if (data.length) {
+        this._messageLength = this._totalPayloadLength;
+        this._fragments.push(data);
+      }
+      this.dataMessage(cb);
+    }
+    decompress(data, cb) {
+      const perMessageDeflate = this._extensions[PerMessageDeflate.extensionName];
+      perMessageDeflate.decompress(data, this._fin, (err, buf) => {
+        if (err)
+          return cb(err);
+        if (buf.length) {
+          this._messageLength += buf.length;
+          if (this._messageLength > this._maxPayload && this._maxPayload > 0) {
+            const error = this.createError(RangeError, "Max payload size exceeded", false, 1009, "WS_ERR_UNSUPPORTED_MESSAGE_LENGTH");
+            cb(error);
+            return;
+          }
+          this._fragments.push(buf);
+        }
+        this.dataMessage(cb);
+        if (this._state === GET_INFO)
+          this.startLoop(cb);
+      });
+    }
+    dataMessage(cb) {
+      if (!this._fin) {
+        this._state = GET_INFO;
+        return;
+      }
+      const messageLength = this._messageLength;
+      const fragments = this._fragments;
+      this._totalPayloadLength = 0;
+      this._messageLength = 0;
+      this._fragmented = 0;
+      this._numFragments = 0;
+      this._fragments = [];
+      if (this._opcode === 2) {
+        let data;
+        if (this._binaryType === "nodebuffer") {
+          data = concat(fragments, messageLength);
+        } else if (this._binaryType === "arraybuffer") {
+          data = toArrayBuffer(concat(fragments, messageLength));
+        } else if (this._binaryType === "blob") {
+          data = new Blob(fragments);
+        } else {
+          data = fragments;
+        }
+        if (this._allowSynchronousEvents) {
+          this.emit("message", data, true);
+          this._state = GET_INFO;
+        } else {
+          this._state = DEFER_EVENT;
+          setImmediate(() => {
+            this.emit("message", data, true);
+            this._state = GET_INFO;
+            this.startLoop(cb);
+          });
+        }
+      } else {
+        const buf = concat(fragments, messageLength);
+        if (!this._skipUTF8Validation && !isValidUTF8(buf)) {
+          const error = this.createError(Error, "invalid UTF-8 sequence", true, 1007, "WS_ERR_INVALID_UTF8");
+          cb(error);
+          return;
+        }
+        if (this._state === INFLATING || this._allowSynchronousEvents) {
+          this.emit("message", buf, false);
+          this._state = GET_INFO;
+        } else {
+          this._state = DEFER_EVENT;
+          setImmediate(() => {
+            this.emit("message", buf, false);
+            this._state = GET_INFO;
+            this.startLoop(cb);
+          });
+        }
+      }
+    }
+    controlMessage(data, cb) {
+      if (this._opcode === 8) {
+        if (data.length === 0) {
+          this._loop = false;
+          this.emit("conclude", 1005, EMPTY_BUFFER);
+          this.end();
+        } else {
+          const code = data.readUInt16BE(0);
+          if (!isValidStatusCode(code)) {
+            const error = this.createError(RangeError, `invalid status code ${code}`, true, 1002, "WS_ERR_INVALID_CLOSE_CODE");
+            cb(error);
+            return;
+          }
+          const buf = new FastBuffer(data.buffer, data.byteOffset + 2, data.length - 2);
+          if (!this._skipUTF8Validation && !isValidUTF8(buf)) {
+            const error = this.createError(Error, "invalid UTF-8 sequence", true, 1007, "WS_ERR_INVALID_UTF8");
+            cb(error);
+            return;
+          }
+          this._loop = false;
+          this.emit("conclude", code, buf);
+          this.end();
+        }
+        this._state = GET_INFO;
+        return;
+      }
+      if (this._allowSynchronousEvents) {
+        this.emit(this._opcode === 9 ? "ping" : "pong", data);
+        this._state = GET_INFO;
+      } else {
+        this._state = DEFER_EVENT;
+        setImmediate(() => {
+          this.emit(this._opcode === 9 ? "ping" : "pong", data);
+          this._state = GET_INFO;
+          this.startLoop(cb);
+        });
+      }
+    }
+    createError(ErrorCtor, message, prefix, statusCode, errorCode) {
+      this._loop = false;
+      this._errored = true;
+      const err = new ErrorCtor(prefix ? `Invalid WebSocket frame: ${message}` : message);
+      Error.captureStackTrace(err, this.createError);
+      err.code = errorCode;
+      err[kStatusCode] = statusCode;
+      return err;
+    }
+  }
+  module2.exports = Receiver;
+});
+
+// node_modules/ws/lib/sender.js
+var require_sender = __commonJS((exports2, module2) => {
+  var { Duplex } = require("stream");
+  var { randomFillSync } = require("crypto");
+  var {
+    types: { isUint8Array }
+  } = require("util");
+  var PerMessageDeflate = require_permessage_deflate();
+  var { EMPTY_BUFFER, kWebSocket, NOOP } = require_constants();
+  var { isBlob, isValidStatusCode } = require_validation();
+  var { mask: applyMask, toBuffer } = require_buffer_util();
+  var kByteLength = Symbol("kByteLength");
+  var maskBuffer = Buffer.alloc(4);
+  var RANDOM_POOL_SIZE = 8 * 1024;
+  var randomPool;
+  var randomPoolPointer = RANDOM_POOL_SIZE;
+  var DEFAULT = 0;
+  var DEFLATING = 1;
+  var GET_BLOB_DATA = 2;
+
+  class Sender {
+    constructor(socket, extensions, generateMask) {
+      this._extensions = extensions || {};
+      if (generateMask) {
+        this._generateMask = generateMask;
+        this._maskBuffer = Buffer.alloc(4);
+      }
+      this._socket = socket;
+      this._firstFragment = true;
+      this._compress = false;
+      this._bufferedBytes = 0;
+      this._queue = [];
+      this._state = DEFAULT;
+      this.onerror = NOOP;
+      this[kWebSocket] = undefined;
+    }
+    static frame(data, options) {
+      let mask;
+      let merge = false;
+      let offset = 2;
+      let skipMasking = false;
+      if (options.mask) {
+        mask = options.maskBuffer || maskBuffer;
+        if (options.generateMask) {
+          options.generateMask(mask);
+        } else {
+          if (randomPoolPointer === RANDOM_POOL_SIZE) {
+            if (randomPool === undefined) {
+              randomPool = Buffer.alloc(RANDOM_POOL_SIZE);
+            }
+            randomFillSync(randomPool, 0, RANDOM_POOL_SIZE);
+            randomPoolPointer = 0;
+          }
+          mask[0] = randomPool[randomPoolPointer++];
+          mask[1] = randomPool[randomPoolPointer++];
+          mask[2] = randomPool[randomPoolPointer++];
+          mask[3] = randomPool[randomPoolPointer++];
+        }
+        skipMasking = (mask[0] | mask[1] | mask[2] | mask[3]) === 0;
+        offset = 6;
+      }
+      let dataLength;
+      if (typeof data === "string") {
+        if ((!options.mask || skipMasking) && options[kByteLength] !== undefined) {
+          dataLength = options[kByteLength];
+        } else {
+          data = Buffer.from(data);
+          dataLength = data.length;
+        }
+      } else {
+        dataLength = data.length;
+        merge = options.mask && options.readOnly && !skipMasking;
+      }
+      let payloadLength = dataLength;
+      if (dataLength >= 65536) {
+        offset += 8;
+        payloadLength = 127;
+      } else if (dataLength > 125) {
+        offset += 2;
+        payloadLength = 126;
+      }
+      const target = Buffer.allocUnsafe(merge ? dataLength + offset : offset);
+      target[0] = options.fin ? options.opcode | 128 : options.opcode;
+      if (options.rsv1)
+        target[0] |= 64;
+      target[1] = payloadLength;
+      if (payloadLength === 126) {
+        target.writeUInt16BE(dataLength, 2);
+      } else if (payloadLength === 127) {
+        target[2] = target[3] = 0;
+        target.writeUIntBE(dataLength, 4, 6);
+      }
+      if (!options.mask)
+        return [target, data];
+      target[1] |= 128;
+      target[offset - 4] = mask[0];
+      target[offset - 3] = mask[1];
+      target[offset - 2] = mask[2];
+      target[offset - 1] = mask[3];
+      if (skipMasking)
+        return [target, data];
+      if (merge) {
+        applyMask(data, mask, target, offset, dataLength);
+        return [target];
+      }
+      applyMask(data, mask, data, 0, dataLength);
+      return [target, data];
+    }
+    close(code, data, mask, cb) {
+      let buf;
+      if (code === undefined) {
+        buf = EMPTY_BUFFER;
+      } else if (typeof code !== "number" || !isValidStatusCode(code)) {
+        throw new TypeError("First argument must be a valid error code number");
+      } else if (data === undefined || !data.length) {
+        buf = Buffer.allocUnsafe(2);
+        buf.writeUInt16BE(code, 0);
+      } else {
+        const length = Buffer.byteLength(data);
+        if (length > 123) {
+          throw new RangeError("The message must not be greater than 123 bytes");
+        }
+        buf = Buffer.allocUnsafe(2 + length);
+        buf.writeUInt16BE(code, 0);
+        if (typeof data === "string") {
+          buf.write(data, 2);
+        } else if (isUint8Array(data)) {
+          buf.set(data, 2);
+        } else {
+          throw new TypeError("Second argument must be a string or a Uint8Array");
+        }
+      }
+      const options = {
+        [kByteLength]: buf.length,
+        fin: true,
+        generateMask: this._generateMask,
+        mask,
+        maskBuffer: this._maskBuffer,
+        opcode: 8,
+        readOnly: false,
+        rsv1: false
+      };
+      if (this._state !== DEFAULT) {
+        this.enqueue([this.dispatch, buf, false, options, cb]);
+      } else {
+        this.sendFrame(Sender.frame(buf, options), cb);
+      }
+    }
+    ping(data, mask, cb) {
+      let byteLength;
+      let readOnly;
+      if (typeof data === "string") {
+        byteLength = Buffer.byteLength(data);
+        readOnly = false;
+      } else if (isBlob(data)) {
+        byteLength = data.size;
+        readOnly = false;
+      } else {
+        data = toBuffer(data);
+        byteLength = data.length;
+        readOnly = toBuffer.readOnly;
+      }
+      if (byteLength > 125) {
+        throw new RangeError("The data size must not be greater than 125 bytes");
+      }
+      const options = {
+        [kByteLength]: byteLength,
+        fin: true,
+        generateMask: this._generateMask,
+        mask,
+        maskBuffer: this._maskBuffer,
+        opcode: 9,
+        readOnly,
+        rsv1: false
+      };
+      if (isBlob(data)) {
+        if (this._state !== DEFAULT) {
+          this.enqueue([this.getBlobData, data, false, options, cb]);
+        } else {
+          this.getBlobData(data, false, options, cb);
+        }
+      } else if (this._state !== DEFAULT) {
+        this.enqueue([this.dispatch, data, false, options, cb]);
+      } else {
+        this.sendFrame(Sender.frame(data, options), cb);
+      }
+    }
+    pong(data, mask, cb) {
+      let byteLength;
+      let readOnly;
+      if (typeof data === "string") {
+        byteLength = Buffer.byteLength(data);
+        readOnly = false;
+      } else if (isBlob(data)) {
+        byteLength = data.size;
+        readOnly = false;
+      } else {
+        data = toBuffer(data);
+        byteLength = data.length;
+        readOnly = toBuffer.readOnly;
+      }
+      if (byteLength > 125) {
+        throw new RangeError("The data size must not be greater than 125 bytes");
+      }
+      const options = {
+        [kByteLength]: byteLength,
+        fin: true,
+        generateMask: this._generateMask,
+        mask,
+        maskBuffer: this._maskBuffer,
+        opcode: 10,
+        readOnly,
+        rsv1: false
+      };
+      if (isBlob(data)) {
+        if (this._state !== DEFAULT) {
+          this.enqueue([this.getBlobData, data, false, options, cb]);
+        } else {
+          this.getBlobData(data, false, options, cb);
+        }
+      } else if (this._state !== DEFAULT) {
+        this.enqueue([this.dispatch, data, false, options, cb]);
+      } else {
+        this.sendFrame(Sender.frame(data, options), cb);
+      }
+    }
+    send(data, options, cb) {
+      const perMessageDeflate = this._extensions[PerMessageDeflate.extensionName];
+      let opcode = options.binary ? 2 : 1;
+      let rsv1 = options.compress;
+      let byteLength;
+      let readOnly;
+      if (typeof data === "string") {
+        byteLength = Buffer.byteLength(data);
+        readOnly = false;
+      } else if (isBlob(data)) {
+        byteLength = data.size;
+        readOnly = false;
+      } else {
+        data = toBuffer(data);
+        byteLength = data.length;
+        readOnly = toBuffer.readOnly;
+      }
+      if (this._firstFragment) {
+        this._firstFragment = false;
+        if (rsv1 && perMessageDeflate && perMessageDeflate.params[perMessageDeflate._isServer ? "server_no_context_takeover" : "client_no_context_takeover"]) {
+          rsv1 = byteLength >= perMessageDeflate._threshold;
+        }
+        this._compress = rsv1;
+      } else {
+        rsv1 = false;
+        opcode = 0;
+      }
+      if (options.fin)
+        this._firstFragment = true;
+      const opts = {
+        [kByteLength]: byteLength,
+        fin: options.fin,
+        generateMask: this._generateMask,
+        mask: options.mask,
+        maskBuffer: this._maskBuffer,
+        opcode,
+        readOnly,
+        rsv1
+      };
+      if (isBlob(data)) {
+        if (this._state !== DEFAULT) {
+          this.enqueue([this.getBlobData, data, this._compress, opts, cb]);
+        } else {
+          this.getBlobData(data, this._compress, opts, cb);
+        }
+      } else if (this._state !== DEFAULT) {
+        this.enqueue([this.dispatch, data, this._compress, opts, cb]);
+      } else {
+        this.dispatch(data, this._compress, opts, cb);
+      }
+    }
+    getBlobData(blob, compress, options, cb) {
+      this._bufferedBytes += options[kByteLength];
+      this._state = GET_BLOB_DATA;
+      blob.arrayBuffer().then((arrayBuffer) => {
+        if (this._socket.destroyed) {
+          const err = new Error("The socket was closed while the blob was being read");
+          process.nextTick(callCallbacks, this, err, cb);
+          return;
+        }
+        this._bufferedBytes -= options[kByteLength];
+        const data = toBuffer(arrayBuffer);
+        if (!compress) {
+          this._state = DEFAULT;
+          this.sendFrame(Sender.frame(data, options), cb);
+          this.dequeue();
+        } else {
+          this.dispatch(data, compress, options, cb);
+        }
+      }).catch((err) => {
+        process.nextTick(onError, this, err, cb);
+      });
+    }
+    dispatch(data, compress, options, cb) {
+      if (!compress) {
+        this.sendFrame(Sender.frame(data, options), cb);
+        return;
+      }
+      const perMessageDeflate = this._extensions[PerMessageDeflate.extensionName];
+      this._bufferedBytes += options[kByteLength];
+      this._state = DEFLATING;
+      perMessageDeflate.compress(data, options.fin, (_, buf) => {
+        if (this._socket.destroyed) {
+          const err = new Error("The socket was closed while data was being compressed");
+          callCallbacks(this, err, cb);
+          return;
+        }
+        this._bufferedBytes -= options[kByteLength];
+        this._state = DEFAULT;
+        options.readOnly = false;
+        this.sendFrame(Sender.frame(buf, options), cb);
+        this.dequeue();
+      });
+    }
+    dequeue() {
+      while (this._state === DEFAULT && this._queue.length) {
+        const params = this._queue.shift();
+        this._bufferedBytes -= params[3][kByteLength];
+        Reflect.apply(params[0], this, params.slice(1));
+      }
+    }
+    enqueue(params) {
+      this._bufferedBytes += params[3][kByteLength];
+      this._queue.push(params);
+    }
+    sendFrame(list, cb) {
+      if (list.length === 2) {
+        this._socket.cork();
+        this._socket.write(list[0]);
+        this._socket.write(list[1], cb);
+        this._socket.uncork();
+      } else {
+        this._socket.write(list[0], cb);
+      }
+    }
+  }
+  module2.exports = Sender;
+  function callCallbacks(sender, err, cb) {
+    if (typeof cb === "function")
+      cb(err);
+    for (let i = 0;i < sender._queue.length; i++) {
+      const params = sender._queue[i];
+      const callback = params[params.length - 1];
+      if (typeof callback === "function")
+        callback(err);
+    }
+  }
+  function onError(sender, err, cb) {
+    callCallbacks(sender, err, cb);
+    sender.onerror(err);
+  }
+});
+
+// node_modules/ws/lib/event-target.js
+var require_event_target = __commonJS((exports2, module2) => {
+  var { kForOnEventAttribute, kListener } = require_constants();
+  var kCode = Symbol("kCode");
+  var kData = Symbol("kData");
+  var kError = Symbol("kError");
+  var kMessage = Symbol("kMessage");
+  var kReason = Symbol("kReason");
+  var kTarget = Symbol("kTarget");
+  var kType = Symbol("kType");
+  var kWasClean = Symbol("kWasClean");
+
+  class Event2 {
+    constructor(type) {
+      this[kTarget] = null;
+      this[kType] = type;
+    }
+    get target() {
+      return this[kTarget];
+    }
+    get type() {
+      return this[kType];
+    }
+  }
+  Object.defineProperty(Event2.prototype, "target", { enumerable: true });
+  Object.defineProperty(Event2.prototype, "type", { enumerable: true });
+
+  class CloseEvent extends Event2 {
+    constructor(type, options = {}) {
+      super(type);
+      this[kCode] = options.code === undefined ? 0 : options.code;
+      this[kReason] = options.reason === undefined ? "" : options.reason;
+      this[kWasClean] = options.wasClean === undefined ? false : options.wasClean;
+    }
+    get code() {
+      return this[kCode];
+    }
+    get reason() {
+      return this[kReason];
+    }
+    get wasClean() {
+      return this[kWasClean];
+    }
+  }
+  Object.defineProperty(CloseEvent.prototype, "code", { enumerable: true });
+  Object.defineProperty(CloseEvent.prototype, "reason", { enumerable: true });
+  Object.defineProperty(CloseEvent.prototype, "wasClean", { enumerable: true });
+
+  class ErrorEvent extends Event2 {
+    constructor(type, options = {}) {
+      super(type);
+      this[kError] = options.error === undefined ? null : options.error;
+      this[kMessage] = options.message === undefined ? "" : options.message;
+    }
+    get error() {
+      return this[kError];
+    }
+    get message() {
+      return this[kMessage];
+    }
+  }
+  Object.defineProperty(ErrorEvent.prototype, "error", { enumerable: true });
+  Object.defineProperty(ErrorEvent.prototype, "message", { enumerable: true });
+
+  class MessageEvent extends Event2 {
+    constructor(type, options = {}) {
+      super(type);
+      this[kData] = options.data === undefined ? null : options.data;
+    }
+    get data() {
+      return this[kData];
+    }
+  }
+  Object.defineProperty(MessageEvent.prototype, "data", { enumerable: true });
+  var EventTarget = {
+    addEventListener(type, handler, options = {}) {
+      for (const listener of this.listeners(type)) {
+        if (!options[kForOnEventAttribute] && listener[kListener] === handler && !listener[kForOnEventAttribute]) {
+          return;
+        }
+      }
+      let wrapper;
+      if (type === "message") {
+        wrapper = function onMessage(data, isBinary) {
+          const event = new MessageEvent("message", {
+            data: isBinary ? data : data.toString()
+          });
+          event[kTarget] = this;
+          callListener(handler, this, event);
+        };
+      } else if (type === "close") {
+        wrapper = function onClose(code, message) {
+          const event = new CloseEvent("close", {
+            code,
+            reason: message.toString(),
+            wasClean: this._closeFrameReceived && this._closeFrameSent
+          });
+          event[kTarget] = this;
+          callListener(handler, this, event);
+        };
+      } else if (type === "error") {
+        wrapper = function onError(error) {
+          const event = new ErrorEvent("error", {
+            error,
+            message: error.message
+          });
+          event[kTarget] = this;
+          callListener(handler, this, event);
+        };
+      } else if (type === "open") {
+        wrapper = function onOpen() {
+          const event = new Event2("open");
+          event[kTarget] = this;
+          callListener(handler, this, event);
+        };
+      } else {
+        return;
+      }
+      wrapper[kForOnEventAttribute] = !!options[kForOnEventAttribute];
+      wrapper[kListener] = handler;
+      if (options.once) {
+        this.once(type, wrapper);
+      } else {
+        this.on(type, wrapper);
+      }
+    },
+    removeEventListener(type, handler) {
+      for (const listener of this.listeners(type)) {
+        if (listener[kListener] === handler && !listener[kForOnEventAttribute]) {
+          this.removeListener(type, listener);
+          break;
+        }
+      }
+    }
+  };
+  module2.exports = {
+    CloseEvent,
+    ErrorEvent,
+    Event: Event2,
+    EventTarget,
+    MessageEvent
+  };
+  function callListener(listener, thisArg, event) {
+    if (typeof listener === "object" && listener.handleEvent) {
+      listener.handleEvent.call(listener, event);
+    } else {
+      listener.call(thisArg, event);
+    }
+  }
+});
+
+// node_modules/ws/lib/extension.js
+var require_extension = __commonJS((exports2, module2) => {
+  var { tokenChars } = require_validation();
+  function push(dest, name, elem) {
+    if (dest[name] === undefined)
+      dest[name] = [elem];
+    else
+      dest[name].push(elem);
+  }
+  function parse(header) {
+    const offers = Object.create(null);
+    let params = Object.create(null);
+    let mustUnescape = false;
+    let isEscaping = false;
+    let inQuotes = false;
+    let extensionName;
+    let paramName;
+    let start = -1;
+    let code = -1;
+    let end = -1;
+    let i = 0;
+    for (;i < header.length; i++) {
+      code = header.charCodeAt(i);
+      if (extensionName === undefined) {
+        if (end === -1 && tokenChars[code] === 1) {
+          if (start === -1)
+            start = i;
+        } else if (i !== 0 && (code === 32 || code === 9)) {
+          if (end === -1 && start !== -1)
+            end = i;
+        } else if (code === 59 || code === 44) {
+          if (start === -1) {
+            throw new SyntaxError(`Unexpected character at index ${i}`);
+          }
+          if (end === -1)
+            end = i;
+          const name = header.slice(start, end);
+          if (code === 44) {
+            push(offers, name, params);
+            params = Object.create(null);
+          } else {
+            extensionName = name;
+          }
+          start = end = -1;
+        } else {
+          throw new SyntaxError(`Unexpected character at index ${i}`);
+        }
+      } else if (paramName === undefined) {
+        if (end === -1 && tokenChars[code] === 1) {
+          if (start === -1)
+            start = i;
+        } else if (code === 32 || code === 9) {
+          if (end === -1 && start !== -1)
+            end = i;
+        } else if (code === 59 || code === 44) {
+          if (start === -1) {
+            throw new SyntaxError(`Unexpected character at index ${i}`);
+          }
+          if (end === -1)
+            end = i;
+          push(params, header.slice(start, end), true);
+          if (code === 44) {
+            push(offers, extensionName, params);
+            params = Object.create(null);
+            extensionName = undefined;
+          }
+          start = end = -1;
+        } else if (code === 61 && start !== -1 && end === -1) {
+          paramName = header.slice(start, i);
+          start = end = -1;
+        } else {
+          throw new SyntaxError(`Unexpected character at index ${i}`);
+        }
+      } else {
+        if (isEscaping) {
+          if (tokenChars[code] !== 1) {
+            throw new SyntaxError(`Unexpected character at index ${i}`);
+          }
+          if (start === -1)
+            start = i;
+          else if (!mustUnescape)
+            mustUnescape = true;
+          isEscaping = false;
+        } else if (inQuotes) {
+          if (tokenChars[code] === 1) {
+            if (start === -1)
+              start = i;
+          } else if (code === 34 && start !== -1) {
+            inQuotes = false;
+            end = i;
+          } else if (code === 92) {
+            isEscaping = true;
+          } else {
+            throw new SyntaxError(`Unexpected character at index ${i}`);
+          }
+        } else if (code === 34 && header.charCodeAt(i - 1) === 61) {
+          inQuotes = true;
+        } else if (end === -1 && tokenChars[code] === 1) {
+          if (start === -1)
+            start = i;
+        } else if (start !== -1 && (code === 32 || code === 9)) {
+          if (end === -1)
+            end = i;
+        } else if (code === 59 || code === 44) {
+          if (start === -1) {
+            throw new SyntaxError(`Unexpected character at index ${i}`);
+          }
+          if (end === -1)
+            end = i;
+          let value = header.slice(start, end);
+          if (mustUnescape) {
+            value = value.replace(/\\/g, "");
+            mustUnescape = false;
+          }
+          push(params, paramName, value);
+          if (code === 44) {
+            push(offers, extensionName, params);
+            params = Object.create(null);
+            extensionName = undefined;
+          }
+          paramName = undefined;
+          start = end = -1;
+        } else {
+          throw new SyntaxError(`Unexpected character at index ${i}`);
+        }
+      }
+    }
+    if (start === -1 || inQuotes || code === 32 || code === 9) {
+      throw new SyntaxError("Unexpected end of input");
+    }
+    if (end === -1)
+      end = i;
+    const token = header.slice(start, end);
+    if (extensionName === undefined) {
+      push(offers, token, params);
+    } else {
+      if (paramName === undefined) {
+        push(params, token, true);
+      } else if (mustUnescape) {
+        push(params, paramName, token.replace(/\\/g, ""));
+      } else {
+        push(params, paramName, token);
+      }
+      push(offers, extensionName, params);
+    }
+    return offers;
+  }
+  function format(extensions) {
+    return Object.keys(extensions).map((extension) => {
+      let configurations = extensions[extension];
+      if (!Array.isArray(configurations))
+        configurations = [configurations];
+      return configurations.map((params) => {
+        return [extension].concat(Object.keys(params).map((k) => {
+          let values = params[k];
+          if (!Array.isArray(values))
+            values = [values];
+          return values.map((v) => v === true ? k : `${k}=${v}`).join("; ");
+        })).join("; ");
+      }).join(", ");
+    }).join(", ");
+  }
+  module2.exports = { format, parse };
+});
+
+// node_modules/ws/lib/websocket.js
+var require_websocket = __commonJS((exports2, module2) => {
+  var EventEmitter = require("events");
+  var https = require("https");
+  var http = require("http");
+  var net = require("net");
+  var tls = require("tls");
+  var { randomBytes, createHash } = require("crypto");
+  var { Duplex, Readable } = require("stream");
+  var { URL: URL2 } = require("url");
+  var PerMessageDeflate = require_permessage_deflate();
+  var Receiver = require_receiver();
+  var Sender = require_sender();
+  var { isBlob } = require_validation();
+  var {
+    BINARY_TYPES,
+    CLOSE_TIMEOUT,
+    EMPTY_BUFFER,
+    GUID,
+    kForOnEventAttribute,
+    kListener,
+    kStatusCode,
+    kWebSocket,
+    NOOP
+  } = require_constants();
+  var {
+    EventTarget: { addEventListener, removeEventListener }
+  } = require_event_target();
+  var { format, parse } = require_extension();
+  var { toBuffer } = require_buffer_util();
+  var kAborted = Symbol("kAborted");
+  var protocolVersions = [8, 13];
+  var readyStates = ["CONNECTING", "OPEN", "CLOSING", "CLOSED"];
+  var subprotocolRegex = /^[!#$%&'*+\-.0-9A-Z^_`|a-z~]+$/;
+
+  class WebSocket extends EventEmitter {
+    constructor(address, protocols, options) {
+      super();
+      this._binaryType = BINARY_TYPES[0];
+      this._closeCode = 1006;
+      this._closeFrameReceived = false;
+      this._closeFrameSent = false;
+      this._closeMessage = EMPTY_BUFFER;
+      this._closeTimer = null;
+      this._errorEmitted = false;
+      this._extensions = {};
+      this._paused = false;
+      this._protocol = "";
+      this._readyState = WebSocket.CONNECTING;
+      this._receiver = null;
+      this._sender = null;
+      this._socket = null;
+      if (address !== null) {
+        this._bufferedAmount = 0;
+        this._isServer = false;
+        this._redirects = 0;
+        if (protocols === undefined) {
+          protocols = [];
+        } else if (!Array.isArray(protocols)) {
+          if (typeof protocols === "object" && protocols !== null) {
+            options = protocols;
+            protocols = [];
+          } else {
+            protocols = [protocols];
+          }
+        }
+        initAsClient(this, address, protocols, options);
+      } else {
+        this._autoPong = options.autoPong;
+        this._closeTimeout = options.closeTimeout;
+        this._isServer = true;
+      }
+    }
+    get binaryType() {
+      return this._binaryType;
+    }
+    set binaryType(type) {
+      if (!BINARY_TYPES.includes(type))
+        return;
+      this._binaryType = type;
+      if (this._receiver)
+        this._receiver._binaryType = type;
+    }
+    get bufferedAmount() {
+      if (!this._socket)
+        return this._bufferedAmount;
+      return this._socket._writableState.length + this._sender._bufferedBytes;
+    }
+    get extensions() {
+      return Object.keys(this._extensions).join();
+    }
+    get isPaused() {
+      return this._paused;
+    }
+    get onclose() {
+      return null;
+    }
+    get onerror() {
+      return null;
+    }
+    get onopen() {
+      return null;
+    }
+    get onmessage() {
+      return null;
+    }
+    get protocol() {
+      return this._protocol;
+    }
+    get readyState() {
+      return this._readyState;
+    }
+    get url() {
+      return this._url;
+    }
+    setSocket(socket, head, options) {
+      const receiver = new Receiver({
+        allowSynchronousEvents: options.allowSynchronousEvents,
+        binaryType: this.binaryType,
+        extensions: this._extensions,
+        isServer: this._isServer,
+        maxBufferedChunks: options.maxBufferedChunks,
+        maxFragments: options.maxFragments,
+        maxPayload: options.maxPayload,
+        skipUTF8Validation: options.skipUTF8Validation
+      });
+      const sender = new Sender(socket, this._extensions, options.generateMask);
+      this._receiver = receiver;
+      this._sender = sender;
+      this._socket = socket;
+      receiver[kWebSocket] = this;
+      sender[kWebSocket] = this;
+      socket[kWebSocket] = this;
+      receiver.on("conclude", receiverOnConclude);
+      receiver.on("drain", receiverOnDrain);
+      receiver.on("error", receiverOnError);
+      receiver.on("message", receiverOnMessage);
+      receiver.on("ping", receiverOnPing);
+      receiver.on("pong", receiverOnPong);
+      sender.onerror = senderOnError;
+      if (socket.setTimeout)
+        socket.setTimeout(0);
+      if (socket.setNoDelay)
+        socket.setNoDelay();
+      if (head.length > 0)
+        socket.unshift(head);
+      socket.on("close", socketOnClose);
+      socket.on("data", socketOnData);
+      socket.on("end", socketOnEnd);
+      socket.on("error", socketOnError);
+      this._readyState = WebSocket.OPEN;
+      this.emit("open");
+    }
+    emitClose() {
+      if (!this._socket) {
+        this._readyState = WebSocket.CLOSED;
+        this.emit("close", this._closeCode, this._closeMessage);
+        return;
+      }
+      if (this._extensions[PerMessageDeflate.extensionName]) {
+        this._extensions[PerMessageDeflate.extensionName].cleanup();
+      }
+      this._receiver.removeAllListeners();
+      this._readyState = WebSocket.CLOSED;
+      this.emit("close", this._closeCode, this._closeMessage);
+    }
+    close(code, data) {
+      if (this.readyState === WebSocket.CLOSED)
+        return;
+      if (this.readyState === WebSocket.CONNECTING) {
+        const msg = "WebSocket was closed before the connection was established";
+        abortHandshake(this, this._req, msg);
+        return;
+      }
+      if (this.readyState === WebSocket.CLOSING) {
+        if (this._closeFrameSent && (this._closeFrameReceived || this._receiver._writableState.errorEmitted)) {
+          this._socket.end();
+        }
+        return;
+      }
+      this._readyState = WebSocket.CLOSING;
+      this._sender.close(code, data, !this._isServer, (err) => {
+        if (err)
+          return;
+        this._closeFrameSent = true;
+        if (this._closeFrameReceived || this._receiver._writableState.errorEmitted) {
+          this._socket.end();
+        }
+      });
+      setCloseTimer(this);
+    }
+    pause() {
+      if (this.readyState === WebSocket.CONNECTING || this.readyState === WebSocket.CLOSED) {
+        return;
+      }
+      this._paused = true;
+      this._socket.pause();
+    }
+    ping(data, mask, cb) {
+      if (this.readyState === WebSocket.CONNECTING) {
+        throw new Error("WebSocket is not open: readyState 0 (CONNECTING)");
+      }
+      if (typeof data === "function") {
+        cb = data;
+        data = mask = undefined;
+      } else if (typeof mask === "function") {
+        cb = mask;
+        mask = undefined;
+      }
+      if (typeof data === "number")
+        data = data.toString();
+      if (this.readyState !== WebSocket.OPEN) {
+        sendAfterClose(this, data, cb);
+        return;
+      }
+      if (mask === undefined)
+        mask = !this._isServer;
+      this._sender.ping(data || EMPTY_BUFFER, mask, cb);
+    }
+    pong(data, mask, cb) {
+      if (this.readyState === WebSocket.CONNECTING) {
+        throw new Error("WebSocket is not open: readyState 0 (CONNECTING)");
+      }
+      if (typeof data === "function") {
+        cb = data;
+        data = mask = undefined;
+      } else if (typeof mask === "function") {
+        cb = mask;
+        mask = undefined;
+      }
+      if (typeof data === "number")
+        data = data.toString();
+      if (this.readyState !== WebSocket.OPEN) {
+        sendAfterClose(this, data, cb);
+        return;
+      }
+      if (mask === undefined)
+        mask = !this._isServer;
+      this._sender.pong(data || EMPTY_BUFFER, mask, cb);
+    }
+    resume() {
+      if (this.readyState === WebSocket.CONNECTING || this.readyState === WebSocket.CLOSED) {
+        return;
+      }
+      this._paused = false;
+      if (!this._receiver._writableState.needDrain)
+        this._socket.resume();
+    }
+    send(data, options, cb) {
+      if (this.readyState === WebSocket.CONNECTING) {
+        throw new Error("WebSocket is not open: readyState 0 (CONNECTING)");
+      }
+      if (typeof options === "function") {
+        cb = options;
+        options = {};
+      }
+      if (typeof data === "number")
+        data = data.toString();
+      if (this.readyState !== WebSocket.OPEN) {
+        sendAfterClose(this, data, cb);
+        return;
+      }
+      const opts = {
+        binary: typeof data !== "string",
+        mask: !this._isServer,
+        compress: true,
+        fin: true,
+        ...options
+      };
+      if (!this._extensions[PerMessageDeflate.extensionName]) {
+        opts.compress = false;
+      }
+      this._sender.send(data || EMPTY_BUFFER, opts, cb);
+    }
+    terminate() {
+      if (this.readyState === WebSocket.CLOSED)
+        return;
+      if (this.readyState === WebSocket.CONNECTING) {
+        const msg = "WebSocket was closed before the connection was established";
+        abortHandshake(this, this._req, msg);
+        return;
+      }
+      if (this._socket) {
+        this._readyState = WebSocket.CLOSING;
+        this._socket.destroy();
+      }
+    }
+  }
+  Object.defineProperty(WebSocket, "CONNECTING", {
+    enumerable: true,
+    value: readyStates.indexOf("CONNECTING")
+  });
+  Object.defineProperty(WebSocket.prototype, "CONNECTING", {
+    enumerable: true,
+    value: readyStates.indexOf("CONNECTING")
+  });
+  Object.defineProperty(WebSocket, "OPEN", {
+    enumerable: true,
+    value: readyStates.indexOf("OPEN")
+  });
+  Object.defineProperty(WebSocket.prototype, "OPEN", {
+    enumerable: true,
+    value: readyStates.indexOf("OPEN")
+  });
+  Object.defineProperty(WebSocket, "CLOSING", {
+    enumerable: true,
+    value: readyStates.indexOf("CLOSING")
+  });
+  Object.defineProperty(WebSocket.prototype, "CLOSING", {
+    enumerable: true,
+    value: readyStates.indexOf("CLOSING")
+  });
+  Object.defineProperty(WebSocket, "CLOSED", {
+    enumerable: true,
+    value: readyStates.indexOf("CLOSED")
+  });
+  Object.defineProperty(WebSocket.prototype, "CLOSED", {
+    enumerable: true,
+    value: readyStates.indexOf("CLOSED")
+  });
+  [
+    "binaryType",
+    "bufferedAmount",
+    "extensions",
+    "isPaused",
+    "protocol",
+    "readyState",
+    "url"
+  ].forEach((property) => {
+    Object.defineProperty(WebSocket.prototype, property, { enumerable: true });
+  });
+  ["open", "error", "close", "message"].forEach((method) => {
+    Object.defineProperty(WebSocket.prototype, `on${method}`, {
+      enumerable: true,
+      get() {
+        for (const listener of this.listeners(method)) {
+          if (listener[kForOnEventAttribute])
+            return listener[kListener];
+        }
+        return null;
+      },
+      set(handler) {
+        for (const listener of this.listeners(method)) {
+          if (listener[kForOnEventAttribute]) {
+            this.removeListener(method, listener);
+            break;
+          }
+        }
+        if (typeof handler !== "function")
+          return;
+        this.addEventListener(method, handler, {
+          [kForOnEventAttribute]: true
+        });
+      }
+    });
+  });
+  WebSocket.prototype.addEventListener = addEventListener;
+  WebSocket.prototype.removeEventListener = removeEventListener;
+  module2.exports = WebSocket;
+  function initAsClient(websocket, address, protocols, options) {
+    const opts = {
+      allowSynchronousEvents: true,
+      autoPong: true,
+      closeTimeout: CLOSE_TIMEOUT,
+      protocolVersion: protocolVersions[1],
+      maxBufferedChunks: 256 * 1024,
+      maxFragments: 16 * 1024,
+      maxPayload: 100 * 1024 * 1024,
+      skipUTF8Validation: false,
+      perMessageDeflate: true,
+      followRedirects: false,
+      maxRedirects: 10,
+      ...options,
+      socketPath: undefined,
+      hostname: undefined,
+      protocol: undefined,
+      timeout: undefined,
+      method: "GET",
+      host: undefined,
+      path: undefined,
+      port: undefined
+    };
+    websocket._autoPong = opts.autoPong;
+    websocket._closeTimeout = opts.closeTimeout;
+    if (!protocolVersions.includes(opts.protocolVersion)) {
+      throw new RangeError(`Unsupported protocol version: ${opts.protocolVersion} ` + `(supported versions: ${protocolVersions.join(", ")})`);
+    }
+    let parsedUrl;
+    if (address instanceof URL2) {
+      parsedUrl = address;
+    } else {
+      try {
+        parsedUrl = new URL2(address);
+      } catch {
+        throw new SyntaxError(`Invalid URL: ${address}`);
+      }
+    }
+    if (parsedUrl.protocol === "http:") {
+      parsedUrl.protocol = "ws:";
+    } else if (parsedUrl.protocol === "https:") {
+      parsedUrl.protocol = "wss:";
+    }
+    websocket._url = parsedUrl.href;
+    const isSecure = parsedUrl.protocol === "wss:";
+    const isIpcUrl = parsedUrl.protocol === "ws+unix:";
+    let invalidUrlMessage;
+    if (parsedUrl.protocol !== "ws:" && !isSecure && !isIpcUrl) {
+      invalidUrlMessage = `The URL's protocol must be one of "ws:", "wss:", ` + '"http:", "https:", or "ws+unix:"';
+    } else if (isIpcUrl && !parsedUrl.pathname) {
+      invalidUrlMessage = "The URL's pathname is empty";
+    } else if (parsedUrl.hash) {
+      invalidUrlMessage = "The URL contains a fragment identifier";
+    }
+    if (invalidUrlMessage) {
+      const err = new SyntaxError(invalidUrlMessage);
+      if (websocket._redirects === 0) {
+        throw err;
+      } else {
+        emitErrorAndClose(websocket, err);
+        return;
+      }
+    }
+    const defaultPort = isSecure ? 443 : 80;
+    const key = randomBytes(16).toString("base64");
+    const request = isSecure ? https.request : http.request;
+    const protocolSet = new Set;
+    let perMessageDeflate;
+    opts.createConnection = opts.createConnection || (isSecure ? tlsConnect : netConnect);
+    opts.defaultPort = opts.defaultPort || defaultPort;
+    opts.port = parsedUrl.port || defaultPort;
+    opts.host = parsedUrl.hostname.startsWith("[") ? parsedUrl.hostname.slice(1, -1) : parsedUrl.hostname;
+    opts.headers = {
+      ...opts.headers,
+      "Sec-WebSocket-Version": opts.protocolVersion,
+      "Sec-WebSocket-Key": key,
+      Connection: "Upgrade",
+      Upgrade: "websocket"
+    };
+    opts.path = parsedUrl.pathname + parsedUrl.search;
+    opts.timeout = opts.handshakeTimeout;
+    if (opts.perMessageDeflate) {
+      perMessageDeflate = new PerMessageDeflate({
+        ...opts.perMessageDeflate,
+        isServer: false,
+        maxPayload: opts.maxPayload
+      });
+      opts.headers["Sec-WebSocket-Extensions"] = format({
+        [PerMessageDeflate.extensionName]: perMessageDeflate.offer()
+      });
+    }
+    if (protocols.length) {
+      for (const protocol of protocols) {
+        if (typeof protocol !== "string" || !subprotocolRegex.test(protocol) || protocolSet.has(protocol)) {
+          throw new SyntaxError("An invalid or duplicated subprotocol was specified");
+        }
+        protocolSet.add(protocol);
+      }
+      opts.headers["Sec-WebSocket-Protocol"] = protocols.join(",");
+    }
+    if (opts.origin) {
+      if (opts.protocolVersion < 13) {
+        opts.headers["Sec-WebSocket-Origin"] = opts.origin;
+      } else {
+        opts.headers.Origin = opts.origin;
+      }
+    }
+    if (parsedUrl.username || parsedUrl.password) {
+      opts.auth = `${parsedUrl.username}:${parsedUrl.password}`;
+    }
+    if (isIpcUrl) {
+      const parts = opts.path.split(":");
+      opts.socketPath = parts[0];
+      opts.path = parts[1];
+    }
+    let req;
+    if (opts.followRedirects) {
+      if (websocket._redirects === 0) {
+        websocket._originalIpc = isIpcUrl;
+        websocket._originalSecure = isSecure;
+        websocket._originalHostOrSocketPath = isIpcUrl ? opts.socketPath : parsedUrl.host;
+        const headers = options && options.headers;
+        options = { ...options, headers: {} };
+        if (headers) {
+          for (const [key2, value] of Object.entries(headers)) {
+            options.headers[key2.toLowerCase()] = value;
+          }
+        }
+      } else if (websocket.listenerCount("redirect") === 0) {
+        const isSameHost = isIpcUrl ? websocket._originalIpc ? opts.socketPath === websocket._originalHostOrSocketPath : false : websocket._originalIpc ? false : parsedUrl.host === websocket._originalHostOrSocketPath;
+        if (!isSameHost || websocket._originalSecure && !isSecure) {
+          delete opts.headers.authorization;
+          delete opts.headers.cookie;
+          if (!isSameHost)
+            delete opts.headers.host;
+          opts.auth = undefined;
+        }
+      }
+      if (opts.auth && !options.headers.authorization) {
+        options.headers.authorization = "Basic " + Buffer.from(opts.auth).toString("base64");
+      }
+      req = websocket._req = request(opts);
+      if (websocket._redirects) {
+        websocket.emit("redirect", websocket.url, req);
+      }
+    } else {
+      req = websocket._req = request(opts);
+    }
+    if (opts.timeout) {
+      req.on("timeout", () => {
+        abortHandshake(websocket, req, "Opening handshake has timed out");
+      });
+    }
+    req.on("error", (err) => {
+      if (req === null || req[kAborted])
+        return;
+      req = websocket._req = null;
+      emitErrorAndClose(websocket, err);
+    });
+    req.on("response", (res) => {
+      const location2 = res.headers.location;
+      const statusCode = res.statusCode;
+      if (location2 && opts.followRedirects && statusCode >= 300 && statusCode < 400) {
+        if (++websocket._redirects > opts.maxRedirects) {
+          abortHandshake(websocket, req, "Maximum redirects exceeded");
+          return;
+        }
+        req.abort();
+        let addr;
+        try {
+          addr = new URL2(location2, address);
+        } catch (e) {
+          const err = new SyntaxError(`Invalid URL: ${location2}`);
+          emitErrorAndClose(websocket, err);
+          return;
+        }
+        initAsClient(websocket, addr, protocols, options);
+      } else if (!websocket.emit("unexpected-response", req, res)) {
+        abortHandshake(websocket, req, `Unexpected server response: ${res.statusCode}`);
+      }
+    });
+    req.on("upgrade", (res, socket, head) => {
+      websocket.emit("upgrade", res);
+      if (websocket.readyState !== WebSocket.CONNECTING)
+        return;
+      req = websocket._req = null;
+      const upgrade = res.headers.upgrade;
+      if (upgrade === undefined || upgrade.toLowerCase() !== "websocket") {
+        abortHandshake(websocket, socket, "Invalid Upgrade header");
+        return;
+      }
+      const digest = createHash("sha1").update(key + GUID).digest("base64");
+      if (res.headers["sec-websocket-accept"] !== digest) {
+        abortHandshake(websocket, socket, "Invalid Sec-WebSocket-Accept header");
+        return;
+      }
+      const serverProt = res.headers["sec-websocket-protocol"];
+      let protError;
+      if (serverProt !== undefined) {
+        if (!protocolSet.size) {
+          protError = "Server sent a subprotocol but none was requested";
+        } else if (!protocolSet.has(serverProt)) {
+          protError = "Server sent an invalid subprotocol";
+        }
+      } else if (protocolSet.size) {
+        protError = "Server sent no subprotocol";
+      }
+      if (protError) {
+        abortHandshake(websocket, socket, protError);
+        return;
+      }
+      if (serverProt)
+        websocket._protocol = serverProt;
+      const secWebSocketExtensions = res.headers["sec-websocket-extensions"];
+      if (secWebSocketExtensions !== undefined) {
+        if (!perMessageDeflate) {
+          const message = "Server sent a Sec-WebSocket-Extensions header but no extension " + "was requested";
+          abortHandshake(websocket, socket, message);
+          return;
+        }
+        let extensions;
+        try {
+          extensions = parse(secWebSocketExtensions);
+        } catch (err) {
+          const message = "Invalid Sec-WebSocket-Extensions header";
+          abortHandshake(websocket, socket, message);
+          return;
+        }
+        const extensionNames = Object.keys(extensions);
+        if (extensionNames.length !== 1 || extensionNames[0] !== PerMessageDeflate.extensionName) {
+          const message = "Server indicated an extension that was not requested";
+          abortHandshake(websocket, socket, message);
+          return;
+        }
+        try {
+          perMessageDeflate.accept(extensions[PerMessageDeflate.extensionName]);
+        } catch (err) {
+          const message = "Invalid Sec-WebSocket-Extensions header";
+          abortHandshake(websocket, socket, message);
+          return;
+        }
+        websocket._extensions[PerMessageDeflate.extensionName] = perMessageDeflate;
+      }
+      websocket.setSocket(socket, head, {
+        allowSynchronousEvents: opts.allowSynchronousEvents,
+        generateMask: opts.generateMask,
+        maxBufferedChunks: opts.maxBufferedChunks,
+        maxFragments: opts.maxFragments,
+        maxPayload: opts.maxPayload,
+        skipUTF8Validation: opts.skipUTF8Validation
+      });
+    });
+    if (opts.finishRequest) {
+      opts.finishRequest(req, websocket);
+    } else {
+      req.end();
+    }
+  }
+  function emitErrorAndClose(websocket, err) {
+    websocket._readyState = WebSocket.CLOSING;
+    websocket._errorEmitted = true;
+    websocket.emit("error", err);
+    websocket.emitClose();
+  }
+  function netConnect(options) {
+    options.path = options.socketPath;
+    return net.connect(options);
+  }
+  function tlsConnect(options) {
+    options.path = undefined;
+    if (!options.servername && options.servername !== "") {
+      options.servername = net.isIP(options.host) ? "" : options.host;
+    }
+    return tls.connect(options);
+  }
+  function abortHandshake(websocket, stream, message) {
+    websocket._readyState = WebSocket.CLOSING;
+    const err = new Error(message);
+    Error.captureStackTrace(err, abortHandshake);
+    if (stream.setHeader) {
+      stream[kAborted] = true;
+      stream.abort();
+      if (stream.socket && !stream.socket.destroyed) {
+        stream.socket.destroy();
+      }
+      process.nextTick(emitErrorAndClose, websocket, err);
+    } else {
+      stream.destroy(err);
+      stream.once("error", websocket.emit.bind(websocket, "error"));
+      stream.once("close", websocket.emitClose.bind(websocket));
+    }
+  }
+  function sendAfterClose(websocket, data, cb) {
+    if (data) {
+      const length = isBlob(data) ? data.size : toBuffer(data).length;
+      if (websocket._socket)
+        websocket._sender._bufferedBytes += length;
+      else
+        websocket._bufferedAmount += length;
+    }
+    if (cb) {
+      const err = new Error(`WebSocket is not open: readyState ${websocket.readyState} ` + `(${readyStates[websocket.readyState]})`);
+      process.nextTick(cb, err);
+    }
+  }
+  function receiverOnConclude(code, reason) {
+    const websocket = this[kWebSocket];
+    websocket._closeFrameReceived = true;
+    websocket._closeMessage = reason;
+    websocket._closeCode = code;
+    if (websocket._socket[kWebSocket] === undefined)
+      return;
+    websocket._socket.removeListener("data", socketOnData);
+    process.nextTick(resume, websocket._socket);
+    if (code === 1005)
+      websocket.close();
+    else
+      websocket.close(code, reason);
+  }
+  function receiverOnDrain() {
+    const websocket = this[kWebSocket];
+    if (!websocket.isPaused)
+      websocket._socket.resume();
+  }
+  function receiverOnError(err) {
+    const websocket = this[kWebSocket];
+    if (websocket._socket[kWebSocket] !== undefined) {
+      websocket._socket.removeListener("data", socketOnData);
+      process.nextTick(resume, websocket._socket);
+      websocket.close(err[kStatusCode]);
+    }
+    if (!websocket._errorEmitted) {
+      websocket._errorEmitted = true;
+      websocket.emit("error", err);
+    }
+  }
+  function receiverOnFinish() {
+    this[kWebSocket].emitClose();
+  }
+  function receiverOnMessage(data, isBinary) {
+    this[kWebSocket].emit("message", data, isBinary);
+  }
+  function receiverOnPing(data) {
+    const websocket = this[kWebSocket];
+    if (websocket._autoPong)
+      websocket.pong(data, !this._isServer, NOOP);
+    websocket.emit("ping", data);
+  }
+  function receiverOnPong(data) {
+    this[kWebSocket].emit("pong", data);
+  }
+  function resume(stream) {
+    stream.resume();
+  }
+  function senderOnError(err) {
+    const websocket = this[kWebSocket];
+    if (websocket.readyState === WebSocket.CLOSED)
+      return;
+    if (websocket.readyState === WebSocket.OPEN) {
+      websocket._readyState = WebSocket.CLOSING;
+      setCloseTimer(websocket);
+    }
+    this._socket.end();
+    if (!websocket._errorEmitted) {
+      websocket._errorEmitted = true;
+      websocket.emit("error", err);
+    }
+  }
+  function setCloseTimer(websocket) {
+    websocket._closeTimer = setTimeout(websocket._socket.destroy.bind(websocket._socket), websocket._closeTimeout);
+  }
+  function socketOnClose() {
+    const websocket = this[kWebSocket];
+    this.removeListener("close", socketOnClose);
+    this.removeListener("data", socketOnData);
+    this.removeListener("end", socketOnEnd);
+    websocket._readyState = WebSocket.CLOSING;
+    if (!this._readableState.endEmitted && !websocket._closeFrameReceived && !websocket._receiver._writableState.errorEmitted && this._readableState.length !== 0) {
+      const chunk = this.read(this._readableState.length);
+      websocket._receiver.write(chunk);
+    }
+    websocket._receiver.end();
+    this[kWebSocket] = undefined;
+    clearTimeout(websocket._closeTimer);
+    if (websocket._receiver._writableState.finished || websocket._receiver._writableState.errorEmitted) {
+      websocket.emitClose();
+    } else {
+      websocket._receiver.on("error", receiverOnFinish);
+      websocket._receiver.on("finish", receiverOnFinish);
+    }
+  }
+  function socketOnData(chunk) {
+    if (!this[kWebSocket]._receiver.write(chunk)) {
+      this.pause();
+    }
+  }
+  function socketOnEnd() {
+    const websocket = this[kWebSocket];
+    websocket._readyState = WebSocket.CLOSING;
+    websocket._receiver.end();
+    this.end();
+  }
+  function socketOnError() {
+    const websocket = this[kWebSocket];
+    this.removeListener("error", socketOnError);
+    this.on("error", NOOP);
+    if (websocket) {
+      websocket._readyState = WebSocket.CLOSING;
+      this.destroy();
+    }
+  }
+});
+
+// node_modules/ws/lib/stream.js
+var require_stream = __commonJS((exports2, module2) => {
+  var WebSocket = require_websocket();
+  var { Duplex } = require("stream");
+  function emitClose(stream) {
+    stream.emit("close");
+  }
+  function duplexOnEnd() {
+    if (!this.destroyed && this._writableState.finished) {
+      this.destroy();
+    }
+  }
+  function duplexOnError(err) {
+    this.removeListener("error", duplexOnError);
+    this.destroy();
+    if (this.listenerCount("error") === 0) {
+      this.emit("error", err);
+    }
+  }
+  function createWebSocketStream(ws, options) {
+    let terminateOnDestroy = true;
+    const duplex = new Duplex({
+      ...options,
+      autoDestroy: false,
+      emitClose: false,
+      objectMode: false,
+      writableObjectMode: false
+    });
+    ws.on("message", function message(msg, isBinary) {
+      const data = !isBinary && duplex._readableState.objectMode ? msg.toString() : msg;
+      if (!duplex.push(data))
+        ws.pause();
+    });
+    ws.once("error", function error(err) {
+      if (duplex.destroyed)
+        return;
+      terminateOnDestroy = false;
+      duplex.destroy(err);
+    });
+    ws.once("close", function close() {
+      if (duplex.destroyed)
+        return;
+      duplex.push(null);
+    });
+    duplex._destroy = function(err, callback) {
+      if (ws.readyState === ws.CLOSED) {
+        callback(err);
+        process.nextTick(emitClose, duplex);
+        return;
+      }
+      let called = false;
+      ws.once("error", function error(err2) {
+        called = true;
+        callback(err2);
+      });
+      ws.once("close", function close() {
+        if (!called)
+          callback(err);
+        process.nextTick(emitClose, duplex);
+      });
+      if (terminateOnDestroy)
+        ws.terminate();
+    };
+    duplex._final = function(callback) {
+      if (ws.readyState === ws.CONNECTING) {
+        ws.once("open", function open() {
+          duplex._final(callback);
+        });
+        return;
+      }
+      if (ws._socket === null)
+        return;
+      if (ws._socket._writableState.finished) {
+        callback();
+        if (duplex._readableState.endEmitted)
+          duplex.destroy();
+      } else {
+        ws._socket.once("finish", function finish() {
+          callback();
+        });
+        ws.close();
+      }
+    };
+    duplex._read = function() {
+      if (ws.isPaused)
+        ws.resume();
+    };
+    duplex._write = function(chunk, encoding, callback) {
+      if (ws.readyState === ws.CONNECTING) {
+        ws.once("open", function open() {
+          duplex._write(chunk, encoding, callback);
+        });
+        return;
+      }
+      ws.send(chunk, callback);
+    };
+    duplex.on("end", duplexOnEnd);
+    duplex.on("error", duplexOnError);
+    return duplex;
+  }
+  module2.exports = createWebSocketStream;
+});
+
+// node_modules/ws/lib/subprotocol.js
+var require_subprotocol = __commonJS((exports2, module2) => {
+  var { tokenChars } = require_validation();
+  function parse(header) {
+    const protocols = new Set;
+    let start = -1;
+    let end = -1;
+    let i = 0;
+    for (i;i < header.length; i++) {
+      const code = header.charCodeAt(i);
+      if (end === -1 && tokenChars[code] === 1) {
+        if (start === -1)
+          start = i;
+      } else if (i !== 0 && (code === 32 || code === 9)) {
+        if (end === -1 && start !== -1)
+          end = i;
+      } else if (code === 44) {
+        if (start === -1) {
+          throw new SyntaxError(`Unexpected character at index ${i}`);
+        }
+        if (end === -1)
+          end = i;
+        const protocol2 = header.slice(start, end);
+        if (protocols.has(protocol2)) {
+          throw new SyntaxError(`The "${protocol2}" subprotocol is duplicated`);
+        }
+        protocols.add(protocol2);
+        start = end = -1;
+      } else {
+        throw new SyntaxError(`Unexpected character at index ${i}`);
+      }
+    }
+    if (start === -1 || end !== -1) {
+      throw new SyntaxError("Unexpected end of input");
+    }
+    const protocol = header.slice(start, i);
+    if (protocols.has(protocol)) {
+      throw new SyntaxError(`The "${protocol}" subprotocol is duplicated`);
+    }
+    protocols.add(protocol);
+    return protocols;
+  }
+  module2.exports = { parse };
+});
+
+// node_modules/ws/lib/websocket-server.js
+var require_websocket_server = __commonJS((exports2, module2) => {
+  var EventEmitter = require("events");
+  var http = require("http");
+  var { Duplex } = require("stream");
+  var { createHash } = require("crypto");
+  var extension = require_extension();
+  var PerMessageDeflate = require_permessage_deflate();
+  var subprotocol = require_subprotocol();
+  var WebSocket = require_websocket();
+  var { CLOSE_TIMEOUT, GUID, kWebSocket } = require_constants();
+  var keyRegex = /^[+/0-9A-Za-z]{22}==$/;
+  var RUNNING = 0;
+  var CLOSING = 1;
+  var CLOSED = 2;
+
+  class WebSocketServer extends EventEmitter {
+    constructor(options, callback) {
+      super();
+      options = {
+        allowSynchronousEvents: true,
+        autoPong: true,
+        maxBufferedChunks: 256 * 1024,
+        maxFragments: 16 * 1024,
+        maxPayload: 100 * 1024 * 1024,
+        skipUTF8Validation: false,
+        perMessageDeflate: false,
+        handleProtocols: null,
+        clientTracking: true,
+        closeTimeout: CLOSE_TIMEOUT,
+        verifyClient: null,
+        noServer: false,
+        backlog: null,
+        server: null,
+        host: null,
+        path: null,
+        port: null,
+        WebSocket,
+        ...options
+      };
+      if (options.port == null && !options.server && !options.noServer || options.port != null && (options.server || options.noServer) || options.server && options.noServer) {
+        throw new TypeError('One and only one of the "port", "server", or "noServer" options ' + "must be specified");
+      }
+      if (options.port != null) {
+        this._server = http.createServer((req, res) => {
+          const body = http.STATUS_CODES[426];
+          res.writeHead(426, {
+            "Content-Length": body.length,
+            "Content-Type": "text/plain"
+          });
+          res.end(body);
+        });
+        this._server.listen(options.port, options.host, options.backlog, callback);
+      } else if (options.server) {
+        this._server = options.server;
+      }
+      if (this._server) {
+        const emitConnection = this.emit.bind(this, "connection");
+        this._removeListeners = addListeners(this._server, {
+          listening: this.emit.bind(this, "listening"),
+          error: this.emit.bind(this, "error"),
+          upgrade: (req, socket, head) => {
+            this.handleUpgrade(req, socket, head, emitConnection);
+          }
+        });
+      }
+      if (options.perMessageDeflate === true)
+        options.perMessageDeflate = {};
+      if (options.clientTracking) {
+        this.clients = new Set;
+        this._shouldEmitClose = false;
+      }
+      this.options = options;
+      this._state = RUNNING;
+    }
+    address() {
+      if (this.options.noServer) {
+        throw new Error('The server is operating in "noServer" mode');
+      }
+      if (!this._server)
+        return null;
+      return this._server.address();
+    }
+    close(cb) {
+      if (this._state === CLOSED) {
+        if (cb) {
+          this.once("close", () => {
+            cb(new Error("The server is not running"));
+          });
+        }
+        process.nextTick(emitClose, this);
+        return;
+      }
+      if (cb)
+        this.once("close", cb);
+      if (this._state === CLOSING)
+        return;
+      this._state = CLOSING;
+      if (this.options.noServer || this.options.server) {
+        if (this._server) {
+          this._removeListeners();
+          this._removeListeners = this._server = null;
+        }
+        if (this.clients) {
+          if (!this.clients.size) {
+            process.nextTick(emitClose, this);
+          } else {
+            this._shouldEmitClose = true;
+          }
+        } else {
+          process.nextTick(emitClose, this);
+        }
+      } else {
+        const server = this._server;
+        this._removeListeners();
+        this._removeListeners = this._server = null;
+        server.close(() => {
+          emitClose(this);
+        });
+      }
+    }
+    shouldHandle(req) {
+      if (this.options.path) {
+        const index = req.url.indexOf("?");
+        const pathname = index !== -1 ? req.url.slice(0, index) : req.url;
+        if (pathname !== this.options.path)
+          return false;
+      }
+      return true;
+    }
+    handleUpgrade(req, socket, head, cb) {
+      socket.on("error", socketOnError);
+      const key = req.headers["sec-websocket-key"];
+      const upgrade = req.headers.upgrade;
+      const version = +req.headers["sec-websocket-version"];
+      if (req.method !== "GET") {
+        const message = "Invalid HTTP method";
+        abortHandshakeOrEmitwsClientError(this, req, socket, 405, message);
+        return;
+      }
+      if (upgrade === undefined || upgrade.toLowerCase() !== "websocket") {
+        const message = "Invalid Upgrade header";
+        abortHandshakeOrEmitwsClientError(this, req, socket, 400, message);
+        return;
+      }
+      if (key === undefined || !keyRegex.test(key)) {
+        const message = "Missing or invalid Sec-WebSocket-Key header";
+        abortHandshakeOrEmitwsClientError(this, req, socket, 400, message);
+        return;
+      }
+      if (version !== 13 && version !== 8) {
+        const message = "Missing or invalid Sec-WebSocket-Version header";
+        abortHandshakeOrEmitwsClientError(this, req, socket, 400, message, {
+          "Sec-WebSocket-Version": "13, 8"
+        });
+        return;
+      }
+      if (!this.shouldHandle(req)) {
+        abortHandshake(socket, 400);
+        return;
+      }
+      const secWebSocketProtocol = req.headers["sec-websocket-protocol"];
+      let protocols = new Set;
+      if (secWebSocketProtocol !== undefined) {
+        try {
+          protocols = subprotocol.parse(secWebSocketProtocol);
+        } catch (err) {
+          const message = "Invalid Sec-WebSocket-Protocol header";
+          abortHandshakeOrEmitwsClientError(this, req, socket, 400, message);
+          return;
+        }
+      }
+      const secWebSocketExtensions = req.headers["sec-websocket-extensions"];
+      const extensions = {};
+      if (this.options.perMessageDeflate && secWebSocketExtensions !== undefined) {
+        const perMessageDeflate = new PerMessageDeflate({
+          ...this.options.perMessageDeflate,
+          isServer: true,
+          maxPayload: this.options.maxPayload
+        });
+        try {
+          const offers = extension.parse(secWebSocketExtensions);
+          if (offers[PerMessageDeflate.extensionName]) {
+            perMessageDeflate.accept(offers[PerMessageDeflate.extensionName]);
+            extensions[PerMessageDeflate.extensionName] = perMessageDeflate;
+          }
+        } catch (err) {
+          const message = "Invalid or unacceptable Sec-WebSocket-Extensions header";
+          abortHandshakeOrEmitwsClientError(this, req, socket, 400, message);
+          return;
+        }
+      }
+      if (this.options.verifyClient) {
+        const info = {
+          origin: req.headers[`${version === 8 ? "sec-websocket-origin" : "origin"}`],
+          secure: !!(req.socket.authorized || req.socket.encrypted),
+          req
+        };
+        if (this.options.verifyClient.length === 2) {
+          this.options.verifyClient(info, (verified, code, message, headers) => {
+            if (!verified) {
+              return abortHandshake(socket, code || 401, message, headers);
+            }
+            this.completeUpgrade(extensions, key, protocols, req, socket, head, cb);
+          });
+          return;
+        }
+        if (!this.options.verifyClient(info))
+          return abortHandshake(socket, 401);
+      }
+      this.completeUpgrade(extensions, key, protocols, req, socket, head, cb);
+    }
+    completeUpgrade(extensions, key, protocols, req, socket, head, cb) {
+      if (!socket.readable || !socket.writable)
+        return socket.destroy();
+      if (socket[kWebSocket]) {
+        throw new Error("server.handleUpgrade() was called more than once with the same " + "socket, possibly due to a misconfiguration");
+      }
+      if (this._state > RUNNING)
+        return abortHandshake(socket, 503);
+      const digest = createHash("sha1").update(key + GUID).digest("base64");
+      const headers = [
+        "HTTP/1.1 101 Switching Protocols",
+        "Upgrade: websocket",
+        "Connection: Upgrade",
+        `Sec-WebSocket-Accept: ${digest}`
+      ];
+      const ws = new this.options.WebSocket(null, undefined, this.options);
+      if (protocols.size) {
+        const protocol = this.options.handleProtocols ? this.options.handleProtocols(protocols, req) : protocols.values().next().value;
+        if (protocol) {
+          headers.push(`Sec-WebSocket-Protocol: ${protocol}`);
+          ws._protocol = protocol;
+        }
+      }
+      if (extensions[PerMessageDeflate.extensionName]) {
+        const params = extensions[PerMessageDeflate.extensionName].params;
+        const value = extension.format({
+          [PerMessageDeflate.extensionName]: [params]
+        });
+        headers.push(`Sec-WebSocket-Extensions: ${value}`);
+        ws._extensions = extensions;
+      }
+      this.emit("headers", headers, req);
+      socket.write(headers.concat(`\r
+`).join(`\r
+`));
+      socket.removeListener("error", socketOnError);
+      ws.setSocket(socket, head, {
+        allowSynchronousEvents: this.options.allowSynchronousEvents,
+        maxBufferedChunks: this.options.maxBufferedChunks,
+        maxFragments: this.options.maxFragments,
+        maxPayload: this.options.maxPayload,
+        skipUTF8Validation: this.options.skipUTF8Validation
+      });
+      if (this.clients) {
+        this.clients.add(ws);
+        ws.on("close", () => {
+          this.clients.delete(ws);
+          if (this._shouldEmitClose && !this.clients.size) {
+            process.nextTick(emitClose, this);
+          }
+        });
+      }
+      cb(ws, req);
+    }
+  }
+  module2.exports = WebSocketServer;
+  function addListeners(server, map) {
+    for (const event of Object.keys(map))
+      server.on(event, map[event]);
+    return function removeListeners() {
+      for (const event of Object.keys(map)) {
+        server.removeListener(event, map[event]);
+      }
+    };
+  }
+  function emitClose(server) {
+    server._state = CLOSED;
+    server.emit("close");
+  }
+  function socketOnError() {
+    this.destroy();
+  }
+  function abortHandshake(socket, code, message, headers) {
+    message = message || http.STATUS_CODES[code];
+    headers = {
+      Connection: "close",
+      "Content-Type": "text/html",
+      "Content-Length": Buffer.byteLength(message),
+      ...headers
+    };
+    socket.once("finish", socket.destroy);
+    socket.end(`HTTP/1.1 ${code} ${http.STATUS_CODES[code]}\r
+` + Object.keys(headers).map((h) => `${h}: ${headers[h]}`).join(`\r
+`) + `\r
+\r
+` + message);
+  }
+  function abortHandshakeOrEmitwsClientError(server, req, socket, code, message, headers) {
+    if (server.listenerCount("wsClientError")) {
+      const err = new Error(message);
+      Error.captureStackTrace(err, abortHandshakeOrEmitwsClientError);
+      server.emit("wsClientError", err, socket, req);
+    } else {
+      abortHandshake(socket, code, message, headers);
+    }
+  }
+});
+
+// node_modules/ws/wrapper.mjs
+var import_stream, import_extension, import_permessage_deflate, import_receiver, import_sender, import_subprotocol, import_websocket, import_websocket_server;
+var init_wrapper = __esm(() => {
+  import_stream = __toESM(require_stream(), 1);
+  import_extension = __toESM(require_extension(), 1);
+  import_permessage_deflate = __toESM(require_permessage_deflate(), 1);
+  import_receiver = __toESM(require_receiver(), 1);
+  import_sender = __toESM(require_sender(), 1);
+  import_subprotocol = __toESM(require_subprotocol(), 1);
+  import_websocket = __toESM(require_websocket(), 1);
+  import_websocket_server = __toESM(require_websocket_server(), 1);
+});
+
+// src/lib/version.ts
+function getVersion() {
+  if (cached)
+    return cached;
+  if (process.env.IFRAMER_VERSION)
+    return cached = process.env.IFRAMER_VERSION;
+  const candidates = [
+    import_path10.default.join(__dirname, "..", "..", "package.json"),
+    import_path10.default.join(__dirname, "..", "package.json"),
+    import_path10.default.join(process.cwd(), "package.json")
+  ];
+  for (const p of candidates) {
+    try {
+      const v = JSON.parse(import_fs11.default.readFileSync(p, "utf8")).version;
+      if (v)
+        return cached = v;
+    } catch {}
+  }
+  return cached = "0.0.0";
+}
+var import_fs11, import_path10, __dirname = "/Users/eduardoverona/tools/iframer-toolkit/src/lib", cached = null;
+var init_version = __esm(() => {
+  import_fs11 = __toESM(require("fs"));
+  import_path10 = __toESM(require("path"));
+});
+
+// src/lib/extension/bridge.ts
+class ExtensionBridge {
+  wss = null;
+  clients = new Map;
+  pending = new Map;
+  nextReqId = 1;
+  tabOwner = new Map;
+  collidingTabs = new Set;
+  cdpListeners = new Map;
+  attach(server) {
+    if (this.wss)
+      return;
+    this.wss = new import_websocket_server.default({ server, path: "/extension/ws" });
+    this.wss.on("connection", (ws, req) => {
+      let expected = "";
+      try {
+        expected = getLocalToken();
+      } catch {
+        expected = "";
+      }
+      if (!expected) {
+        ws.close(4001, "unauthorized");
+        return;
+      }
+      const queryToken = new URL(req.url || "", "http://127.0.0.1").searchParams.get("token");
+      if (queryToken !== null) {
+        if (queryToken !== expected) {
+          ws.close(4001, "unauthorized");
+          return;
+        }
+        this.acceptClient(ws);
+        return;
+      }
+      const timer = setTimeout(() => ws.close(4001, "auth timeout"), 3000);
+      ws.once("message", (data) => {
+        clearTimeout(timer);
+        try {
+          const m = JSON.parse(data.toString());
+          if (m?.type === "auth" && m.token === expected) {
+            this.acceptClient(ws);
+            return;
+          }
+        } catch {}
+        ws.close(4001, "unauthorized");
+      });
+    });
+  }
+  acceptClient(ws) {
+    const client = {
+      clientId: import_crypto5.default.randomUUID(),
+      socket: ws,
+      connectedAt: Date.now(),
+      tabs: [],
+      heartbeat: null
+    };
+    this.clients.set(client.clientId, client);
+    this.startHeartbeat(client);
+    try {
+      ws.send(JSON.stringify({ type: "server_info", version: getVersion() }));
+    } catch {}
+    ws.on("message", (data) => this.onMessage(client, data));
+    ws.on("close", () => this.dropClient(client, "socket closed"));
+    ws.on("error", () => {});
+  }
+  startHeartbeat(client) {
+    client.heartbeat = setInterval(() => {
+      this.send(client, "ping", {}).catch(() => {});
+    }, HEARTBEAT_MS);
+    client.heartbeat.unref?.();
+  }
+  dropClient(client, _reason) {
+    if (client.heartbeat)
+      clearInterval(client.heartbeat);
+    if (this.clients.get(client.clientId) === client) {
+      this.clients.delete(client.clientId);
+    }
+    for (const [tabId, owner] of this.tabOwner) {
+      if (owner === client.clientId)
+        this.tabOwner.delete(tabId);
+    }
+    for (const [id, p] of this.pending) {
+      if (p.clientId === client.clientId) {
+        clearTimeout(p.timer);
+        p.reject(new Error("Extension disconnected before responding."));
+        this.pending.delete(id);
+      }
+    }
+  }
+  onMessage(client, data) {
+    let msg;
+    try {
+      msg = JSON.parse(data.toString());
+    } catch {
+      return;
+    }
+    if (msg.type === "hello") {
+      client.profileId = msg.profileId;
+      client.profileName = msg.profileName;
+      client.extVersion = msg.extVersion;
+      if (msg.profileId) {
+        for (const other of this.clients.values()) {
+          if (other !== client && other.profileId === msg.profileId) {
+            try {
+              other.socket.close(4002, "replaced by same profile reconnect");
+            } catch {}
+          }
+        }
+      }
+      return;
+    }
+    if (msg.type === "cdp_event") {
+      const ev = msg;
+      if (typeof ev.tabId === "number") {
+        const fn = this.cdpListeners.get(cdpKey(client.clientId, ev.tabId));
+        if (fn)
+          fn(ev);
+      }
+      return;
+    }
+    if (typeof msg.id !== "number")
+      return;
+    const p = this.pending.get(msg.id);
+    if (!p || p.clientId !== client.clientId)
+      return;
+    this.pending.delete(msg.id);
+    clearTimeout(p.timer);
+    if (msg.ok)
+      p.resolve(msg.result);
+    else
+      p.reject(new Error(msg.error || "Extension reported an error."));
+  }
+  send(client, type, payload) {
+    const ws = client.socket;
+    if (!ws || ws.readyState !== import_websocket.default.OPEN) {
+      return Promise.reject(new Error("Extension client is not connected."));
+    }
+    const id = this.nextReqId++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`Extension did not respond within ${REQUEST_TIMEOUT_MS}ms (${type}).`));
+      }, REQUEST_TIMEOUT_MS);
+      this.pending.set(id, { clientId: client.clientId, resolve, reject, timer });
+      try {
+        ws.send(JSON.stringify({ id, type, ...payload }));
+      } catch (e) {
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      }
+    });
+  }
+  hasClients() {
+    return this.clients.size > 0;
+  }
+  status() {
+    return {
+      connected: this.clients.size > 0,
+      clients: [...this.clients.values()].map((c) => ({
+        clientId: c.clientId,
+        profileId: c.profileId,
+        profileName: c.profileName,
+        extVersion: c.extVersion,
+        connectedAt: new Date(c.connectedAt).toISOString(),
+        tabCount: c.tabs.length
+      }))
+    };
+  }
+  async listTabs() {
+    const all = [];
+    this.tabOwner.clear();
+    this.collidingTabs.clear();
+    await Promise.all([...this.clients.values()].map(async (client) => {
+      try {
+        const res = await this.send(client, "list_tabs", {}) || { tabs: [] };
+        const tagged = (res.tabs || []).map((t) => ({
+          ...t,
+          clientId: client.clientId,
+          profileId: client.profileId,
+          profileName: client.profileName
+        }));
+        client.tabs = tagged;
+        for (const t of tagged) {
+          const prev = this.tabOwner.get(t.id);
+          if (prev !== undefined && prev !== client.clientId)
+            this.collidingTabs.add(t.id);
+          this.tabOwner.set(t.id, client.clientId);
+        }
+        all.push(...tagged);
+      } catch {
+        client.tabs = [];
+      }
+    }));
+    return { tabs: all, clients: this.status().clients };
+  }
+  async resolveClient(tabId, clientId) {
+    if (clientId) {
+      const c = this.clients.get(clientId);
+      if (!c)
+        throw new Error(`No connected extension with clientId ${clientId}.`);
+      return c;
+    }
+    if (this.clients.size === 0) {
+      throw new Error("No iframer extension is connected. Open Chrome, install/enable the iframer " + "extension, and pair it (paste the token, dot goes green).");
+    }
+    if (this.clients.size === 1) {
+      return [...this.clients.values()][0];
+    }
+    let owner = this.tabOwner.get(tabId);
+    if (!owner || this.collidingTabs.has(tabId)) {
+      await this.listTabs();
+      owner = this.tabOwner.get(tabId);
+    }
+    if (this.collidingTabs.has(tabId)) {
+      throw new Error(`Tab id ${tabId} exists in more than one connected browser (separate browsers ` + `have independent tab-id spaces). Call \`tabs\` and pass the tab's clientId ` + `alongside tabId to pick the right one.`);
+    }
+    if (owner) {
+      const c = this.clients.get(owner);
+      if (c)
+        return c;
+    }
+    throw new Error(`Could not determine which browser profile owns tab ${tabId}. Call \`tabs\` to ` + `refresh the list, then pass the tab's clientId alongside tabId.`);
+  }
+  resolveClientNoTab(clientId) {
+    if (clientId) {
+      const c = this.clients.get(clientId);
+      if (!c)
+        throw new Error(`No connected extension with clientId ${clientId}.`);
+      return c;
+    }
+    if (this.clients.size === 0) {
+      throw new Error("No iframer extension is connected. Open Chrome, install/enable the iframer " + "extension, and pair it (paste the token, dot goes green).");
+    }
+    if (this.clients.size === 1)
+      return [...this.clients.values()][0];
+    throw new Error("Multiple browser profiles are connected — pass clientId to say which one to act in. " + "Call `tabs` to see the profiles and their clientIds.");
+  }
+  async reloadAll() {
+    const clients = [...this.clients.values()];
+    await Promise.all(clients.map((c) => this.send(c, "reload", {}).catch(() => {})));
+    return { reloaded: clients.length };
+  }
+  async groupTabs(tabIds, opts = {}, clientId) {
+    const client = clientId ? this.resolveClientNoTab(clientId) : await this.resolveClient(tabIds[0]);
+    return this.send(client, "group_tabs", {
+      tabIds,
+      title: opts.title,
+      color: opts.color,
+      collapsed: opts.collapsed,
+      groupId: opts.groupId
+    });
+  }
+  async ungroupTabs(tabIds, clientId) {
+    const client = clientId ? this.resolveClientNoTab(clientId) : await this.resolveClient(tabIds[0]);
+    return this.send(client, "ungroup_tabs", { tabIds });
+  }
+  async updateGroup(groupId, opts, clientId) {
+    const client = this.resolveClientNoTab(clientId);
+    return this.send(client, "update_group", { groupId, ...opts });
+  }
+  async listGroups(clientId) {
+    const client = this.resolveClientNoTab(clientId);
+    return this.send(client, "list_groups", {});
+  }
+  async createTab(url, opts = {}, clientId) {
+    const client = this.resolveClientNoTab(clientId);
+    const res = await this.send(client, "create_tab", {
+      url,
+      active: opts.active,
+      windowId: opts.windowId
+    });
+    return { tab: { ...res.tab, clientId: client.clientId, profileId: client.profileId, profileName: client.profileName }, clientId: client.clientId };
+  }
+  addCdpListener(clientId, tabId, fn) {
+    const key = cdpKey(clientId, tabId);
+    if (this.cdpListeners.has(key)) {
+      throw new Error(`Tab ${tabId} is already being driven by another pipeline. Retry when it finishes.`);
+    }
+    this.cdpListeners.set(key, fn);
+  }
+  removeCdpListener(clientId, tabId) {
+    this.cdpListeners.delete(cdpKey(clientId, tabId));
+  }
+  async cdpAttach(tabId, clientId, focus) {
+    const client = await this.resolveClient(tabId, clientId);
+    const res = await this.send(client, "cdp_attach", { tabId, focus: !!focus }) || {
+      targetInfo: null
+    };
+    return { targetInfo: res.targetInfo, clientId: client.clientId };
+  }
+  async cdpCommand(clientId, tabId, sessionId, method, params) {
+    const client = this.clients.get(clientId);
+    if (!client)
+      throw new Error(`CDP: client ${clientId} is gone.`);
+    return this.send(client, "cdp_command", { tabId, sessionId, method, params });
+  }
+  async cdpDetach(clientId, tabId) {
+    const client = this.clients.get(clientId);
+    if (!client)
+      return;
+    try {
+      await this.send(client, "cdp_detach", { tabId });
+    } catch {}
+  }
+}
+function cdpKey(clientId, tabId) {
+  return `${clientId}:${tabId}`;
+}
+var import_crypto5, REQUEST_TIMEOUT_MS = 180000, HEARTBEAT_MS = 15000, extensionBridge;
+var init_bridge = __esm(() => {
+  init_wrapper();
+  init_crypto();
+  init_version();
+  import_crypto5 = __toESM(require("crypto"));
+  extensionBridge = new ExtensionBridge;
+});
+
+// src/lib/extension/cdp-relay.ts
+class CdpRelay {
+  tabId;
+  clientId;
+  focus;
+  httpServer = null;
+  wss = null;
+  pw = null;
+  port = 0;
+  path = `/cdp/${import_crypto7.randomUUID()}`;
+  tabSessionId = "pw-tab-1";
+  targetInfo = null;
+  ownerClientId = "";
+  listenerRegistered = false;
+  constructor(tabId, clientId, focus) {
+    this.tabId = tabId;
+    this.clientId = clientId;
+    this.focus = focus;
+  }
+  async start() {
+    const { targetInfo, clientId } = await extensionBridge.cdpAttach(this.tabId, this.clientId, this.focus);
+    this.ownerClientId = clientId;
+    this.targetInfo = targetInfo || {
+      targetId: `iframer-${this.tabId}`,
+      type: "page",
+      title: "",
+      url: ""
+    };
+    extensionBridge.addCdpListener(this.ownerClientId, this.tabId, (ev) => {
+      this.sendToPw({
+        method: ev.method,
+        params: ev.params,
+        sessionId: ev.sessionId || this.tabSessionId
+      });
+    });
+    this.listenerRegistered = true;
+    await new Promise((resolve, reject) => {
+      this.httpServer = import_http.default.createServer((req, res) => {
+        if (req.url === "/json/version" || req.url === "/json/version/") {
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({
+            Browser: "Chrome/iframer-extension",
+            "Protocol-Version": "1.3",
+            "User-Agent": "iframer-cdp-relay/1.0",
+            "V8-Version": "",
+            "WebKit-Version": "",
+            webSocketDebuggerUrl: `ws://127.0.0.1:${this.port}${this.path}`
+          }));
+          return;
+        }
+        res.writeHead(404);
+        res.end();
+      });
+      this.httpServer.on("upgrade", (req) => {
+        if (process.env.IFRAMER_RELAY_DEBUG)
+          log17.info(`[relay] upgrade request url=${req.url}`);
+      });
+      this.wss = new import_websocket_server.default({ server: this.httpServer, path: this.path });
+      this.wss.on("connection", (ws) => {
+        if (process.env.IFRAMER_RELAY_DEBUG)
+          log17.info(`[relay] playwright connected`);
+        if (this.pw) {
+          ws.close(4000, "relay already has a client");
+          return;
+        }
+        this.pw = ws;
+        ws.on("message", (data) => this.onPwMessage(data));
+        ws.on("close", () => {
+          if (this.pw === ws)
+            this.pw = null;
+        });
+        ws.on("error", () => {});
+      });
+      this.httpServer.on("error", reject);
+      this.httpServer.listen(0, "127.0.0.1", () => {
+        const addr = this.httpServer.address();
+        this.port = typeof addr === "object" && addr ? addr.port : 0;
+        resolve();
+      });
+    });
+  }
+  cdpEndpoint() {
+    return `ws://127.0.0.1:${this.port}${this.path}`;
+  }
+  httpEndpoint() {
+    return `http://127.0.0.1:${this.port}`;
+  }
+  sendToPw(msg) {
+    if (this.pw && this.pw.readyState === import_websocket.default.OPEN) {
+      try {
+        this.pw.send(JSON.stringify(msg));
+      } catch {}
+    }
+  }
+  async onPwMessage(data) {
+    if (process.env.IFRAMER_RELAY_DEBUG)
+      log17.info(`[relay] raw pw msg (${data?.length ?? 0} bytes): ${data?.toString().slice(0, 120)}`);
+    let msg;
+    try {
+      msg = JSON.parse(data.toString());
+    } catch {
+      return;
+    }
+    const { id, sessionId, method, params } = msg;
+    if (process.env.IFRAMER_RELAY_DEBUG)
+      log17.info(`[relay] pw→ ${method} (id=${id}, sess=${sessionId || "-"})`);
+    if (!method)
+      return;
+    try {
+      const result = await this.handleCdpCommand(method, params, sessionId);
+      if (typeof id === "number")
+        this.sendToPw({ id, sessionId, result });
+    } catch (e) {
+      if (typeof id === "number") {
+        this.sendToPw({ id, sessionId, error: { message: e instanceof Error ? e.message : String(e) } });
+      }
+    }
+  }
+  async handleCdpCommand(method, params, sessionId) {
+    switch (method) {
+      case "Browser.getVersion":
+        return { protocolVersion: "1.3", product: "Chrome/iframer-extension", userAgent: "iframer-cdp-relay/1.0" };
+      case "Browser.setDownloadBehavior":
+        return {};
+      case "Browser.close":
+        return {};
+      case "Target.setDiscoverTargets":
+        return {};
+      case "Target.getTargets":
+        return { targetInfos: this.targetInfo ? [{ ...this.targetInfo, attached: true }] : [] };
+      case "Target.setAutoAttach":
+        if (!sessionId) {
+          this.sendToPw({
+            method: "Target.attachedToTarget",
+            params: {
+              sessionId: this.tabSessionId,
+              targetInfo: { ...this.targetInfo, attached: true },
+              waitingForDebugger: false
+            }
+          });
+          return {};
+        }
+        break;
+      case "Target.getTargetInfo":
+        if (!sessionId)
+          return { targetInfo: this.targetInfo };
+        break;
+    }
+    const realSessionId = sessionId === this.tabSessionId ? undefined : sessionId;
+    if (method === "Page.captureScreenshot") {
+      return this.captureScreenshotWithFallback(params, realSessionId);
+    }
+    return extensionBridge.cdpCommand(this.ownerClientId, this.tabId, realSessionId, method, params);
+  }
+  async captureScreenshotWithFallback(params, sessionId) {
+    const base = params && typeof params === "object" ? { ...params } : {};
+    const attempt = (p) => extensionBridge.cdpCommand(this.ownerClientId, this.tabId, sessionId, "Page.captureScreenshot", p);
+    const first = attempt(base);
+    first.catch(() => {
+      return;
+    });
+    try {
+      return await Promise.race([
+        first,
+        new Promise((_, reject) => {
+          const t = setTimeout(() => reject(new Error("screenshot timed out (no compositor frame)")), 1e4);
+          t.unref?.();
+        })
+      ]);
+    } catch {
+      return attempt({ ...base, fromSurface: false });
+    }
+  }
+  async stop() {
+    const ownedTab = this.listenerRegistered;
+    if (ownedTab) {
+      extensionBridge.removeCdpListener(this.ownerClientId, this.tabId);
+      this.listenerRegistered = false;
+    }
+    try {
+      this.wss?.clients.forEach((c) => {
+        try {
+          c.terminate();
+        } catch {}
+      });
+    } catch {}
+    try {
+      this.pw?.terminate();
+    } catch {}
+    this.pw = null;
+    const withTimeout = (fn) => new Promise((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (!done) {
+          done = true;
+          resolve();
+        }
+      };
+      try {
+        fn(finish);
+      } catch {
+        finish();
+      }
+      setTimeout(finish, 1000).unref?.();
+    });
+    if (this.wss)
+      await withTimeout((cb) => this.wss.close(cb));
+    if (this.httpServer)
+      await withTimeout((cb) => this.httpServer.close(cb));
+    this.wss = null;
+    this.httpServer = null;
+    if (ownedTab) {
+      try {
+        await extensionBridge.cdpDetach(this.ownerClientId, this.tabId);
+      } catch (e) {
+        log17.warn(`cdp detach failed: ${e}`);
+      }
+    }
+  }
+}
+var import_http, import_crypto7, log17;
+var init_cdp_relay = __esm(() => {
+  init_wrapper();
+  init_bridge();
+  init_logger();
+  import_http = __toESM(require("http"));
+  import_crypto7 = require("crypto");
+  log17 = createLogger("cdp-relay");
+});
+
 // src/lib/execution/pipeline-executor.ts
 class PipelineExecutor {
   deps;
   pendingElicitOtp;
+  extensionTabLocks = new Map;
   constructor(deps) {
     this.deps = deps;
   }
@@ -5021,6 +8763,22 @@ class PipelineExecutor {
   }
   async executeInner(userId, token, pipeline) {
     const opts = pipeline.options || {};
+    if (typeof opts.extensionTabId === "number") {
+      const tabId = opts.extensionTabId;
+      const lockKey = `${opts.clientId || "auto"}:${tabId}`;
+      const prev = this.extensionTabLocks.get(lockKey);
+      const run2 = (prev ? prev.catch(() => {
+        return;
+      }) : Promise.resolve()).then(() => this.executeExtension(userId, token, pipeline, tabId, opts.clientId));
+      this.extensionTabLocks.set(lockKey, run2);
+      run2.catch(() => {
+        return;
+      }).finally(() => {
+        if (this.extensionTabLocks.get(lockKey) === run2)
+          this.extensionTabLocks.delete(lockKey);
+      });
+      return run2;
+    }
     const forcedMode = opts.mode;
     const autoEscalate = opts.autoEscalate !== false;
     const instanceId = opts.instanceId || DEFAULT_INSTANCE;
@@ -5042,7 +8800,7 @@ class PipelineExecutor {
         this.deps.domainModes.recordFailure(domain, failedMode, result.error?.message || "blocked");
       const nextMode = this.deps.domainModes.getNextMode(failedMode, availableModes);
       if (nextMode) {
-        log17.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
+        log18.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
         if (failedMode !== "docker-headful") {
           await this.deps.daemon.stopMode(failedMode, instanceId);
         }
@@ -5055,7 +8813,7 @@ class PipelineExecutor {
           this.deps.domainModes.recordFailure(domain, nextMode, result.error?.message || "blocked");
           const thirdMode = this.deps.domainModes.getNextMode(nextMode, availableModes);
           if (thirdMode) {
-            log17.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
+            log18.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
             if (nextMode !== "docker-headful") {
               await this.deps.daemon.stopMode(nextMode, instanceId);
             }
@@ -5078,6 +8836,89 @@ class PipelineExecutor {
       return this.executeDocker(userId, token, pipeline);
     }
     return this.executeLocal(userId, token, pipeline, mode, instanceId);
+  }
+  async executeExtension(userId, token, pipeline, tabId, clientId) {
+    const startTime = Date.now();
+    const relay = new CdpRelay(tabId, clientId, pipeline.options?.focus);
+    let browser;
+    try {
+      await relay.start();
+      browser = await import_playwright_core.chromium.connectOverCDP(relay.httpEndpoint(), { timeout: 30000 });
+      const context = browser.contexts()[0];
+      if (!context)
+        throw new Error("no CDP browser context for the tab");
+      let page = context.pages()[0];
+      if (!page) {
+        page = await context.waitForEvent("page", { timeout: 5000 }).catch(() => {
+          return;
+        });
+      }
+      if (!page)
+        throw new Error("no page available for the tab (is it still open?)");
+      const ctx = this.deps.refStore.makeContext(userId, token);
+      if (this.pendingElicitOtp)
+        ctx.elicitOtp = this.pendingElicitOtp;
+      const runner = new PipelineRunner(ctx);
+      const capMs = Math.min(60000 + pipeline.steps.length * 15000, 150000);
+      let watchdog;
+      let result;
+      try {
+        const runPromise = runner.run(page, pipeline);
+        runPromise.catch(() => {
+          return;
+        });
+        result = await Promise.race([
+          runPromise,
+          new Promise((_, reject) => {
+            watchdog = setTimeout(() => reject(new Error(`pipeline exceeded ${Math.round(capMs / 1000)}s — the tab may have stopped ` + `rendering (minimized window?). Un-minimize the Chrome window or retry ` + `with options.focus=true.`)), capMs);
+            watchdog.unref?.();
+          })
+        ]);
+      } finally {
+        if (watchdog)
+          clearTimeout(watchdog);
+      }
+      this.deps.refStore.sync(userId, ctx);
+      result.modeUsed = "extension";
+      if (result.ok) {
+        try {
+          extractKnowledgeFromRun(pipeline, result, null, "extension");
+        } catch (e) {
+          log18.warn(`knowledge update failed: ${getErrorMessage(e)}`);
+        }
+      }
+      return result;
+    } catch (err) {
+      const msg = getErrorMessage(err);
+      const stalled = msg.includes("pipeline exceeded");
+      return {
+        ok: false,
+        completedSteps: 0,
+        totalSteps: pipeline.steps.length,
+        results: [],
+        finalState: { url: "", title: "" },
+        obstacles: [],
+        durationMs: Date.now() - startTime,
+        modeUsed: "extension",
+        error: {
+          failedAtStep: 0,
+          failedStep: pipeline.steps[0],
+          errorType: "action-failed",
+          message: `Extension mode failed: ${msg}`,
+          pageState: { url: "", title: "" },
+          suggestion: stalled ? "STOP retrying and tell the user what happened: the Chrome tab being driven stopped " + "responding — its window is likely minimized or the page is wedged. Ask them to " + "un-minimize the Chrome window (leaving it behind other windows is fine), or ask " + "permission to rerun with options.focus=true to bring it to the front." : "Ensure the iframer extension is connected (green dot) and the tab is still open. See chrome://extensions.",
+          retryable: !stalled
+        }
+      };
+    } finally {
+      try {
+        if (browser)
+          await browser.close();
+      } catch {}
+      try {
+        await relay.stop();
+      } catch {}
+    }
   }
   async executeDocker(userId, token, pipeline) {
     let session = getSession(userId);
@@ -5170,7 +9011,7 @@ class PipelineExecutor {
         try {
           extractKnowledgeFromRun(pipeline, result, updatedSession, mode);
         } catch (err) {
-          log17.warn(`knowledge update failed: ${getErrorMessage(err)}`);
+          log18.warn(`knowledge update failed: ${getErrorMessage(err)}`);
         }
       }
       this.deps.refStore.sync(userId, ctx);
@@ -5202,7 +9043,7 @@ class PipelineExecutor {
     }
   }
 }
-var log17;
+var import_playwright_core, log18;
 var init_pipeline_executor = __esm(() => {
   init_daemon();
   init_pipeline();
@@ -5213,7 +9054,9 @@ var init_pipeline_executor = __esm(() => {
   init_page_state();
   init_config();
   init_logger();
-  log17 = createLogger("iframer");
+  init_cdp_relay();
+  import_playwright_core = require("playwright-core");
+  log18 = createLogger("iframer");
 });
 
 // src/lib/execution/fetch-service.ts
@@ -5564,7 +9407,7 @@ class Iframer {
             sessionSaved = true;
           }
         } catch (err) {
-          log18.warn(`stopSession: failed to extract daemon state for ${inst.mode}::${inst.instanceId}: ${getErrorMessage(err)}`);
+          log19.warn(`stopSession: failed to extract daemon state for ${inst.mode}::${inst.instanceId}: ${getErrorMessage(err)}`);
         }
       }
     }
@@ -5643,7 +9486,7 @@ class Iframer {
     }
   }
 }
-var import_path8, import_url, log18, DEFAULT_SCREENSHOT_DIR, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3 = 20000;
+var import_path11, import_url, log19, DEFAULT_SCREENSHOT_DIR, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3 = 20000;
 var init_iframer = __esm(() => {
   init_session_manager();
   init_launcher();
@@ -5659,24 +9502,24 @@ var init_iframer = __esm(() => {
   init_fetch_service();
   init_capture_manager();
   init_credential_store();
-  import_path8 = __toESM(require("path"));
+  import_path11 = __toESM(require("path"));
   import_url = require("url");
-  log18 = createLogger("iframer");
-  DEFAULT_SCREENSHOT_DIR = import_path8.default.join(import_path8.default.dirname(import_url.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/src/lib/iframer.ts")), "../../.screenshots");
+  log19 = createLogger("iframer");
+  DEFAULT_SCREENSHOT_DIR = import_path11.default.join(import_path11.default.dirname(import_url.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/src/lib/iframer.ts")), "../../.screenshots");
   DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
 });
 
 // bin/cli.js
 var __dirname = "/Users/eduardoverona/tools/iframer-toolkit/bin";
-var fs9 = require("fs");
-var os3 = require("os");
-var path9 = require("path");
+var fs12 = require("fs");
+var os4 = require("os");
+var path12 = require("path");
 var { execSync: execSync3 } = require("child_process");
 var readline = require("readline");
-var HOME_DIR = os3.homedir();
-var CONFIG_DIR = process.env.IFRAMER_DATA_DIR || path9.join(HOME_DIR, ".iframer");
-var CLAUDE_CONFIG_PATH = path9.join(HOME_DIR, ".claude.json");
-var CODEX_CONFIG_PATH = path9.join(HOME_DIR, ".codex", "config.toml");
+var HOME_DIR = os4.homedir();
+var CONFIG_DIR = process.env.IFRAMER_DATA_DIR || path12.join(HOME_DIR, ".iframer");
+var CLAUDE_CONFIG_PATH = path12.join(HOME_DIR, ".claude.json");
+var CODEX_CONFIG_PATH = path12.join(HOME_DIR, ".codex", "config.toml");
 var DEFAULT_SERVER = process.env.IFRAMER_URL || "http://localhost:3021";
 var API_KEY = process.env.IFRAMER_SECRET;
 var USE_LOCAL = process.env.IFRAMER_MODE === "local" || !process.env.IFRAMER_URL;
@@ -5685,21 +9528,21 @@ function resolveLocalToken() {
   if (process.env.IFRAMER_SECRET)
     return process.env.IFRAMER_SECRET;
   const candidates = [
-    path9.join(CONFIG_DIR, "secret"),
-    path9.join(process.env.XDG_RUNTIME_DIR || os3.tmpdir(), "iframer-secret")
+    path12.join(CONFIG_DIR, "secret"),
+    path12.join(process.env.XDG_RUNTIME_DIR || os4.tmpdir(), "iframer-secret")
   ];
   for (const file of candidates) {
     try {
-      const existing = fs9.readFileSync(file, "utf8").trim();
+      const existing = fs12.readFileSync(file, "utf8").trim();
       if (existing)
         return existing;
     } catch {}
   }
   for (const file of candidates) {
     try {
-      fs9.mkdirSync(path9.dirname(file), { recursive: true });
+      fs12.mkdirSync(path12.dirname(file), { recursive: true });
       const secret = require("crypto").randomBytes(32).toString("hex");
-      fs9.writeFileSync(file, secret, { mode: 384 });
+      fs12.writeFileSync(file, secret, { mode: 384 });
       return secret;
     } catch {}
   }
@@ -5786,20 +9629,20 @@ async function apiDelete(endpoint) {
   return res.json();
 }
 function resolveMcpRuntime() {
-  const mcpServerTS = path9.join(__dirname, "..", "src", "mcp", "server.ts");
-  const mcpServerCJS = path9.join(__dirname, "mcp-server.cjs");
+  const mcpServerTS = path12.join(__dirname, "..", "src", "mcp", "server.ts");
+  const mcpServerCJS = path12.join(__dirname, "mcp-server.cjs");
   let bunPath;
   try {
     bunPath = execSync3("which bun", { encoding: "utf8" }).trim();
   } catch {}
-  if (bunPath && fs9.existsSync(mcpServerTS)) {
+  if (bunPath && fs12.existsSync(mcpServerTS)) {
     return {
       command: bunPath,
       args: ["run", mcpServerTS],
       message: "  Using bun to run MCP server from source (no build needed)"
     };
   }
-  if (fs9.existsSync(mcpServerCJS)) {
+  if (fs12.existsSync(mcpServerCJS)) {
     return {
       command: "node",
       args: [mcpServerCJS],
@@ -5815,8 +9658,8 @@ function resolveIframerSecret() {
   if (secret)
     return secret;
   try {
-    const envPath = path9.join(__dirname, "..", ".env");
-    const envContent = fs9.readFileSync(envPath, "utf8");
+    const envPath = path12.join(__dirname, "..", ".env");
+    const envContent = fs12.readFileSync(envPath, "utf8");
     const match = envContent.match(/^IFRAMER_SECRET=(.+)$/m);
     if (match)
       secret = match[1].trim();
@@ -5825,23 +9668,23 @@ function resolveIframerSecret() {
 }
 function installSkill() {
   const candidates = [
-    path9.join(__dirname, "..", "skills", "iframer.md"),
-    path9.join(__dirname, "skills", "iframer.md")
+    path12.join(__dirname, "..", "skills", "iframer.md"),
+    path12.join(__dirname, "skills", "iframer.md")
   ];
   let source = null;
   for (const c of candidates) {
-    if (fs9.existsSync(c)) {
+    if (fs12.existsSync(c)) {
       source = c;
       break;
     }
   }
   if (!source)
     return false;
-  const destDir = path9.join(HOME_DIR, ".claude", "commands");
-  const dest = path9.join(destDir, "iframer.md");
+  const destDir = path12.join(HOME_DIR, ".claude", "commands");
+  const dest = path12.join(destDir, "iframer.md");
   try {
-    fs9.mkdirSync(destDir, { recursive: true });
-    fs9.copyFileSync(source, dest);
+    fs12.mkdirSync(destDir, { recursive: true });
+    fs12.copyFileSync(source, dest);
     return true;
   } catch (err) {
     console.error(`  Warning: could not install skill: ${err.message}`);
@@ -5849,10 +9692,10 @@ function installSkill() {
   }
 }
 function removeSkill() {
-  const dest = path9.join(HOME_DIR, ".claude", "commands", "iframer.md");
+  const dest = path12.join(HOME_DIR, ".claude", "commands", "iframer.md");
   try {
-    if (fs9.existsSync(dest)) {
-      fs9.unlinkSync(dest);
+    if (fs12.existsSync(dest)) {
+      fs12.unlinkSync(dest);
       return true;
     }
   } catch {}
@@ -5860,8 +9703,8 @@ function removeSkill() {
 }
 function writeMachineSecret(secret) {
   try {
-    fs9.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs9.writeFileSync(path9.join(CONFIG_DIR, "secret"), secret, { mode: 384 });
+    fs12.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs12.writeFileSync(path12.join(CONFIG_DIR, "secret"), secret, { mode: 384 });
     return true;
   } catch (err) {
     console.error(`  Warning: could not write ~/.iframer/secret: ${err.message}`);
@@ -5870,7 +9713,7 @@ function writeMachineSecret(secret) {
 }
 function loadClaudeConfig() {
   try {
-    return JSON.parse(fs9.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    return JSON.parse(fs12.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
   } catch {
     return {};
   }
@@ -5880,13 +9723,13 @@ function installClaudeMcp(mcpName, mcpEntry) {
   if (!config.mcpServers)
     config.mcpServers = {};
   config.mcpServers[mcpName] = mcpEntry;
-  fs9.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
+  fs12.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
   return CLAUDE_CONFIG_PATH;
 }
 function removeClaudeMcp(mcpName) {
   let config;
   try {
-    config = JSON.parse(fs9.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    config = JSON.parse(fs12.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
   } catch {
     return { removed: false, path: CLAUDE_CONFIG_PATH };
   }
@@ -5894,7 +9737,7 @@ function removeClaudeMcp(mcpName) {
     return { removed: false, path: CLAUDE_CONFIG_PATH };
   }
   delete config.mcpServers[mcpName];
-  fs9.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
+  fs12.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
   return { removed: true, path: CLAUDE_CONFIG_PATH };
 }
 function escapeTomlString(value) {
@@ -5946,10 +9789,10 @@ function renderCodexMcpBlock(mcpName, mcpEntry) {
 `);
 }
 function installCodexMcp(mcpName, mcpEntry) {
-  fs9.mkdirSync(path9.dirname(CODEX_CONFIG_PATH), { recursive: true });
+  fs12.mkdirSync(path12.dirname(CODEX_CONFIG_PATH), { recursive: true });
   let content = "";
   try {
-    content = fs9.readFileSync(CODEX_CONFIG_PATH, "utf8");
+    content = fs12.readFileSync(CODEX_CONFIG_PATH, "utf8");
   } catch {}
   const existing = findCodexMcpSection(content, mcpName);
   if (existing) {
@@ -5958,7 +9801,7 @@ function installCodexMcp(mcpName, mcpEntry) {
   }
   const trimmed = content.trimEnd();
   const block = renderCodexMcpBlock(mcpName, mcpEntry);
-  fs9.writeFileSync(CODEX_CONFIG_PATH, trimmed ? `${trimmed}
+  fs12.writeFileSync(CODEX_CONFIG_PATH, trimmed ? `${trimmed}
 
 ${block}
 ` : `${block}
@@ -5968,7 +9811,7 @@ ${block}
 function removeCodexMcp(mcpName) {
   let content;
   try {
-    content = fs9.readFileSync(CODEX_CONFIG_PATH, "utf8");
+    content = fs12.readFileSync(CODEX_CONFIG_PATH, "utf8");
   } catch {
     return { removed: false, path: CODEX_CONFIG_PATH };
   }
@@ -5980,7 +9823,7 @@ function removeCodexMcp(mcpName) {
 `).replace(/\n{3,}/g, `
 
 `).trimEnd();
-  fs9.writeFileSync(CODEX_CONFIG_PATH, next ? `${next}
+  fs12.writeFileSync(CODEX_CONFIG_PATH, next ? `${next}
 ` : "");
   return { removed: true, path: CODEX_CONFIG_PATH };
 }
@@ -5990,8 +9833,8 @@ async function getLocalIframer() {
     return _iframer;
   try {
     const { Iframer: Iframer2 } = await Promise.resolve().then(() => (init_iframer(), exports_iframer));
-    const screenshotDir = path9.join(os3.tmpdir(), "iframer-screenshots");
-    fs9.mkdirSync(screenshotDir, { recursive: true });
+    const screenshotDir = path12.join(os4.tmpdir(), "iframer-screenshots");
+    fs12.mkdirSync(screenshotDir, { recursive: true });
     _iframer = new Iframer2({
       screenshotDir,
       publicUrl: `file://${screenshotDir}`,
@@ -6027,17 +9870,17 @@ function hasFlag(args, flag) {
 function handleResponse(data, screenshotPath) {
   const { screenshot: screenshot2, tileScreenshots, ...rest } = data;
   if (screenshot2 && screenshotPath) {
-    fs9.writeFileSync(screenshotPath, Buffer.from(screenshot2, "base64"));
+    fs12.writeFileSync(screenshotPath, Buffer.from(screenshot2, "base64"));
     rest._screenshotSaved = screenshotPath;
   }
   if (tileScreenshots && tileScreenshots.length > 0) {
     const tileDir = "/tmp/browser-tiles";
-    fs9.mkdirSync(tileDir, { recursive: true });
+    fs12.mkdirSync(tileDir, { recursive: true });
     const tilePaths = [];
     for (const tile of tileScreenshots) {
       if (tile.screenshot) {
         const tilePath = `${tileDir}/tile-${tile.index}.png`;
-        fs9.writeFileSync(tilePath, Buffer.from(tile.screenshot, "base64"));
+        fs12.writeFileSync(tilePath, Buffer.from(tile.screenshot, "base64"));
         tilePaths.push(tilePath);
       }
     }
@@ -6069,11 +9912,13 @@ if (command === "install") {
       command = "install-chrome";
     else if (target === "mcp")
       command = "install-mcp";
+    else if (target === "extension")
+      command = "install-extension";
     else if (target === "deps" || target === "dependencies" || target === "all")
       command = "install-all";
     else {
       console.error(`  Unknown install target: ${target}`);
-      console.error("  Usage: iframer install <chromium|mcp>");
+      console.error("  Usage: iframer install <chromium|mcp|extension>");
       process.exit(1);
     }
   }
@@ -6087,11 +9932,22 @@ if (command === "remove") {
       command = "remove-chrome";
     else if (target === "mcp")
       command = "remove-mcp";
+    else if (target === "extension")
+      command = "remove-extension";
     else {
       console.error(`  Unknown remove target: ${target}`);
-      console.error("  Usage: iframer remove <chromium|mcp>");
+      console.error("  Usage: iframer remove <chromium|mcp|extension>");
       process.exit(1);
     }
+  }
+}
+if (command === "extension") {
+  const sub = args.shift();
+  if (sub === "path")
+    command = "extension-path";
+  else {
+    console.error("  Usage: iframer extension path");
+    process.exit(1);
   }
 }
 async function installChrome() {
@@ -6100,19 +9956,178 @@ async function installChrome() {
 }
 function isMcpInstalled(mcpName) {
   try {
-    const config = JSON.parse(fs9.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    const config = JSON.parse(fs12.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
     return !!(config.mcpServers && config.mcpServers[mcpName]);
   } catch {
     return false;
   }
 }
+var EXTENSION_ID = "mjfdkiicioigljhenkgaldhihllfdpll";
+function extensionDir() {
+  return path12.join(__dirname, "..", "extension");
+}
+function semverNewer(a, b) {
+  const pa = String(a).split(".").map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).split(".").map((n) => parseInt(n, 10) || 0);
+  for (let i = 0;i < 3; i++) {
+    if ((pa[i] || 0) > (pb[i] || 0))
+      return true;
+    if ((pa[i] || 0) < (pb[i] || 0))
+      return false;
+  }
+  return false;
+}
+async function reloadAndRestartServer(reloadExtension) {
+  let info = null;
+  try {
+    info = JSON.parse(fs12.readFileSync(path12.join(CONFIG_DIR, "server.json"), "utf8"));
+  } catch {}
+  if (!info || !info.port) {
+    if (reloadExtension) {
+      console.log("  (No running iframer server. The new extension files are on disk —");
+      console.log("   reload it from chrome://extensions, or it applies next session.)");
+    }
+    return;
+  }
+  const base = `http://127.0.0.1:${info.port}`;
+  const headers = { "x-api-key": LOCAL_TOKEN, "content-type": "application/json" };
+  if (reloadExtension) {
+    try {
+      await fetch(`${base}/extension/reload`, { method: "POST", headers });
+      console.log("  Told the extension to reload.");
+    } catch {}
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  try {
+    await fetch(`${base}/shutdown`, { method: "POST", headers });
+    console.log("  Retired the old server (a fresh one spawns on next use).");
+  } catch {}
+}
+var NM_HOST_NAME = "com.iframer.token";
+function nativeMessagingBrowserDirs() {
+  if (process.platform === "darwin") {
+    const as = path12.join(HOME_DIR, "Library", "Application Support");
+    return [
+      { browser: "Chrome", dir: path12.join(as, "Google", "Chrome"), always: true },
+      { browser: "Chrome Beta", dir: path12.join(as, "Google", "Chrome Beta") },
+      { browser: "Chrome Canary", dir: path12.join(as, "Google", "Chrome Canary") },
+      { browser: "Chromium", dir: path12.join(as, "Chromium") },
+      { browser: "Brave", dir: path12.join(as, "BraveSoftware", "Brave-Browser") },
+      { browser: "Edge", dir: path12.join(as, "Microsoft Edge") },
+      { browser: "Vivaldi", dir: path12.join(as, "Vivaldi") },
+      { browser: "Arc", dir: path12.join(as, "Arc", "User Data") }
+    ];
+  }
+  const cfg = process.env.XDG_CONFIG_HOME || path12.join(HOME_DIR, ".config");
+  return [
+    { browser: "Chrome", dir: path12.join(cfg, "google-chrome"), always: true },
+    { browser: "Chrome Beta", dir: path12.join(cfg, "google-chrome-beta") },
+    { browser: "Chromium", dir: path12.join(cfg, "chromium") },
+    { browser: "Brave", dir: path12.join(cfg, "BraveSoftware", "Brave-Browser") },
+    { browser: "Edge", dir: path12.join(cfg, "microsoft-edge") },
+    { browser: "Vivaldi", dir: path12.join(cfg, "vivaldi") }
+  ];
+}
+function extensionMarkerPath() {
+  return path12.join(CONFIG_DIR, "extension.json");
+}
+function readExtensionMarker() {
+  try {
+    return JSON.parse(fs12.readFileSync(extensionMarkerPath(), "utf8"));
+  } catch {
+    return null;
+  }
+}
+function extensionInstalled() {
+  return !!readExtensionMarker();
+}
+function writeExtensionMarker(flavor, browsers) {
+  fs12.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs12.writeFileSync(extensionMarkerPath(), JSON.stringify({ installed: true, flavor, browsers, installedAt: new Date().toISOString() }, null, 2));
+}
+function clearExtensionMarker() {
+  try {
+    fs12.unlinkSync(extensionMarkerPath());
+  } catch {}
+}
+var EXTENSION_FLAVORS = {
+  chrome: { label: "Chrome (Chromium family)", supported: true },
+  chromium: { label: "Chrome (Chromium family)", supported: true },
+  firefox: { label: "Firefox", supported: false }
+};
+function installExtensionHost() {
+  if (process.platform !== "darwin" && process.platform !== "linux") {
+    console.error("  Extension auto-pairing is only supported on macOS and Linux.");
+    process.exit(1);
+  }
+  resolveLocalToken();
+  const srcHost = path12.join(__dirname, "..", "extension", "native-host.cjs");
+  if (!fs12.existsSync(srcHost)) {
+    console.error(`  Host script not found: ${srcHost}`);
+    process.exit(1);
+  }
+  fs12.mkdirSync(CONFIG_DIR, { recursive: true });
+  const hostScript = path12.join(CONFIG_DIR, "extension-token-host.cjs");
+  fs12.copyFileSync(srcHost, hostScript);
+  const wrapper = path12.join(CONFIG_DIR, "extension-token-host.sh");
+  fs12.writeFileSync(wrapper, [
+    "#!/bin/sh",
+    `for BIN in "${process.execPath}" "$(command -v node 2>/dev/null)" /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node; do`,
+    `  [ -n "$BIN" ] && [ -x "$BIN" ] && exec "$BIN" "${hostScript}"`,
+    "done",
+    "exit 1",
+    ""
+  ].join(`
+`), { mode: 493 });
+  const manifest = JSON.stringify({
+    name: NM_HOST_NAME,
+    description: "iframer pairing-token host",
+    path: wrapper,
+    type: "stdio",
+    allowed_origins: [`chrome-extension://${EXTENSION_ID}/`]
+  }, null, 2);
+  const installed = [];
+  for (const { browser, dir, always } of nativeMessagingBrowserDirs()) {
+    if (!always && !fs12.existsSync(dir))
+      continue;
+    try {
+      const nmDir = path12.join(dir, "NativeMessagingHosts");
+      fs12.mkdirSync(nmDir, { recursive: true });
+      fs12.writeFileSync(path12.join(nmDir, `${NM_HOST_NAME}.json`), manifest);
+      installed.push(browser);
+    } catch (e) {
+      console.error(`  ${browser}: failed (${e.message})`);
+    }
+  }
+  if (installed.length)
+    writeExtensionMarker("chrome", installed);
+  return installed;
+}
+function removeExtensionHost() {
+  const removed = [];
+  for (const { browser, dir } of nativeMessagingBrowserDirs()) {
+    const file = path12.join(dir, "NativeMessagingHosts", `${NM_HOST_NAME}.json`);
+    try {
+      if (fs12.existsSync(file)) {
+        fs12.unlinkSync(file);
+        removed.push(browser);
+      }
+    } catch {}
+  }
+  for (const f of ["extension-token-host.cjs", "extension-token-host.sh"]) {
+    try {
+      fs12.unlinkSync(path12.join(CONFIG_DIR, f));
+    } catch {}
+  }
+  return removed;
+}
 async function removeChrome() {
-  const chromeDir = path9.join(CONFIG_DIR, "chrome");
-  if (!fs9.existsSync(chromeDir)) {
+  const chromeDir = path12.join(CONFIG_DIR, "chrome");
+  if (!fs12.existsSync(chromeDir)) {
     console.log("  Chrome for Testing not found, nothing to remove.");
     return;
   }
-  fs9.rmSync(chromeDir, { recursive: true, force: true });
+  fs12.rmSync(chromeDir, { recursive: true, force: true });
   console.log(`  Removed ${chromeDir}`);
 }
 async function main() {
@@ -6265,8 +10280,8 @@ async function main() {
       if (input.startsWith("[") || input.startsWith("{")) {
         const parsed = JSON.parse(input);
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
-      } else if (fs9.existsSync(input)) {
-        const parsed = JSON.parse(fs9.readFileSync(input, "utf-8"));
+      } else if (fs12.existsSync(input)) {
+        const parsed = JSON.parse(fs12.readFileSync(input, "utf-8"));
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
       } else {
         console.error(`  File not found: ${input}`);
@@ -6371,7 +10386,7 @@ async function main() {
           process.exit(1);
         }
         const buffer = Buffer.from(await res.arrayBuffer());
-        fs9.writeFileSync(outPath, buffer);
+        fs12.writeFileSync(outPath, buffer);
         console.log(outPath);
       }
       break;
@@ -6540,8 +10555,8 @@ async function main() {
       } else if (input.startsWith("[") || input.startsWith("{")) {
         const parsed = JSON.parse(input);
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
-      } else if (fs9.existsSync(input)) {
-        const parsed = JSON.parse(fs9.readFileSync(input, "utf-8"));
+      } else if (fs12.existsSync(input)) {
+        const parsed = JSON.parse(fs12.readFileSync(input, "utf-8"));
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
       } else {
         console.error(`  Not a URL or file: ${input}`);
@@ -6561,8 +10576,8 @@ async function main() {
       }
       if (result.capturedApi && result.capturedApi.length > 0) {
         const outputDir = parseFlag(args, "--output") || `./${result.capturedApi[0].domain}`;
-        fs9.mkdirSync(outputDir, { recursive: true });
-        fs9.writeFileSync(path9.join(outputDir, "captured-api.json"), JSON.stringify(result.capturedApi, null, 2));
+        fs12.mkdirSync(outputDir, { recursive: true });
+        fs12.writeFileSync(path12.join(outputDir, "captured-api.json"), JSON.stringify(result.capturedApi, null, 2));
         console.log(`  Captured ${result.capturedApi.reduce((sum, api) => sum + api.endpoints.length, 0)} endpoints`);
         console.log(`  Saved to: ${outputDir}/captured-api.json`);
         for (const api of result.capturedApi) {
@@ -6744,7 +10759,7 @@ async function main() {
       let secretSource = secret ? "env/.env" : null;
       if (!secret) {
         try {
-          secret = fs9.readFileSync(path9.join(CONFIG_DIR, "secret"), "utf8").trim();
+          secret = fs12.readFileSync(path12.join(CONFIG_DIR, "secret"), "utf8").trim();
           if (secret)
             secretSource = "~/.iframer/secret";
         } catch {}
@@ -6789,6 +10804,183 @@ async function main() {
   [2/2] MCP server registration`);
       command = "remove-mcp";
       return main();
+    }
+    case "telemetry": {
+      const file = path12.join(CONFIG_DIR, "telemetry.jsonl");
+      if (args.includes("--clear")) {
+        try {
+          fs12.unlinkSync(file);
+        } catch {}
+        console.log("  Telemetry log cleared.");
+        break;
+      }
+      let lines;
+      try {
+        lines = fs12.readFileSync(file, "utf8").trim().split(`
+`).filter(Boolean);
+      } catch {
+        console.log("  No telemetry recorded yet. It logs automatically as agents use iframer");
+        console.log("  (new MCP sessions only — restart a session if it predates telemetry).");
+        break;
+      }
+      const sessions2 = new Map;
+      for (const line of lines) {
+        let r;
+        try {
+          r = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        let s = sessions2.get(r.session);
+        if (!s) {
+          s = { calls: 0, tokens: 0, defTokens: 0, tools: new Map, first: r.ts, last: r.ts };
+          sessions2.set(r.session, s);
+        }
+        s.last = r.ts;
+        if (r.kind === "definitions")
+          s.defTokens = r.estTokens || 0;
+        else if (r.kind === "call") {
+          s.calls++;
+          s.tokens += r.estTokens || 0;
+          const t = s.tools.get(r.tool) || { calls: 0, tokens: 0 };
+          t.calls++;
+          t.tokens += r.estTokens || 0;
+          s.tools.set(r.tool, t);
+        }
+      }
+      const fmt = (n) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+      let grandCalls = 0, grandTokens = 0;
+      const toolTotals = new Map;
+      for (const s of sessions2.values()) {
+        grandCalls += s.calls;
+        grandTokens += s.tokens;
+        for (const [name, t] of s.tools) {
+          const g = toolTotals.get(name) || { calls: 0, tokens: 0 };
+          g.calls += t.calls;
+          g.tokens += t.tokens;
+          toolTotals.set(name, g);
+        }
+      }
+      console.log(`
+  iframer MCP token telemetry (estimated at ~4 chars/token, local only)
+`);
+      console.log(`  All time: ${sessions2.size} session(s), ${grandCalls} call(s), ~${fmt(grandTokens)} tokens of tool traffic`);
+      console.log(`
+  Per tool (all time):`);
+      for (const [name, t] of [...toolTotals.entries()].sort((a, b) => b[1].tokens - a[1].tokens)) {
+        console.log(`    ${name.padEnd(18)} ${String(t.calls).padStart(4)} calls  ~${fmt(t.tokens).padStart(7)} tokens`);
+      }
+      console.log(`
+  Recent sessions:`);
+      const recent = [...sessions2.entries()].slice(-5);
+      for (const [id, s] of recent) {
+        console.log(`    ${id.padEnd(20)} ${String(s.calls).padStart(4)} calls  ~${fmt(s.tokens).padStart(7)} tokens (+~${fmt(s.defTokens)} definitions overhead, once per session)`);
+      }
+      console.log(`
+  Note: definitions overhead excludes zod schema text — Claude Code's /context`);
+      console.log(`  shows the exact per-session definition footprint. Clear log: iframer telemetry --clear
+`);
+      break;
+    }
+    case "install-extension": {
+      const flavor = (args[0] || "chrome").toLowerCase();
+      const spec = EXTENSION_FLAVORS[flavor];
+      if (!spec) {
+        console.error(`  Unknown browser: ${flavor}. Supported: ${Object.keys(EXTENSION_FLAVORS).filter((k, i, a) => a.indexOf(k) === i).join(", ")}`);
+        console.error("  Usage: iframer install extension chrome");
+        process.exit(1);
+      }
+      if (!spec.supported) {
+        console.log(`  ${spec.label} extension isn't available yet — coming soon.`);
+        console.log("  For now: iframer install extension chrome");
+        break;
+      }
+      console.log(`  Installing the iframer extension for ${spec.label}...
+`);
+      const installed = installExtensionHost();
+      if (installed.length === 0) {
+        console.log("  No Chromium-family browser directories found — nothing installed.");
+        break;
+      }
+      console.log(`  Pairing host installed for: ${installed.join(", ")}`);
+      console.log(`
+  ┌─ ONE manual step to finish ────────────────────────────────┐`);
+      console.log("  │  1. Open  chrome://extensions");
+      console.log("  │  2. Turn on  Developer mode  (top-right)");
+      console.log("  │  3. Click  Load unpacked  and select this folder:");
+      console.log(`  │       ${extensionDir()}`);
+      console.log("  └────────────────────────────────────────────────────────────┘");
+      console.log("\n  Load it from THAT path (inside the installed package) so `iframer");
+      console.log("  update` can refresh it in place. Once loaded it pairs itself — no");
+      console.log(`  token pasting. Get the path again anytime with: iframer extension path
+`);
+      break;
+    }
+    case "extension-path": {
+      console.log(extensionDir());
+      break;
+    }
+    case "update": {
+      const checkOnly = args.includes("--check");
+      const pkgRoot = path12.join(__dirname, "..");
+      const isDev = fs12.existsSync(path12.join(pkgRoot, ".git"));
+      let installed = "unknown";
+      try {
+        installed = JSON.parse(fs12.readFileSync(path12.join(pkgRoot, "package.json"), "utf8")).version;
+      } catch {}
+      let latest = null;
+      try {
+        latest = require("child_process").execSync("npm view iframer-toolkit version", { encoding: "utf8" }).trim();
+      } catch {}
+      console.log(`  installed: v${installed}${latest ? `    latest: v${latest}` : "    (could not reach npm registry)"}`);
+      if (!latest) {
+        if (checkOnly)
+          break;
+      }
+      const newerAvailable = latest && semverNewer(latest, installed);
+      if (latest && !newerAvailable) {
+        console.log(installed === latest ? "  Already up to date." : `  You're on v${installed}, ahead of npm's v${latest}. Nothing to do.`);
+        break;
+      }
+      if (checkOnly) {
+        if (newerAvailable)
+          console.log("  Update available — run `iframer update` to apply.");
+        break;
+      }
+      if (isDev) {
+        console.log(`
+  This is a dev/linked install (the package has a .git repo).`);
+        console.log("  Update it with `git pull && bun run build`, not npm.");
+        break;
+      }
+      console.log(`
+  Updating via npm...`);
+      try {
+        require("child_process").execSync("npm install -g iframer-toolkit@latest", { stdio: "inherit" });
+      } catch {
+        console.error(`
+  npm install failed. If it's a permissions error:`);
+        console.error("    sudo npm install -g iframer-toolkit@latest");
+        process.exit(1);
+      }
+      console.log();
+      const hasExt = extensionInstalled();
+      await reloadAndRestartServer(hasExt);
+      console.log(`
+  Updated to v${latest || "latest"}.${hasExt ? "" : " (Extension not installed — nothing to reload.)"}
+`);
+      break;
+    }
+    case "remove-extension": {
+      const removed = removeExtensionHost();
+      clearExtensionMarker();
+      if (removed.length === 0) {
+        console.log("  Extension pairing host was not installed.");
+      } else {
+        console.log(`  Pairing host removed from: ${removed.join(", ")}`);
+        console.log("  (Also remove it from chrome://extensions if you loaded it there.)");
+      }
+      break;
     }
     case "remove-mcp": {
       const isDev = args.includes("--dev");
@@ -6860,6 +11052,11 @@ async function main() {
     knowledge get <domain>          Same as --cache <domain>
     knowledge clear [domain]        Same as --clear-cache
 
+  Telemetry:
+    telemetry                       Report estimated session tokens consumed by MCP tool calls
+    telemetry --clear               Wipe the telemetry log
+    (opt out: IFRAMER_TELEMETRY=0 in the MCP env)
+
   Browser:
     modes                           Show available browser modes
     install chromium                Download Chrome for Testing
@@ -6876,9 +11073,14 @@ async function main() {
     install                         Install everything (Chromium + MCP)
     install chromium                Download Chrome for Testing
     install mcp [--dev]             Register iframer MCP in Claude Code and Codex
+    install extension chrome        Install the (optional) browser extension for Chrome/Chromium
+    extension path                  Print the extension folder to load in chrome://extensions
+    update                          Update iframer via npm; reload the extension too if it's installed
+    update --check                  Report whether a newer version is available (no install)
     remove                          Remove everything (Chromium + MCP)
     remove chromium                 Delete downloaded Chrome for Testing
     remove mcp [--dev]              Unregister iframer MCP from Claude Code and Codex
+    remove extension                Remove the extension pairing host
 
   Environment:
     IFRAMER_URL                     Docker API URL (default: http://localhost:3021)
