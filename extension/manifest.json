@@ -4,7 +4,7 @@
   "version": "0.5.0",
   "description": "Let iframer drive a Chrome tab you choose, on your real logged-in session.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAp2wbce98k+xDnEgtuzLyNXYBLEDY0nqChuvolb94B3VV1HsHFUulUyNe92eN6MjQuadDohQ2j5mj7zWs4yQoixgTQPe7Gm/+GHWdgxwM2s9t5opnLHwF90LPiJm6q1NGWLM4aK6JT+2I6FnUGmj2bzB4WIlf55C3aMEBoXTqIzG2U8s2cxkXGebWWqbPlMK/Phsmsvo4POWnidbGHPhBOq0iyPTu7RdSDlNdJdJ+dtdNXkMmltKUS881MQI9T6GcCCKhIKcZrJGGnk0xphlWyl+ublTAO0tbQSVB/K7D3JmCxMv690TPtYUPPhGi+C6VCv3IeutLmNo60mvux3wbGQIDAQAB",
-  "permissions": ["tabs", "scripting", "storage", "activeTab", "alarms", "identity", "identity.email", "debugger", "nativeMessaging"],
+  "permissions": ["tabs", "tabGroups", "scripting", "storage", "activeTab", "alarms", "identity", "identity.email", "debugger", "nativeMessaging"],
   "host_permissions": ["<all_urls>", "http://127.0.0.1/*", "http://localhost/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "action": { "default_popup": "popup.html", "default_title": "iframer" }

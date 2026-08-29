@@ -38,6 +38,8 @@ IMPORTANT — Element refs (@e1, @e2...): All selector fields accept @e refs fro
 
 IMPORTANT — Saved anchors (@a:<name>): Selector fields also accept persisted, per-domain anchors from the \`remember\` tool. Call \`remember get <domain>\` before a UI task; if an anchor exists, target it directly (e.g. selector="@a:composer") — no snapshot needed. After finding a new element that works, \`remember save\` it. Unlike @e refs (which reset every snapshot), @a: anchors persist across runs.
 
+FILLING FORMS: Always use the \`fill\` step for text inputs/textareas — NOT \`evaluate\` to set .value. \`fill\` is framework-aware: it fires the React-safe native setter plus input/change/blur, so controlled forms (React, react-hook-form, Formik, Vue) actually register the value and mark the field "touched". This prevents the common "I filled every field but submit still says they're required/empty" failure — which is a form-framework state issue, not a real empty field. If a submit is still rejected as incomplete after filling, re-run \`fill\` on the flagged field (it re-triggers the blur/validation) rather than assuming the value didn't land.
+
 Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: errorContext with screenshot path, URL, errorType, suggestion, retryable.`,
     {
       steps: z.array(stepSchema).describe("Pipeline steps to execute sequentially"),

@@ -61,7 +61,15 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>;
 }
 
-type OutboundType = "list_tabs" | "ping" | "cdp_attach" | "cdp_command" | "cdp_detach";
+type OutboundType = "list_tabs" | "ping" | "cdp_attach" | "cdp_command" | "cdp_detach" | "create_tab" | "group_tabs" | "ungroup_tabs" | "update_group" | "list_groups" | "reload";
+
+export interface TabGroupResult {
+  groupId: number;
+  title: string;
+  color: string;
+  collapsed: boolean;
+  tabIds: number[];
+}
 
 export interface CdpEvent {
   tabId: number;
@@ -347,6 +355,90 @@ class ExtensionBridge {
       `Could not determine which browser profile owns tab ${tabId}. Call \`tabs\` to ` +
         `refresh the list, then pass the tab's clientId alongside tabId.`,
     );
+  }
+
+  /** Pick a client for a browser-level op that has no tabId (create tab, etc.).
+   *  Explicit clientId wins; otherwise require exactly one connected profile. */
+  private resolveClientNoTab(clientId?: string): Client {
+    if (clientId) {
+      const c = this.clients.get(clientId);
+      if (!c) throw new Error(`No connected extension with clientId ${clientId}.`);
+      return c;
+    }
+    if (this.clients.size === 0) {
+      throw new Error(
+        "No iframer extension is connected. Open Chrome, install/enable the iframer " +
+          "extension, and pair it (paste the token, dot goes green).",
+      );
+    }
+    if (this.clients.size === 1) return [...this.clients.values()][0];
+    throw new Error(
+      "Multiple browser profiles are connected — pass clientId to say which one to act in. " +
+        "Call `tabs` to see the profiles and their clientIds.",
+    );
+  }
+
+  /** Hot-reload every connected extension (chrome.runtime.reload) so new
+   *  background.js takes effect without a manual chrome://extensions reload.
+   *  Dev/iteration aid. Clients drop and auto-reconnect within ~seconds. */
+  async reloadAll(): Promise<{ reloaded: number }> {
+    const clients = [...this.clients.values()];
+    await Promise.all(clients.map((c) => this.send(c, "reload", {}).catch(() => {})));
+    return { reloaded: clients.length };
+  }
+
+  /** Group tabs into a native Chrome tab group. */
+  async groupTabs(
+    tabIds: number[],
+    opts: { title?: string; color?: string; collapsed?: boolean; groupId?: number } = {},
+    clientId?: string,
+  ): Promise<TabGroupResult> {
+    // Route to the client that owns the tabs (refresh ownership if needed).
+    const client = clientId ? this.resolveClientNoTab(clientId) : await this.resolveClient(tabIds[0]);
+    return this.send<TabGroupResult>(client, "group_tabs", {
+      tabIds,
+      title: opts.title,
+      color: opts.color,
+      collapsed: opts.collapsed,
+      groupId: opts.groupId,
+    });
+  }
+
+  /** Remove tabs from their group (chrome.tabs.ungroup). */
+  async ungroupTabs(tabIds: number[], clientId?: string): Promise<{ ungrouped: number[] }> {
+    const client = clientId ? this.resolveClientNoTab(clientId) : await this.resolveClient(tabIds[0]);
+    return this.send<{ ungrouped: number[] }>(client, "ungroup_tabs", { tabIds });
+  }
+
+  /** Rename / recolor / collapse an existing group by id. */
+  async updateGroup(
+    groupId: number,
+    opts: { title?: string; color?: string; collapsed?: boolean },
+    clientId?: string,
+  ): Promise<Omit<TabGroupResult, "tabIds">> {
+    const client = this.resolveClientNoTab(clientId);
+    return this.send<Omit<TabGroupResult, "tabIds">>(client, "update_group", { groupId, ...opts });
+  }
+
+  /** List all tab groups across the browser. */
+  async listGroups(clientId?: string): Promise<{ groups: Array<Omit<TabGroupResult, "tabIds"> & { windowId: number }> }> {
+    const client = this.resolveClientNoTab(clientId);
+    return this.send<{ groups: Array<Omit<TabGroupResult, "tabIds"> & { windowId: number }> }>(client, "list_groups", {});
+  }
+
+  /** Open a new tab in the user's real Chrome via chrome.tabs.create. */
+  async createTab(
+    url: string,
+    opts: { active?: boolean; windowId?: number } = {},
+    clientId?: string,
+  ): Promise<{ tab: ExtensionTab; clientId: string }> {
+    const client = this.resolveClientNoTab(clientId);
+    const res = await this.send<{ tab: ExtensionTab }>(client, "create_tab", {
+      url,
+      active: opts.active,
+      windowId: opts.windowId,
+    });
+    return { tab: { ...res.tab, clientId: client.clientId, profileId: client.profileId, profileName: client.profileName }, clientId: client.clientId };
   }
 
   // ─── CDP relay plumbing ───────────────────────────────────────────

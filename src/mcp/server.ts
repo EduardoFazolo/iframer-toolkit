@@ -11,6 +11,7 @@ import { registerReverseEngineerTool } from "./tools/reverse-engineer";
 import { registerKnowledgeTool } from "./tools/knowledge";
 import { registerTabsTool } from "./tools/tabs";
 import { registerRememberTool } from "./tools/anchors";
+import { registerClipboardTool } from "./tools/clipboard";
 import { recordCall, recordDefinitions, contentChars, safeJsonLen } from "./telemetry";
 
 // ─── Instructions ───────────────────────────────────────────────────
@@ -91,6 +92,7 @@ registerReverseEngineerTool(server);
 registerKnowledgeTool(server);
 registerTabsTool(server);
 registerRememberTool(server);
+registerClipboardTool(server);
 recordDefinitions(defCount, defChars, INSTRUCTIONS.length);
 
 // ─── Lifecycle ───────────────────────────────────────────────────────

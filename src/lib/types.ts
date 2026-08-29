@@ -20,6 +20,9 @@ export type PipelineStep =
   | { type: "scroll"; deltaY?: number; selector?: string }
   | { type: "keyboard"; key: string; meta?: boolean; ctrl?: boolean; shift?: boolean; alt?: boolean }
   | { type: "read"; selector?: string; maxChars?: number }
+  | { type: "upload"; selector: string; files: string[] }
+  | { type: "paste"; selector?: string }
+  | { type: "download"; url: string; path?: string }
   | { type: "type-code"; value: string; selector?: string }
   | { type: "login"; domain: string; usernameSelector?: string; passwordSelector?: string; submitSelector?: string; totpSelector?: string }
   | { type: "solve-captcha" }

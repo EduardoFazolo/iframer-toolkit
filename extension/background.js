@@ -279,6 +279,22 @@ async function handleMessage(sock, raw) {
       reply(sock, id, true, { pong: true });
     } else if (type === "list_tabs") {
       reply(sock, id, true, { tabs: await listTabs() });
+    } else if (type === "create_tab") {
+      reply(sock, id, true, await createTab(msg.url, { active: msg.active, windowId: msg.windowId }));
+    } else if (type === "group_tabs") {
+      reply(sock, id, true, await groupTabs(msg.tabIds, { title: msg.title, color: msg.color, collapsed: msg.collapsed, groupId: msg.groupId }));
+    } else if (type === "ungroup_tabs") {
+      reply(sock, id, true, await ungroupTabs(msg.tabIds));
+    } else if (type === "update_group") {
+      reply(sock, id, true, await updateGroup(msg.groupId, { title: msg.title, color: msg.color, collapsed: msg.collapsed }));
+    } else if (type === "list_groups") {
+      reply(sock, id, true, { groups: await listGroups() });
+    } else if (type === "reload") {
+      // Hot-reload the unpacked extension so new background.js takes effect
+      // without a manual chrome://extensions reload. Reply FIRST — reload()
+      // kills this worker immediately.
+      reply(sock, id, true, { reloading: true });
+      setTimeout(() => { try { chrome.runtime.reload(); } catch {} }, 100);
     } else if (type === "cdp_attach") {
       reply(sock, id, true, await cdpAttach(msg.tabId, !!msg.focus));
     } else if (type === "cdp_command") {
@@ -292,6 +308,72 @@ async function handleMessage(sock, raw) {
   } catch (e) {
     reply(sock, id, false, e && e.message ? e.message : String(e));
   }
+}
+
+// Open a new tab in the user's real Chrome. Native browser control — not a
+// page-context window.open (which is popup-blocked and uncontrollable).
+async function createTab(url, opts = {}) {
+  const createProps = { active: opts.active !== false };
+  if (url) createProps.url = url;
+  if (typeof opts.windowId === "number") createProps.windowId = opts.windowId;
+  const t = await chrome.tabs.create(createProps);
+  return {
+    tab: {
+      id: t.id,
+      windowId: t.windowId,
+      title: t.title || "",
+      url: t.url || t.pendingUrl || url || "",
+      active: !!t.active,
+      favIconUrl: t.favIconUrl,
+    },
+  };
+}
+
+// Group tabs into a Chrome tab group (native — creates a real collapsible,
+// colored group in the tab strip). Pass groupId to add to an existing group,
+// omit to create a new one. title/color/collapsed style the group.
+async function groupTabs(tabIds, opts = {}) {
+  if (!Array.isArray(tabIds) || tabIds.length === 0) throw new Error("group_tabs needs a non-empty tabIds array");
+  const groupProps = { tabIds };
+  if (typeof opts.groupId === "number") groupProps.groupId = opts.groupId;
+  const groupId = await chrome.tabs.group(groupProps);
+  const update = {};
+  if (typeof opts.title === "string") update.title = opts.title;
+  if (typeof opts.color === "string") update.color = opts.color;
+  if (typeof opts.collapsed === "boolean") update.collapsed = opts.collapsed;
+  let group = null;
+  if (Object.keys(update).length > 0) {
+    group = await chrome.tabGroups.update(groupId, update);
+  } else {
+    try { group = await chrome.tabGroups.get(groupId); } catch {}
+  }
+  return { groupId, title: group?.title || opts.title || "", color: group?.color || opts.color || "", collapsed: !!group?.collapsed, tabIds };
+}
+
+// Remove tabs from their group (chrome.tabs.ungroup). If a group ends up empty
+// Chrome deletes it automatically.
+async function ungroupTabs(tabIds) {
+  if (!Array.isArray(tabIds) || tabIds.length === 0) throw new Error("ungroup_tabs needs a non-empty tabIds array");
+  await chrome.tabs.ungroup(tabIds);
+  return { ungrouped: tabIds };
+}
+
+// Rename / recolor / collapse an EXISTING group by id (no tabIds needed).
+async function updateGroup(groupId, opts = {}) {
+  if (typeof groupId !== "number") throw new Error("update_group needs a numeric groupId");
+  const update = {};
+  if (typeof opts.title === "string") update.title = opts.title;
+  if (typeof opts.color === "string") update.color = opts.color;
+  if (typeof opts.collapsed === "boolean") update.collapsed = opts.collapsed;
+  if (Object.keys(update).length === 0) throw new Error("update_group needs at least one of title, color, collapsed");
+  const g = await chrome.tabGroups.update(groupId, update);
+  return { groupId: g.id, title: g.title || "", color: g.color || "", collapsed: !!g.collapsed };
+}
+
+// List all tab groups in this browser (id, title, color, collapsed, windowId).
+async function listGroups() {
+  const groups = await chrome.tabGroups.query({});
+  return groups.map((g) => ({ groupId: g.id, title: g.title || "", color: g.color || "", collapsed: !!g.collapsed, windowId: g.windowId }));
 }
 
 async function listTabs() {
