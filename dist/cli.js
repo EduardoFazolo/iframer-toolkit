@@ -9966,23 +9966,38 @@ var EXTENSION_ID = "mjfdkiicioigljhenkgaldhihllfdpll";
 function extensionDir() {
   return path12.join(__dirname, "..", "extension");
 }
-async function reloadAndRestartServer() {
+function semverNewer(a, b) {
+  const pa = String(a).split(".").map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).split(".").map((n) => parseInt(n, 10) || 0);
+  for (let i = 0;i < 3; i++) {
+    if ((pa[i] || 0) > (pb[i] || 0))
+      return true;
+    if ((pa[i] || 0) < (pb[i] || 0))
+      return false;
+  }
+  return false;
+}
+async function reloadAndRestartServer(reloadExtension) {
   let info = null;
   try {
     info = JSON.parse(fs12.readFileSync(path12.join(CONFIG_DIR, "server.json"), "utf8"));
   } catch {}
   if (!info || !info.port) {
-    console.log("  (No running iframer server. The new files are on disk — reload the extension");
-    console.log("   from chrome://extensions, or it applies automatically next session.)");
+    if (reloadExtension) {
+      console.log("  (No running iframer server. The new extension files are on disk —");
+      console.log("   reload it from chrome://extensions, or it applies next session.)");
+    }
     return;
   }
   const base = `http://127.0.0.1:${info.port}`;
   const headers = { "x-api-key": LOCAL_TOKEN, "content-type": "application/json" };
-  try {
-    await fetch(`${base}/extension/reload`, { method: "POST", headers });
-    console.log("  Told the extension to reload.");
-  } catch {}
-  await new Promise((r) => setTimeout(r, 1000));
+  if (reloadExtension) {
+    try {
+      await fetch(`${base}/extension/reload`, { method: "POST", headers });
+      console.log("  Told the extension to reload.");
+    } catch {}
+    await new Promise((r) => setTimeout(r, 1000));
+  }
   try {
     await fetch(`${base}/shutdown`, { method: "POST", headers });
     console.log("  Retired the old server (a fresh one spawns on next use).");
@@ -10013,6 +10028,33 @@ function nativeMessagingBrowserDirs() {
     { browser: "Vivaldi", dir: path12.join(cfg, "vivaldi") }
   ];
 }
+function extensionMarkerPath() {
+  return path12.join(CONFIG_DIR, "extension.json");
+}
+function readExtensionMarker() {
+  try {
+    return JSON.parse(fs12.readFileSync(extensionMarkerPath(), "utf8"));
+  } catch {
+    return null;
+  }
+}
+function extensionInstalled() {
+  return !!readExtensionMarker();
+}
+function writeExtensionMarker(flavor, browsers) {
+  fs12.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs12.writeFileSync(extensionMarkerPath(), JSON.stringify({ installed: true, flavor, browsers, installedAt: new Date().toISOString() }, null, 2));
+}
+function clearExtensionMarker() {
+  try {
+    fs12.unlinkSync(extensionMarkerPath());
+  } catch {}
+}
+var EXTENSION_FLAVORS = {
+  chrome: { label: "Chrome (Chromium family)", supported: true },
+  chromium: { label: "Chrome (Chromium family)", supported: true },
+  firefox: { label: "Firefox", supported: false }
+};
 function installExtensionHost() {
   if (process.platform !== "darwin" && process.platform !== "linux") {
     console.error("  Extension auto-pairing is only supported on macOS and Linux.");
@@ -10057,6 +10099,8 @@ function installExtensionHost() {
       console.error(`  ${browser}: failed (${e.message})`);
     }
   }
+  if (installed.length)
+    writeExtensionMarker("chrome", installed);
   return installed;
 }
 function removeExtensionHost() {
@@ -10839,7 +10883,19 @@ async function main() {
       break;
     }
     case "install-extension": {
-      console.log(`  Installing the extension pairing host (native messaging)...
+      const flavor = (args[0] || "chrome").toLowerCase();
+      const spec = EXTENSION_FLAVORS[flavor];
+      if (!spec) {
+        console.error(`  Unknown browser: ${flavor}. Supported: ${Object.keys(EXTENSION_FLAVORS).filter((k, i, a) => a.indexOf(k) === i).join(", ")}`);
+        console.error("  Usage: iframer install extension chrome");
+        process.exit(1);
+      }
+      if (!spec.supported) {
+        console.log(`  ${spec.label} extension isn't available yet — coming soon.`);
+        console.log("  For now: iframer install extension chrome");
+        break;
+      }
+      console.log(`  Installing the iframer extension for ${spec.label}...
 `);
       const installed = installExtensionHost();
       if (installed.length === 0) {
@@ -10848,15 +10904,15 @@ async function main() {
       }
       console.log(`  Pairing host installed for: ${installed.join(", ")}`);
       console.log(`
-  Load the extension (once) from this folder — chrome://extensions →`);
-      console.log("  Developer mode → Load unpacked → select:");
-      console.log(`    ${extensionDir()}`);
-      console.log(`
-  Loading it from THIS path (inside the installed package) means`);
-      console.log("  `iframer update` / `npm update` can refresh it in place. The extension");
-      console.log("  then pairs itself — no token pasting.");
-      console.log("  If it's already loaded, quit + reopen the browser (native messaging");
-      console.log(`  hosts are picked up on browser start), then check the popup dot.
+  ┌─ ONE manual step to finish ────────────────────────────────┐`);
+      console.log("  │  1. Open  chrome://extensions");
+      console.log("  │  2. Turn on  Developer mode  (top-right)");
+      console.log("  │  3. Click  Load unpacked  and select this folder:");
+      console.log(`  │       ${extensionDir()}`);
+      console.log("  └────────────────────────────────────────────────────────────┘");
+      console.log("\n  Load it from THAT path (inside the installed package) so `iframer");
+      console.log("  update` can refresh it in place. Once loaded it pairs itself — no");
+      console.log(`  token pasting. Get the path again anytime with: iframer extension path
 `);
       break;
     }
@@ -10877,12 +10933,17 @@ async function main() {
         latest = require("child_process").execSync("npm view iframer-toolkit version", { encoding: "utf8" }).trim();
       } catch {}
       console.log(`  installed: v${installed}${latest ? `    latest: v${latest}` : "    (could not reach npm registry)"}`);
-      if (latest && latest === installed) {
-        console.log("  Already up to date.");
+      if (!latest) {
+        if (checkOnly)
+          break;
+      }
+      const newerAvailable = latest && semverNewer(latest, installed);
+      if (latest && !newerAvailable) {
+        console.log(installed === latest ? "  Already up to date." : `  You're on v${installed}, ahead of npm's v${latest}. Nothing to do.`);
         break;
       }
       if (checkOnly) {
-        if (latest && latest !== installed)
+        if (newerAvailable)
           console.log("  Update available — run `iframer update` to apply.");
         break;
       }
@@ -10903,18 +10964,21 @@ async function main() {
         process.exit(1);
       }
       console.log();
-      await reloadAndRestartServer();
+      const hasExt = extensionInstalled();
+      await reloadAndRestartServer(hasExt);
       console.log(`
-  Updated to v${latest || "latest"}.
+  Updated to v${latest || "latest"}.${hasExt ? "" : " (Extension not installed — nothing to reload.)"}
 `);
       break;
     }
     case "remove-extension": {
       const removed = removeExtensionHost();
+      clearExtensionMarker();
       if (removed.length === 0) {
         console.log("  Extension pairing host was not installed.");
       } else {
         console.log(`  Pairing host removed from: ${removed.join(", ")}`);
+        console.log("  (Also remove it from chrome://extensions if you loaded it there.)");
       }
       break;
     }
@@ -11009,9 +11073,9 @@ async function main() {
     install                         Install everything (Chromium + MCP)
     install chromium                Download Chrome for Testing
     install mcp [--dev]             Register iframer MCP in Claude Code and Codex
-    install extension               Pair the extension (native host) + print the folder to load unpacked
+    install extension chrome        Install the (optional) browser extension for Chrome/Chromium
     extension path                  Print the extension folder to load in chrome://extensions
-    update                          Update iframer via npm, reload the extension, restart the server
+    update                          Update iframer via npm; reload the extension too if it's installed
     update --check                  Report whether a newer version is available (no install)
     remove                          Remove everything (Chromium + MCP)
     remove chromium                 Delete downloaded Chrome for Testing
