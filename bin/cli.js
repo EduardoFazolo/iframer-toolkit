@@ -503,6 +503,16 @@ if (command === "remove") {
   }
 }
 
+// `iframer extension path` -> print the folder to load unpacked.
+if (command === "extension") {
+  const sub = args.shift();
+  if (sub === "path") command = "extension-path";
+  else {
+    console.error("  Usage: iframer extension path");
+    process.exit(1);
+  }
+}
+
 async function installChrome() {
   const { downloadChrome } = await import("../src/lib/browser/chrome-downloader.ts");
   await downloadChrome();
@@ -523,6 +533,30 @@ function isMcpInstalled(mcpName) {
 // host is locked to the extension's ID, which is pinned by the "key" field in
 // extension/manifest.json.
 const EXTENSION_ID = "mjfdkiicioigljhenkgaldhihllfdpll";
+
+/** The extension folder inside the installed package (dist/cli.js -> ../extension).
+ *  Users load THIS path so `npm update` / `iframer update` refresh it in place. */
+function extensionDir() {
+  return path.join(__dirname, "..", "extension");
+}
+
+/** After an update: tell the connected extension to reload (it re-reads the
+ *  new files npm just wrote), then retire the old server so the next call
+ *  spawns the new build. */
+async function reloadAndRestartServer() {
+  let info = null;
+  try { info = JSON.parse(fs.readFileSync(path.join(CONFIG_DIR, "server.json"), "utf8")); } catch {}
+  if (!info || !info.port) {
+    console.log("  (No running iframer server. The new files are on disk — reload the extension");
+    console.log("   from chrome://extensions, or it applies automatically next session.)");
+    return;
+  }
+  const base = `http://127.0.0.1:${info.port}`;
+  const headers = { "x-api-key": LOCAL_TOKEN, "content-type": "application/json" };
+  try { await fetch(`${base}/extension/reload`, { method: "POST", headers }); console.log("  Told the extension to reload."); } catch {}
+  await new Promise((r) => setTimeout(r, 1000)); // let the reload reach the extension
+  try { await fetch(`${base}/shutdown`, { method: "POST", headers }); console.log("  Retired the old server (a fresh one spawns on next use)."); } catch {}
+}
 const NM_HOST_NAME = "com.iframer.token";
 
 /** Chromium-family browser data dirs that can hold a NativeMessagingHosts
@@ -1429,10 +1463,56 @@ async function main() {
         break;
       }
       console.log(`  Pairing host installed for: ${installed.join(", ")}`);
-      console.log("\n  The iframer extension now pairs itself — no token pasting.");
-      console.log("  If the extension is already loaded, quit + reopen the browser (native");
-      console.log("  messaging hosts are picked up on browser start), then check the popup dot.");
-      console.log("  Manual pasting in the popup still works as a fallback.\n");
+      console.log("\n  Load the extension (once) from this folder — chrome://extensions →");
+      console.log("  Developer mode → Load unpacked → select:");
+      console.log(`    ${extensionDir()}`);
+      console.log("\n  Loading it from THIS path (inside the installed package) means");
+      console.log("  `iframer update` / `npm update` can refresh it in place. The extension");
+      console.log("  then pairs itself — no token pasting.");
+      console.log("  If it's already loaded, quit + reopen the browser (native messaging");
+      console.log("  hosts are picked up on browser start), then check the popup dot.\n");
+      break;
+    }
+
+    case "extension-path": {
+      console.log(extensionDir());
+      break;
+    }
+
+    // ─── Update (npm as the extension update channel) ────────────────
+
+    case "update": {
+      const checkOnly = args.includes("--check");
+      const pkgRoot = path.join(__dirname, "..");
+      const isDev = fs.existsSync(path.join(pkgRoot, ".git"));
+      let installed = "unknown";
+      try { installed = JSON.parse(fs.readFileSync(path.join(pkgRoot, "package.json"), "utf8")).version; } catch {}
+      let latest = null;
+      try { latest = require("child_process").execSync("npm view iframer-toolkit version", { encoding: "utf8" }).trim(); } catch {}
+
+      console.log(`  installed: v${installed}${latest ? `    latest: v${latest}` : "    (could not reach npm registry)"}`);
+      if (latest && latest === installed) { console.log("  Already up to date."); break; }
+      if (checkOnly) {
+        if (latest && latest !== installed) console.log("  Update available — run `iframer update` to apply.");
+        break;
+      }
+      if (isDev) {
+        console.log("\n  This is a dev/linked install (the package has a .git repo).");
+        console.log("  Update it with `git pull && bun run build`, not npm.");
+        break;
+      }
+
+      console.log("\n  Updating via npm...");
+      try {
+        require("child_process").execSync("npm install -g iframer-toolkit@latest", { stdio: "inherit" });
+      } catch {
+        console.error("\n  npm install failed. If it's a permissions error:");
+        console.error("    sudo npm install -g iframer-toolkit@latest");
+        process.exit(1);
+      }
+      console.log();
+      await reloadAndRestartServer();
+      console.log(`\n  Updated to v${latest || "latest"}.\n`);
       break;
     }
 
@@ -1539,7 +1619,10 @@ async function main() {
     install                         Install everything (Chromium + MCP)
     install chromium                Download Chrome for Testing
     install mcp [--dev]             Register iframer MCP in Claude Code and Codex
-    install extension               Let the browser extension pair itself (no token pasting)
+    install extension               Pair the extension (native host) + print the folder to load unpacked
+    extension path                  Print the extension folder to load in chrome://extensions
+    update                          Update iframer via npm, reload the extension, restart the server
+    update --check                  Report whether a newer version is available (no install)
     remove                          Remove everything (Chromium + MCP)
     remove chromium                 Delete downloaded Chrome for Testing
     remove mcp [--dev]              Unregister iframer MCP from Claude Code and Codex

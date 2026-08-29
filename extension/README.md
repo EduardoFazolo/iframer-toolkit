@@ -39,11 +39,36 @@ asks for the tab's `clientId`. A service-worker restart replaces that profile's
 own connection instead of piling up. The server stays alive while any profile is
 connected and idle-exits once none are.
 
-## Install (unpacked, dev)
+## Install (unpacked)
 
 1. Open `chrome://extensions`.
 2. Turn on **Developer mode** (top right).
-3. **Load unpacked** → select this `extension/` folder.
+3. **Load unpacked** → select the extension folder **inside the installed
+   package**, not a random checkout. Get its path with:
+   ```sh
+   iframer extension path
+   ```
+   Loading from that path is what lets updates land in place (see below). The
+   pinned `key` keeps the extension ID — and pairing — stable across updates.
+
+## Updating (npm is the update channel)
+
+The extension ships inside the `iframer-toolkit` npm package, so npm *is* the
+update channel — no Chrome Web Store. When a newer version is published, the
+extension notices (the running extension is older than the files on disk) and
+shows a **↑ Update available** badge + a popup notice. To apply it:
+
+```sh
+iframer update          # npm-updates, reloads the extension, restarts the server
+iframer update --check  # just report whether a newer version exists
+```
+
+`iframer update` runs `npm install -g iframer-toolkit@latest` (which overwrites
+the extension files in place at the path above), tells the running extension to
+`chrome.runtime.reload()` so it re-reads the new files, and retires the old
+server. The only manual step is ever the *first* **Load unpacked** — after that,
+updates are one command. (Dev/linked checkouts update via `git pull && bun run
+build` instead; `iframer update` detects that and says so.)
 
 ## Pair it (one time, zero copying)
 

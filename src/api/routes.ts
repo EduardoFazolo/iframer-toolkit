@@ -4,6 +4,7 @@ import type { AuthRequest } from "./middleware";
 import { Iframer } from "../lib/iframer";
 import { asyncHandler, AppError } from "./error-handler";
 import { extensionBridge } from "../lib/extension/bridge";
+import { getVersion } from "../lib/version";
 import fs from "fs";
 
 /** Cast Request to AuthRequest (populated by tokenAuth middleware) */
@@ -231,7 +232,7 @@ export function registerRoutes(app: Express): void {
   // ─── Extension bridge (real-tab control) ─────────────────────────
 
   app.get("/extension/status", (_req, res) => {
-    res.json({ ok: true, ...extensionBridge.status() });
+    res.json({ ok: true, version: getVersion(), ...extensionBridge.status() });
   });
 
   app.post("/extension/tabs", asyncHandler(async (_req: Request, res: Response) => {

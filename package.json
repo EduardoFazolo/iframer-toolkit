@@ -1,6 +1,6 @@
 {
   "name": "iframer-toolkit",
-  "version": "0.9.0",
+  "version": "0.91.1",
   "description": "Browser access toolkit for AI agents — CLI and MCP server for headless/headful browsing, login flows, and pipeline execution.",
   "keywords": [
     "iframer",
@@ -29,6 +29,7 @@
   "files": [
     "dist/",
     "skills/",
+    "extension/",
     "README.md",
     "LICENSE"
   ],
@@ -47,7 +48,8 @@
     "build:cli": "bun build bin/cli.js --target node --format cjs --outfile dist/cli.js --external better-sqlite3 --external patchright --external fingerprint-generator --external @anthropic-ai/sdk --external @modelcontextprotocol/sdk --external zod --external cloakbrowser --external playwright-core",
     "build:mcp": "bun build src/mcp/server.ts --target node --format cjs --outfile dist/mcp-server.cjs --external better-sqlite3 --external patchright --external fingerprint-generator --external @anthropic-ai/sdk --external @modelcontextprotocol/sdk --external zod --external cloakbrowser --external playwright-core",
     "build:local-server": "bun build index.ts --target node --format cjs --outfile dist/local-server.cjs --external better-sqlite3 --external patchright --external fingerprint-generator --external @anthropic-ai/sdk --external @modelcontextprotocol/sdk --external zod --external cloakbrowser --external playwright-core --external express --external ws",
-    "build": "bun run build:cli && bun run build:mcp && bun run build:local-server",
+    "build:stamp": "node scripts/stamp-extension-version.mjs",
+    "build": "bun run build:stamp && bun run build:cli && bun run build:mcp && bun run build:local-server",
     "test": "bun test tests/unit",
     "test:extension": "node tests/integration/extension-bridge.mjs",
     "prepublishOnly": "bun run build",

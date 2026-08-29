@@ -26,6 +26,16 @@ function renderStatus(status) {
   } else {
     $("status").textContent = reasonText[status && status.reason] || "Not connected.";
   }
+  // Update-available notice (check-and-notify).
+  const up = $("update");
+  if (up) {
+    if (status && status.updateAvailable) {
+      up.style.display = "block";
+      up.textContent = `↑ Update available: v${status.updateAvailable} (you have v${status.current || "?"}). Run \`iframer update\` in a terminal.`;
+    } else {
+      up.style.display = "none";
+    }
+  }
 }
 
 async function refresh() {
