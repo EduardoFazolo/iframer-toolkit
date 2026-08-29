@@ -3,6 +3,8 @@ import type { Express, Request, Response } from "express";
 import type { AuthRequest } from "./middleware";
 import { Iframer } from "../lib/iframer";
 import { asyncHandler, AppError } from "./error-handler";
+import { extensionBridge } from "../lib/extension/bridge";
+import { getVersion } from "../lib/version";
 import fs from "fs";
 
 /** Cast Request to AuthRequest (populated by tokenAuth middleware) */
@@ -225,6 +227,83 @@ export function registerRoutes(app: Express): void {
     if (!result.ok) throw new AppError(400, result.error || "Login failed");
     const { ok: _ok, ...resultRest } = result;
     res.json({ ok: true, message: "Login attempted", ...resultRest });
+  }));
+
+  // ─── Extension bridge (real-tab control) ─────────────────────────
+
+  app.get("/extension/status", (_req, res) => {
+    res.json({ ok: true, version: getVersion(), ...extensionBridge.status() });
+  });
+
+  app.post("/extension/tabs", asyncHandler(async (_req: Request, res: Response) => {
+    const result = await extensionBridge.listTabs();
+    res.json({ ok: true, ...result });
+  }));
+
+  // Hot-reload connected extensions (dev aid — new background.js without a
+  // manual chrome://extensions reload).
+  app.post("/extension/reload", asyncHandler(async (_req: Request, res: Response) => {
+    const result = await extensionBridge.reloadAll();
+    res.json({ ok: true, ...result });
+  }));
+
+  // Open a new tab in the user's real Chrome (native chrome.tabs.create).
+  app.post("/extension/tab/create", asyncHandler(async (req: Request, res: Response) => {
+    const { url, active, windowId, clientId } = req.body || {};
+    if (url !== undefined && typeof url !== "string") throw new AppError(400, "url must be a string");
+    const result = await extensionBridge.createTab(url || "", { active, windowId }, clientId);
+    res.json({ ok: true, ...result });
+  }));
+
+  // Group tabs into a native Chrome tab group (chrome.tabs.group + tabGroups.update).
+  app.post("/extension/tab/group", asyncHandler(async (req: Request, res: Response) => {
+    const { tabIds, title, color, collapsed, groupId, clientId } = req.body || {};
+    if (!Array.isArray(tabIds) || tabIds.length === 0 || !tabIds.every((t) => typeof t === "number")) {
+      throw new AppError(400, "tabIds must be a non-empty array of numbers");
+    }
+    const result = await extensionBridge.groupTabs(tabIds, { title, color, collapsed, groupId }, clientId);
+    res.json({ ok: true, group: result });
+  }));
+
+  // Remove tabs from their group (chrome.tabs.ungroup).
+  app.post("/extension/tab/ungroup", asyncHandler(async (req: Request, res: Response) => {
+    const { tabIds, clientId } = req.body || {};
+    if (!Array.isArray(tabIds) || tabIds.length === 0 || !tabIds.every((t) => typeof t === "number")) {
+      throw new AppError(400, "tabIds must be a non-empty array of numbers");
+    }
+    const result = await extensionBridge.ungroupTabs(tabIds, clientId);
+    res.json({ ok: true, ...result });
+  }));
+
+  // Rename / recolor / collapse an existing group (chrome.tabGroups.update).
+  app.post("/extension/group/update", asyncHandler(async (req: Request, res: Response) => {
+    const { groupId, title, color, collapsed, clientId } = req.body || {};
+    if (typeof groupId !== "number") throw new AppError(400, "groupId (number) is required");
+    const result = await extensionBridge.updateGroup(groupId, { title, color, collapsed }, clientId);
+    res.json({ ok: true, group: result });
+  }));
+
+  // List all tab groups (chrome.tabGroups.query).
+  app.post("/extension/groups", asyncHandler(async (req: Request, res: Response) => {
+    const { clientId } = req.body || {};
+    const result = await extensionBridge.listGroups(clientId);
+    res.json({ ok: true, ...result });
+  }));
+
+  // Drive a REAL Chrome tab through iframer's full pipeline via the extension
+  // CDP relay (connectOverCDP). Same engine as every other mode.
+  app.post("/extension/execute", asyncHandler(async (req: Request, res: Response) => {
+    const { tabId, steps, options, clientId } = req.body || {};
+    if (typeof tabId !== "number") throw new AppError(400, "tabId (number) is required");
+    if (!Array.isArray(steps) || steps.length === 0) {
+      throw new AppError(400, "steps must be a non-empty array");
+    }
+    const r = auth(req);
+    const result = await iframer.execute(r.userId, r.token, {
+      steps,
+      options: { ...(options || {}), extensionTabId: tabId, clientId },
+    });
+    res.json(result);
   }));
 
   // ─── Headless fetch ─────────────────────────────────────────────

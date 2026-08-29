@@ -36,6 +36,10 @@ Key step types:
 
 IMPORTANT — Element refs (@e1, @e2...): All selector fields accept @e refs from snapshot, find, or annotated screenshot. PREFER refs over CSS selectors.
 
+IMPORTANT — Saved anchors (@a:<name>): Selector fields also accept persisted, per-domain anchors from the \`remember\` tool. Call \`remember get <domain>\` before a UI task; if an anchor exists, target it directly (e.g. selector="@a:composer") — no snapshot needed. After finding a new element that works, \`remember save\` it. Unlike @e refs (which reset every snapshot), @a: anchors persist across runs.
+
+FILLING FORMS: Always use the \`fill\` step for text inputs/textareas — NOT \`evaluate\` to set .value. \`fill\` is framework-aware: it fires the React-safe native setter plus input/change/blur, so controlled forms (React, react-hook-form, Formik, Vue) actually register the value and mark the field "touched". This prevents the common "I filled every field but submit still says they're required/empty" failure — which is a form-framework state issue, not a real empty field. If a submit is still rejected as incomplete after filling, re-run \`fill\` on the flagged field (it re-triggers the blur/validation) rather than assuming the value didn't land.
+
 Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: errorContext with screenshot path, URL, errorType, suggestion, retryable.`,
     {
       steps: z.array(stepSchema).describe("Pipeline steps to execute sequentially"),
@@ -45,13 +49,39 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
         continueOnObstacle: z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
         continueOnError: z.boolean().optional().describe("Continue past failing steps (default: false)"),
         captureApi: z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes."),
-        mode: z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("DO NOT SET THIS unless user explicitly requests a mode. iframer auto-selects and auto-escalates."),
+        mode: z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("DO NOT SET THIS unless user explicitly requests a mode. iframer auto-selects and auto-escalates. Use 'extension' ONLY to drive a tab in the user's real Chrome via the iframer extension — requires options.tabId (get it from the `tabs` tool)."),
         autoEscalate: z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)"),
         instanceId: z.string().optional().describe("Run in a named parallel browser within this session (default: 'default'). Use distinct ids to drive several browsers at once, e.g. one per account — each keeps its own login/session state."),
+        tabId: z.number().optional().describe("Only with mode='extension': the id of the real Chrome tab to drive (from the `tabs` tool). Input is trusted OS-level (chrome.debugger); Chrome shows its 'is being debugged' bar while the run is in progress."),
+        clientId: z.string().optional().describe("Only with mode='extension', and only needed when several profiles/browsers are connected and a tab is ambiguous: the clientId of the profile that owns the tab (from the `tabs` tool)."),
+        focus: z.boolean().optional().describe("Only with mode='extension': bring the tab's window to the OS foreground while driving. Default false — the tab is driven in the background (activated in its window, focus-emulated) without interrupting the user. Set true only if a site ignores background input."),
       }).optional(),
     },
     async (params) => {
       try {
+        // Extension mode: drive a tab in the user's real Chrome.
+        // Bypasses the whole launch/escalation machinery — the extension owns
+        // the browser, iframer just streams the step pipeline to it.
+        if (params.options?.mode === "extension") {
+          const tabId = params.options?.tabId;
+          if (typeof tabId !== "number") {
+            return err(
+              "mode='extension' requires options.tabId. Call the `tabs` tool first to " +
+                "find the id of the tab the user wants to drive.",
+            );
+          }
+          const extResult = await localApiPost<PipelineResult>("/extension/execute", {
+            tabId,
+            clientId: params.options?.clientId,
+            steps: params.steps,
+            options: params.options,
+          });
+          const extLines = formatExecuteResult(extResult);
+          const content: TextContent[] = [{ type: "text", text: extLines.join("\n") }];
+          if (!extResult.ok) return { content, isError: true };
+          return { content };
+        }
+
         const dockerRunning = await isDockerRunning();
 
         async function runWithMode(mode?: string): Promise<PipelineResult> {
@@ -205,9 +235,20 @@ export function formatExecuteResult(data: PipelineResult): string[] {
         lines.push(`\n--- Annotated screenshot refs ---`);
         lines.push(res.refs);
       }
-    } else if (r.result !== undefined && r.result !== null) {
-      lines.push(`\nstep ${r.stepIndex}: ${JSON.stringify(r.result)}`);
+    } else if (r.step.type === "read") {
+      const res = r.result as { text?: string; truncated?: boolean } | undefined;
+      if (res?.text !== undefined) {
+        lines.push(`\n--- Read (step ${r.stepIndex}${res.truncated ? ", truncated" : ""}) ---`);
+        lines.push(res.text);
+      }
+    } else if (r.step.type === "extract" || r.step.type === "evaluate") {
+      // The point of these steps IS their return value — always show it.
+      lines.push(`\nstep ${r.stepIndex} (${r.step.type}): ${JSON.stringify(r.result)}`);
     }
+    // Trivial action confirmations (click/fill/navigate/scroll/wait →
+    // {clicked:true} etc.) are intentionally NOT printed per-step: for a
+    // multi-step pipeline that was pure context noise. The "steps N/N" count
+    // above already says they ran; failures are reported separately below.
   }
 
   if (data.obstacles && data.obstacles.length > 0) {

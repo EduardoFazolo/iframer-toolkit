@@ -47,13 +47,13 @@ export async function apiPost<T = Record<string, unknown>>(endpoint: string, bod
 
 /** GET from the Docker server at BASE_URL (:3021). */
 export async function apiGet<T = Record<string, unknown>>(endpoint: string): Promise<T> {
-  const res = await fetch(`${BASE_URL}${endpoint}`, { headers: authHeaders() });
+  const res = await fetch(`${BASE_URL}${endpoint}`, { headers: authHeaders(), signal: AbortSignal.timeout(30_000) });
   return res.json() as Promise<T>;
 }
 
 /** DELETE on the Docker server at BASE_URL (:3021). */
 export async function apiDelete<T = Record<string, unknown>>(endpoint: string): Promise<T> {
-  const res = await fetch(`${BASE_URL}${endpoint}`, { method: "DELETE", headers: authHeaders() });
+  const res = await fetch(`${BASE_URL}${endpoint}`, { method: "DELETE", headers: authHeaders(), signal: AbortSignal.timeout(30_000) });
   return res.json() as Promise<T>;
 }
 
@@ -74,7 +74,7 @@ export async function localApiPost<T = Record<string, unknown>>(endpoint: string
 export async function localApiGet<T = Record<string, unknown>>(endpoint: string): Promise<T> {
   await ensureLocalServer();
   const url = localServer.getBaseUrl();
-  const res = await fetch(`${url}${endpoint}`, { headers: authHeaders(LOCAL_TOKEN) });
+  const res = await fetch(`${url}${endpoint}`, { headers: authHeaders(LOCAL_TOKEN), signal: AbortSignal.timeout(30_000) });
   return res.json() as Promise<T>;
 }
 
@@ -82,7 +82,7 @@ export async function localApiGet<T = Record<string, unknown>>(endpoint: string)
 export async function localApiDelete<T = Record<string, unknown>>(endpoint: string): Promise<T> {
   await ensureLocalServer();
   const url = localServer.getBaseUrl();
-  const res = await fetch(`${url}${endpoint}`, { method: "DELETE", headers: authHeaders(LOCAL_TOKEN) });
+  const res = await fetch(`${url}${endpoint}`, { method: "DELETE", headers: authHeaders(LOCAL_TOKEN), signal: AbortSignal.timeout(30_000) });
   return res.json() as Promise<T>;
 }
 

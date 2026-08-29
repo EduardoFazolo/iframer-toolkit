@@ -60,7 +60,9 @@ The outputDir defaults to ./<domain>/. Ask the user where to save if unclear.`,
         staleTimeoutMs: z.number().optional().describe("Override the 20s stale-state timeout per step"),
         continueOnObstacle: z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
         continueOnError: z.boolean().optional().describe("Continue past failing steps (default: false)"),
-        mode: z.enum(["headless", "binary-headful", "docker-headful"]).optional().describe("Browser mode override"),
+        mode: z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("Browser mode override. Use 'extension' to capture the API of a tab already open in the user's real Chrome — requires options.tabId from the `tabs` tool. Chrome shows its 'is being debugged' bar while the capture runs."),
+        tabId: z.number().optional().describe("Only with mode='extension': the real Chrome tab to reverse-engineer (from the `tabs` tool)."),
+        clientId: z.string().optional().describe("Only with mode='extension', when multiple profiles are connected and the tab is ambiguous: the owning profile's clientId (from the `tabs` tool)."),
       }).optional(),
     },
     async (params) => {
@@ -72,9 +74,22 @@ The outputDir defaults to ./<domain>/. Ask the user where to save if unclear.`,
         // Route through Docker only for docker-headful mode, local server for everything else
         const mode = params.options?.mode;
         const dockerRunning = await isDockerRunning();
-        const captureResult = (mode === "docker-headful" && dockerRunning)
-          ? await apiPost<PipelineResult>("/execute", execParams)
-          : await localApiPost<PipelineResult>("/execute", execParams);
+        let captureResult: PipelineResult;
+        if (mode === "extension") {
+          if (typeof params.options?.tabId !== "number") {
+            return err("mode='extension' requires options.tabId. Call the `tabs` tool first to find the tab to reverse-engineer.");
+          }
+          captureResult = await localApiPost<PipelineResult>("/extension/execute", {
+            tabId: params.options.tabId,
+            clientId: params.options.clientId,
+            steps: params.steps,
+            options: { ...params.options, captureApi: true },
+          });
+        } else if (mode === "docker-headful" && dockerRunning) {
+          captureResult = await apiPost<PipelineResult>("/execute", execParams);
+        } else {
+          captureResult = await localApiPost<PipelineResult>("/execute", execParams);
+        }
 
         const lines: string[] = [];
         lines.push(`ok: ${captureResult.ok}`);
@@ -134,10 +149,12 @@ The outputDir defaults to ./<domain>/. Ask the user where to save if unclear.`,
         }
 
         let text = lines.join("\n");
-        // Cap response to ~80KB — Claude API rejects oversized or surrogate-laden tool results.
-        // Full data is always on disk at the captured-api.json path.
-        if (text.length > 80_000) {
-          text = text.slice(0, 80_000) + "\n\n[... response truncated — read captured-api.json for full data]";
+        // Hard cap the inline response. Full data is always on disk at the
+        // captured-api.json path, so truncation never loses anything — it just
+        // keeps a huge capture from flooding the agent's context. 30KB (~7.5k
+        // tokens) is plenty for the endpoint index + scaffolding instructions.
+        if (text.length > 30_000) {
+          text = text.slice(0, 30_000) + "\n\n[... index truncated — read captured-api.json for the full endpoint list and all detail]";
         }
         const content: TextContent[] = [{ type: "text", text }];
         if (!captureResult.ok) return { content, isError: true };
@@ -173,17 +190,16 @@ export function formatCapturedApi(lines: string[], capturedApi: CapturedApi[], p
       byProtocol.get(p)!.push(ep);
     }
     const protocolSummary = Array.from(byProtocol.entries()).map(([p, eps]) => `${p}=${eps.length}`).join(", ");
-    lines.push(`\nEndpoints (${api.endpoints.length}) [${protocolSummary}]:`);
+    // Compact one line per endpoint. The FULL detail (curl, request/response
+    // bodies, all params, auth) is written to captured-api.json below — inlining
+    // multi-line blocks per endpoint used to dump thousands of tokens the agent
+    // rarely needed. One line carries what's needed to pick an endpoint; read
+    // the file (or grep it) for the rest.
+    lines.push(`\nEndpoints (${api.endpoints.length}) [${protocolSummary}] — full detail in captured-api.json:`);
     for (const ep of api.endpoints) {
-      lines.push(`\n  [${ep.protocol}/${ep.verb}] ${ep.functionName}`);
-      lines.push(`    Action: ${ep.action}`);
-      lines.push(`    ${ep.method} ${ep.path}  →  ${ep.responseStatus}`);
-      // Show only the meaningful part of request body — skip framework noise
-      if (ep.requestBody) {
-        const body = ep.requestBody as Record<string, unknown>;
-        const signalKeys = extractSignalKeys(body);
-        if (signalKeys) lines.push(`    Params: ${signalKeys}`);
-      }
+      const params = ep.requestBody ? extractSignalKeys(ep.requestBody as Record<string, unknown>) : null;
+      const tail = params ? `  {${params}}` : "";
+      lines.push(`  [${ep.protocol}/${ep.verb}] ${ep.method} ${ep.path} → ${ep.functionName}${tail}`);
     }
   }
 
@@ -237,6 +253,11 @@ function extractSignalKeys(body: Record<string, unknown>): string | null {
     if (NOISE.has(k)) continue;
     if (typeof v === "string" && v.length > 80) {
       signalEntries.push(`${k}=${v.slice(0, 40)}...`);
+    } else if (Array.isArray(v)) {
+      // e.g. multipart `fields: ["token","channel","limit",…]` — show the
+      // VALUES (the actual param names), not array indices.
+      const items = v.slice(0, 8).map((x) => String(x)).join(",");
+      signalEntries.push(`${k}=[${items}${v.length > 8 ? ",…" : ""}]`);
     } else if (typeof v === "object" && v !== null) {
       const keys = Object.keys(v).slice(0, 5).join(",");
       signalEntries.push(`${k}={${keys}${Object.keys(v).length > 5 ? ",..." : ""}}`);
