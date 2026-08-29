@@ -49,6 +49,12 @@ function isRetryable(errorType: ErrorContext["errorType"]): boolean {
 }
 
 function getSuggestion(errorType: ErrorContext["errorType"], step: PipelineStep): string | undefined {
+  // A @e ref that no longer resolves usually means the SPA re-rendered between
+  // the snapshot and this step, wiping the injected marker. Point at the durable fix.
+  const usedEphemeralRef = typeof (step as { selector?: unknown }).selector === "string" && (step as { selector: string }).selector.startsWith("@e");
+  if (usedEphemeralRef && (errorType === "element-not-found" || errorType === "timeout" || errorType === "stale-state")) {
+    return "The @e ref went stale — the page (likely a React/SPA) re-rendered and dropped it since the snapshot. Take a fresh `snapshot`/`find` right before acting, or save the element as a durable `@a:` anchor with the `remember` tool.";
+  }
   switch (errorType) {
     case "stale-state":
       return "The page stopped responding. The step may have triggered a very slow load or the server may be unreachable.";

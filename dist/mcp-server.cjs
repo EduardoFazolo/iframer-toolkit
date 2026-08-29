@@ -383,14 +383,14 @@ async function apiGet(endpoint) {
   const res = await fetch(`${BASE_URL}${endpoint}`, { headers: authHeaders(), signal: AbortSignal.timeout(30000) });
   return res.json();
 }
-async function localApiPost(endpoint, body) {
+async function localApiPost(endpoint, body, timeoutMs = 180000) {
   await ensureLocalServer();
   const url = localServer.getBaseUrl();
   const res = await fetch(`${url}${endpoint}`, {
     method: "POST",
     headers: authHeaders(LOCAL_TOKEN),
     body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(180000)
+    signal: AbortSignal.timeout(timeoutMs)
   });
   return res.json();
 }
@@ -632,12 +632,12 @@ var stepSchema = import_zod2.z.discriminatedUnion("type", [
   import_zod2.z.object({ type: import_zod2.z.literal("fill"), selector: import_zod2.z.string(), value: import_zod2.z.string().describe("Sets an input/textarea's value. Framework-aware: fires the React-safe native setter + input/change/blur, so controlled forms (React, react-hook-form, Formik, Vue) register the value AND mark the field touched. This is the fix for 'I filled the field but submit says it's still empty' — always use fill for form fields, not evaluate.") }),
   import_zod2.z.object({ type: import_zod2.z.literal("human-click"), selector: import_zod2.z.string().optional(), x: import_zod2.z.number().optional(), y: import_zod2.z.number().optional() }),
   import_zod2.z.object({ type: import_zod2.z.literal("right-click"), selector: import_zod2.z.string().optional(), x: import_zod2.z.number().optional(), y: import_zod2.z.number().optional() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("human-type"), selector: import_zod2.z.string(), value: import_zod2.z.string() }),
+  import_zod2.z.object({ type: import_zod2.z.literal("human-type"), selector: import_zod2.z.string(), value: import_zod2.z.string(), skipClick: import_zod2.z.boolean().optional().describe("Skip the click-to-focus and type into the already-focused element. Use for editors that blur on a synthetic click (e.g. Draft.js). Either way, typing aborts safely if the target isn't actually focused."), speed: import_zod2.z.enum(["slow", "normal", "fast"]).optional().describe("Typing speed. 'normal' (~130ms/char, realistic, default), 'fast' (~45ms/char) for long non-sensitive text, 'slow' for extra realism.") }),
   import_zod2.z.object({ type: import_zod2.z.literal("evaluate"), expression: import_zod2.z.string() }),
   import_zod2.z.object({ type: import_zod2.z.literal("extract"), expression: import_zod2.z.string() }),
   import_zod2.z.object({ type: import_zod2.z.literal("wait"), ms: import_zod2.z.number() }),
   import_zod2.z.object({ type: import_zod2.z.literal("wait-for"), selector: import_zod2.z.string(), timeout: import_zod2.z.number().optional() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("scroll"), deltaY: import_zod2.z.number().optional(), selector: import_zod2.z.string().optional().describe("Scroll within this element instead of the window") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("scroll"), deltaY: import_zod2.z.number().optional(), selector: import_zod2.z.string().optional().describe("Scroll within this element instead of the window"), human: import_zod2.z.boolean().optional().describe("Scroll like a person: real wheel events in eased chunks with pauses (vs an instant jump). Slower but not bot-obvious.") }),
   import_zod2.z.object({ type: import_zod2.z.literal("keyboard"), key: import_zod2.z.string(), meta: import_zod2.z.boolean().optional(), ctrl: import_zod2.z.boolean().optional(), shift: import_zod2.z.boolean().optional(), alt: import_zod2.z.boolean().optional() }),
   import_zod2.z.object({ type: import_zod2.z.literal("read"), selector: import_zod2.z.string().optional().describe("Element to read visible text from (CSS or @e ref). Omit for the whole page body."), maxChars: import_zod2.z.number().optional().describe("Cap the returned text length (default 6000). Raise it only when you actually need more — larger reads cost proportionally more context.") }),
   import_zod2.z.object({ type: import_zod2.z.literal("upload"), selector: import_zod2.z.string().describe("The <input type=file> to set (CSS, @e ref, or @a anchor)."), files: import_zod2.z.array(import_zod2.z.string()).describe("Absolute local file path(s) to upload. Paths must exist on this machine (same machine as the browser).") }),
@@ -705,12 +705,16 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
         if (typeof tabId !== "number") {
           return err("mode='extension' requires options.tabId. Call the `tabs` tool first to " + "find the id of the tab the user wants to drive.");
         }
+        const typeChars = (params.steps || []).reduce((n, s) => {
+          return (s.type === "human-type" || s.type === "type-code") && typeof s.value === "string" ? n + s.value.length : n;
+        }, 0);
+        const timeoutMs = Math.min(60000 + (params.steps?.length || 0) * 15000 + typeChars * 250, 1200000) + 30000;
         const extResult = await localApiPost("/extension/execute", {
           tabId,
           clientId: params.options?.clientId,
           steps: params.steps,
           options: params.options
-        });
+        }, timeoutMs);
         const extLines = formatExecuteResult(extResult);
         const content2 = [{ type: "text", text: extLines.join(`
 `) }];
@@ -827,13 +831,6 @@ function formatExecuteResult(data) {
     lines.push(`
 Final page: ${data.finalState.title}`);
     lines.push(`URL: ${data.finalState.url}`);
-  }
-  if (data.ok && data.finalState?.url) {
-    try {
-      const domain = new URL(data.finalState.url).hostname.replace(/^www\./, "");
-      lines.push(`
-Knowledge cache updated for ${domain}. Before the next browser run on this domain, call \`knowledge get ${domain}\` — you may be able to skip the browser entirely.`);
-    } catch {}
   }
   for (const r of data.results || []) {
     if (r.tabSwitchedTo) {

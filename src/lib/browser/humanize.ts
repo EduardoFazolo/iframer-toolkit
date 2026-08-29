@@ -63,6 +63,9 @@ export async function humanMove(page: Page, toX: number, toY: number): Promise<v
 export async function humanClick(page: Page, selector: string): Promise<void> {
   const element = await page.waitForSelector(selector, { timeout: TIMEOUTS.SELECTOR_WAIT });
   if (!element) throw new Error(`Element not found: ${selector}`);
+  // Below-the-fold targets must be scrolled into view first, or boundingBox
+  // returns off-screen coords and the mouse moves to a point that clicks nothing.
+  await element.scrollIntoViewIfNeeded().catch(() => {});
   const box = await element.boundingBox();
   if (!box) throw new Error(`Element not visible: ${selector}`);
 
@@ -87,16 +90,81 @@ export async function humanClickXY(page: Page, x: number, y: number): Promise<vo
   await sleep(randRange(TIMING.POST_CLICK));
 }
 
-export async function humanType(page: Page, selector: string, text: string): Promise<void> {
-  await humanClick(page, selector);
-  await sleep(randRange(TIMING.POST_CLICK));
+/** Is the element matched by `selector` actually focused? Handles contenteditable
+ *  (activeElement may be the editor or a descendant). */
+async function assertFocused(page: Page, selector: string, clicked: boolean): Promise<void> {
+  const r = await page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    if (!el) return { ok: false, active: "(target not found)" };
+    const a = document.activeElement;
+    // Keystrokes go to activeElement, so they reach the target only if it IS the
+    // target or a node inside it (contenteditable child). NOT if activeElement is
+    // an ancestor — <body> contains everything, and that's the leak we're guarding.
+    const ok = !!a && (a === el || el.contains(a));
+    const desc = a ? `${a.tagName.toLowerCase()}${a.id ? "#" + a.id : ""}` : "nothing";
+    return { ok, active: desc };
+  }, selector);
+  if (!r.ok) {
+    throw new Error(
+      `human-type aborted: after ${clicked ? "clicking" : "skip-click on"} "${selector}", it is NOT focused ` +
+        `(focus is on ${r.active}). Typing now would send keystrokes to the page, where single keys act as ` +
+        `shortcuts — a real hazard. Fix the selector, or focus the field first and pass skipClick. No keys were sent.`,
+    );
+  }
+}
 
+// Per-char delay multiplier. "normal" keeps the realistic ~130ms/char; "fast"
+// is for bulk, non-sensitive text where realism matters less than wall-clock.
+const SPEED_FACTOR: Record<string, number> = { slow: 1.5, normal: 1, fast: 0.35 };
+
+export async function humanType(
+  page: Page,
+  selector: string,
+  text: string,
+  opts: { skipClick?: boolean; speed?: "slow" | "normal" | "fast" } = {},
+): Promise<void> {
+  // Put focus in the field. skipClick trusts the caller focused it already —
+  // needed for editors that BLUR on a synthetic click (e.g. Draft.js on X).
+  if (!opts.skipClick) {
+    await humanClick(page, selector);
+    await sleep(randRange(TIMING.POST_CLICK));
+  }
+
+  // SAFETY: never type unless the target is genuinely focused. A missed click
+  // otherwise turns each character into a global keyboard shortcut.
+  await assertFocused(page, selector, !opts.skipClick);
+
+  const factor = SPEED_FACTOR[opts.speed || "normal"] ?? 1;
   for (const char of text) {
     await page.keyboard.type(char);
-    await sleep(randRange(TIMING.CHAR_DELAY));
+    await sleep(randRange(TIMING.CHAR_DELAY) * factor);
     if (Math.random() < 0.05) {
-      await sleep(randRange(TIMING.WORD_PAUSE));
+      await sleep(randRange(TIMING.WORD_PAUSE) * factor);
     }
+  }
+}
+
+/** Human-like scroll: real wheel events (page.mouse.wheel) in eased chunks with
+ *  jitter and the occasional pause — unlike an instant window.scrollBy, which
+ *  fires no wheel events and reads as a bot. Scrolls whatever is under the
+ *  cursor, so hover the target element first for element-scoped scrolling. */
+export async function humanScroll(page: Page, deltaY: number): Promise<void> {
+  const abs = Math.abs(deltaY);
+  if (abs === 0) return;
+  const dir = Math.sign(deltaY) || 1;
+  const ticks = Math.max(3, Math.min(20, Math.round(abs / rand(80, 140))));
+  let done = 0;
+  for (let i = 0; i < ticks; i++) {
+    const t = (i + 1) / ticks;
+    const ease = Math.sin(t * Math.PI); // slow-fast-slow
+    let step = Math.round((abs / ticks) * (0.6 + ease * 0.8) + rand(-8, 8));
+    step = Math.max(10, step);
+    if (done + step > abs) step = abs - done;
+    await page.mouse.wheel(0, dir * step);
+    done += step;
+    await sleep(rand(30, 90));
+    if (Math.random() < 0.15) await sleep(rand(120, 300));
+    if (done >= abs) break;
   }
 }
 

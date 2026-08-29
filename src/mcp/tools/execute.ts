@@ -70,12 +70,18 @@ Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: er
                 "find the id of the tab the user wants to drive.",
             );
           }
+          // Match the server watchdog's typing-aware cap (+buffer) so long
+          // human-type isn't cut off by the client fetch abort.
+          const typeChars = (params.steps || []).reduce((n: number, s: { type?: string; value?: unknown }) => {
+            return (s.type === "human-type" || s.type === "type-code") && typeof s.value === "string" ? n + s.value.length : n;
+          }, 0);
+          const timeoutMs = Math.min(60_000 + (params.steps?.length || 0) * 15_000 + typeChars * 250, 1_200_000) + 30_000;
           const extResult = await localApiPost<PipelineResult>("/extension/execute", {
             tabId,
             clientId: params.options?.clientId,
             steps: params.steps,
             options: params.options,
-          });
+          }, timeoutMs);
           const extLines = formatExecuteResult(extResult);
           const content: TextContent[] = [{ type: "text", text: extLines.join("\n") }];
           if (!extResult.ok) return { content, isError: true };
@@ -201,13 +207,9 @@ export function formatExecuteResult(data: PipelineResult): string[] {
     lines.push(`URL: ${data.finalState.url}`);
   }
 
-  // Knowledge cache hint
-  if (data.ok && data.finalState?.url) {
-    try {
-      const domain = new URL(data.finalState.url).hostname.replace(/^www\./, "");
-      lines.push(`\nKnowledge cache updated for ${domain}. Before the next browser run on this domain, call \`knowledge get ${domain}\` — you may be able to skip the browser entirely.`);
-    } catch {}
-  }
+  // (The per-run "call knowledge get <domain>" nag was removed — it was noise on
+  // every response that agents never acted on. The cache still updates silently;
+  // the pre-flight instruction in the tool description covers when to read it.)
 
   // Report any tabs the pipeline followed (a click that opened a new tab).
   for (const r of data.results || []) {

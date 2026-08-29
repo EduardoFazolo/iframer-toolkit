@@ -2,7 +2,7 @@ import type { Page } from "patchright";
 import { clipboardRead } from "../../clipboard";
 import type { PipelineStep, ExecutionContext } from "../../types";
 import { STEALTH_SCRIPT, contextStealthScripts } from "../../browser/stealth";
-import { humanClick, humanClickXY, humanType } from "../../browser/humanize";
+import { humanClick, humanClickXY, humanType, humanScroll, humanMove } from "../../browser/humanize";
 import { injectStorage } from "../../session/persistence";
 import { createLogger } from "../../logger";
 import { TIMING, TIMEOUTS } from "../../constants";
@@ -110,7 +110,7 @@ export async function rightClick(page: Page, step: Step<"right-click">, ctx: Exe
 }
 
 export async function humanTypeStep(page: Page, step: Step<"human-type">, ctx: ExecutionContext): Promise<void> {
-  await humanType(page, resolveSelector(step.selector, ctx), step.value);
+  await humanType(page, resolveSelector(step.selector, ctx), step.value, { skipClick: step.skipClick, speed: step.speed });
 }
 
 export async function evaluate(page: Page, step: Step<"evaluate">): Promise<unknown> {
@@ -131,6 +131,22 @@ export async function waitFor(page: Page, step: Step<"wait-for">, ctx: Execution
 
 export async function scroll(page: Page, step: Step<"scroll">, ctx: ExecutionContext): Promise<void> {
   const selector = step.selector ? resolveSelector(step.selector, ctx) : null;
+
+  // Human mode: real wheel events in eased chunks (see humanScroll). Needs a
+  // concrete distance — fall back to a viewport-ish default when deltaY is omitted.
+  if (step.human) {
+    const dy = step.deltaY ?? 600;
+    if (selector) {
+      // Hover the element so the wheel scrolls IT, not the page.
+      const el = await page.$(selector);
+      const box = el ? await el.boundingBox() : null;
+      if (box) await humanMove(page, box.x + box.width / 2, box.y + box.height / 2);
+    }
+    await humanScroll(page, dy);
+    return;
+  }
+
+  // Instant mode (default): precise, fast — for when realism doesn't matter.
   await page.evaluate(
     ({ dy, sel }) => {
       if (sel) {
