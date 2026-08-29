@@ -39,17 +39,25 @@ asks for the tab's `clientId`. A service-worker restart replaces that profile's
 own connection instead of piling up. The server stays alive while any profile is
 connected and idle-exits once none are.
 
-## Install (unpacked)
+The extension is an **optional** add-on (Chrome/Chromium today; Firefox and
+others later). You opt in explicitly — nothing installs it for you.
+
+## Install (opt-in, Chrome)
+
+```sh
+iframer install extension chrome
+```
+
+That installs the pairing (native-messaging) host and prints the folder to load.
+Then finish the one manual step it tells you:
 
 1. Open `chrome://extensions`.
 2. Turn on **Developer mode** (top right).
-3. **Load unpacked** → select the extension folder **inside the installed
-   package**, not a random checkout. Get its path with:
-   ```sh
-   iframer extension path
-   ```
-   Loading from that path is what lets updates land in place (see below). The
-   pinned `key` keeps the extension ID — and pairing — stable across updates.
+3. **Load unpacked** → select the printed folder — the `extension/` dir **inside
+   the installed package** (get it again with `iframer extension path`).
+
+Loading from that path is what lets `iframer update` refresh it in place. The
+pinned `key` keeps the extension ID — and pairing — stable across updates.
 
 ## Updating (npm is the update channel)
 
