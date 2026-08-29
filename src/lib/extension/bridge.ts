@@ -2,6 +2,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { Server as HttpServer } from "http";
 import crypto from "crypto";
 import { getLocalToken } from "../auth/crypto";
+import { getVersion } from "../version";
 
 // ─── Extension bridge (multi-client) ────────────────────────────────
 //
@@ -152,6 +153,15 @@ class ExtensionBridge {
     };
     this.clients.set(client.clientId, client);
     this.startHeartbeat(client);
+
+    // Tell the extension our version on connect. The extension compares it to
+    // its own manifest version so it can surface "update available" (the
+    // running extension is older than the files an npm update left on disk).
+    try {
+      ws.send(JSON.stringify({ type: "server_info", version: getVersion() }));
+    } catch {
+      /* best-effort */
+    }
 
     ws.on("message", (data: Buffer) => this.onMessage(client, data));
     ws.on("close", () => this.dropClient(client, "socket closed"));

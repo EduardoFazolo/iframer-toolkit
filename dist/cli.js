@@ -8172,6 +8172,32 @@ var init_wrapper = __esm(() => {
   import_websocket_server = __toESM(require_websocket_server(), 1);
 });
 
+// src/lib/version.ts
+function getVersion() {
+  if (cached)
+    return cached;
+  if (process.env.IFRAMER_VERSION)
+    return cached = process.env.IFRAMER_VERSION;
+  const candidates = [
+    import_path10.default.join(__dirname, "..", "..", "package.json"),
+    import_path10.default.join(__dirname, "..", "package.json"),
+    import_path10.default.join(process.cwd(), "package.json")
+  ];
+  for (const p of candidates) {
+    try {
+      const v = JSON.parse(import_fs11.default.readFileSync(p, "utf8")).version;
+      if (v)
+        return cached = v;
+    } catch {}
+  }
+  return cached = "0.0.0";
+}
+var import_fs11, import_path10, __dirname = "/Users/eduardoverona/tools/iframer-toolkit/src/lib", cached = null;
+var init_version = __esm(() => {
+  import_fs11 = __toESM(require("fs"));
+  import_path10 = __toESM(require("path"));
+});
+
 // src/lib/extension/bridge.ts
 class ExtensionBridge {
   wss = null;
@@ -8229,6 +8255,9 @@ class ExtensionBridge {
     };
     this.clients.set(client.clientId, client);
     this.startHeartbeat(client);
+    try {
+      ws.send(JSON.stringify({ type: "server_info", version: getVersion() }));
+    } catch {}
     ws.on("message", (data) => this.onMessage(client, data));
     ws.on("close", () => this.dropClient(client, "socket closed"));
     ws.on("error", () => {});
@@ -8481,6 +8510,7 @@ var import_crypto5, REQUEST_TIMEOUT_MS = 180000, HEARTBEAT_MS = 15000, extension
 var init_bridge = __esm(() => {
   init_wrapper();
   init_crypto();
+  init_version();
   import_crypto5 = __toESM(require("crypto"));
   extensionBridge = new ExtensionBridge;
 });
@@ -9456,7 +9486,7 @@ class Iframer {
     }
   }
 }
-var import_path10, import_url, log19, DEFAULT_SCREENSHOT_DIR, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3 = 20000;
+var import_path11, import_url, log19, DEFAULT_SCREENSHOT_DIR, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3 = 20000;
 var init_iframer = __esm(() => {
   init_session_manager();
   init_launcher();
@@ -9472,24 +9502,24 @@ var init_iframer = __esm(() => {
   init_fetch_service();
   init_capture_manager();
   init_credential_store();
-  import_path10 = __toESM(require("path"));
+  import_path11 = __toESM(require("path"));
   import_url = require("url");
   log19 = createLogger("iframer");
-  DEFAULT_SCREENSHOT_DIR = import_path10.default.join(import_path10.default.dirname(import_url.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/src/lib/iframer.ts")), "../../.screenshots");
+  DEFAULT_SCREENSHOT_DIR = import_path11.default.join(import_path11.default.dirname(import_url.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/src/lib/iframer.ts")), "../../.screenshots");
   DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
 });
 
 // bin/cli.js
 var __dirname = "/Users/eduardoverona/tools/iframer-toolkit/bin";
-var fs11 = require("fs");
+var fs12 = require("fs");
 var os4 = require("os");
-var path11 = require("path");
+var path12 = require("path");
 var { execSync: execSync3 } = require("child_process");
 var readline = require("readline");
 var HOME_DIR = os4.homedir();
-var CONFIG_DIR = process.env.IFRAMER_DATA_DIR || path11.join(HOME_DIR, ".iframer");
-var CLAUDE_CONFIG_PATH = path11.join(HOME_DIR, ".claude.json");
-var CODEX_CONFIG_PATH = path11.join(HOME_DIR, ".codex", "config.toml");
+var CONFIG_DIR = process.env.IFRAMER_DATA_DIR || path12.join(HOME_DIR, ".iframer");
+var CLAUDE_CONFIG_PATH = path12.join(HOME_DIR, ".claude.json");
+var CODEX_CONFIG_PATH = path12.join(HOME_DIR, ".codex", "config.toml");
 var DEFAULT_SERVER = process.env.IFRAMER_URL || "http://localhost:3021";
 var API_KEY = process.env.IFRAMER_SECRET;
 var USE_LOCAL = process.env.IFRAMER_MODE === "local" || !process.env.IFRAMER_URL;
@@ -9498,21 +9528,21 @@ function resolveLocalToken() {
   if (process.env.IFRAMER_SECRET)
     return process.env.IFRAMER_SECRET;
   const candidates = [
-    path11.join(CONFIG_DIR, "secret"),
-    path11.join(process.env.XDG_RUNTIME_DIR || os4.tmpdir(), "iframer-secret")
+    path12.join(CONFIG_DIR, "secret"),
+    path12.join(process.env.XDG_RUNTIME_DIR || os4.tmpdir(), "iframer-secret")
   ];
   for (const file of candidates) {
     try {
-      const existing = fs11.readFileSync(file, "utf8").trim();
+      const existing = fs12.readFileSync(file, "utf8").trim();
       if (existing)
         return existing;
     } catch {}
   }
   for (const file of candidates) {
     try {
-      fs11.mkdirSync(path11.dirname(file), { recursive: true });
+      fs12.mkdirSync(path12.dirname(file), { recursive: true });
       const secret = require("crypto").randomBytes(32).toString("hex");
-      fs11.writeFileSync(file, secret, { mode: 384 });
+      fs12.writeFileSync(file, secret, { mode: 384 });
       return secret;
     } catch {}
   }
@@ -9599,20 +9629,20 @@ async function apiDelete(endpoint) {
   return res.json();
 }
 function resolveMcpRuntime() {
-  const mcpServerTS = path11.join(__dirname, "..", "src", "mcp", "server.ts");
-  const mcpServerCJS = path11.join(__dirname, "mcp-server.cjs");
+  const mcpServerTS = path12.join(__dirname, "..", "src", "mcp", "server.ts");
+  const mcpServerCJS = path12.join(__dirname, "mcp-server.cjs");
   let bunPath;
   try {
     bunPath = execSync3("which bun", { encoding: "utf8" }).trim();
   } catch {}
-  if (bunPath && fs11.existsSync(mcpServerTS)) {
+  if (bunPath && fs12.existsSync(mcpServerTS)) {
     return {
       command: bunPath,
       args: ["run", mcpServerTS],
       message: "  Using bun to run MCP server from source (no build needed)"
     };
   }
-  if (fs11.existsSync(mcpServerCJS)) {
+  if (fs12.existsSync(mcpServerCJS)) {
     return {
       command: "node",
       args: [mcpServerCJS],
@@ -9628,8 +9658,8 @@ function resolveIframerSecret() {
   if (secret)
     return secret;
   try {
-    const envPath = path11.join(__dirname, "..", ".env");
-    const envContent = fs11.readFileSync(envPath, "utf8");
+    const envPath = path12.join(__dirname, "..", ".env");
+    const envContent = fs12.readFileSync(envPath, "utf8");
     const match = envContent.match(/^IFRAMER_SECRET=(.+)$/m);
     if (match)
       secret = match[1].trim();
@@ -9638,23 +9668,23 @@ function resolveIframerSecret() {
 }
 function installSkill() {
   const candidates = [
-    path11.join(__dirname, "..", "skills", "iframer.md"),
-    path11.join(__dirname, "skills", "iframer.md")
+    path12.join(__dirname, "..", "skills", "iframer.md"),
+    path12.join(__dirname, "skills", "iframer.md")
   ];
   let source = null;
   for (const c of candidates) {
-    if (fs11.existsSync(c)) {
+    if (fs12.existsSync(c)) {
       source = c;
       break;
     }
   }
   if (!source)
     return false;
-  const destDir = path11.join(HOME_DIR, ".claude", "commands");
-  const dest = path11.join(destDir, "iframer.md");
+  const destDir = path12.join(HOME_DIR, ".claude", "commands");
+  const dest = path12.join(destDir, "iframer.md");
   try {
-    fs11.mkdirSync(destDir, { recursive: true });
-    fs11.copyFileSync(source, dest);
+    fs12.mkdirSync(destDir, { recursive: true });
+    fs12.copyFileSync(source, dest);
     return true;
   } catch (err) {
     console.error(`  Warning: could not install skill: ${err.message}`);
@@ -9662,10 +9692,10 @@ function installSkill() {
   }
 }
 function removeSkill() {
-  const dest = path11.join(HOME_DIR, ".claude", "commands", "iframer.md");
+  const dest = path12.join(HOME_DIR, ".claude", "commands", "iframer.md");
   try {
-    if (fs11.existsSync(dest)) {
-      fs11.unlinkSync(dest);
+    if (fs12.existsSync(dest)) {
+      fs12.unlinkSync(dest);
       return true;
     }
   } catch {}
@@ -9673,8 +9703,8 @@ function removeSkill() {
 }
 function writeMachineSecret(secret) {
   try {
-    fs11.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs11.writeFileSync(path11.join(CONFIG_DIR, "secret"), secret, { mode: 384 });
+    fs12.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs12.writeFileSync(path12.join(CONFIG_DIR, "secret"), secret, { mode: 384 });
     return true;
   } catch (err) {
     console.error(`  Warning: could not write ~/.iframer/secret: ${err.message}`);
@@ -9683,7 +9713,7 @@ function writeMachineSecret(secret) {
 }
 function loadClaudeConfig() {
   try {
-    return JSON.parse(fs11.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    return JSON.parse(fs12.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
   } catch {
     return {};
   }
@@ -9693,13 +9723,13 @@ function installClaudeMcp(mcpName, mcpEntry) {
   if (!config.mcpServers)
     config.mcpServers = {};
   config.mcpServers[mcpName] = mcpEntry;
-  fs11.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
+  fs12.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
   return CLAUDE_CONFIG_PATH;
 }
 function removeClaudeMcp(mcpName) {
   let config;
   try {
-    config = JSON.parse(fs11.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    config = JSON.parse(fs12.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
   } catch {
     return { removed: false, path: CLAUDE_CONFIG_PATH };
   }
@@ -9707,7 +9737,7 @@ function removeClaudeMcp(mcpName) {
     return { removed: false, path: CLAUDE_CONFIG_PATH };
   }
   delete config.mcpServers[mcpName];
-  fs11.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
+  fs12.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
   return { removed: true, path: CLAUDE_CONFIG_PATH };
 }
 function escapeTomlString(value) {
@@ -9759,10 +9789,10 @@ function renderCodexMcpBlock(mcpName, mcpEntry) {
 `);
 }
 function installCodexMcp(mcpName, mcpEntry) {
-  fs11.mkdirSync(path11.dirname(CODEX_CONFIG_PATH), { recursive: true });
+  fs12.mkdirSync(path12.dirname(CODEX_CONFIG_PATH), { recursive: true });
   let content = "";
   try {
-    content = fs11.readFileSync(CODEX_CONFIG_PATH, "utf8");
+    content = fs12.readFileSync(CODEX_CONFIG_PATH, "utf8");
   } catch {}
   const existing = findCodexMcpSection(content, mcpName);
   if (existing) {
@@ -9771,7 +9801,7 @@ function installCodexMcp(mcpName, mcpEntry) {
   }
   const trimmed = content.trimEnd();
   const block = renderCodexMcpBlock(mcpName, mcpEntry);
-  fs11.writeFileSync(CODEX_CONFIG_PATH, trimmed ? `${trimmed}
+  fs12.writeFileSync(CODEX_CONFIG_PATH, trimmed ? `${trimmed}
 
 ${block}
 ` : `${block}
@@ -9781,7 +9811,7 @@ ${block}
 function removeCodexMcp(mcpName) {
   let content;
   try {
-    content = fs11.readFileSync(CODEX_CONFIG_PATH, "utf8");
+    content = fs12.readFileSync(CODEX_CONFIG_PATH, "utf8");
   } catch {
     return { removed: false, path: CODEX_CONFIG_PATH };
   }
@@ -9793,7 +9823,7 @@ function removeCodexMcp(mcpName) {
 `).replace(/\n{3,}/g, `
 
 `).trimEnd();
-  fs11.writeFileSync(CODEX_CONFIG_PATH, next ? `${next}
+  fs12.writeFileSync(CODEX_CONFIG_PATH, next ? `${next}
 ` : "");
   return { removed: true, path: CODEX_CONFIG_PATH };
 }
@@ -9803,8 +9833,8 @@ async function getLocalIframer() {
     return _iframer;
   try {
     const { Iframer: Iframer2 } = await Promise.resolve().then(() => (init_iframer(), exports_iframer));
-    const screenshotDir = path11.join(os4.tmpdir(), "iframer-screenshots");
-    fs11.mkdirSync(screenshotDir, { recursive: true });
+    const screenshotDir = path12.join(os4.tmpdir(), "iframer-screenshots");
+    fs12.mkdirSync(screenshotDir, { recursive: true });
     _iframer = new Iframer2({
       screenshotDir,
       publicUrl: `file://${screenshotDir}`,
@@ -9840,17 +9870,17 @@ function hasFlag(args, flag) {
 function handleResponse(data, screenshotPath) {
   const { screenshot: screenshot2, tileScreenshots, ...rest } = data;
   if (screenshot2 && screenshotPath) {
-    fs11.writeFileSync(screenshotPath, Buffer.from(screenshot2, "base64"));
+    fs12.writeFileSync(screenshotPath, Buffer.from(screenshot2, "base64"));
     rest._screenshotSaved = screenshotPath;
   }
   if (tileScreenshots && tileScreenshots.length > 0) {
     const tileDir = "/tmp/browser-tiles";
-    fs11.mkdirSync(tileDir, { recursive: true });
+    fs12.mkdirSync(tileDir, { recursive: true });
     const tilePaths = [];
     for (const tile of tileScreenshots) {
       if (tile.screenshot) {
         const tilePath = `${tileDir}/tile-${tile.index}.png`;
-        fs11.writeFileSync(tilePath, Buffer.from(tile.screenshot, "base64"));
+        fs12.writeFileSync(tilePath, Buffer.from(tile.screenshot, "base64"));
         tilePaths.push(tilePath);
       }
     }
@@ -9911,42 +9941,76 @@ if (command === "remove") {
     }
   }
 }
+if (command === "extension") {
+  const sub = args.shift();
+  if (sub === "path")
+    command = "extension-path";
+  else {
+    console.error("  Usage: iframer extension path");
+    process.exit(1);
+  }
+}
 async function installChrome() {
   const { downloadChrome: downloadChrome2 } = await Promise.resolve().then(() => (init_chrome_downloader(), exports_chrome_downloader));
   await downloadChrome2();
 }
 function isMcpInstalled(mcpName) {
   try {
-    const config = JSON.parse(fs11.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    const config = JSON.parse(fs12.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
     return !!(config.mcpServers && config.mcpServers[mcpName]);
   } catch {
     return false;
   }
 }
 var EXTENSION_ID = "mjfdkiicioigljhenkgaldhihllfdpll";
+function extensionDir() {
+  return path12.join(__dirname, "..", "extension");
+}
+async function reloadAndRestartServer() {
+  let info = null;
+  try {
+    info = JSON.parse(fs12.readFileSync(path12.join(CONFIG_DIR, "server.json"), "utf8"));
+  } catch {}
+  if (!info || !info.port) {
+    console.log("  (No running iframer server. The new files are on disk — reload the extension");
+    console.log("   from chrome://extensions, or it applies automatically next session.)");
+    return;
+  }
+  const base = `http://127.0.0.1:${info.port}`;
+  const headers = { "x-api-key": LOCAL_TOKEN, "content-type": "application/json" };
+  try {
+    await fetch(`${base}/extension/reload`, { method: "POST", headers });
+    console.log("  Told the extension to reload.");
+  } catch {}
+  await new Promise((r) => setTimeout(r, 1000));
+  try {
+    await fetch(`${base}/shutdown`, { method: "POST", headers });
+    console.log("  Retired the old server (a fresh one spawns on next use).");
+  } catch {}
+}
 var NM_HOST_NAME = "com.iframer.token";
 function nativeMessagingBrowserDirs() {
   if (process.platform === "darwin") {
-    const as = path11.join(HOME_DIR, "Library", "Application Support");
+    const as = path12.join(HOME_DIR, "Library", "Application Support");
     return [
-      { browser: "Chrome", dir: path11.join(as, "Google", "Chrome"), always: true },
-      { browser: "Chrome Beta", dir: path11.join(as, "Google", "Chrome Beta") },
-      { browser: "Chrome Canary", dir: path11.join(as, "Google", "Chrome Canary") },
-      { browser: "Chromium", dir: path11.join(as, "Chromium") },
-      { browser: "Brave", dir: path11.join(as, "BraveSoftware", "Brave-Browser") },
-      { browser: "Edge", dir: path11.join(as, "Microsoft Edge") },
-      { browser: "Vivaldi", dir: path11.join(as, "Vivaldi") },
-      { browser: "Arc", dir: path11.join(as, "Arc", "User Data") }
+      { browser: "Chrome", dir: path12.join(as, "Google", "Chrome"), always: true },
+      { browser: "Chrome Beta", dir: path12.join(as, "Google", "Chrome Beta") },
+      { browser: "Chrome Canary", dir: path12.join(as, "Google", "Chrome Canary") },
+      { browser: "Chromium", dir: path12.join(as, "Chromium") },
+      { browser: "Brave", dir: path12.join(as, "BraveSoftware", "Brave-Browser") },
+      { browser: "Edge", dir: path12.join(as, "Microsoft Edge") },
+      { browser: "Vivaldi", dir: path12.join(as, "Vivaldi") },
+      { browser: "Arc", dir: path12.join(as, "Arc", "User Data") }
     ];
   }
-  const cfg = process.env.XDG_CONFIG_HOME || path11.join(HOME_DIR, ".config");
+  const cfg = process.env.XDG_CONFIG_HOME || path12.join(HOME_DIR, ".config");
   return [
-    { browser: "Chrome", dir: path11.join(cfg, "google-chrome"), always: true },
-    { browser: "Chrome Beta", dir: path11.join(cfg, "google-chrome-beta") },
-    { browser: "Chromium", dir: path11.join(cfg, "chromium") },
-    { browser: "Brave", dir: path11.join(cfg, "BraveSoftware", "Brave-Browser") },
-    { browser: "Edge", dir: path11.join(cfg, "microsoft-edge") },
-    { browser: "Vivaldi", dir: path11.join(cfg, "vivaldi") }
+    { browser: "Chrome", dir: path12.join(cfg, "google-chrome"), always: true },
+    { browser: "Chrome Beta", dir: path12.join(cfg, "google-chrome-beta") },
+    { browser: "Chromium", dir: path12.join(cfg, "chromium") },
+    { browser: "Brave", dir: path12.join(cfg, "BraveSoftware", "Brave-Browser") },
+    { browser: "Edge", dir: path12.join(cfg, "microsoft-edge") },
+    { browser: "Vivaldi", dir: path12.join(cfg, "vivaldi") }
   ];
 }
 function installExtensionHost() {
@@ -9955,16 +10019,16 @@ function installExtensionHost() {
     process.exit(1);
   }
   resolveLocalToken();
-  const srcHost = path11.join(__dirname, "..", "extension", "native-host.cjs");
-  if (!fs11.existsSync(srcHost)) {
+  const srcHost = path12.join(__dirname, "..", "extension", "native-host.cjs");
+  if (!fs12.existsSync(srcHost)) {
     console.error(`  Host script not found: ${srcHost}`);
     process.exit(1);
   }
-  fs11.mkdirSync(CONFIG_DIR, { recursive: true });
-  const hostScript = path11.join(CONFIG_DIR, "extension-token-host.cjs");
-  fs11.copyFileSync(srcHost, hostScript);
-  const wrapper = path11.join(CONFIG_DIR, "extension-token-host.sh");
-  fs11.writeFileSync(wrapper, [
+  fs12.mkdirSync(CONFIG_DIR, { recursive: true });
+  const hostScript = path12.join(CONFIG_DIR, "extension-token-host.cjs");
+  fs12.copyFileSync(srcHost, hostScript);
+  const wrapper = path12.join(CONFIG_DIR, "extension-token-host.sh");
+  fs12.writeFileSync(wrapper, [
     "#!/bin/sh",
     `for BIN in "${process.execPath}" "$(command -v node 2>/dev/null)" /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node; do`,
     `  [ -n "$BIN" ] && [ -x "$BIN" ] && exec "$BIN" "${hostScript}"`,
@@ -9982,12 +10046,12 @@ function installExtensionHost() {
   }, null, 2);
   const installed = [];
   for (const { browser, dir, always } of nativeMessagingBrowserDirs()) {
-    if (!always && !fs11.existsSync(dir))
+    if (!always && !fs12.existsSync(dir))
       continue;
     try {
-      const nmDir = path11.join(dir, "NativeMessagingHosts");
-      fs11.mkdirSync(nmDir, { recursive: true });
-      fs11.writeFileSync(path11.join(nmDir, `${NM_HOST_NAME}.json`), manifest);
+      const nmDir = path12.join(dir, "NativeMessagingHosts");
+      fs12.mkdirSync(nmDir, { recursive: true });
+      fs12.writeFileSync(path12.join(nmDir, `${NM_HOST_NAME}.json`), manifest);
       installed.push(browser);
     } catch (e) {
       console.error(`  ${browser}: failed (${e.message})`);
@@ -9998,28 +10062,28 @@ function installExtensionHost() {
 function removeExtensionHost() {
   const removed = [];
   for (const { browser, dir } of nativeMessagingBrowserDirs()) {
-    const file = path11.join(dir, "NativeMessagingHosts", `${NM_HOST_NAME}.json`);
+    const file = path12.join(dir, "NativeMessagingHosts", `${NM_HOST_NAME}.json`);
     try {
-      if (fs11.existsSync(file)) {
-        fs11.unlinkSync(file);
+      if (fs12.existsSync(file)) {
+        fs12.unlinkSync(file);
         removed.push(browser);
       }
     } catch {}
   }
   for (const f of ["extension-token-host.cjs", "extension-token-host.sh"]) {
     try {
-      fs11.unlinkSync(path11.join(CONFIG_DIR, f));
+      fs12.unlinkSync(path12.join(CONFIG_DIR, f));
     } catch {}
   }
   return removed;
 }
 async function removeChrome() {
-  const chromeDir = path11.join(CONFIG_DIR, "chrome");
-  if (!fs11.existsSync(chromeDir)) {
+  const chromeDir = path12.join(CONFIG_DIR, "chrome");
+  if (!fs12.existsSync(chromeDir)) {
     console.log("  Chrome for Testing not found, nothing to remove.");
     return;
   }
-  fs11.rmSync(chromeDir, { recursive: true, force: true });
+  fs12.rmSync(chromeDir, { recursive: true, force: true });
   console.log(`  Removed ${chromeDir}`);
 }
 async function main() {
@@ -10172,8 +10236,8 @@ async function main() {
       if (input.startsWith("[") || input.startsWith("{")) {
         const parsed = JSON.parse(input);
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
-      } else if (fs11.existsSync(input)) {
-        const parsed = JSON.parse(fs11.readFileSync(input, "utf-8"));
+      } else if (fs12.existsSync(input)) {
+        const parsed = JSON.parse(fs12.readFileSync(input, "utf-8"));
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
       } else {
         console.error(`  File not found: ${input}`);
@@ -10278,7 +10342,7 @@ async function main() {
           process.exit(1);
         }
         const buffer = Buffer.from(await res.arrayBuffer());
-        fs11.writeFileSync(outPath, buffer);
+        fs12.writeFileSync(outPath, buffer);
         console.log(outPath);
       }
       break;
@@ -10447,8 +10511,8 @@ async function main() {
       } else if (input.startsWith("[") || input.startsWith("{")) {
         const parsed = JSON.parse(input);
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
-      } else if (fs11.existsSync(input)) {
-        const parsed = JSON.parse(fs11.readFileSync(input, "utf-8"));
+      } else if (fs12.existsSync(input)) {
+        const parsed = JSON.parse(fs12.readFileSync(input, "utf-8"));
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
       } else {
         console.error(`  Not a URL or file: ${input}`);
@@ -10468,8 +10532,8 @@ async function main() {
       }
       if (result.capturedApi && result.capturedApi.length > 0) {
         const outputDir = parseFlag(args, "--output") || `./${result.capturedApi[0].domain}`;
-        fs11.mkdirSync(outputDir, { recursive: true });
-        fs11.writeFileSync(path11.join(outputDir, "captured-api.json"), JSON.stringify(result.capturedApi, null, 2));
+        fs12.mkdirSync(outputDir, { recursive: true });
+        fs12.writeFileSync(path12.join(outputDir, "captured-api.json"), JSON.stringify(result.capturedApi, null, 2));
         console.log(`  Captured ${result.capturedApi.reduce((sum, api) => sum + api.endpoints.length, 0)} endpoints`);
         console.log(`  Saved to: ${outputDir}/captured-api.json`);
         for (const api of result.capturedApi) {
@@ -10651,7 +10715,7 @@ async function main() {
       let secretSource = secret ? "env/.env" : null;
       if (!secret) {
         try {
-          secret = fs11.readFileSync(path11.join(CONFIG_DIR, "secret"), "utf8").trim();
+          secret = fs12.readFileSync(path12.join(CONFIG_DIR, "secret"), "utf8").trim();
           if (secret)
             secretSource = "~/.iframer/secret";
         } catch {}
@@ -10698,17 +10762,17 @@ async function main() {
       return main();
     }
     case "telemetry": {
-      const file = path11.join(CONFIG_DIR, "telemetry.jsonl");
+      const file = path12.join(CONFIG_DIR, "telemetry.jsonl");
       if (args.includes("--clear")) {
         try {
-          fs11.unlinkSync(file);
+          fs12.unlinkSync(file);
         } catch {}
         console.log("  Telemetry log cleared.");
         break;
       }
       let lines;
       try {
-        lines = fs11.readFileSync(file, "utf8").trim().split(`
+        lines = fs12.readFileSync(file, "utf8").trim().split(`
 `).filter(Boolean);
       } catch {
         console.log("  No telemetry recorded yet. It logs automatically as agents use iframer");
@@ -10784,10 +10848,64 @@ async function main() {
       }
       console.log(`  Pairing host installed for: ${installed.join(", ")}`);
       console.log(`
-  The iframer extension now pairs itself — no token pasting.`);
-      console.log("  If the extension is already loaded, quit + reopen the browser (native");
-      console.log("  messaging hosts are picked up on browser start), then check the popup dot.");
-      console.log(`  Manual pasting in the popup still works as a fallback.
+  Load the extension (once) from this folder — chrome://extensions →`);
+      console.log("  Developer mode → Load unpacked → select:");
+      console.log(`    ${extensionDir()}`);
+      console.log(`
+  Loading it from THIS path (inside the installed package) means`);
+      console.log("  `iframer update` / `npm update` can refresh it in place. The extension");
+      console.log("  then pairs itself — no token pasting.");
+      console.log("  If it's already loaded, quit + reopen the browser (native messaging");
+      console.log(`  hosts are picked up on browser start), then check the popup dot.
+`);
+      break;
+    }
+    case "extension-path": {
+      console.log(extensionDir());
+      break;
+    }
+    case "update": {
+      const checkOnly = args.includes("--check");
+      const pkgRoot = path12.join(__dirname, "..");
+      const isDev = fs12.existsSync(path12.join(pkgRoot, ".git"));
+      let installed = "unknown";
+      try {
+        installed = JSON.parse(fs12.readFileSync(path12.join(pkgRoot, "package.json"), "utf8")).version;
+      } catch {}
+      let latest = null;
+      try {
+        latest = require("child_process").execSync("npm view iframer-toolkit version", { encoding: "utf8" }).trim();
+      } catch {}
+      console.log(`  installed: v${installed}${latest ? `    latest: v${latest}` : "    (could not reach npm registry)"}`);
+      if (latest && latest === installed) {
+        console.log("  Already up to date.");
+        break;
+      }
+      if (checkOnly) {
+        if (latest && latest !== installed)
+          console.log("  Update available — run `iframer update` to apply.");
+        break;
+      }
+      if (isDev) {
+        console.log(`
+  This is a dev/linked install (the package has a .git repo).`);
+        console.log("  Update it with `git pull && bun run build`, not npm.");
+        break;
+      }
+      console.log(`
+  Updating via npm...`);
+      try {
+        require("child_process").execSync("npm install -g iframer-toolkit@latest", { stdio: "inherit" });
+      } catch {
+        console.error(`
+  npm install failed. If it's a permissions error:`);
+        console.error("    sudo npm install -g iframer-toolkit@latest");
+        process.exit(1);
+      }
+      console.log();
+      await reloadAndRestartServer();
+      console.log(`
+  Updated to v${latest || "latest"}.
 `);
       break;
     }
@@ -10891,7 +11009,10 @@ async function main() {
     install                         Install everything (Chromium + MCP)
     install chromium                Download Chrome for Testing
     install mcp [--dev]             Register iframer MCP in Claude Code and Codex
-    install extension               Let the browser extension pair itself (no token pasting)
+    install extension               Pair the extension (native host) + print the folder to load unpacked
+    extension path                  Print the extension folder to load in chrome://extensions
+    update                          Update iframer via npm, reload the extension, restart the server
+    update --check                  Report whether a newer version is available (no install)
     remove                          Remove everything (Chromium + MCP)
     remove chromium                 Delete downloaded Chrome for Testing
     remove mcp [--dev]              Unregister iframer MCP from Claude Code and Codex

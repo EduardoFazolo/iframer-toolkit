@@ -116,15 +116,15 @@ var init_paths = __esm(() => {
 
 // index.ts
 var import_express = __toESM(require("express"));
-var import_path11 = __toESM(require("path"));
-var import_fs12 = __toESM(require("fs"));
+var import_path12 = __toESM(require("path"));
+var import_fs13 = __toESM(require("fs"));
 var import_url2 = require("url");
 
 // src/api/routes.ts
 var import_patchright3 = require("patchright");
 
 // src/lib/iframer.ts
-var import_path10 = __toESM(require("path"));
+var import_path11 = __toESM(require("path"));
 var import_url = require("url");
 
 // src/lib/browser/session-manager.ts
@@ -5137,6 +5137,33 @@ var import_crypto7 = require("crypto");
 // src/lib/extension/bridge.ts
 var import_ws = require("ws");
 var import_crypto5 = __toESM(require("crypto"));
+
+// src/lib/version.ts
+var import_fs11 = __toESM(require("fs"));
+var import_path10 = __toESM(require("path"));
+var __dirname = "/Users/eduardoverona/tools/iframer-toolkit/src/lib";
+var cached = null;
+function getVersion() {
+  if (cached)
+    return cached;
+  if (process.env.IFRAMER_VERSION)
+    return cached = process.env.IFRAMER_VERSION;
+  const candidates = [
+    import_path10.default.join(__dirname, "..", "..", "package.json"),
+    import_path10.default.join(__dirname, "..", "package.json"),
+    import_path10.default.join(process.cwd(), "package.json")
+  ];
+  for (const p of candidates) {
+    try {
+      const v = JSON.parse(import_fs11.default.readFileSync(p, "utf8")).version;
+      if (v)
+        return cached = v;
+    } catch {}
+  }
+  return cached = "0.0.0";
+}
+
+// src/lib/extension/bridge.ts
 var REQUEST_TIMEOUT_MS = 180000;
 var HEARTBEAT_MS = 15000;
 
@@ -5196,6 +5223,9 @@ class ExtensionBridge {
     };
     this.clients.set(client.clientId, client);
     this.startHeartbeat(client);
+    try {
+      ws.send(JSON.stringify({ type: "server_info", version: getVersion() }));
+    } catch {}
     ws.on("message", (data) => this.onMessage(client, data));
     ws.on("close", () => this.dropClient(client, "socket closed"));
     ws.on("error", () => {});
@@ -6186,7 +6216,7 @@ class CredentialStore {
 
 // src/lib/iframer.ts
 var log19 = createLogger("iframer");
-var DEFAULT_SCREENSHOT_DIR = import_path10.default.join(import_path10.default.dirname(import_url.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/src/lib/iframer.ts")), "../../.screenshots");
+var DEFAULT_SCREENSHOT_DIR = import_path11.default.join(import_path11.default.dirname(import_url.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/src/lib/iframer.ts")), "../../.screenshots");
 var DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
 var DEFAULT_STALE_TIMEOUT_MS3 = 20000;
 
@@ -6400,7 +6430,7 @@ function errorHandler(err, _req, res, _next) {
 }
 
 // src/api/routes.ts
-var import_fs11 = __toESM(require("fs"));
+var import_fs12 = __toESM(require("fs"));
 function auth(req) {
   return req;
 }
@@ -6413,7 +6443,7 @@ function registerRoutes(app) {
     const browsers = [];
     try {
       const execPath = import_patchright3.chromium.executablePath();
-      browsers.push({ name: "chromium", installed: import_fs11.default.existsSync(execPath), executablePath: execPath });
+      browsers.push({ name: "chromium", installed: import_fs12.default.existsSync(execPath), executablePath: execPath });
     } catch {
       browsers.push({ name: "chromium", installed: false, executablePath: null });
     }
@@ -6583,7 +6613,7 @@ function registerRoutes(app) {
     res.json({ ok: true, message: "Login attempted", ...resultRest });
   }));
   app.get("/extension/status", (_req, res) => {
-    res.json({ ok: true, ...extensionBridge.status() });
+    res.json({ ok: true, version: getVersion(), ...extensionBridge.status() });
   });
   app.post("/extension/tabs", asyncHandler(async (_req, res) => {
     const result = await extensionBridge.listTabs();
@@ -6674,8 +6704,8 @@ var PORT = parseInt(process.env.PORT || "3021", 10);
 var REAP_INTERVAL_MS = 60000;
 var IDLE_EXIT_MS = parseInt(process.env.IFRAMER_SERVER_IDLE_EXIT_MS || String(30 * 60 * 1000), 10);
 var SHUTDOWN_DEADLINE_MS = 1e4;
-var SCREENSHOT_DIR = import_path11.default.join(import_path11.default.dirname(import_url2.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/index.ts")), ".screenshots");
-import_fs12.default.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+var SCREENSHOT_DIR = import_path12.default.join(import_path12.default.dirname(import_url2.fileURLToPath("file:///Users/eduardoverona/tools/iframer-toolkit/index.ts")), ".screenshots");
+import_fs13.default.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 app.use("/screenshots", import_express.default.static(SCREENSHOT_DIR));
 app.use(import_express.default.json());
 var lastActivity = Date.now();

@@ -116,6 +116,39 @@ async function setStatus(patch) {
   await chrome.storage.local.set({ status: { ...prev, ...patch } });
 }
 
+// Numeric semver compare: is `a` newer than `b`? (x.y.z, extra parts ignored.)
+function isNewer(a, b) {
+  const pa = String(a).split(".").map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).split(".").map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) > (pb[i] || 0)) return true;
+    if ((pa[i] || 0) < (pb[i] || 0)) return false;
+  }
+  return false;
+}
+
+// Compare the server's version (fresh after an npm update) to our own. Surface
+// "update available" via a toolbar badge + stored state the popup reads. We do
+// NOT self-reload (check-and-notify) — the user runs `iframer update`, which
+// applies the update and triggers the reload.
+async function checkForUpdate(serverVersion) {
+  const current = chrome.runtime.getManifest().version;
+  const available = serverVersion && isNewer(serverVersion, current) ? serverVersion : null;
+  try {
+    if (available) {
+      await chrome.action.setBadgeText({ text: "↑" });
+      await chrome.action.setBadgeBackgroundColor({ color: "#2a7" });
+      await chrome.action.setTitle({ title: `iframer — update available (v${available}), run 'iframer update'` });
+    } else {
+      await chrome.action.setBadgeText({ text: "" });
+      await chrome.action.setTitle({ title: "iframer" });
+    }
+  } catch {
+    /* action API not available in some contexts */
+  }
+  await setStatus({ current, updateAvailable: available });
+}
+
 // Back off when the server isn't there: each full failed scan of 21 ports logs
 // 21 ERR_CONNECTION_REFUSED lines, so retrying every 2s floods the extension's
 // error page. Grow the wait up to a minute; any explicit action (new token,
@@ -272,6 +305,15 @@ async function handleMessage(sock, raw) {
     return;
   }
   const { id, type } = msg;
+
+  // Server announces its version on connect (one-way event, no id). Compare to
+  // our own manifest version and surface "update available" — the running
+  // extension is older than the files an `npm update` left on disk.
+  if (type === "server_info") {
+    checkForUpdate(msg.version);
+    return;
+  }
+
   if (typeof id !== "number") return;
 
   try {
