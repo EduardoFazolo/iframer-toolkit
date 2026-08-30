@@ -1,5 +1,12 @@
 import { z } from "zod";
 
+// NOTE ON TOKEN BUDGET: this schema is serialized into EVERY conversation for
+// BOTH `execute` and (loosely) `reverse-engineer`. Descriptions here are paid
+// for by every user on every chat — keep them one-line unless the step is
+// genuinely error-prone without the teaching (fill, human-type). Situational
+// manuals (captcha workflow, code-gen layout) are injected into tool RESULTS
+// at the moment they're needed instead — see src/lib/format-result.ts.
+
 export const stepSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("navigate"), url: z.string(), waitUntil: z.string().optional() }),
   z.object({ type: z.literal("click"), selector: z.string() }),
@@ -11,22 +18,33 @@ export const stepSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("extract"), expression: z.string() }),
   z.object({ type: z.literal("wait"), ms: z.number() }),
   z.object({ type: z.literal("wait-for"), selector: z.string(), timeout: z.number().optional() }),
-  z.object({ type: z.literal("scroll"), deltaY: z.number().optional(), selector: z.string().optional().describe("Scroll within this element instead of the window"), human: z.boolean().optional().describe("Scroll like a person: real wheel events in eased chunks with pauses (vs an instant jump). Slower but not bot-obvious.") }),
+  z.object({ type: z.literal("scroll"), deltaY: z.number().optional(), selector: z.string().optional().describe("Scroll within this element instead of the window"), human: z.boolean().optional().describe("Real eased wheel events instead of an instant jump (slower, less bot-obvious)") }),
   z.object({ type: z.literal("keyboard"), key: z.string(), meta: z.boolean().optional(), ctrl: z.boolean().optional(), shift: z.boolean().optional(), alt: z.boolean().optional() }),
-  z.object({ type: z.literal("read"), selector: z.string().optional().describe("Element to read visible text from (CSS or @e ref). Omit for the whole page body."), maxChars: z.number().optional().describe("Cap the returned text length (default 6000). Raise it only when you actually need more — larger reads cost proportionally more context.") }),
-  z.object({ type: z.literal("upload"), selector: z.string().describe("The <input type=file> to set (CSS, @e ref, or @a anchor)."), files: z.array(z.string()).describe("Absolute local file path(s) to upload. Paths must exist on this machine (same machine as the browser).") }),
-  z.object({ type: z.literal("paste"), selector: z.string().optional().describe("Field to paste the OS clipboard into (CSS, @e ref, or @a anchor). Omit to insert at the currently focused element. Reliable — inserts via CDP Input.insertText, unlike a ⌘V keyboard step (the extension relay ignores modifier keys).") }),
-  z.object({ type: z.literal("download"), url: z.string().describe("URL of the file to download. Fetched through the browser's session (cookies included, so auth'd downloads work) and written to disk server-side — no Save-As dialog."), path: z.string().optional().describe("Absolute local path to save to. Omit to save into ~/.iframer/downloads/ with the URL's filename. Read the returned path to open the file.") }),
+  z.object({ type: z.literal("read"), selector: z.string().optional().describe("Element to read text from (CSS or @e ref); omit for the whole body"), maxChars: z.number().optional().describe("Cap returned text length (default 6000)") }),
+  z.object({ type: z.literal("upload"), selector: z.string().describe("The <input type=file> (CSS, @e ref, or @a anchor)"), files: z.array(z.string()).describe("Absolute local file path(s) on this machine") }),
+  z.object({ type: z.literal("paste"), selector: z.string().optional().describe("Field to paste the OS clipboard into; omit for the focused element. Reliable via CDP insertText where a ⌘V keyboard step isn't.") }),
+  z.object({ type: z.literal("download"), url: z.string().describe("File URL — fetched with the browser's cookies (auth'd downloads work), written to disk server-side, no Save-As dialog"), path: z.string().optional().describe("Absolute save path (default: ~/.iframer/downloads/<name>)") }),
   z.object({ type: z.literal("type-code"), value: z.string(), selector: z.string().optional() }),
   z.object({ type: z.literal("login"), domain: z.string(), usernameSelector: z.string().optional(), passwordSelector: z.string().optional(), submitSelector: z.string().optional(), totpSelector: z.string().optional() }),
   z.object({ type: z.literal("solve-captcha") }),
-  z.object({ type: z.literal("screenshot"), annotate: z.boolean().optional().describe("Overlay numbered badges on interactive elements. Returns refs (@e1, @e2...) you can use in subsequent steps.") }),
-  z.object({ type: z.literal("snapshot"), interactiveOnly: z.boolean().optional().describe("Only include interactive elements (default: true)"), maxElements: z.number().optional().describe("Max elements to return (default: 80)") }),
-  z.object({ type: z.literal("find"), role: z.string().optional().describe("ARIA role: button, link, textbox, checkbox, etc."), name: z.string().optional().describe("Accessible name — button text, aria-label"), text: z.string().optional().describe("Visible text content"), placeholder: z.string().optional().describe("Input placeholder text"), label: z.string().optional().describe("Associated label text"), exact: z.boolean().optional().describe("Exact match vs substring (default: substring)") }),
-  z.object({ type: z.literal("recaptcha-click") }),
-  z.object({ type: z.literal("recaptcha-select"), tiles: z.array(z.number()) }),
-  z.object({ type: z.literal("recaptcha-verify") }),
-  z.object({ type: z.literal("recaptcha-info") }),
-  z.object({ type: z.literal("recaptcha-solve") }),
-  z.object({ type: z.literal("recaptcha-answer"), tiles: z.array(z.number()) }),
+  z.object({ type: z.literal("screenshot"), annotate: z.boolean().optional().describe("Overlay numbered badges on interactive elements; returns @e refs") }),
+  z.object({ type: z.literal("snapshot"), interactiveOnly: z.boolean().optional().describe("Only interactive elements (default: true)"), maxElements: z.number().optional().describe("Max elements (default: 80)") }),
+  z.object({ type: z.literal("find"), role: z.string().optional().describe("ARIA role: button, link, textbox…"), name: z.string().optional().describe("Accessible name / aria-label"), text: z.string().optional().describe("Visible text content"), placeholder: z.string().optional(), label: z.string().optional(), exact: z.boolean().optional().describe("Exact match vs substring (default: substring)") }),
+  // Captcha interaction, collapsed to one step. The full workflow manual is
+  // injected into the execute RESULT whenever a captcha blocks a run.
+  z.object({ type: z.literal("recaptcha"), action: z.enum(["info", "click", "select", "verify", "solve", "answer"]).describe("Captcha interaction (manual arrives in the result when a captcha blocks a run): info=state+grid screenshot, click=checkbox, answer=select tiles+verify+recheck, select/verify=manual control, solve=auto vision solve"), tiles: z.array(z.number()).optional().describe("Tile numbers for select/answer") }),
 ]);
+
+/** Wire-format translation: the MCP schema exposes ONE `recaptcha` step, but
+ *  the server/CLI pipeline API keeps the original `recaptcha-*` step types
+ *  (stable for existing pipelines and CLI users). Translate before POSTing.
+ *  Returns PipelineStep[] — after translation every step is wire-format. */
+export function normalizeSteps(steps: ReadonlyArray<Record<string, unknown>>): import("../../lib/types").PipelineStep[] {
+  return (steps || []).map((s) => {
+    if (s && s.type === "recaptcha") {
+      const { action, ...rest } = s as { action?: string; [k: string]: unknown };
+      return { ...rest, type: `recaptcha-${action || "info"}` };
+    }
+    return s;
+  }) as unknown as import("../../lib/types").PipelineStep[];
+}

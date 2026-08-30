@@ -884,6 +884,7 @@ async function main() {
         console.error("    --capture-api        Record XHR/fetch requests");
         console.error("    --continue-on-error  Don't stop on step failure");
         console.error("    --timeout <ms>       Stale state timeout (default: 20000)");
+        console.error("    --json               Print raw PipelineResult JSON (default: compact agent-readable text)");
         process.exit(1);
       }
 
@@ -920,8 +921,21 @@ async function main() {
         result = await apiPost("/execute", { steps, options });
       }
 
-      printResult(result);
-      break;
+      // Default output = the same compact agent-facing text the MCP produces
+      // (schema-free CLI usage gets the lean per-task tokens too). --json
+      // keeps the raw PipelineResult for scripts.
+      if (hasFlag(args, "--json")) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        const { formatExecuteResult } = await import("../src/lib/format-result.ts");
+        console.log(formatExecuteResult(result).join("\n"));
+        const shot = result.error?.pageState?.screenshotUrl ?? result.finalState?.screenshotUrl;
+        if (shot) console.log(`\nScreenshot: ${shot}`);
+      }
+      // Explicit exit: the in-process browser keeps the event loop alive, so
+      // without this the CLI hangs after printing (long-standing quirk that
+      // the old raw-JSON path shared).
+      process.exit(result.ok ? 0 : 1);
     }
 
     // ─── Browse (quick headless fetch) ───────────────────────────────

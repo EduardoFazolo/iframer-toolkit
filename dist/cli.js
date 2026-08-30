@@ -9590,6 +9590,123 @@ var init_iframer = __esm(() => {
   DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
 });
 
+// src/lib/format-result.ts
+var exports_format_result = {};
+__export(exports_format_result, {
+  formatExecuteResult: () => formatExecuteResult
+});
+function resultOf(r, _type) {
+  return r.result;
+}
+function captchaBlocked(data) {
+  if (data.error?.errorType === "captcha-unsolvable")
+    return true;
+  return (data.obstacles || []).some((o) => (o.type === "captcha" || o.type === "hcaptcha") && !o.resolved);
+}
+function formatExecuteResult(data) {
+  const lines = [];
+  lines.push(`ok: ${data.ok}`);
+  lines.push(`steps: ${data.completedSteps}/${data.totalSteps}`);
+  if (data.durationMs)
+    lines.push(`duration: ${data.durationMs}ms`);
+  if (data.modeUsed)
+    lines.push(`mode: ${data.modeUsed}${data.modeEscalated ? " (auto-escalated)" : ""}`);
+  if (data.finalState) {
+    lines.push(`
+Final page: ${data.finalState.title}`);
+    lines.push(`URL: ${data.finalState.url}`);
+  }
+  for (const r of data.results || []) {
+    if (r.tabSwitchedTo) {
+      lines.push(`
+↳ step ${r.stepIndex} opened a new tab — pipeline is now on: ${r.tabSwitchedTo}`);
+    }
+  }
+  const meaningful = (data.results || []).filter((r) => r.ok && r.result !== undefined && r.result !== null);
+  for (const r of meaningful) {
+    if (r.step.type === "snapshot") {
+      const res = resultOf(r, "snapshot");
+      if (res?.snapshot) {
+        lines.push(`
+--- Snapshot (${res.elementCount} elements) ---`);
+        lines.push(res.snapshot);
+      }
+    } else if (r.step.type === "find") {
+      const res = resultOf(r, "find");
+      if (res?.ref) {
+        lines.push(`
+Found: ${res.ref} ${res.role} "${res.name}" (${res.matchCount} match${res.matchCount > 1 ? "es" : ""})`);
+      }
+    } else if (r.step.type === "screenshot") {
+      const res = resultOf(r, "screenshot");
+      if (res?.refs) {
+        lines.push(`
+--- Annotated screenshot refs ---`);
+        lines.push(res.refs);
+      }
+    } else if (r.step.type === "read") {
+      const res = r.result;
+      if (res?.text !== undefined) {
+        lines.push(`
+--- Read (step ${r.stepIndex}${res.truncated ? ", truncated" : ""}) ---`);
+        lines.push(res.text);
+      }
+    } else if (r.step.type === "extract" || r.step.type === "evaluate") {
+      lines.push(`
+step ${r.stepIndex} (${r.step.type}): ${JSON.stringify(r.result)}`);
+    }
+  }
+  if (data.obstacles && data.obstacles.length > 0) {
+    lines.push(`
+Obstacles handled:`);
+    for (const o of data.obstacles) {
+      lines.push(`  [step ${o.detectedAtStep}] ${o.type}: ${o.resolved ? o.resolution : "UNRESOLVED - " + (o.resolution || "unknown")}`);
+    }
+  }
+  if (data.capturedApi && data.capturedApi.length > 0) {
+    lines.push(`
+--- Captured API ---`);
+    for (const api of data.capturedApi) {
+      lines.push(`
+${api.domain} (${api.baseUrl})`);
+      lines.push("  Endpoints:");
+      for (const ep of api.endpoints) {
+        lines.push(`    ${ep.method} ${ep.path}  [step ${ep.triggeredAtStep}, status ${ep.responseStatus}]`);
+      }
+    }
+  }
+  if (data.error) {
+    lines.push(`
+--- Failure ---`);
+    if (typeof data.error === "string") {
+      lines.push(`Error: ${data.error}`);
+    } else {
+      lines.push(`Failed at step ${data.error.failedAtStep}: ${JSON.stringify(data.error.failedStep)}`);
+      lines.push(`Error type: ${data.error.errorType}`);
+      lines.push(`Message: ${data.error.message}`);
+      lines.push(`Retryable: ${data.error.retryable}`);
+      if (data.error.suggestion)
+        lines.push(`Suggestion: ${data.error.suggestion}`);
+      if (data.error.pageState?.url)
+        lines.push(`URL at failure: ${data.error.pageState.url}`);
+    }
+  }
+  if (captchaBlocked(data)) {
+    lines.push(RECAPTCHA_MANUAL);
+  }
+  return lines;
+}
+var RECAPTCHA_MANUAL = `
+--- Captcha workflow ---
+A captcha is blocking this run. Use the "recaptcha" step with an action:
+  {type:"recaptcha", action:"info"}                → state + instruction + tile-grid screenshot
+  {type:"recaptcha", action:"click"}               → click the "I'm not a robot" checkbox
+  {type:"recaptcha", action:"answer", tiles:[...]} → select tiles + verify + re-check (handles refreshing grids)
+  {type:"recaptcha", action:"select"|"verify"}     → manual tile-select / submit, if you need finer control
+  {type:"recaptcha", action:"solve"}               → automatic vision solve (docker-headful)
+Or {type:"solve-captcha"} for one-shot auto-detect + solve.
+In binary-headful mode, prefer asking the user to solve it in the visible window.`;
+
 // bin/cli.js
 var __dirname = "/Users/eduardoverona/tools/iframer-toolkit/bin";
 var fs12 = require("fs");
@@ -10355,6 +10472,7 @@ async function main() {
         console.error("    --capture-api        Record XHR/fetch requests");
         console.error("    --continue-on-error  Don't stop on step failure");
         console.error("    --timeout <ms>       Stale state timeout (default: 20000)");
+        console.error("    --json               Print raw PipelineResult JSON (default: compact agent-readable text)");
         process.exit(1);
       }
       let steps;
@@ -10389,8 +10507,18 @@ async function main() {
       } else {
         result = await apiPost("/execute", { steps, options });
       }
-      printResult(result);
-      break;
+      if (hasFlag(args, "--json")) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        const { formatExecuteResult: formatExecuteResult2 } = await Promise.resolve().then(() => exports_format_result);
+        console.log(formatExecuteResult2(result).join(`
+`));
+        const shot = result.error?.pageState?.screenshotUrl ?? result.finalState?.screenshotUrl;
+        if (shot)
+          console.log(`
+Screenshot: ${shot}`);
+      }
+      process.exit(result.ok ? 0 : 1);
     }
     case "browse":
     case "fetch": {

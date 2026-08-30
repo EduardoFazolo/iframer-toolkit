@@ -21,18 +21,9 @@ type OriginStore = Record<string, Record<string, string>>;
 export function registerSessionTool(server: McpServer) {
   server.tool(
     "session",
-    `Manage the browser session and lifecycle.
+    `Manage the browser session/lifecycle.
 
-Actions:
-- **stop**: save cookies/localStorage to the store, then close the browser. Session data persists for the next run.
-- **clear**: wipe all stored session data (cookies/localStorage) from the database. Does NOT kill running browsers.
-- **restart**: kill all running browser instances (local + Docker) and reset state. The next \`execute\` call will launch a fresh browser automatically. Use this when the browser is frozen, crashed, or in a bad state. Credentials and knowledge cache are NOT affected.
-- **capture-start**: attach a persistent XHR/fetch listener to the running browser. Accumulates ALL requests indefinitely — not tied to any pipeline. Use before triggering the action you want to capture (e.g. upload, delete, async mutation).
-- **capture-stop**: stop the persistent listener and return all captured endpoints + save to disk. Call this when you're satisfied you've seen the requests you need.
-- **get-cookies**: extract ALL cookies from the browser context via CDP (including HttpOnly/Secure — below the JS sandbox). Pass urls to scope. Returns name, value, domain, path, httpOnly, secure, expiry.
-- **get-auth**: extract cookies + localStorage + sessionStorage in one shot. Everything needed to replay authenticated requests from Node.js.
-
-Sessions live in the single local SQLite database (~/.iframer/iframer.db), shared across every browser mode.`,
+stop: save cookies/localStorage and close the browser — ALWAYS call when browser work is done. clear: wipe stored session data (doesn't kill browsers). restart: kill all browser instances and reset — use when frozen/crashed/bad state (credentials + knowledge unaffected). capture-start / capture-stop: persistent XHR/fetch recorder not tied to a pipeline — start it, trigger the action you want captured, stop to return + save endpoints. get-cookies: all cookies via CDP incl. HttpOnly (pass urls to scope). get-auth: cookies + localStorage + sessionStorage in one shot, for replaying authed requests.`,
     {
       action: z.enum(["stop", "clear", "restart", "capture-start", "capture-stop", "get-cookies", "get-auth"]).describe("stop | clear | restart | capture-start | capture-stop | get-cookies | get-auth"),
       mode: z.enum(["headless", "binary-headful"]).optional().describe("Browser mode (default: binary-headful)"),

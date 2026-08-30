@@ -21,15 +21,9 @@ import {
 export function registerRememberTool(server: McpServer) {
   server.tool(
     "remember",
-    `Persisted per-domain map of a website's UI elements ("anchors"), so the agent recalls where things are instead of re-exploring the DOM every run.
+    `Persisted per-domain map of a site's UI elements ("anchors") — recall where things are instead of re-exploring the DOM each run.
 
-WORKFLOW:
-1. Before a UI task on a site, call \`remember get <domain>\`. If an anchor exists (e.g. "composer", "send-button"), use it directly: put \`@a:<name>\` in any selector field of an \`execute\` step (click/fill/etc.). It resolves to the saved selector — no snapshot needed.
-2. If the site is new or the anchor you need is missing, discover the element with a \`snapshot\` or \`find\` step, act on it, then \`remember save\` it (name + the selector that worked, plus any quirks) so future runs are instant.
-3. SELF-HEAL: if a step using \`@a:<name>\` FAILS, the page changed — do NOT keep retrying the same anchor. Re-discover with snapshot/find, then \`remember save\` the new selector under the same name (overwrites, resets the health counters). Prefer stable selectors (aria-label, data-qa, role+name) over brittle generated CSS.
-4. Record site quirks with \`remember quirk\` (e.g. "synthetic clicks ignored — use trusted/coordinate clicks", "@here triggers a confirmation modal — click Send"). \`get\` surfaces them so the agent isn't surprised.
-
-Anchors live at ~/.iframer/knowledge/<domain>.anchors.json, alongside the API knowledge cache.`,
+(1) Before a UI task: \`remember get <domain>\`; an existing anchor is targeted as @a:<name> in any execute selector — no snapshot needed. (2) A newly discovered selector that worked → \`remember save\` it (prefer stable selectors: aria-label, data-qa, role+name). (3) SELF-HEAL: if @a:<name> fails, the page changed — re-discover with snapshot/find and \`remember save\` the new selector; do NOT retry the stale one. (4) \`remember quirk\` records site-wide gotchas ("synthetic clicks ignored — use trusted"); \`get\` surfaces them.`,
     {
       action: z.enum(["get", "save", "forget", "list", "quirk"]).describe("get: show a domain's anchors+quirks | save: create/overwrite an anchor | forget: delete an anchor | list: all domains with anchors | quirk: add site-wide quirk note(s)"),
       domain: z.string().optional().describe("Site domain, e.g. 'slack.com' or 'app.slack.com' (required for all actions except list)."),

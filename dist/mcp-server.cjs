@@ -637,187 +637,48 @@ var stepSchema = import_zod2.z.discriminatedUnion("type", [
   import_zod2.z.object({ type: import_zod2.z.literal("extract"), expression: import_zod2.z.string() }),
   import_zod2.z.object({ type: import_zod2.z.literal("wait"), ms: import_zod2.z.number() }),
   import_zod2.z.object({ type: import_zod2.z.literal("wait-for"), selector: import_zod2.z.string(), timeout: import_zod2.z.number().optional() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("scroll"), deltaY: import_zod2.z.number().optional(), selector: import_zod2.z.string().optional().describe("Scroll within this element instead of the window"), human: import_zod2.z.boolean().optional().describe("Scroll like a person: real wheel events in eased chunks with pauses (vs an instant jump). Slower but not bot-obvious.") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("scroll"), deltaY: import_zod2.z.number().optional(), selector: import_zod2.z.string().optional().describe("Scroll within this element instead of the window"), human: import_zod2.z.boolean().optional().describe("Real eased wheel events instead of an instant jump (slower, less bot-obvious)") }),
   import_zod2.z.object({ type: import_zod2.z.literal("keyboard"), key: import_zod2.z.string(), meta: import_zod2.z.boolean().optional(), ctrl: import_zod2.z.boolean().optional(), shift: import_zod2.z.boolean().optional(), alt: import_zod2.z.boolean().optional() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("read"), selector: import_zod2.z.string().optional().describe("Element to read visible text from (CSS or @e ref). Omit for the whole page body."), maxChars: import_zod2.z.number().optional().describe("Cap the returned text length (default 6000). Raise it only when you actually need more — larger reads cost proportionally more context.") }),
-  import_zod2.z.object({ type: import_zod2.z.literal("upload"), selector: import_zod2.z.string().describe("The <input type=file> to set (CSS, @e ref, or @a anchor)."), files: import_zod2.z.array(import_zod2.z.string()).describe("Absolute local file path(s) to upload. Paths must exist on this machine (same machine as the browser).") }),
-  import_zod2.z.object({ type: import_zod2.z.literal("paste"), selector: import_zod2.z.string().optional().describe("Field to paste the OS clipboard into (CSS, @e ref, or @a anchor). Omit to insert at the currently focused element. Reliable — inserts via CDP Input.insertText, unlike a ⌘V keyboard step (the extension relay ignores modifier keys).") }),
-  import_zod2.z.object({ type: import_zod2.z.literal("download"), url: import_zod2.z.string().describe("URL of the file to download. Fetched through the browser's session (cookies included, so auth'd downloads work) and written to disk server-side — no Save-As dialog."), path: import_zod2.z.string().optional().describe("Absolute local path to save to. Omit to save into ~/.iframer/downloads/ with the URL's filename. Read the returned path to open the file.") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("read"), selector: import_zod2.z.string().optional().describe("Element to read text from (CSS or @e ref); omit for the whole body"), maxChars: import_zod2.z.number().optional().describe("Cap returned text length (default 6000)") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("upload"), selector: import_zod2.z.string().describe("The <input type=file> (CSS, @e ref, or @a anchor)"), files: import_zod2.z.array(import_zod2.z.string()).describe("Absolute local file path(s) on this machine") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("paste"), selector: import_zod2.z.string().optional().describe("Field to paste the OS clipboard into; omit for the focused element. Reliable via CDP insertText where a ⌘V keyboard step isn't.") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("download"), url: import_zod2.z.string().describe("File URL — fetched with the browser's cookies (auth'd downloads work), written to disk server-side, no Save-As dialog"), path: import_zod2.z.string().optional().describe("Absolute save path (default: ~/.iframer/downloads/<name>)") }),
   import_zod2.z.object({ type: import_zod2.z.literal("type-code"), value: import_zod2.z.string(), selector: import_zod2.z.string().optional() }),
   import_zod2.z.object({ type: import_zod2.z.literal("login"), domain: import_zod2.z.string(), usernameSelector: import_zod2.z.string().optional(), passwordSelector: import_zod2.z.string().optional(), submitSelector: import_zod2.z.string().optional(), totpSelector: import_zod2.z.string().optional() }),
   import_zod2.z.object({ type: import_zod2.z.literal("solve-captcha") }),
-  import_zod2.z.object({ type: import_zod2.z.literal("screenshot"), annotate: import_zod2.z.boolean().optional().describe("Overlay numbered badges on interactive elements. Returns refs (@e1, @e2...) you can use in subsequent steps.") }),
-  import_zod2.z.object({ type: import_zod2.z.literal("snapshot"), interactiveOnly: import_zod2.z.boolean().optional().describe("Only include interactive elements (default: true)"), maxElements: import_zod2.z.number().optional().describe("Max elements to return (default: 80)") }),
-  import_zod2.z.object({ type: import_zod2.z.literal("find"), role: import_zod2.z.string().optional().describe("ARIA role: button, link, textbox, checkbox, etc."), name: import_zod2.z.string().optional().describe("Accessible name — button text, aria-label"), text: import_zod2.z.string().optional().describe("Visible text content"), placeholder: import_zod2.z.string().optional().describe("Input placeholder text"), label: import_zod2.z.string().optional().describe("Associated label text"), exact: import_zod2.z.boolean().optional().describe("Exact match vs substring (default: substring)") }),
-  import_zod2.z.object({ type: import_zod2.z.literal("recaptcha-click") }),
-  import_zod2.z.object({ type: import_zod2.z.literal("recaptcha-select"), tiles: import_zod2.z.array(import_zod2.z.number()) }),
-  import_zod2.z.object({ type: import_zod2.z.literal("recaptcha-verify") }),
-  import_zod2.z.object({ type: import_zod2.z.literal("recaptcha-info") }),
-  import_zod2.z.object({ type: import_zod2.z.literal("recaptcha-solve") }),
-  import_zod2.z.object({ type: import_zod2.z.literal("recaptcha-answer"), tiles: import_zod2.z.array(import_zod2.z.number()) })
+  import_zod2.z.object({ type: import_zod2.z.literal("screenshot"), annotate: import_zod2.z.boolean().optional().describe("Overlay numbered badges on interactive elements; returns @e refs") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("snapshot"), interactiveOnly: import_zod2.z.boolean().optional().describe("Only interactive elements (default: true)"), maxElements: import_zod2.z.number().optional().describe("Max elements (default: 80)") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("find"), role: import_zod2.z.string().optional().describe("ARIA role: button, link, textbox…"), name: import_zod2.z.string().optional().describe("Accessible name / aria-label"), text: import_zod2.z.string().optional().describe("Visible text content"), placeholder: import_zod2.z.string().optional(), label: import_zod2.z.string().optional(), exact: import_zod2.z.boolean().optional().describe("Exact match vs substring (default: substring)") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("recaptcha"), action: import_zod2.z.enum(["info", "click", "select", "verify", "solve", "answer"]).describe("Captcha interaction (manual arrives in the result when a captcha blocks a run): info=state+grid screenshot, click=checkbox, answer=select tiles+verify+recheck, select/verify=manual control, solve=auto vision solve"), tiles: import_zod2.z.array(import_zod2.z.number()).optional().describe("Tile numbers for select/answer") })
 ]);
+function normalizeSteps(steps) {
+  return (steps || []).map((s) => {
+    if (s && s.type === "recaptcha") {
+      const { action, ...rest } = s;
+      return { ...rest, type: `recaptcha-${action || "info"}` };
+    }
+    return s;
+  });
+}
 
-// src/mcp/tools/execute.ts
+// src/lib/format-result.ts
 function resultOf(r, _type) {
   return r.result;
 }
-function registerExecuteTool(server) {
-  server.tool("execute", `Execute a pipeline of browser steps. Auto-starts a session if needed. Handles obstacles (captcha, cookie banners) automatically.
-
-MANDATORY PRE-FLIGHT: Before calling this tool for any website, call \`knowledge get <domain>\` first. If the cache shows a direct-API path that satisfies the user's request, skip this tool entirely — direct API calls are orders of magnitude faster. Only fall through to \`execute\` when the cache is missing, stale, or insufficient. Every successful run here updates the knowledge cache automatically.
-
-Steps run sequentially. Each step has a 20-second stale-state timeout — if nothing changes on the page for 20s, execution stops and returns a detailed error so you can decide what to do.
-
-Key step types:
-- navigate: go to a URL (obstacle detection runs after this)
-- snapshot: get the page's interactive elements as a structured list with refs (@e1, @e2...). Use this BEFORE interacting to see what's on the page. Then use refs in click/fill/human-click/human-type steps instead of CSS selectors.
-- find: locate a specific element by role, name, text, placeholder, or label. Returns a ref.
-- screenshot: take a screenshot. Add annotate=true to overlay numbered badges on interactive elements.
-- extract: evaluate JS and include the result in the response
-- solve-captcha: auto-detect and solve reCAPTCHA/hCaptcha with vision AI
-- login: fill login form with stored credentials (never exposes passwords). Handles email-first flows (Slack, Microsoft, Google) and standard forms.
-
-IMPORTANT — Element refs (@e1, @e2...): All selector fields accept @e refs from snapshot, find, or annotated screenshot. PREFER refs over CSS selectors.
-
-IMPORTANT — Saved anchors (@a:<name>): Selector fields also accept persisted, per-domain anchors from the \`remember\` tool. Call \`remember get <domain>\` before a UI task; if an anchor exists, target it directly (e.g. selector="@a:composer") — no snapshot needed. After finding a new element that works, \`remember save\` it. Unlike @e refs (which reset every snapshot), @a: anchors persist across runs.
-
-FILLING FORMS: Always use the \`fill\` step for text inputs/textareas — NOT \`evaluate\` to set .value. \`fill\` is framework-aware: it fires the React-safe native setter plus input/change/blur, so controlled forms (React, react-hook-form, Formik, Vue) actually register the value and mark the field "touched". This prevents the common "I filled every field but submit still says they're required/empty" failure — which is a form-framework state issue, not a real empty field. If a submit is still rejected as incomplete after filling, re-run \`fill\` on the flagged field (it re-triggers the blur/validation) rather than assuming the value didn't land.
-
-Returns: ok, completedSteps, results, obstacles, capturedApi, and on failure: errorContext with screenshot path, URL, errorType, suggestion, retryable.`, {
-    steps: import_zod3.z.array(stepSchema).describe("Pipeline steps to execute sequentially"),
-    options: import_zod3.z.object({
-      staleTimeoutMs: import_zod3.z.number().optional().describe("Override the 20s stale-state timeout per step"),
-      screenshotAfterEach: import_zod3.z.boolean().optional().describe("Take a screenshot after every step (expensive)"),
-      continueOnObstacle: import_zod3.z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
-      continueOnError: import_zod3.z.boolean().optional().describe("Continue past failing steps (default: false)"),
-      captureApi: import_zod3.z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes."),
-      mode: import_zod3.z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("DO NOT SET THIS unless user explicitly requests a mode. iframer auto-selects and auto-escalates. Use 'extension' ONLY to drive a tab in the user's real Chrome via the iframer extension — requires options.tabId (get it from the `tabs` tool)."),
-      autoEscalate: import_zod3.z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)"),
-      instanceId: import_zod3.z.string().optional().describe("Run in a named parallel browser within this session (default: 'default'). Use distinct ids to drive several browsers at once, e.g. one per account — each keeps its own login/session state."),
-      tabId: import_zod3.z.number().optional().describe("Only with mode='extension': the id of the real Chrome tab to drive (from the `tabs` tool). Input is trusted OS-level (chrome.debugger); Chrome shows its 'is being debugged' bar while the run is in progress."),
-      clientId: import_zod3.z.string().optional().describe("Only with mode='extension', and only needed when several profiles/browsers are connected and a tab is ambiguous: the clientId of the profile that owns the tab (from the `tabs` tool)."),
-      focus: import_zod3.z.boolean().optional().describe("Only with mode='extension': bring the tab's window to the OS foreground while driving. Default false — the tab is driven in the background (activated in its window, focus-emulated) without interrupting the user. Set true only if a site ignores background input.")
-    }).optional()
-  }, async (params) => {
-    try {
-      if (params.options?.mode === "extension") {
-        const tabId = params.options?.tabId;
-        if (typeof tabId !== "number") {
-          return err("mode='extension' requires options.tabId. Call the `tabs` tool first to " + "find the id of the tab the user wants to drive.");
-        }
-        const typeChars = (params.steps || []).reduce((n, s) => {
-          return (s.type === "human-type" || s.type === "type-code") && typeof s.value === "string" ? n + s.value.length : n;
-        }, 0);
-        const timeoutMs = Math.min(60000 + (params.steps?.length || 0) * 15000 + typeChars * 250, 1200000) + 30000;
-        const extResult = await localApiPost("/extension/execute", {
-          tabId,
-          clientId: params.options?.clientId,
-          steps: params.steps,
-          options: params.options
-        }, timeoutMs);
-        const extLines = formatExecuteResult(extResult);
-        const content2 = [{ type: "text", text: extLines.join(`
-`) }];
-        if (!extResult.ok)
-          return { content: content2, isError: true };
-        return { content: content2 };
-      }
-      const dockerRunning = await isDockerRunning();
-      async function runWithMode(mode) {
-        if (mode === "docker-headful") {
-          if (!dockerRunning) {
-            return {
-              ok: false,
-              completedSteps: 0,
-              totalSteps: params.steps.length,
-              results: [],
-              finalState: { url: "", title: "" },
-              obstacles: [],
-              durationMs: 0,
-              modeUsed: "docker-headful",
-              error: {
-                failedAtStep: 0,
-                failedStep: params.steps[0],
-                errorType: "action-failed",
-                message: "docker-headful mode was requested but the Docker API is not reachable.",
-                pageState: { url: "", title: "" },
-                suggestion: "Start Docker with `bun run start:docker`, or omit options.mode.",
-                retryable: false
-              }
-            };
-          }
-          return apiPost("/execute", {
-            steps: params.steps,
-            options: { ...params.options, mode: "docker-headful", autoEscalate: false }
-          });
-        }
-        return localApiPost("/execute", {
-          steps: params.steps,
-          options: { ...params.options, mode: mode || undefined }
-        });
-      }
-      let execResult;
-      try {
-        execResult = await runWithMode(params.options?.mode);
-      } catch (execErr) {
-        const msg = execErr instanceof Error ? execErr.message : String(execErr);
-        const isCrash = /ECONNREFUSED|ECONNRESET|EPIPE|socket hang up|fetch failed/i.test(msg);
-        if (isCrash) {
-          log2.info(`Execute crashed (${msg.slice(0, 80)}), restarting local server and retrying...`);
-          try {
-            await localServer.restart();
-          } catch {}
-          try {
-            execResult = await runWithMode(params.options?.mode);
-          } catch (retryErr) {
-            return err(`Browser server crashed and retry also failed.
-` + `Original: ${msg}
-Retry: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}
-
-` + `Call \`session restart\` to reset, then retry.`);
-          }
-        } else {
-          throw execErr;
-        }
-      }
-      const requestedMode = params.options?.mode;
-      if (!execResult.ok && execResult.error?.errorType === "bot-blocked" && params.options?.autoEscalate !== false && !requestedMode) {
-        const escalation = ["docker-headful", "binary-headful"];
-        for (const nextMode of escalation) {
-          if (nextMode === "docker-headful" && !dockerRunning)
-            continue;
-          log2.info(`Auto-escalating to ${nextMode}`);
-          execResult = await runWithMode(nextMode);
-          if (execResult.ok)
-            break;
-          if (execResult.error?.errorType !== "bot-blocked")
-            break;
-        }
-      }
-      const lines = formatExecuteResult(execResult);
-      let screenshotUrl = null;
-      if (execResult.error) {
-        screenshotUrl = execResult.error.pageState?.screenshotUrl ?? null;
-      } else {
-        screenshotUrl = execResult.finalState?.screenshotUrl ?? null;
-      }
-      if (screenshotUrl) {
-        const filePath = await resolveScreenshotPath(screenshotUrl);
-        if (filePath) {
-          lines.push(`
-Screenshot saved: ${filePath}`);
-          lines.push("Use the Read tool on the path above to view the screenshot.");
-        }
-      }
-      const content = [{ type: "text", text: lines.join(`
-`) }];
-      if (!execResult.ok)
-        return { content, isError: true };
-      return { content };
-    } catch (e) {
-      return err(`Error: ${getErrorMessage(e)}`);
-    }
-  });
+var RECAPTCHA_MANUAL = `
+--- Captcha workflow ---
+A captcha is blocking this run. Use the "recaptcha" step with an action:
+  {type:"recaptcha", action:"info"}                → state + instruction + tile-grid screenshot
+  {type:"recaptcha", action:"click"}               → click the "I'm not a robot" checkbox
+  {type:"recaptcha", action:"answer", tiles:[...]} → select tiles + verify + re-check (handles refreshing grids)
+  {type:"recaptcha", action:"select"|"verify"}     → manual tile-select / submit, if you need finer control
+  {type:"recaptcha", action:"solve"}               → automatic vision solve (docker-headful)
+Or {type:"solve-captcha"} for one-shot auto-detect + solve.
+In binary-headful mode, prefer asking the user to solve it in the visible window.`;
+function captchaBlocked(data) {
+  if (data.error?.errorType === "captcha-unsolvable")
+    return true;
+  return (data.obstacles || []).some((o) => (o.type === "captcha" || o.type === "hcaptcha") && !o.resolved);
 }
 function formatExecuteResult(data) {
   const lines = [];
@@ -907,7 +768,162 @@ ${api.domain} (${api.baseUrl})`);
         lines.push(`URL at failure: ${data.error.pageState.url}`);
     }
   }
+  if (captchaBlocked(data)) {
+    lines.push(RECAPTCHA_MANUAL);
+  }
   return lines;
+}
+
+// src/mcp/tools/execute.ts
+function registerExecuteTool(server) {
+  server.tool("execute", `Execute a pipeline of browser steps. Auto-starts a session; handles obstacles (captcha, cookie banners) automatically.
+
+MANDATORY PRE-FLIGHT: call \`knowledge get <domain>\` first. If the cache shows a direct-API path that satisfies the request, skip the browser entirely — direct API calls are orders of magnitude cheaper. Every successful run updates the cache silently.
+
+Steps run sequentially (20s stale-state timeout per step; failures return errorType + suggestion).
+
+Seeing the page: \`snapshot\` lists interactive elements with refs (@e1…), \`find\` locates one element by role/name/text, \`screenshot\` with annotate=true overlays numbered badges, \`extract\` evaluates JS and returns the result. \`login\` fills login forms from stored credentials (never exposes passwords; handles email-first flows).
+
+Selectors: every selector field accepts @e refs (PREFER them over CSS) and persisted per-domain @a:<name> anchors from the \`remember\` tool. \`remember get <domain>\` before a UI task — an existing anchor can be targeted directly with no snapshot. When a newly found selector works, \`remember save\` it (@e refs reset each snapshot; @a: anchors persist across runs).
+
+FORMS: use \`fill\` for text inputs — never evaluate-set .value (fill fires the framework-aware events; see its description). If a submit still claims fields are empty/required, re-run fill on the flagged field rather than assuming the value didn't land.
+
+Returns: ok, completedSteps, output for snapshot/find/read/extract steps, obstacles, capturedApi, and on failure a screenshot path + errorType + suggestion + retryable.`, {
+    steps: import_zod3.z.array(stepSchema).describe("Pipeline steps to execute sequentially"),
+    options: import_zod3.z.object({
+      staleTimeoutMs: import_zod3.z.number().optional().describe("Override the 20s stale-state timeout per step"),
+      screenshotAfterEach: import_zod3.z.boolean().optional().describe("Take a screenshot after every step (expensive)"),
+      continueOnObstacle: import_zod3.z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
+      continueOnError: import_zod3.z.boolean().optional().describe("Continue past failing steps (default: false)"),
+      captureApi: import_zod3.z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes."),
+      mode: import_zod3.z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("DO NOT SET unless the user explicitly requests a mode — iframer auto-selects and auto-escalates. 'extension' drives a real-Chrome tab (requires options.tabId from the `tabs` tool)."),
+      autoEscalate: import_zod3.z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)"),
+      instanceId: import_zod3.z.string().optional().describe("Named parallel browser (default 'default') — distinct ids drive several browsers at once, each with its own session state."),
+      tabId: import_zod3.z.number().optional().describe("mode='extension': the real-Chrome tab id to drive (from the `tabs` tool)."),
+      clientId: import_zod3.z.string().optional().describe("mode='extension': owning profile's clientId, only when several browsers are connected and the tab is ambiguous."),
+      focus: import_zod3.z.boolean().optional().describe("mode='extension': raise the window to the foreground while driving (default false — background drive with focus emulation). Only if a site ignores background input.")
+    }).optional()
+  }, async (params) => {
+    try {
+      const steps = normalizeSteps(params.steps);
+      if (params.options?.mode === "extension") {
+        const tabId = params.options?.tabId;
+        if (typeof tabId !== "number") {
+          return err("mode='extension' requires options.tabId. Call the `tabs` tool first to " + "find the id of the tab the user wants to drive.");
+        }
+        const typeChars = (steps || []).reduce((n, s) => {
+          return (s.type === "human-type" || s.type === "type-code") && typeof s.value === "string" ? n + s.value.length : n;
+        }, 0);
+        const timeoutMs = Math.min(60000 + (steps.length || 0) * 15000 + typeChars * 250, 1200000) + 30000;
+        const extResult = await localApiPost("/extension/execute", {
+          tabId,
+          clientId: params.options?.clientId,
+          steps,
+          options: params.options
+        }, timeoutMs);
+        const extLines = formatExecuteResult(extResult);
+        const content2 = [{ type: "text", text: extLines.join(`
+`) }];
+        if (!extResult.ok)
+          return { content: content2, isError: true };
+        return { content: content2 };
+      }
+      const dockerRunning = await isDockerRunning();
+      async function runWithMode(mode) {
+        if (mode === "docker-headful") {
+          if (!dockerRunning) {
+            return {
+              ok: false,
+              completedSteps: 0,
+              totalSteps: steps.length,
+              results: [],
+              finalState: { url: "", title: "" },
+              obstacles: [],
+              durationMs: 0,
+              modeUsed: "docker-headful",
+              error: {
+                failedAtStep: 0,
+                failedStep: steps[0],
+                errorType: "action-failed",
+                message: "docker-headful mode was requested but the Docker API is not reachable.",
+                pageState: { url: "", title: "" },
+                suggestion: "Start Docker with `bun run start:docker`, or omit options.mode.",
+                retryable: false
+              }
+            };
+          }
+          return apiPost("/execute", {
+            steps,
+            options: { ...params.options, mode: "docker-headful", autoEscalate: false }
+          });
+        }
+        return localApiPost("/execute", {
+          steps,
+          options: { ...params.options, mode: mode || undefined }
+        });
+      }
+      let execResult;
+      try {
+        execResult = await runWithMode(params.options?.mode);
+      } catch (execErr) {
+        const msg = execErr instanceof Error ? execErr.message : String(execErr);
+        const isCrash = /ECONNREFUSED|ECONNRESET|EPIPE|socket hang up|fetch failed/i.test(msg);
+        if (isCrash) {
+          log2.info(`Execute crashed (${msg.slice(0, 80)}), restarting local server and retrying...`);
+          try {
+            await localServer.restart();
+          } catch {}
+          try {
+            execResult = await runWithMode(params.options?.mode);
+          } catch (retryErr) {
+            return err(`Browser server crashed and retry also failed.
+` + `Original: ${msg}
+Retry: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}
+
+` + `Call \`session restart\` to reset, then retry.`);
+          }
+        } else {
+          throw execErr;
+        }
+      }
+      const requestedMode = params.options?.mode;
+      if (!execResult.ok && execResult.error?.errorType === "bot-blocked" && params.options?.autoEscalate !== false && !requestedMode) {
+        const escalation = ["docker-headful", "binary-headful"];
+        for (const nextMode of escalation) {
+          if (nextMode === "docker-headful" && !dockerRunning)
+            continue;
+          log2.info(`Auto-escalating to ${nextMode}`);
+          execResult = await runWithMode(nextMode);
+          if (execResult.ok)
+            break;
+          if (execResult.error?.errorType !== "bot-blocked")
+            break;
+        }
+      }
+      const lines = formatExecuteResult(execResult);
+      let screenshotUrl = null;
+      if (execResult.error) {
+        screenshotUrl = execResult.error.pageState?.screenshotUrl ?? null;
+      } else {
+        screenshotUrl = execResult.finalState?.screenshotUrl ?? null;
+      }
+      if (screenshotUrl) {
+        const filePath = await resolveScreenshotPath(screenshotUrl);
+        if (filePath) {
+          lines.push(`
+Screenshot saved: ${filePath}`);
+          lines.push("Use the Read tool on the path above to view the screenshot.");
+        }
+      }
+      const content = [{ type: "text", text: lines.join(`
+`) }];
+      if (!execResult.ok)
+        return { content, isError: true };
+      return { content };
+    } catch (e) {
+      return err(`Error: ${getErrorMessage(e)}`);
+    }
+  });
 }
 
 // src/mcp/tools/session.ts
@@ -918,64 +934,25 @@ var import_fs5 = __toESM(require("fs"));
 // src/mcp/tools/reverse-engineer.ts
 var import_zod4 = require("zod");
 function registerReverseEngineerTool(server) {
-  server.tool("reverse-engineer", `Reverse-engineer a website's API. Navigates to a URL, performs the steps you specify, and captures every XHR/fetch request the page makes — including auth tokens, cookies, headers, request/response bodies, and ready-to-use curl commands.
+  server.tool("reverse-engineer", `Reverse-engineer a website's API: runs the steps you provide (SAME format as the \`execute\` tool's steps) while recording every XHR/fetch the page makes — auth tokens, cookies, headers, request/response bodies, ready-to-use curl. Use when the user asks to "reverse engineer", "map", or "capture" a site's API so it can be replayed later.
 
-Use this when the user asks to:
-- "reverse engineer" or "map" a site's API
-- "capture the endpoints" or "save the API"
-- "figure out how this site works under the hood"
-- "record the API calls" so they can be replayed later
-
-How it works:
-1. You provide steps (same as execute) — navigate, click, fill, extract, etc.
-2. iframer runs them while recording all API calls the page makes
-3. Returns structured data per domain: shared auth + endpoints classified by protocol (rest, graphql, json-rpc, grpc-web, form-rpc, soap) with method, path, action, verb, headers, body, response, curl
-
-IMPORTANT — one request ≠ one endpoint. Each endpoint has (protocol, action):
-- REST: action = "METHOD /parameterized/path". Verb from HTTP method.
-- GraphQL: action = operationName (or doc_id for persisted queries). Many ops share the single /graphql URL — EACH operation is its own endpoint.
-- JSON-RPC: action = body.method (e.g. eth_getBalance, user.list).
-- gRPC-web: action = request path.
-- Form-RPC (FB-style urlencoded): action = fb_api_req_friendly_name / doc_id.
-- SOAP: action = SOAPAction header.
-
-Generate ONE function per (protocol, action). Do NOT merge different GraphQL operations into one function just because they share the URL.
-
-Output layout — save as RUNNABLE CODE to <outputDir>/:
-  auth.{js,ts}                  — shared cookies, tokens, authorization
-  transport/
-    rest.{js,ts}                — shared REST helper (only if any rest endpoints)
-    graphql.{js,ts}             — shared GraphQL client: post(operationName|docId, variables)
-    jsonRpc.{js,ts}             — shared JSON-RPC client (if any)
-    grpc.{js,ts}                — shared gRPC-web client (if any)
-  <protocol>/<verb>/<functionName>.{js,ts}
-    e.g. graphql/queries/getTimelineFeed.ts
-         graphql/mutations/reactToPost.ts
-         rest/read/getChannelMessages.ts
-         rest/create/createMessage.ts
-         jsonRpc/ethGetBalance.ts
-  index.{js,ts}                 — re-exports all endpoint functions
-  types.ts                      — (typed mode only) inferred interfaces from responses
-  README.md                     — endpoints grouped by protocol + verb, dependency chain, auth expiry warning
-
-Use capturedApi[i].endpoints[j].protocol, .action, .verb, .functionName directly — iframer already classified them. Put queries (verb=read|list) under queries/, mutations (verb=create|update|delete|action) under mutations/ for GraphQL. For REST, group by verb dir.
-
-The outputDir defaults to ./<domain>/. Ask the user where to save if unclear.`, {
-    steps: import_zod4.z.array(stepSchema).describe("Pipeline steps to execute while capturing API calls"),
+During capture, drive the site like a user (open the inbox, send a message…) — the actions are what trigger the calls worth recording. Endpoint classification, output layout, and code-generation rules arrive WITH the captured results.`, {
+    steps: import_zod4.z.array(import_zod4.z.record(import_zod4.z.string(), import_zod4.z.unknown())).describe("Pipeline steps to run while capturing — same step format as the execute tool"),
     outputDir: import_zod4.z.string().optional().describe("Directory to save the captured API files. If not provided, ask the user or default to ./<domain>/"),
     typed: import_zod4.z.boolean().optional().describe("Save as .ts with inferred types instead of .js. Set to true when the user asks for types, typescript, or type inference."),
     options: import_zod4.z.object({
       staleTimeoutMs: import_zod4.z.number().optional().describe("Override the 20s stale-state timeout per step"),
       continueOnObstacle: import_zod4.z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
       continueOnError: import_zod4.z.boolean().optional().describe("Continue past failing steps (default: false)"),
-      mode: import_zod4.z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("Browser mode override. Use 'extension' to capture the API of a tab already open in the user's real Chrome — requires options.tabId from the `tabs` tool. Chrome shows its 'is being debugged' bar while the capture runs."),
-      tabId: import_zod4.z.number().optional().describe("Only with mode='extension': the real Chrome tab to reverse-engineer (from the `tabs` tool)."),
-      clientId: import_zod4.z.string().optional().describe("Only with mode='extension', when multiple profiles are connected and the tab is ambiguous: the owning profile's clientId (from the `tabs` tool).")
+      mode: import_zod4.z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("Mode override. 'extension' captures a tab already open in the user's real Chrome (requires options.tabId from `tabs`)."),
+      tabId: import_zod4.z.number().optional().describe("mode='extension': the real-Chrome tab id (from `tabs`)."),
+      clientId: import_zod4.z.string().optional().describe("mode='extension': owning profile's clientId when the tab is ambiguous.")
     }).optional()
   }, async (params) => {
     try {
+      const steps = normalizeSteps(params.steps);
       const execParams = {
-        steps: params.steps,
+        steps,
         options: { ...params.options, captureApi: true }
       };
       const mode = params.options?.mode;
@@ -988,7 +965,7 @@ The outputDir defaults to ./<domain>/. Ask the user where to save if unclear.`, 
         captureResult = await localApiPost("/extension/execute", {
           tabId: params.options.tabId,
           clientId: params.options.clientId,
-          steps: params.steps,
+          steps,
           options: { ...params.options, captureApi: true }
         });
       } else if (mode === "docker-headful" && dockerRunning) {
@@ -1136,8 +1113,12 @@ Layout (protocols present: ${Array.from(protocolsSeen).join(", ")}):`);
     lines.push(`  types.ts                         — interfaces inferred from response bodies`);
   lines.push(`  README.md                        — endpoints grouped by protocol + verb, auth expiry warning`);
   lines.push(`
+How to read the endpoint list — one request ≠ one endpoint; an endpoint is (protocol, action):`);
+  lines.push(`  REST: action = "METHOD /parameterized/path" · GraphQL: action = operationName (or doc_id for persisted queries) — many ops share one /graphql URL, EACH is its own endpoint · JSON-RPC: action = body.method · gRPC-web: action = request path · Form-RPC (FB-style urlencoded): action = fb_api_req_friendly_name / doc_id · SOAP: action = SOAPAction header.`);
+  lines.push(`  iframer already classified everything — use .protocol, .action, .verb, .functionName directly.`);
+  lines.push(`
 Rules:`);
-  lines.push(`  - One function per (protocol, action). Use the functionName field verbatim for the file + export name.`);
+  lines.push(`  - One function per (protocol, action) — NEVER merge GraphQL operations just because they share the URL. Use the functionName field verbatim for the file + export name.`);
   lines.push(`  - verb=read|list → queries/ (GraphQL) or read/ (REST). verb=create|update|delete|action → mutations/ (GraphQL) or verb dir (REST).`);
   lines.push(`  - Each endpoint file is minimal: import transport + auth, call transport with the action id, pass variables, return typed result.`);
   lines.push(`  - GraphQL transport signature: post(opNameOrDocId: string, variables: object). Pick doc_id when present in captured body, else operationName.`);
@@ -1192,18 +1173,9 @@ function extractSignalKeys(body) {
 
 // src/mcp/tools/session.ts
 function registerSessionTool(server) {
-  server.tool("session", `Manage the browser session and lifecycle.
+  server.tool("session", `Manage the browser session/lifecycle.
 
-Actions:
-- **stop**: save cookies/localStorage to the store, then close the browser. Session data persists for the next run.
-- **clear**: wipe all stored session data (cookies/localStorage) from the database. Does NOT kill running browsers.
-- **restart**: kill all running browser instances (local + Docker) and reset state. The next \`execute\` call will launch a fresh browser automatically. Use this when the browser is frozen, crashed, or in a bad state. Credentials and knowledge cache are NOT affected.
-- **capture-start**: attach a persistent XHR/fetch listener to the running browser. Accumulates ALL requests indefinitely — not tied to any pipeline. Use before triggering the action you want to capture (e.g. upload, delete, async mutation).
-- **capture-stop**: stop the persistent listener and return all captured endpoints + save to disk. Call this when you're satisfied you've seen the requests you need.
-- **get-cookies**: extract ALL cookies from the browser context via CDP (including HttpOnly/Secure — below the JS sandbox). Pass urls to scope. Returns name, value, domain, path, httpOnly, secure, expiry.
-- **get-auth**: extract cookies + localStorage + sessionStorage in one shot. Everything needed to replay authenticated requests from Node.js.
-
-Sessions live in the single local SQLite database (~/.iframer/iframer.db), shared across every browser mode.`, {
+stop: save cookies/localStorage and close the browser — ALWAYS call when browser work is done. clear: wipe stored session data (doesn't kill browsers). restart: kill all browser instances and reset — use when frozen/crashed/bad state (credentials + knowledge unaffected). capture-start / capture-stop: persistent XHR/fetch recorder not tied to a pipeline — start it, trigger the action you want captured, stop to return + save endpoints. get-cookies: all cookies via CDP incl. HttpOnly (pass urls to scope). get-auth: cookies + localStorage + sessionStorage in one shot, for replaying authed requests.`, {
     action: import_zod5.z.enum(["stop", "clear", "restart", "capture-start", "capture-stop", "get-cookies", "get-auth"]).describe("stop | clear | restart | capture-start | capture-stop | get-cookies | get-auth"),
     mode: import_zod5.z.enum(["headless", "binary-headful"]).optional().describe("Browser mode (default: binary-headful)"),
     urls: import_zod5.z.array(import_zod5.z.string()).optional().describe("URLs to scope cookie extraction (get-cookies/get-auth). Omit for all cookies."),
@@ -1499,29 +1471,11 @@ function domainMatches(normalized, stored) {
   return stored.some((d) => d === normalized || normalized.endsWith("." + d) || d.endsWith("." + normalized));
 }
 function registerCredentialsTool(server) {
-  server.tool("credentials", `Manage stored login credentials. This tool ONLY stores and lists credentials — it does NOT log you into anything. Actual logins happen via the \`execute\` tool with a \`login\` step. Credentials are stored in a single local SQLite database shared by ALL browser modes (headless, binary-headful, docker-headful) — store once, login anywhere.
+  server.tool("credentials", `Store/list login credentials (one local SQLite store shared by all browser modes). This tool never logs in — logins run via \`execute\`'s \`login\` step.
 
-CORRECT WORKFLOW when the user needs to be logged into a site:
-1. Call \`credentials\` with \`action=list\`. READ THE RESPONSE LITERALLY. If it says "No credentials stored" then NO credentials exist. If it lists domains, those are the only ones stored.
-2. If the target domain IS in the list → skip to step 4. Credentials exist and are valid. Move on.
-3. If the target domain is NOT in the list → call \`credentials\` with \`action=store, domain=<site>\`. This attempts to pop a secure form in the user's UI. The response is either \`Credentials stored for <site>.\` (success) OR a loud error telling you the client doesn't support form elicitation, with instructions for the user to run a CLI command. Relay the error verbatim and STOP — do not proceed with login until the user confirms they ran the command.
-4. Call \`execute\` with \`[{type:"navigate", url:"https://<site>/login"}, {type:"login", domain:"<site>"}]\`. The login step auto-detects the form, fills stored credentials, handles 2FA, submits, and auto-escalates browser modes if blocked.
+WORKFLOW: (1) action=list and read the response LITERALLY — never ask the user whether credentials exist, never confabulate. (2) Domain missing → action=store pops a secure form in the user's UI; if the response is an elicitation-unsupported error, relay its CLI instructions verbatim and STOP (never pretend it succeeded). (3) Then \`execute\` [{type:"navigate",url:"https://<site>/login"},{type:"login",domain:"<site>"}] — auto-detects the form, fills stored credentials, handles 2FA, escalates modes if blocked.
 
-═══════════════════════════════════════════════════════════════════════
-CRITICAL RULES
-═══════════════════════════════════════════════════════════════════════
-
-1. **NEVER re-store credentials as a recovery from a failed login.** If credentials already exist, the store call will be REJECTED. Login failures are browser-mode / bot-detection / page-structure problems, not credential problems.
-
-2. **NEVER ask the user "do you have credentials?"** — call action=list and read the response.
-
-3. **NEVER confabulate.** If action=list returns "No credentials stored", the database is empty.
-
-4. **NEVER pretend a store call succeeded if the response was an error.**
-
-5. **NEVER ask the user to paste their password in chat.**
-
-6. **\`force: true\` on store is ONLY for explicit password changes.**`, {
+RULES: NEVER re-store after a failed login (that's a browser/bot problem; the store is rejected anyway). NEVER ask for passwords in chat. force:true only for an explicit password change.`, {
     action: import_zod6.z.enum(["store", "list"]).describe("store: prompt for credentials | list: show stored domains"),
     domain: import_zod6.z.string().optional().describe("Domain (required for store). Use the bare registrable domain."),
     force: import_zod6.z.boolean().optional().describe("Overwrite existing. ONLY for explicit password changes.")
@@ -1612,25 +1566,11 @@ ${domains.map((d) => `  - ${d}`).join(`
 // src/mcp/tools/knowledge.ts
 var import_zod7 = require("zod");
 function registerKnowledgeTool(server) {
-  server.tool("knowledge", `Per-domain knowledge cache. Call this BEFORE every \`execute\` or \`browse\` on a website — it's orders of magnitude faster than launching a browser when the cache already has what you need.
+  server.tool("knowledge", `Per-domain knowledge cache (markdown at ~/.iframer/knowledge/<domain>.md): auth mechanism (load-bearing cookies/headers), captured API endpoints, captcha/bot notes, last working browser mode.
 
-Each domain's cache is a plain markdown file at ~/.iframer/knowledge/<domain>.md containing:
-- Auth mechanism (which cookies / localStorage keys / headers are load-bearing)
-- Known API endpoints the site uses (captured from real browser runs)
-- Notes about captchas, bot detection, session behavior
-- Which browser mode last worked
+MANDATORY: \`knowledge get <domain>\` BEFORE any execute/browse on a site. If it shows a direct-API path that satisfies the request, call the endpoints directly and SKIP the browser entirely — orders of magnitude cheaper. Empty/stale → fall through to \`execute\` (successful runs update the cache automatically). Cached endpoints returning 401/403 → stale session: run an execute pipeline with a \`login\` step.
 
-MANDATORY WORKFLOW — for any task that targets a specific website:
-
-1. Call \`knowledge get <domain>\` first.
-2. If the cache shows a direct-API path (auth material + endpoints) that satisfies the request, hit the endpoints directly using the agent's own fetch capability — the session cookies/headers are already injected into the current browser context, and the cache tells you exactly how to call them. Skip the browser entirely.
-3. If the cache is empty, outdated, or doesn't cover what you need, fall through to \`execute\` with a pipeline. After \`execute\` succeeds, the cache gets updated automatically — future calls benefit.
-4. If cached endpoints return 401/403, the session is stale — run an \`execute\` pipeline containing a \`login\` step to refresh. The cache will be re-verified automatically on success.
-
-Actions:
-- get: return the markdown cache for a specific domain
-- list: show all cached domains with last-verified timestamps
-- clear: delete cache for a specific domain, or everything if domain is omitted`, {
+Actions: get <domain> · list · clear [domain].`, {
     action: import_zod7.z.enum(["get", "list", "clear"]).describe("get: return cache for a domain | list: all cached domains | clear: delete cache"),
     domain: import_zod7.z.string().optional().describe("Domain (required for get; optional for clear — omit to clear everything)")
   }, async ({ action, domain }) => {
@@ -1694,21 +1634,11 @@ Actions:
 // src/mcp/tools/tabs.ts
 var import_zod8 = require("zod");
 function registerTabsTool(server) {
-  server.tool("tabs", `List the tabs currently open in the user's REAL Chrome browser, through the iframer browser extension.
+  server.tool("tabs", `List/control tabs in the user's REAL Chrome via the iframer extension (must be installed + paired; returns a connect hint otherwise).
 
-Use this when the user says something like "use my open tab", "the tab I have here", "my Gmail tab", or references a site/screenshot they already have open. Match their reference against the returned tabs (by url or title), pick the tab id, then call \`execute\` with options.mode="extension" and options.tabId=<id> to drive that exact tab on their real logged-in session (Chrome shows its "is being debugged" bar while a run is in progress).
+Use when the user references an open tab ("my Gmail tab"). Match by url/title from the returned tabs, then drive that tab with \`execute\` options.mode="extension", options.tabId=<id> (Chrome shows its debug bar during runs). Several matches → ask, don't guess.
 
-Requires the iframer Chrome extension to be installed and connected (paired once with the token). Once connected, iframer can see and drive any open tab. If nothing is connected, this returns a clear message telling the user how to connect.
-
-Returns: connected (bool), and tabs: [{ id, title, url, active, windowId }]. If several tabs match the user's reference, ask them which one rather than guessing.
-
-action="open" opens a NEW tab in the user's real Chrome (native — not a page popup) at options.url, and returns its tab id so you can immediately drive it with \`execute\` mode="extension".
-
-Tab GROUP management (native Chrome tab groups):
-- action="group": put tabIds into a group (new, or add to an existing groupId); optionally title/color/collapsed.
-- action="ungroup": remove tabIds from their group.
-- action="update-group": rename/recolor/collapse an EXISTING group by groupId (no tabIds needed).
-- action="groups": list all current groups (id, title, color, collapsed) — use to find a groupId to update.`, {
+Actions: list (default) → {connected, tabs:[{id,title,url,active,windowId}]} · open → new native tab at options.url, returns its id · group / ungroup / update-group / groups → native Chrome tab-group management (title/color/collapsed; groups lists ids).`, {
     action: import_zod8.z.enum(["list", "open", "group", "ungroup", "update-group", "groups"]).optional().describe("'list' (default) lists open tabs; 'open' opens a new tab; 'group'/'ungroup' add/remove tabIds to a group; 'update-group' renames/recolors an existing group by groupId; 'groups' lists all groups."),
     url: import_zod8.z.string().optional().describe("With action='open': the URL to open (omit for a blank tab)."),
     active: import_zod8.z.boolean().optional().describe("With action='open': focus the new tab (default true)."),
@@ -1899,15 +1829,9 @@ function listAnchorDomains() {
 
 // src/mcp/tools/anchors.ts
 function registerRememberTool(server) {
-  server.tool("remember", `Persisted per-domain map of a website's UI elements ("anchors"), so the agent recalls where things are instead of re-exploring the DOM every run.
+  server.tool("remember", `Persisted per-domain map of a site's UI elements ("anchors") — recall where things are instead of re-exploring the DOM each run.
 
-WORKFLOW:
-1. Before a UI task on a site, call \`remember get <domain>\`. If an anchor exists (e.g. "composer", "send-button"), use it directly: put \`@a:<name>\` in any selector field of an \`execute\` step (click/fill/etc.). It resolves to the saved selector — no snapshot needed.
-2. If the site is new or the anchor you need is missing, discover the element with a \`snapshot\` or \`find\` step, act on it, then \`remember save\` it (name + the selector that worked, plus any quirks) so future runs are instant.
-3. SELF-HEAL: if a step using \`@a:<name>\` FAILS, the page changed — do NOT keep retrying the same anchor. Re-discover with snapshot/find, then \`remember save\` the new selector under the same name (overwrites, resets the health counters). Prefer stable selectors (aria-label, data-qa, role+name) over brittle generated CSS.
-4. Record site quirks with \`remember quirk\` (e.g. "synthetic clicks ignored — use trusted/coordinate clicks", "@here triggers a confirmation modal — click Send"). \`get\` surfaces them so the agent isn't surprised.
-
-Anchors live at ~/.iframer/knowledge/<domain>.anchors.json, alongside the API knowledge cache.`, {
+(1) Before a UI task: \`remember get <domain>\`; an existing anchor is targeted as @a:<name> in any execute selector — no snapshot needed. (2) A newly discovered selector that worked → \`remember save\` it (prefer stable selectors: aria-label, data-qa, role+name). (3) SELF-HEAL: if @a:<name> fails, the page changed — re-discover with snapshot/find and \`remember save\` the new selector; do NOT retry the stale one. (4) \`remember quirk\` records site-wide gotchas ("synthetic clicks ignored — use trusted"); \`get\` surfaces them.`, {
     action: import_zod9.z.enum(["get", "save", "forget", "list", "quirk"]).describe("get: show a domain's anchors+quirks | save: create/overwrite an anchor | forget: delete an anchor | list: all domains with anchors | quirk: add site-wide quirk note(s)"),
     domain: import_zod9.z.string().optional().describe("Site domain, e.g. 'slack.com' or 'app.slack.com' (required for all actions except list)."),
     name: import_zod9.z.string().optional().describe("Anchor name for save/forget, e.g. 'composer', 'send-button', 'search'. Short, stable, kebab-case."),
@@ -2048,12 +1972,7 @@ async function clipboardRead() {
 
 // src/mcp/tools/clipboard.ts
 function registerClipboardTool(server) {
-  server.tool("clipboard", `Read or write the machine's clipboard (the same one the user's Chrome pastes from — iframer runs locally).
-
-Use this instead of trying to grant a page clipboard permission (not possible via the extension):
-- To READ something a site copied (a code, a link): clipboard get.
-- To WRITE text to the clipboard: clipboard set <text>.
-- To PASTE the clipboard into a page field: use the \`paste\` execute step (do NOT rely on a ⌘V keyboard step — the extension relay ignores modifier keys).`, {
+  server.tool("clipboard", `Read/write the machine's clipboard (the same one the user's Chrome uses). get → read what a site copied (codes, links); set <text> → write. To paste INTO a page field use the \`paste\` execute step, not a ⌘V keyboard step (the extension relay ignores modifier keys).`, {
     action: import_zod10.z.enum(["get", "set"]).describe("get: read clipboard text | set: write text to clipboard"),
     text: import_zod10.z.string().optional().describe("With action='set': the text to put on the clipboard.")
   }, async ({ action, text }) => {
