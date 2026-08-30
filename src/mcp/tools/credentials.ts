@@ -30,29 +30,11 @@ function domainMatches(normalized: string, stored: string[]): boolean {
 export function registerCredentialsTool(server: McpServer) {
   server.tool(
     "credentials",
-    `Manage stored login credentials. This tool ONLY stores and lists credentials — it does NOT log you into anything. Actual logins happen via the \`execute\` tool with a \`login\` step. Credentials are stored in a single local SQLite database shared by ALL browser modes (headless, binary-headful, docker-headful) — store once, login anywhere.
+    `Store/list login credentials (one local SQLite store shared by all browser modes). This tool never logs in — logins run via \`execute\`'s \`login\` step.
 
-CORRECT WORKFLOW when the user needs to be logged into a site:
-1. Call \`credentials\` with \`action=list\`. READ THE RESPONSE LITERALLY. If it says "No credentials stored" then NO credentials exist. If it lists domains, those are the only ones stored.
-2. If the target domain IS in the list → skip to step 4. Credentials exist and are valid. Move on.
-3. If the target domain is NOT in the list → call \`credentials\` with \`action=store, domain=<site>\`. This attempts to pop a secure form in the user's UI. The response is either \`Credentials stored for <site>.\` (success) OR a loud error telling you the client doesn't support form elicitation, with instructions for the user to run a CLI command. Relay the error verbatim and STOP — do not proceed with login until the user confirms they ran the command.
-4. Call \`execute\` with \`[{type:"navigate", url:"https://<site>/login"}, {type:"login", domain:"<site>"}]\`. The login step auto-detects the form, fills stored credentials, handles 2FA, submits, and auto-escalates browser modes if blocked.
+WORKFLOW: (1) action=list and read the response LITERALLY — never ask the user whether credentials exist, never confabulate. (2) Domain missing → action=store pops a secure form in the user's UI; if the response is an elicitation-unsupported error, relay its CLI instructions verbatim and STOP (never pretend it succeeded). (3) Then \`execute\` [{type:"navigate",url:"https://<site>/login"},{type:"login",domain:"<site>"}] — auto-detects the form, fills stored credentials, handles 2FA, escalates modes if blocked.
 
-═══════════════════════════════════════════════════════════════════════
-CRITICAL RULES
-═══════════════════════════════════════════════════════════════════════
-
-1. **NEVER re-store credentials as a recovery from a failed login.** If credentials already exist, the store call will be REJECTED. Login failures are browser-mode / bot-detection / page-structure problems, not credential problems.
-
-2. **NEVER ask the user "do you have credentials?"** — call action=list and read the response.
-
-3. **NEVER confabulate.** If action=list returns "No credentials stored", the database is empty.
-
-4. **NEVER pretend a store call succeeded if the response was an error.**
-
-5. **NEVER ask the user to paste their password in chat.**
-
-6. **\`force: true\` on store is ONLY for explicit password changes.**`,
+RULES: NEVER re-store after a failed login (that's a browser/bot problem; the store is rejected anyway). NEVER ask for passwords in chat. force:true only for an explicit password change.`,
     {
       action: z.enum(["store", "list"]).describe("store: prompt for credentials | list: show stored domains"),
       domain: z.string().optional().describe("Domain (required for store). Use the bare registrable domain."),
