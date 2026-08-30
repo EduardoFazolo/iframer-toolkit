@@ -10460,6 +10460,8 @@ async function main() {
       return main();
     }
     case "execute": {
+      if (!process.env.LOG_LEVEL && !hasFlag(args, "--verbose"))
+        process.env.LOG_LEVEL = "warn";
       let pipeline;
       const input = args[0];
       if (!input) {
@@ -10475,18 +10477,22 @@ async function main() {
         console.error("    --json               Print raw PipelineResult JSON (default: compact agent-readable text)");
         process.exit(1);
       }
-      let steps;
+      let steps, inputOptions = {};
       if (input.startsWith("[") || input.startsWith("{")) {
         const parsed = JSON.parse(input);
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
+        if (!Array.isArray(parsed) && parsed.options)
+          inputOptions = parsed.options;
       } else if (fs12.existsSync(input)) {
         const parsed = JSON.parse(fs12.readFileSync(input, "utf-8"));
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
+        if (!Array.isArray(parsed) && parsed.options)
+          inputOptions = parsed.options;
       } else {
         console.error(`  File not found: ${input}`);
         process.exit(1);
       }
-      const options = {};
+      const options = { ...inputOptions };
       const mode = parseFlag(args, "--mode");
       if (mode)
         options.mode = mode;
