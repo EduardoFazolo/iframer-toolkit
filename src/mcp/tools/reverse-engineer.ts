@@ -2,73 +2,36 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { PipelineResult, CapturedApi, CapturedEndpoint, ApiProtocol } from "../../lib/types";
 import { localApiPost, apiPost, isDockerRunning, resolveScreenshotPath, err, getErrorMessage } from "../helpers";
-import { stepSchema } from "./step-schema";
+import { normalizeSteps } from "./step-schema";
 
 type TextContent = { type: "text"; text: string };
 
 export function registerReverseEngineerTool(server: McpServer) {
   server.tool(
     "reverse-engineer",
-    `Reverse-engineer a website's API. Navigates to a URL, performs the steps you specify, and captures every XHR/fetch request the page makes — including auth tokens, cookies, headers, request/response bodies, and ready-to-use curl commands.
+    `Reverse-engineer a website's API: runs the steps you provide (SAME format as the \`execute\` tool's steps) while recording every XHR/fetch the page makes — auth tokens, cookies, headers, request/response bodies, ready-to-use curl. Use when the user asks to "reverse engineer", "map", or "capture" a site's API so it can be replayed later.
 
-Use this when the user asks to:
-- "reverse engineer" or "map" a site's API
-- "capture the endpoints" or "save the API"
-- "figure out how this site works under the hood"
-- "record the API calls" so they can be replayed later
-
-How it works:
-1. You provide steps (same as execute) — navigate, click, fill, extract, etc.
-2. iframer runs them while recording all API calls the page makes
-3. Returns structured data per domain: shared auth + endpoints classified by protocol (rest, graphql, json-rpc, grpc-web, form-rpc, soap) with method, path, action, verb, headers, body, response, curl
-
-IMPORTANT — one request ≠ one endpoint. Each endpoint has (protocol, action):
-- REST: action = "METHOD /parameterized/path". Verb from HTTP method.
-- GraphQL: action = operationName (or doc_id for persisted queries). Many ops share the single /graphql URL — EACH operation is its own endpoint.
-- JSON-RPC: action = body.method (e.g. eth_getBalance, user.list).
-- gRPC-web: action = request path.
-- Form-RPC (FB-style urlencoded): action = fb_api_req_friendly_name / doc_id.
-- SOAP: action = SOAPAction header.
-
-Generate ONE function per (protocol, action). Do NOT merge different GraphQL operations into one function just because they share the URL.
-
-Output layout — save as RUNNABLE CODE to <outputDir>/:
-  auth.{js,ts}                  — shared cookies, tokens, authorization
-  transport/
-    rest.{js,ts}                — shared REST helper (only if any rest endpoints)
-    graphql.{js,ts}             — shared GraphQL client: post(operationName|docId, variables)
-    jsonRpc.{js,ts}             — shared JSON-RPC client (if any)
-    grpc.{js,ts}                — shared gRPC-web client (if any)
-  <protocol>/<verb>/<functionName>.{js,ts}
-    e.g. graphql/queries/getTimelineFeed.ts
-         graphql/mutations/reactToPost.ts
-         rest/read/getChannelMessages.ts
-         rest/create/createMessage.ts
-         jsonRpc/ethGetBalance.ts
-  index.{js,ts}                 — re-exports all endpoint functions
-  types.ts                      — (typed mode only) inferred interfaces from responses
-  README.md                     — endpoints grouped by protocol + verb, dependency chain, auth expiry warning
-
-Use capturedApi[i].endpoints[j].protocol, .action, .verb, .functionName directly — iframer already classified them. Put queries (verb=read|list) under queries/, mutations (verb=create|update|delete|action) under mutations/ for GraphQL. For REST, group by verb dir.
-
-The outputDir defaults to ./<domain>/. Ask the user where to save if unclear.`,
+During capture, drive the site like a user (open the inbox, send a message…) — the actions are what trigger the calls worth recording. Endpoint classification, output layout, and code-generation rules arrive WITH the captured results.`,
     {
-      steps: z.array(stepSchema).describe("Pipeline steps to execute while capturing API calls"),
+      steps: z.array(z.record(z.string(), z.unknown())).describe("Pipeline steps to run while capturing — same step format as the execute tool"),
       outputDir: z.string().optional().describe("Directory to save the captured API files. If not provided, ask the user or default to ./<domain>/"),
       typed: z.boolean().optional().describe("Save as .ts with inferred types instead of .js. Set to true when the user asks for types, typescript, or type inference."),
       options: z.object({
         staleTimeoutMs: z.number().optional().describe("Override the 20s stale-state timeout per step"),
         continueOnObstacle: z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
         continueOnError: z.boolean().optional().describe("Continue past failing steps (default: false)"),
-        mode: z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("Browser mode override. Use 'extension' to capture the API of a tab already open in the user's real Chrome — requires options.tabId from the `tabs` tool. Chrome shows its 'is being debugged' bar while the capture runs."),
-        tabId: z.number().optional().describe("Only with mode='extension': the real Chrome tab to reverse-engineer (from the `tabs` tool)."),
-        clientId: z.string().optional().describe("Only with mode='extension', when multiple profiles are connected and the tab is ambiguous: the owning profile's clientId (from the `tabs` tool)."),
+        mode: z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("Mode override. 'extension' captures a tab already open in the user's real Chrome (requires options.tabId from `tabs`)."),
+        tabId: z.number().optional().describe("mode='extension': the real-Chrome tab id (from `tabs`)."),
+        clientId: z.string().optional().describe("mode='extension': owning profile's clientId when the tab is ambiguous."),
       }).optional(),
     },
     async (params) => {
       try {
+        // Same MCP-level step sugar translation as `execute` (loose schema here
+        // — the full step spec ships once, on the execute tool).
+        const steps = normalizeSteps(params.steps);
         const execParams = {
-          steps: params.steps,
+          steps,
           options: { ...params.options, captureApi: true },
         };
         // Route through Docker only for docker-headful mode, local server for everything else
@@ -82,7 +45,7 @@ The outputDir defaults to ./<domain>/. Ask the user where to save if unclear.`,
           captureResult = await localApiPost<PipelineResult>("/extension/execute", {
             tabId: params.options.tabId,
             clientId: params.options.clientId,
-            steps: params.steps,
+            steps,
             options: { ...params.options, captureApi: true },
           });
         } else if (mode === "docker-headful" && dockerRunning) {
@@ -227,8 +190,11 @@ export function formatCapturedApi(lines: string[], capturedApi: CapturedApi[], p
   if (params.typed) lines.push(`  types.ts                         — interfaces inferred from response bodies`);
   lines.push(`  README.md                        — endpoints grouped by protocol + verb, auth expiry warning`);
 
+  lines.push(`\nHow to read the endpoint list — one request ≠ one endpoint; an endpoint is (protocol, action):`);
+  lines.push(`  REST: action = "METHOD /parameterized/path" · GraphQL: action = operationName (or doc_id for persisted queries) — many ops share one /graphql URL, EACH is its own endpoint · JSON-RPC: action = body.method · gRPC-web: action = request path · Form-RPC (FB-style urlencoded): action = fb_api_req_friendly_name / doc_id · SOAP: action = SOAPAction header.`);
+  lines.push(`  iframer already classified everything — use .protocol, .action, .verb, .functionName directly.`);
   lines.push(`\nRules:`);
-  lines.push(`  - One function per (protocol, action). Use the functionName field verbatim for the file + export name.`);
+  lines.push(`  - One function per (protocol, action) — NEVER merge GraphQL operations just because they share the URL. Use the functionName field verbatim for the file + export name.`);
   lines.push(`  - verb=read|list → queries/ (GraphQL) or read/ (REST). verb=create|update|delete|action → mutations/ (GraphQL) or verb dir (REST).`);
   lines.push(`  - Each endpoint file is minimal: import transport + auth, call transport with the action id, pass variables, return typed result.`);
   lines.push(`  - GraphQL transport signature: post(opNameOrDocId: string, variables: object). Pick doc_id when present in captured body, else operationName.`);

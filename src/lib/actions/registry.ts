@@ -24,6 +24,7 @@ const registry = {
   navigate: nav.navigate,
   click: nav.click,
   fill: nav.fill,
+  select: nav.selectOption,
   "human-click": nav.humanClickStep,
   "right-click": nav.rightClick,
   "human-type": nav.humanTypeStep,

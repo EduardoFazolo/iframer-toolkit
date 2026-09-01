@@ -2169,6 +2169,10 @@ async function rightClick(page, step, ctx) {
 async function humanTypeStep(page, step, ctx) {
   await humanType(page, resolveSelector(step.selector, ctx), step.value, { skipClick: step.skipClick, speed: step.speed });
 }
+async function selectOption(page, step, ctx) {
+  const selector = resolveSelector(step.selector, ctx);
+  await page.selectOption(selector, step.value);
+}
 async function evaluate(page, step) {
   return page.evaluate(step.expression);
 }
@@ -3979,6 +3983,7 @@ var init_registry2 = __esm(() => {
     navigate,
     click,
     fill,
+    select: selectOption,
     "human-click": humanClickStep,
     "right-click": rightClick,
     "human-type": humanTypeStep,
@@ -4177,14 +4182,30 @@ class HCaptchaDetector {
 class CookieConsentDetector {
   async detect(page) {
     try {
-      const found = await page.evaluate(() => {
-        const keywords = ["accept cookies", "accept all", "allow cookies", "i accept", "agree"];
-        const buttons = Array.from(document.querySelectorAll("button, a"));
-        return buttons.some((el) => {
-          const text = el.innerText?.toLowerCase() || "";
-          return keywords.some((kw) => text.includes(kw));
-        });
-      });
+      const found = await page.evaluate(() => Array.from(document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]')).some((el) => {
+        const label = ((el.innerText || el.value || "") + "").trim().toLowerCase();
+        if (!label || label.length > 32)
+          return false;
+        const kws = ["accept cookies", "accept all", "allow cookies", "i accept", "i agree", "agree"];
+        if (!kws.some((kw) => label === kw || label.includes(kw) && kw.length / label.length >= 0.5))
+          return false;
+        const r = el.getBoundingClientRect();
+        if (r.width < 20 || r.height < 10)
+          return false;
+        const s = getComputedStyle(el);
+        if (s.visibility === "hidden" || s.display === "none" || s.opacity === "0")
+          return false;
+        let n = el.parentElement;
+        let depth = 0;
+        while (n && depth < 8) {
+          const cs = getComputedStyle(n);
+          if (cs.position === "fixed" || cs.position === "sticky" || n.getAttribute("role") === "dialog" || n.getAttribute("aria-modal") === "true")
+            return true;
+          n = n.parentElement;
+          depth++;
+        }
+        return false;
+      }));
       if (found) {
         return { type: "cookie-consent", confidence: 0.8 };
       }
@@ -4240,25 +4261,44 @@ class CookieConsentResolver {
     return obstacle.type === "cookie-consent";
   }
   async resolve(page) {
-    const keywords = ["accept all", "accept cookies", "allow cookies", "i accept", "agree"];
     try {
-      const buttons = await page.$$("button, a");
-      for (const btn of buttons) {
-        const text = (await btn.innerText().catch(() => "")).toLowerCase();
-        if (keywords.some((kw) => text.includes(kw))) {
-          const visible = await btn.isVisible().catch(() => false);
-          if (visible) {
-            await humanClick(page, await btn.evaluate((el) => {
-              if (el.id)
-                return `#${el.id}`;
-              if (el.className)
-                return `${el.tagName.toLowerCase()}.${el.className.split(" ")[0]}`;
-              return el.tagName.toLowerCase();
-            }));
-            await page.waitForTimeout(500);
-            return { resolved: true, resolution: "dismissed-cookie-consent" };
+      const tagged = await page.evaluate(() => {
+        const el = Array.from(document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]')).find((el2) => {
+          const label = ((el2.innerText || el2.value || "") + "").trim().toLowerCase();
+          if (!label || label.length > 32)
+            return false;
+          const kws = ["accept cookies", "accept all", "allow cookies", "i accept", "i agree", "agree"];
+          if (!kws.some((kw) => label === kw || label.includes(kw) && kw.length / label.length >= 0.5))
+            return false;
+          const r = el2.getBoundingClientRect();
+          if (r.width < 20 || r.height < 10)
+            return false;
+          const s = getComputedStyle(el2);
+          if (s.visibility === "hidden" || s.display === "none" || s.opacity === "0")
+            return false;
+          let n = el2.parentElement;
+          let depth = 0;
+          while (n && depth < 8) {
+            const cs = getComputedStyle(n);
+            if (cs.position === "fixed" || cs.position === "sticky" || n.getAttribute("role") === "dialog" || n.getAttribute("aria-modal") === "true")
+              return true;
+            n = n.parentElement;
+            depth++;
           }
-        }
+          return false;
+        });
+        if (!el)
+          return false;
+        el.setAttribute("data-iframer-consent", "1");
+        return true;
+      });
+      if (tagged) {
+        await humanClick(page, '[data-iframer-consent="1"]');
+        await page.evaluate(() => {
+          document.querySelector('[data-iframer-consent="1"]')?.removeAttribute("data-iframer-consent");
+        }).catch(() => {});
+        await page.waitForTimeout(500);
+        return { resolved: true, resolution: "dismissed-cookie-consent" };
       }
     } catch {}
     return { resolved: false, error: "Could not dismiss cookie consent" };
@@ -9590,6 +9630,123 @@ var init_iframer = __esm(() => {
   DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
 });
 
+// src/lib/format-result.ts
+var exports_format_result = {};
+__export(exports_format_result, {
+  formatExecuteResult: () => formatExecuteResult
+});
+function resultOf(r, _type) {
+  return r.result;
+}
+function captchaBlocked(data) {
+  if (data.error?.errorType === "captcha-unsolvable")
+    return true;
+  return (data.obstacles || []).some((o) => (o.type === "captcha" || o.type === "hcaptcha") && !o.resolved);
+}
+function formatExecuteResult(data) {
+  const lines = [];
+  lines.push(`ok: ${data.ok}`);
+  lines.push(`steps: ${data.completedSteps}/${data.totalSteps}`);
+  if (data.durationMs)
+    lines.push(`duration: ${data.durationMs}ms`);
+  if (data.modeUsed)
+    lines.push(`mode: ${data.modeUsed}${data.modeEscalated ? " (auto-escalated)" : ""}`);
+  if (data.finalState) {
+    lines.push(`
+Final page: ${data.finalState.title}`);
+    lines.push(`URL: ${data.finalState.url}`);
+  }
+  for (const r of data.results || []) {
+    if (r.tabSwitchedTo) {
+      lines.push(`
+↳ step ${r.stepIndex} opened a new tab — pipeline is now on: ${r.tabSwitchedTo}`);
+    }
+  }
+  const meaningful = (data.results || []).filter((r) => r.ok && r.result !== undefined && r.result !== null);
+  for (const r of meaningful) {
+    if (r.step.type === "snapshot") {
+      const res = resultOf(r, "snapshot");
+      if (res?.snapshot) {
+        lines.push(`
+--- Snapshot (${res.elementCount} elements) ---`);
+        lines.push(res.snapshot);
+      }
+    } else if (r.step.type === "find") {
+      const res = resultOf(r, "find");
+      if (res?.ref) {
+        lines.push(`
+Found: ${res.ref} ${res.role} "${res.name}" (${res.matchCount} match${res.matchCount > 1 ? "es" : ""})`);
+      }
+    } else if (r.step.type === "screenshot") {
+      const res = resultOf(r, "screenshot");
+      if (res?.refs) {
+        lines.push(`
+--- Annotated screenshot refs ---`);
+        lines.push(res.refs);
+      }
+    } else if (r.step.type === "read") {
+      const res = r.result;
+      if (res?.text !== undefined) {
+        lines.push(`
+--- Read (step ${r.stepIndex}${res.truncated ? ", truncated" : ""}) ---`);
+        lines.push(res.text);
+      }
+    } else if (r.step.type === "extract" || r.step.type === "evaluate") {
+      lines.push(`
+step ${r.stepIndex} (${r.step.type}): ${JSON.stringify(r.result)}`);
+    }
+  }
+  if (data.obstacles && data.obstacles.length > 0) {
+    lines.push(`
+Obstacles handled:`);
+    for (const o of data.obstacles) {
+      lines.push(`  [step ${o.detectedAtStep}] ${o.type}: ${o.resolved ? o.resolution : "UNRESOLVED - " + (o.resolution || "unknown")}`);
+    }
+  }
+  if (data.capturedApi && data.capturedApi.length > 0) {
+    lines.push(`
+--- Captured API ---`);
+    for (const api of data.capturedApi) {
+      lines.push(`
+${api.domain} (${api.baseUrl})`);
+      lines.push("  Endpoints:");
+      for (const ep of api.endpoints) {
+        lines.push(`    ${ep.method} ${ep.path}  [step ${ep.triggeredAtStep}, status ${ep.responseStatus}]`);
+      }
+    }
+  }
+  if (data.error) {
+    lines.push(`
+--- Failure ---`);
+    if (typeof data.error === "string") {
+      lines.push(`Error: ${data.error}`);
+    } else {
+      lines.push(`Failed at step ${data.error.failedAtStep}: ${JSON.stringify(data.error.failedStep)}`);
+      lines.push(`Error type: ${data.error.errorType}`);
+      lines.push(`Message: ${data.error.message}`);
+      lines.push(`Retryable: ${data.error.retryable}`);
+      if (data.error.suggestion)
+        lines.push(`Suggestion: ${data.error.suggestion}`);
+      if (data.error.pageState?.url)
+        lines.push(`URL at failure: ${data.error.pageState.url}`);
+    }
+  }
+  if (captchaBlocked(data)) {
+    lines.push(RECAPTCHA_MANUAL);
+  }
+  return lines;
+}
+var RECAPTCHA_MANUAL = `
+--- Captcha workflow ---
+A captcha is blocking this run. Use the "recaptcha" step with an action:
+  {type:"recaptcha", action:"info"}                → state + instruction + tile-grid screenshot
+  {type:"recaptcha", action:"click"}               → click the "I'm not a robot" checkbox
+  {type:"recaptcha", action:"answer", tiles:[...]} → select tiles + verify + re-check (handles refreshing grids)
+  {type:"recaptcha", action:"select"|"verify"}     → manual tile-select / submit, if you need finer control
+  {type:"recaptcha", action:"solve"}               → automatic vision solve (docker-headful)
+Or {type:"solve-captcha"} for one-shot auto-detect + solve.
+In binary-headful mode, prefer asking the user to solve it in the visible window.`;
+
 // bin/cli.js
 var __dirname = "/Users/eduardoverona/tools/iframer-toolkit/bin";
 var fs12 = require("fs");
@@ -10343,6 +10500,8 @@ async function main() {
       return main();
     }
     case "execute": {
+      if (!process.env.LOG_LEVEL && !hasFlag(args, "--verbose"))
+        process.env.LOG_LEVEL = "warn";
       let pipeline;
       const input = args[0];
       if (!input) {
@@ -10355,20 +10514,25 @@ async function main() {
         console.error("    --capture-api        Record XHR/fetch requests");
         console.error("    --continue-on-error  Don't stop on step failure");
         console.error("    --timeout <ms>       Stale state timeout (default: 20000)");
+        console.error("    --json               Print raw PipelineResult JSON (default: compact agent-readable text)");
         process.exit(1);
       }
-      let steps;
+      let steps, inputOptions = {};
       if (input.startsWith("[") || input.startsWith("{")) {
         const parsed = JSON.parse(input);
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
+        if (!Array.isArray(parsed) && parsed.options)
+          inputOptions = parsed.options;
       } else if (fs12.existsSync(input)) {
         const parsed = JSON.parse(fs12.readFileSync(input, "utf-8"));
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
+        if (!Array.isArray(parsed) && parsed.options)
+          inputOptions = parsed.options;
       } else {
         console.error(`  File not found: ${input}`);
         process.exit(1);
       }
-      const options = {};
+      const options = { ...inputOptions };
       const mode = parseFlag(args, "--mode");
       if (mode)
         options.mode = mode;
@@ -10389,8 +10553,18 @@ async function main() {
       } else {
         result = await apiPost("/execute", { steps, options });
       }
-      printResult(result);
-      break;
+      if (hasFlag(args, "--json")) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        const { formatExecuteResult: formatExecuteResult2 } = await Promise.resolve().then(() => exports_format_result);
+        console.log(formatExecuteResult2(result).join(`
+`));
+        const shot = result.error?.pageState?.screenshotUrl ?? result.finalState?.screenshotUrl;
+        if (shot)
+          console.log(`
+Screenshot: ${shot}`);
+      }
+      process.exit(result.ok ? 0 : 1);
     }
     case "browse":
     case "fetch": {

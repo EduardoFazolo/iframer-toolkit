@@ -871,6 +871,10 @@ async function main() {
     // ─── Execute (pipeline) ──────────────────────────────────────────
 
     case "execute": {
+      // Keep info-level daemon/knowledge chatter out of the output an agent
+      // reads — it's ~140 tokens/task of noise the MCP path never pays (its
+      // logs go to the server log file). --verbose or LOG_LEVEL restores it.
+      if (!process.env.LOG_LEVEL && !hasFlag(args, "--verbose")) process.env.LOG_LEVEL = "warn";
       let pipeline;
 
       // Accept JSON file or inline JSON
@@ -884,23 +888,26 @@ async function main() {
         console.error("    --capture-api        Record XHR/fetch requests");
         console.error("    --continue-on-error  Don't stop on step failure");
         console.error("    --timeout <ms>       Stale state timeout (default: 20000)");
+        console.error("    --json               Print raw PipelineResult JSON (default: compact agent-readable text)");
         process.exit(1);
       }
 
-      // Parse steps
-      let steps;
+      // Parse steps (+ inline options: a {steps, options} object is honored)
+      let steps, inputOptions = {};
       if (input.startsWith("[") || input.startsWith("{")) {
         const parsed = JSON.parse(input);
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
+        if (!Array.isArray(parsed) && parsed.options) inputOptions = parsed.options;
       } else if (fs.existsSync(input)) {
         const parsed = JSON.parse(fs.readFileSync(input, "utf-8"));
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
+        if (!Array.isArray(parsed) && parsed.options) inputOptions = parsed.options;
       } else {
         console.error(`  File not found: ${input}`);
         process.exit(1);
       }
 
-      const options = {};
+      const options = { ...inputOptions };  // flags below override
       const mode = parseFlag(args, "--mode");
       if (mode) options.mode = mode;
       if (hasFlag(args, "--capture-api")) options.captureApi = true;
@@ -920,8 +927,21 @@ async function main() {
         result = await apiPost("/execute", { steps, options });
       }
 
-      printResult(result);
-      break;
+      // Default output = the same compact agent-facing text the MCP produces
+      // (schema-free CLI usage gets the lean per-task tokens too). --json
+      // keeps the raw PipelineResult for scripts.
+      if (hasFlag(args, "--json")) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        const { formatExecuteResult } = await import("../src/lib/format-result.ts");
+        console.log(formatExecuteResult(result).join("\n"));
+        const shot = result.error?.pageState?.screenshotUrl ?? result.finalState?.screenshotUrl;
+        if (shot) console.log(`\nScreenshot: ${shot}`);
+      }
+      // Explicit exit: the in-process browser keeps the event loop alive, so
+      // without this the CLI hangs after printing (long-standing quirk that
+      // the old raw-JSON path shared).
+      process.exit(result.ok ? 0 : 1);
     }
 
     // ─── Browse (quick headless fetch) ───────────────────────────────

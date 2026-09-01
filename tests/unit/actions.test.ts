@@ -43,12 +43,34 @@ describe("resolveSelector", () => {
 });
 
 describe("step handler registry", () => {
-  // The set of step types the zod input schema accepts.
-  const schemaTypes = stepSchema.options.map((o) => o.shape.type.value as string).sort();
+  // The set of step types the zod input schema accepts, expanded through the
+  // MCP-level sugar: the single `recaptcha` schema step translates (via
+  // normalizeSteps) to the six recaptcha-* wire types the registry handles.
+  const RECAPTCHA_ACTIONS = ["info", "click", "select", "verify", "solve", "answer"];
+  const schemaTypes = stepSchema.options
+    .flatMap((o) => {
+      const t = o.shape.type.value as string;
+      return t === "recaptcha" ? RECAPTCHA_ACTIONS.map((a) => `recaptcha-${a}`) : [t];
+    })
+    .sort();
 
-  it("registers a handler for exactly the step types the schema accepts", () => {
+  it("registers a handler for exactly the step types the schema accepts (after sugar expansion)", () => {
     const registered = [...registeredStepTypes].sort();
     expect(registered).toEqual(schemaTypes);
+  });
+
+  it("normalizeSteps maps every recaptcha action onto a registered wire type", async () => {
+    const { normalizeSteps } = await import("../../src/mcp/tools/step-schema");
+    for (const action of RECAPTCHA_ACTIONS) {
+      const [step] = normalizeSteps([{ type: "recaptcha", action, tiles: [1, 2] }]);
+      expect(registeredStepTypes).toContain(step.type);
+      if (action === "select" || action === "answer") {
+        expect((step as { tiles?: number[] }).tiles).toEqual([1, 2]);
+      }
+    }
+    // Non-sugar steps pass through untouched.
+    const [nav] = normalizeSteps([{ type: "navigate", url: "https://x.test" }]);
+    expect(nav).toEqual({ type: "navigate", url: "https://x.test" });
   });
 
   it("has no duplicate registrations", () => {
