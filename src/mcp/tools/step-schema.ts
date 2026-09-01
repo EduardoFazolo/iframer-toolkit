@@ -19,6 +19,7 @@ export const stepSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("wait"), ms: z.number() }),
   z.object({ type: z.literal("wait-for"), selector: z.string(), timeout: z.number().optional() }),
   z.object({ type: z.literal("scroll"), deltaY: z.number().optional(), selector: z.string().optional().describe("Scroll within this element instead of the window"), human: z.boolean().optional().describe("Real eased wheel events instead of an instant jump (slower, less bot-obvious)") }),
+  z.object({ type: z.literal("select"), selector: z.string(), value: z.string().describe("Option value to pick in a <select> — native selection, real change events (never set .value via evaluate)") }),
   z.object({ type: z.literal("keyboard"), key: z.string(), meta: z.boolean().optional(), ctrl: z.boolean().optional(), shift: z.boolean().optional(), alt: z.boolean().optional() }),
   z.object({ type: z.literal("read"), selector: z.string().optional().describe("Element to read text from (CSS or @e ref); omit for the whole body"), maxChars: z.number().optional().describe("Cap returned text length (default 6000)") }),
   z.object({ type: z.literal("upload"), selector: z.string().describe("The <input type=file> (CSS, @e ref, or @a anchor)"), files: z.array(z.string()).describe("Absolute local file path(s) on this machine") }),

@@ -2192,6 +2192,10 @@ async function rightClick(page, step, ctx) {
 async function humanTypeStep(page, step, ctx) {
   await humanType(page, resolveSelector(step.selector, ctx), step.value, { skipClick: step.skipClick, speed: step.speed });
 }
+async function selectOption(page, step, ctx) {
+  const selector = resolveSelector(step.selector, ctx);
+  await page.selectOption(selector, step.value);
+}
 async function evaluate(page, step) {
   return page.evaluate(step.expression);
 }
@@ -3864,6 +3868,7 @@ var registry = {
   navigate,
   click,
   fill,
+  select: selectOption,
   "human-click": humanClickStep,
   "right-click": rightClick,
   "human-type": humanTypeStep,

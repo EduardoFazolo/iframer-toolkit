@@ -113,6 +113,13 @@ export async function humanTypeStep(page: Page, step: Step<"human-type">, ctx: E
   await humanType(page, resolveSelector(step.selector, ctx), step.value, { skipClick: step.skipClick, speed: step.speed });
 }
 
+export async function selectOption(page: Page, step: Step<"select">, ctx: ExecutionContext): Promise<void> {
+  const selector = resolveSelector(step.selector, ctx);
+  // Native selection via Playwright: real change/input events, framework-safe
+  // (unlike setting .value from evaluate). Matches by option value.
+  await page.selectOption(selector, step.value);
+}
+
 export async function evaluate(page: Page, step: Step<"evaluate">): Promise<unknown> {
   return page.evaluate(step.expression);
 }

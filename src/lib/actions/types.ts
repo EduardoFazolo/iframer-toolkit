@@ -60,6 +60,7 @@ export interface StepResultMap {
   navigate: void;
   click: void;
   fill: void;
+  select: void;
   "human-click": void;
   "right-click": void;
   "human-type": void;
