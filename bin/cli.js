@@ -1146,9 +1146,32 @@ async function main() {
           if (!data.ok) { console.error(`  Error: ${data.error}`); process.exit(1); }
           console.log(`  Session stopped. State saved: ${data.sessionSaved}`);
         } else {
-          const iframer = await getLocalIframer();
-          const result = await iframer.stopSession(LOCAL_USER_ID, LOCAL_TOKEN);
-          console.log(`  Session stopped. State saved: ${result.sessionSaved}`);
+          // The warm daemon owns the browsers now — "task done" must close
+          // THEM, immediately, not just the (empty) in-process instance.
+          // Saves state first, then tears down idle browsers; a browser busy
+          // with another agent's run is left alone (its own idle timer or
+          // that agent's stop reclaims it).
+          let stopped = false;
+          try {
+            const info = JSON.parse(fs.readFileSync(path.join(CONFIG_DIR, "server.json"), "utf8"));
+            if (info && info.port) {
+              const res = await fetch(`http://127.0.0.1:${info.port}/interactive/stop`, {
+                method: "POST",
+                headers: { "x-api-key": LOCAL_TOKEN },
+                signal: AbortSignal.timeout(15_000),
+              });
+              if (res.ok) {
+                const data = await res.json();
+                console.log(`  Session stopped. State saved: ${data.sessionSaved}`);
+                stopped = true;
+              }
+            }
+          } catch {}
+          if (!stopped) {
+            const iframer = await getLocalIframer();
+            const result = await iframer.stopSession(LOCAL_USER_ID, LOCAL_TOKEN);
+            console.log(`  Session stopped. State saved: ${result.sessionSaved}`);
+          }
         }
 
       } else if (sub === "clear") {
