@@ -1444,7 +1444,7 @@ class BrowserDaemon {
   constructor(idleTimeout = DEFAULT_IDLE_TIMEOUT) {
     this.idleTimeout = idleTimeout;
   }
-  async ensure(mode, instanceId = DEFAULT_INSTANCE) {
+  async ensure(mode, instanceId = DEFAULT_INSTANCE, sessionProfile = instanceId) {
     if (mode === "docker-headful") {
       throw new Error("Docker mode doesn't use the daemon. Use the Docker API.");
     }
@@ -1469,6 +1469,7 @@ class BrowserDaemon {
             instance.context = context2;
             instance.page = page2;
           }
+          instance.sessionProfile = sessionProfile;
           this.resetIdleTimer(key);
           return { browser: instance.browser, context: context2, page: page2 };
         }
@@ -1517,6 +1518,7 @@ class BrowserDaemon {
       page,
       mode,
       instanceId,
+      sessionProfile,
       createdAt: new Date,
       chromePid,
       marker,
@@ -6036,10 +6038,11 @@ class PipelineExecutor {
     const startTime = Date.now();
     let acquired = false;
     try {
-      const { page } = await this.deps.daemon.ensure(mode, instanceId);
+      const sessionProfile = pipeline.options?.sessionProfile || instanceId;
+      const { page } = await this.deps.daemon.ensure(mode, instanceId, sessionProfile);
       this.deps.daemon.acquire(mode, instanceId);
       acquired = true;
-      const storeKey = sessionStoreKey(userId, instanceId);
+      const storeKey = sessionStoreKey(userId, sessionProfile);
       const encryptionKey = await deriveKey(token);
       const blob = await this.deps.store.getSession(storeKey);
       let sessionData = null;
@@ -6444,7 +6447,7 @@ class Iframer {
           const data = await extractSession(inst.context, inst.page);
           if (data) {
             const encrypted = encrypt(JSON.stringify(data), encryptionKey);
-            await this.store.setSession(sessionStoreKey(userId, inst.instanceId), encrypted);
+            await this.store.setSession(sessionStoreKey(userId, inst.sessionProfile ?? inst.instanceId), encrypted);
             sessionSaved = true;
           }
         } catch (err) {
@@ -6825,6 +6828,17 @@ var PORT = parseInt(process.env.PORT || "3021", 10);
 var REAP_INTERVAL_MS = 60000;
 var IDLE_EXIT_MS = parseInt(process.env.IFRAMER_SERVER_IDLE_EXIT_MS || String(30 * 60 * 1000), 10);
 var SHUTDOWN_DEADLINE_MS = 1e4;
+var SERVER_DIR = import_path12.default.dirname(import_url2.fileURLToPath("file:///Users/redacted/tools/iframer-toolkit/index.ts"));
+var OWN_VERSION = (() => {
+  for (const p of [import_path12.default.join(SERVER_DIR, "package.json"), import_path12.default.join(SERVER_DIR, "..", "package.json")]) {
+    try {
+      const pkg = JSON.parse(import_fs13.default.readFileSync(p, "utf8"));
+      if (pkg.name === "iframer-toolkit")
+        return pkg.version;
+    } catch {}
+  }
+  return;
+})();
 var SCREENSHOT_DIR = import_path12.default.join(import_path12.default.dirname(import_url2.fileURLToPath("file:///Users/redacted/tools/iframer-toolkit/index.ts")), ".screenshots");
 import_fs13.default.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 app.use("/screenshots", import_express.default.static(SCREENSHOT_DIR));
@@ -6845,7 +6859,7 @@ process.on("unhandledRejection", (reason) => {
 });
 var server = app.listen(PORT, "127.0.0.1", () => {
   console.log(`iframer listening on 127.0.0.1:${PORT}`);
-  writeServerInfo({ pid: process.pid, port: PORT, startedAt: new Date().toISOString() });
+  writeServerInfo({ pid: process.pid, port: PORT, startedAt: new Date().toISOString(), version: OWN_VERSION });
 });
 extensionBridge.attach(server);
 var shutdownStarted = false;

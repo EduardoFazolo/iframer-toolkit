@@ -14,6 +14,19 @@ const REAP_INTERVAL_MS = 60_000;
 const IDLE_EXIT_MS = parseInt(process.env.IFRAMER_SERVER_IDLE_EXIT_MS || String(30 * 60 * 1000), 10);
 const SHUTDOWN_DEADLINE_MS = 10_000;
 
+// Own package version, for server.json — repo layout has package.json beside
+// index.ts, the npm-installed bundle (dist/local-server.cjs) one level up.
+const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url));
+const OWN_VERSION = (() => {
+  for (const p of [path.join(SERVER_DIR, "package.json"), path.join(SERVER_DIR, "..", "package.json")]) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(p, "utf8"));
+      if (pkg.name === "iframer-toolkit") return pkg.version as string;
+    } catch {}
+  }
+  return undefined;
+})();
+
 const SCREENSHOT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), ".screenshots");
 fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 app.use("/screenshots", express.static(SCREENSHOT_DIR));
@@ -46,7 +59,7 @@ process.on("unhandledRejection", (reason) => {
 const server = app.listen(PORT, "127.0.0.1", () => {
   console.log(`iframer listening on 127.0.0.1:${PORT}`);
   // Advertise ourselves as THE shared local server for this machine.
-  writeServerInfo({ pid: process.pid, port: PORT, startedAt: new Date().toISOString() });
+  writeServerInfo({ pid: process.pid, port: PORT, startedAt: new Date().toISOString(), version: OWN_VERSION });
 });
 
 // "Run in my real Chrome tab" transport: the MV3 extension dials

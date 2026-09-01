@@ -21,6 +21,10 @@ export interface DaemonInstance {
   page: Page;
   mode: BrowserMode;
   instanceId: string;
+  /** Session-store row this browser loads/saves (default: instanceId). See
+   *  PipelineOptions.sessionProfile — stopSession must save state back to the
+   *  same row the pipeline loaded from, not to the browser-slot name. */
+  sessionProfile: string;
   createdAt: Date;
   chromePid: number | null;
   marker: string;
@@ -53,7 +57,7 @@ export class BrowserDaemon {
     // on-disk browser registry lets the next server boot reap our Chromes.
   }
 
-  async ensure(mode: BrowserMode, instanceId: string = DEFAULT_INSTANCE): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
+  async ensure(mode: BrowserMode, instanceId: string = DEFAULT_INSTANCE, sessionProfile: string = instanceId): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
     if (mode === "docker-headful") {
       throw new Error("Docker mode doesn't use the daemon. Use the Docker API.");
     }
@@ -80,6 +84,7 @@ export class BrowserDaemon {
             instance.context = context;
             instance.page = page;
           }
+          instance.sessionProfile = sessionProfile;
           this.resetIdleTimer(key);
           return { browser: instance.browser, context, page };
         }
@@ -138,6 +143,7 @@ export class BrowserDaemon {
       page,
       mode,
       instanceId,
+      sessionProfile,
       createdAt: new Date(),
       chromePid,
       marker,

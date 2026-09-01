@@ -180,7 +180,7 @@ export class Iframer {
           const data = await extractSession(inst.context, inst.page);
           if (data) {
             const encrypted = encrypt(JSON.stringify(data), encryptionKey);
-            await this.store.setSession(sessionStoreKey(userId, inst.instanceId), encrypted);
+            await this.store.setSession(sessionStoreKey(userId, inst.sessionProfile ?? inst.instanceId), encrypted);
             sessionSaved = true;
           }
         } catch (err) {
