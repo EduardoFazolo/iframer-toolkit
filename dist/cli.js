@@ -9659,6 +9659,38 @@ class BrowserDaemon {
       }
     });
   }
+  findLiveMode(instanceId) {
+    for (const inst of this.liveInstances()) {
+      if (inst.instanceId === instanceId)
+        return inst.mode;
+    }
+    return null;
+  }
+  async instancesInfo() {
+    const now = Date.now();
+    const out = [];
+    for (const inst of this.liveInstances()) {
+      let url = "";
+      let title = "";
+      try {
+        url = inst.page.url();
+      } catch {}
+      try {
+        title = await inst.page.title();
+      } catch {}
+      out.push({
+        mode: inst.mode,
+        instanceId: inst.instanceId,
+        sessionProfile: inst.sessionProfile ?? inst.instanceId,
+        url,
+        title,
+        busy: inst.active > 0,
+        createdAt: inst.createdAt.toISOString(),
+        ageSeconds: Math.round((now - inst.createdAt.getTime()) / 1000)
+      });
+    }
+    return out;
+  }
   async stopMode(mode, instanceId = DEFAULT_INSTANCE) {
     await this.stopKey(keyOf(mode, instanceId));
   }
@@ -17042,9 +17074,12 @@ class PipelineExecutor {
     const firstNav = pipeline.steps.find((s4) => s4.type === "navigate");
     const domain = firstNav ? new URL(firstNav.url).hostname : null;
     const availableModes = this.deps.availableModes();
+    const liveMode = forcedMode ? null : this.deps.daemon.findLiveMode(instanceId);
     let mode;
     if (forcedMode && availableModes.includes(forcedMode)) {
       mode = forcedMode;
+    } else if (liveMode) {
+      mode = liveMode;
     } else if (domain) {
       mode = this.deps.domainModes.getBestMode(domain, availableModes);
     } else {
@@ -17698,6 +17733,9 @@ class Iframer {
   browserHealth() {
     const modes = this.daemon.runningModes();
     return { alive: modes.length > 0, modes };
+  }
+  listInstances() {
+    return this.daemon.instancesInfo();
   }
   async restartBrowser() {
     const health = this.browserHealth();
@@ -18577,6 +18615,56 @@ async function main() {
       const hasDisplay2 = process.platform === "darwin" || process.platform === "win32" || !!process.env.DISPLAY;
       console.log(`  Display: ${hasDisplay2 ? "available" : "none ($DISPLAY not set)"}`);
       console.log(`  Modes: headless${hasDisplay2 ? ", binary-headful" : ""}${docker ? ", docker-headful" : ""}`);
+      break;
+    }
+    case "instances":
+    case "windows": {
+      let instances = null;
+      let serverUp = false;
+      try {
+        const info = JSON.parse(fs13.readFileSync(path13.join(CONFIG_DIR, "server.json"), "utf8"));
+        if (info && info.port) {
+          serverUp = true;
+          const res = await fetch(`http://127.0.0.1:${info.port}/instances`, {
+            headers: { "x-api-key": LOCAL_TOKEN },
+            signal: AbortSignal.timeout(1e4)
+          });
+          if (res.ok)
+            instances = (await res.json()).instances;
+        }
+      } catch {
+        serverUp = false;
+      }
+      if (hasFlag(args, "--json")) {
+        console.log(JSON.stringify(instances || [], null, 2));
+        break;
+      }
+      if (!serverUp) {
+        console.log("  No iframer server running — no live windows.");
+        break;
+      }
+      if (!instances) {
+        console.log("  Server is running but didn't report windows (may be an older build — restart it).");
+        break;
+      }
+      if (!instances.length) {
+        console.log("  No live browser windows.");
+        break;
+      }
+      console.log(`  ${instances.length} live window(s):
+`);
+      for (const i5 of instances) {
+        const busy = i5.busy ? "busy" : "idle";
+        const age = i5.ageSeconds < 90 ? `${i5.ageSeconds}s` : `${Math.round(i5.ageSeconds / 60)}m`;
+        console.log(`  ● ${i5.instanceId}  [${i5.mode}, ${busy}, ${age}]`);
+        console.log(`    ${i5.title || "(untitled)"}`);
+        console.log(`    ${i5.url || "(blank)"}`);
+        if (i5.sessionProfile !== i5.instanceId)
+          console.log(`    session: ${i5.sessionProfile}`);
+        console.log("");
+      }
+      console.log("  Reattach: run execute with the same instanceId and act on the");
+      console.log("  current page (snapshot/read/find) — don't navigate again.");
       break;
     }
     case "modes": {
@@ -19546,6 +19634,8 @@ Screenshot: ${shot}`);
     (opt out: IFRAMER_TELEMETRY=0 in the MCP env)
 
   Browser:
+    instances                       List live browser windows (instanceId -> current page)
+    windows                         Alias of instances
     modes                           Show available browser modes
     install chromium                Download Chrome for Testing
     status                          Show system status

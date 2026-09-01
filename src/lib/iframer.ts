@@ -232,6 +232,12 @@ export class Iframer {
     return { alive: modes.length > 0, modes };
   }
 
+  /** Live daemon browsers (which page each is on) so an agent can reattach a
+   *  task's window by instanceId after an interrupt instead of re-navigating. */
+  listInstances() {
+    return this.daemon.instancesInfo();
+  }
+
   /** Kill all browser instances and reset state. Next execute call will
    *  launch a fresh browser automatically — no manual restart needed. */
   async restartBrowser(): Promise<{ killed: string[]; message: string }> {

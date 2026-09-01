@@ -29,6 +29,15 @@ export function registerStatusTool(server: McpServer) {
           status.runningModes = browserHealth.modes;
         } catch {}
 
+        // Live browsers and the page each is on. After an interrupt, reattach a
+        // task's window by re-running execute with the SAME instanceId and
+        // acting on the current page (snapshot/read/find) — do NOT navigate
+        // again, which would throw away the state (e.g. an OTP screen).
+        try {
+          const inst = await localApiGet<{ ok: boolean; instances?: unknown[] }>("/instances");
+          if (inst.instances && inst.instances.length) status.liveInstances = inst.instances;
+        } catch {}
+
         // Docker session (if running)
         if (dockerRunning) {
           try {

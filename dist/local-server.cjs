@@ -1565,6 +1565,38 @@ class BrowserDaemon {
       }
     });
   }
+  findLiveMode(instanceId) {
+    for (const inst of this.liveInstances()) {
+      if (inst.instanceId === instanceId)
+        return inst.mode;
+    }
+    return null;
+  }
+  async instancesInfo() {
+    const now = Date.now();
+    const out = [];
+    for (const inst of this.liveInstances()) {
+      let url = "";
+      let title = "";
+      try {
+        url = inst.page.url();
+      } catch {}
+      try {
+        title = await inst.page.title();
+      } catch {}
+      out.push({
+        mode: inst.mode,
+        instanceId: inst.instanceId,
+        sessionProfile: inst.sessionProfile ?? inst.instanceId,
+        url,
+        title,
+        busy: inst.active > 0,
+        createdAt: inst.createdAt.toISOString(),
+        ageSeconds: Math.round((now - inst.createdAt.getTime()) / 1000)
+      });
+    }
+    return out;
+  }
   async stopMode(mode, instanceId = DEFAULT_INSTANCE) {
     await this.stopKey(keyOf(mode, instanceId));
   }
@@ -5860,9 +5892,12 @@ class PipelineExecutor {
     const firstNav = pipeline.steps.find((s) => s.type === "navigate");
     const domain = firstNav ? new URL(firstNav.url).hostname : null;
     const availableModes = this.deps.availableModes();
+    const liveMode = forcedMode ? null : this.deps.daemon.findLiveMode(instanceId);
     let mode;
     if (forcedMode && availableModes.includes(forcedMode)) {
       mode = forcedMode;
+    } else if (liveMode) {
+      mode = liveMode;
     } else if (domain) {
       mode = this.deps.domainModes.getBestMode(domain, availableModes);
     } else {
@@ -6481,6 +6516,9 @@ class Iframer {
     const modes = this.daemon.runningModes();
     return { alive: modes.length > 0, modes };
   }
+  listInstances() {
+    return this.daemon.instancesInfo();
+  }
   async restartBrowser() {
     const health = this.browserHealth();
     await this.daemon.stopAll(true);
@@ -6576,6 +6614,9 @@ function registerRoutes(app) {
   app.get("/browser/health", (_req, res) => {
     res.json({ ok: true, ...iframer.browserHealth() });
   });
+  app.get("/instances", asyncHandler(async (_req, res) => {
+    res.json({ ok: true, instances: await iframer.listInstances() });
+  }));
   app.post("/browser/restart", asyncHandler(async (_req, res) => {
     const result = await iframer.restartBrowser();
     res.json({ ok: true, ...result });

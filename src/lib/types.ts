@@ -67,6 +67,19 @@ export interface Pipeline {
   options?: PipelineOptions;
 }
 
+// A live daemon browser, as seen from outside — enough for an agent to
+// recognize which window belongs to which task and reattach by instanceId.
+export interface InstanceInfo {
+  mode: string;
+  instanceId: string;
+  sessionProfile: string;
+  url: string;
+  title: string;
+  busy: boolean;        // a pipeline is running in it right now
+  createdAt: string;
+  ageSeconds: number;
+}
+
 export interface PipelineOptions {
   staleTimeoutMs?: number;        // Default: 20_000
   screenshotAfterEach?: boolean;  // Default: false
