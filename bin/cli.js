@@ -379,6 +379,79 @@ function removeCodexMcp(mcpName) {
   return { removed: true, path: CODEX_CONFIG_PATH };
 }
 
+// ─── Warm shared server (same daemon the MCP uses) ──────────────────
+//
+// `execute` routes to the machine's shared local server when possible, so the
+// CLI gets a warm browser instead of paying a cold Chrome launch per
+// invocation. Isolation: each agent gets its OWN browser slot (instanceId
+// derived from a per-agent env id), but all CLI slots share the "default"
+// session profile — same cookies/logins the CLI has always had. Lifecycle is
+// the daemon's proven one: 5-min browser idle timer, 30-min server idle-exit,
+// on-disk PID registry + reaper for crashes.
+
+/** Stable-per-agent browser slot: same agent → same warm browser across
+ *  invocations; different agents → different browsers. No identity in the
+ *  env → unique slot per invocation (isolated, just cold). */
+function deriveCliInstanceId() {
+  const raw =
+    process.env.IFRAMER_INSTANCE ||
+    process.env.CLAUDE_CODE_SESSION_ID ||
+    process.env.TERM_SESSION_ID;
+  const id = raw
+    ? require("crypto").createHash("sha256").update(raw).digest("hex").slice(0, 10)
+    : require("crypto").randomBytes(5).toString("hex");
+  return `cli-${id}`;
+}
+
+/** Run a pipeline on the shared warm server. Returns the PipelineResult, or
+ *  null when the warm path isn't usable (then the caller falls back to the
+ *  in-process browser — today's behavior). */
+async function executeViaWarmServer(steps, options) {
+  try {
+    const { readServerInfo, isPidAlive } = await import("../src/lib/browser/registry.ts");
+    const { LocalServerManager } = await import("../src/mcp/local-server.ts");
+    const manager = new LocalServerManager();
+
+    // Version skew: a daemon left over from before an update may not know
+    // newer step types. Retire it; ensureRunning() spawns a fresh one.
+    const info = readServerInfo();
+    if (info && isPidAlive(info.pid)) {
+      let ownVersion = null;
+      try { ownVersion = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8")).version; } catch {}
+      // Missing info.version = pre-versioning daemon → also stale.
+      if (ownVersion && info.version !== ownVersion) {
+        try {
+          await fetch(`http://127.0.0.1:${info.port}/shutdown`, {
+            method: "POST",
+            headers: { "x-api-key": LOCAL_TOKEN },
+            signal: AbortSignal.timeout(3000),
+          });
+        } catch {}
+        // Its shutdown deadline is 10s; wait for the pid, then force it.
+        const deadline = Date.now() + 12_000;
+        while (Date.now() < deadline && isPidAlive(info.pid)) {
+          await new Promise((r) => setTimeout(r, 200));
+        }
+        if (isPidAlive(info.pid)) {
+          try { process.kill(info.pid, "SIGKILL"); } catch {}
+        }
+      }
+    }
+
+    await manager.ensureRunning();
+    const res = await fetch(`${manager.getBaseUrl()}/execute`, {
+      method: "POST",
+      headers: { "x-api-key": LOCAL_TOKEN, "content-type": "application/json" },
+      body: JSON.stringify({ steps, options }),
+      signal: AbortSignal.timeout(180_000),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 /** Get a local Iframer instance (for commands that don't need Docker) */
 let _iframer = null;
 async function getLocalIframer() {
@@ -889,6 +962,7 @@ async function main() {
         console.error("    --continue-on-error  Don't stop on step failure");
         console.error("    --timeout <ms>       Stale state timeout (default: 20000)");
         console.error("    --json               Print raw PipelineResult JSON (default: compact agent-readable text)");
+        console.error("    --in-process         Skip the shared warm server; run a private in-process browser");
         process.exit(1);
       }
 
@@ -915,14 +989,27 @@ async function main() {
       const timeout = parseFlag(args, "--timeout");
       if (timeout) options.staleTimeoutMs = parseInt(timeout);
 
-      // Execute via local iframer or Docker API
+      // Execute via warm shared server, local iframer, or Docker API
       const docker = await isDockerRunning();
       let result;
       if (mode === "docker-headful" && docker) {
         result = await apiPost("/execute", { steps, options });
       } else if (USE_LOCAL || !docker) {
-        const iframer = await getLocalIframer();
-        result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options });
+        // Warm path: shared daemon, per-agent browser slot, shared "default"
+        // session. --in-process forces the old cold path (also the fallback).
+        if (!hasFlag(args, "--in-process")) {
+          const warmOptions = { ...options };
+          if (!warmOptions.instanceId) {
+            // Explicit instanceId keeps full legacy semantics (own session row).
+            warmOptions.instanceId = deriveCliInstanceId();
+            warmOptions.sessionProfile = "default";
+          }
+          result = await executeViaWarmServer(steps, warmOptions);
+        }
+        if (!result) {
+          const iframer = await getLocalIframer();
+          result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options });
+        }
       } else {
         result = await apiPost("/execute", { steps, options });
       }
@@ -935,7 +1022,21 @@ async function main() {
       } else {
         const { formatExecuteResult } = await import("../src/lib/format-result.ts");
         console.log(formatExecuteResult(result).join("\n"));
-        const shot = result.error?.pageState?.screenshotUrl ?? result.finalState?.screenshotUrl;
+        let shot = result.error?.pageState?.screenshotUrl ?? result.finalState?.screenshotUrl;
+        // Warm-server screenshots are http:// links that die when the daemon
+        // idle-exits — persist to a local file so the link outlives it.
+        if (shot && shot.startsWith("http")) {
+          try {
+            const res = await fetch(shot, { signal: AbortSignal.timeout(10_000) });
+            if (res.ok) {
+              const dir = path.join(os.tmpdir(), "iframer-screenshots", "screenshots");
+              fs.mkdirSync(dir, { recursive: true });
+              const file = path.join(dir, `state-${Date.now()}.jpg`);
+              fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
+              shot = `file://${file}`;
+            }
+          } catch {}
+        }
         if (shot) console.log(`\nScreenshot: ${shot}`);
       }
       // Explicit exit: the in-process browser keeps the event loop alive, so
@@ -1647,6 +1748,8 @@ async function main() {
       --capture-api                 Record XHR/fetch requests during execution
       --continue-on-error           Don't stop on step failure
       --timeout <ms>                Stale state timeout (default: 20000)
+      --json                        Print raw PipelineResult JSON
+      --in-process                  Skip the shared warm server; run a private in-process browser
 
   Quick actions:
     browse <url> [options]          Headless fetch with JS rendering

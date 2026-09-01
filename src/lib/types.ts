@@ -77,6 +77,7 @@ export interface PipelineOptions {
   mode?: BrowserMode;             // Force a specific browser mode (default: auto-select)
   autoEscalate?: boolean;         // Auto-retry with stronger mode if blocked (default: true)
   instanceId?: string;            // Named browser within this session (default: "default") — run several in parallel, e.g. one per account
+  sessionProfile?: string;        // Which session-store row (cookies/localStorage) this browser loads and saves (default: instanceId). Lets isolated browsers share one login — e.g. each CLI agent gets its own browser (instanceId) but all read/write the "default" session.
   extensionTabId?: number;        // Set to drive a real Chrome tab via the browser extension (CDP relay). Bypasses launch/escalation.
   clientId?: string;              // With extensionTabId: which connected extension profile owns the tab (when ambiguous).
   focus?: boolean;                // With extensionTabId: raise the tab's window to the OS foreground while driving (default false — the tab is activated in place and driven with CDP focus emulation, without stealing the user's focus).

@@ -330,13 +330,14 @@ export class PipelineExecutor {
 
     let acquired = false;
     try {
-      const { page } = await this.deps.daemon.ensure(mode, instanceId);
+      const sessionProfile = pipeline.options?.sessionProfile || instanceId;
+      const { page } = await this.deps.daemon.ensure(mode, instanceId, sessionProfile);
       // Mark busy so the idle timer can't kill the browser mid-pipeline
       this.deps.daemon.acquire(mode, instanceId);
       acquired = true;
 
       // Load stored session (cookies + localStorage + sessionStorage).
-      const storeKey = sessionStoreKey(userId, instanceId);
+      const storeKey = sessionStoreKey(userId, sessionProfile);
       const encryptionKey = await deriveKey(token);
       const blob = await this.deps.store.getSession(storeKey);
       let sessionData: SessionData | null = null;
