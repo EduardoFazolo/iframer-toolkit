@@ -564,6 +564,11 @@ function registerStatusTool(server) {
         status.browserAlive = browserHealth.alive;
         status.runningModes = browserHealth.modes;
       } catch {}
+      try {
+        const inst = await localApiGet("/instances");
+        if (inst.instances && inst.instances.length)
+          status.liveInstances = inst.instances;
+      } catch {}
       if (dockerRunning) {
         try {
           const sessionData = await apiGet("/interactive/status");
@@ -788,6 +793,8 @@ Seeing the page: \`snapshot\` lists interactive elements with refs (@e1…), \`f
 Selectors: every selector field accepts @e refs (PREFER them over CSS) and persisted per-domain @a:<name> anchors from the \`remember\` tool. \`remember get <domain>\` before a UI task — an existing anchor can be targeted directly with no snapshot. When a newly found selector works, \`remember save\` it (@e refs reset each snapshot; @a: anchors persist across runs).
 
 FORMS: use \`fill\` for text inputs — never evaluate-set .value (fill fires the framework-aware events; see its description). If a submit still claims fields are empty/required, re-run fill on the flagged field rather than assuming the value didn't land.
+
+RESUMING A TASK: name a multi-step or human-in-the-loop task's browser with a stable \`options.instanceId\` (e.g. "otp-login") — the browser and its page PERSIST between calls and survive an interrupt. To resume (after a stop, an interrupt, or a wait for the user to enter a code), call execute again with the SAME instanceId and act on the CURRENT page (snapshot/read/find) — do NOT navigate again, which reloads and discards the state (e.g. an OTP screen). \`status\` lists live windows (instanceId → current url) so you can find the right one.
 
 Returns: ok, completedSteps, output for snapshot/find/read/extract steps, obstacles, capturedApi, and on failure a screenshot path + errorType + suggestion + retryable.`, {
     steps: import_zod3.z.array(stepSchema).describe("Pipeline steps to execute sequentially"),

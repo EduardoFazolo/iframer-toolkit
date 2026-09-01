@@ -3,7 +3,7 @@ import type { Browser, BrowserContext, Page } from "patchright";
 import { randomUUID } from "crypto";
 import { ensureChrome } from "./chrome-downloader";
 import { launchCloakBrowser } from "./cloak-browser";
-import type { BrowserMode } from "../types";
+import type { BrowserMode, InstanceInfo } from "../types";
 import { createLogger } from "../logger";
 import {
   registerBrowser,
@@ -197,6 +197,41 @@ export class BrowserDaemon {
         return false;
       }
     });
+  }
+
+  /** Mode of a live browser with this instanceId, if any (first match). Lets
+   *  a resume reattach the SAME window by instanceId even when the call forces
+   *  no mode and has no navigate step to infer one from. */
+  findLiveMode(instanceId: string): BrowserMode | null {
+    for (const inst of this.liveInstances()) {
+      if (inst.instanceId === instanceId) return inst.mode;
+    }
+    return null;
+  }
+
+  /** Live browsers as InstanceInfo — what page each is on right now, so an
+   *  agent can see which window is which task and reattach by instanceId
+   *  after an interrupt (instead of re-navigating and losing the state). */
+  async instancesInfo(): Promise<InstanceInfo[]> {
+    const now = Date.now();
+    const out: InstanceInfo[] = [];
+    for (const inst of this.liveInstances()) {
+      let url = "";
+      let title = "";
+      try { url = inst.page.url(); } catch {}
+      try { title = await inst.page.title(); } catch {}
+      out.push({
+        mode: inst.mode,
+        instanceId: inst.instanceId,
+        sessionProfile: inst.sessionProfile ?? inst.instanceId,
+        url,
+        title,
+        busy: inst.active > 0,
+        createdAt: inst.createdAt.toISOString(),
+        ageSeconds: Math.round((now - inst.createdAt.getTime()) / 1000),
+      });
+    }
+    return out;
   }
 
   async stopMode(mode: BrowserMode, instanceId: string = DEFAULT_INSTANCE): Promise<void> {

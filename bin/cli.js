@@ -819,6 +819,49 @@ async function main() {
       break;
     }
 
+    // ─── Instances (live browser windows) ───────────────────────────
+
+    case "instances":
+    case "windows": {
+      // List the shared daemon's live browsers and the page each is on, so a
+      // task can be reattached by instanceId after an interrupt. Queries the
+      // shared server directly (the in-process browser holds nothing lasting).
+      let instances = null;
+      let serverUp = false;
+      try {
+        const info = JSON.parse(fs.readFileSync(path.join(CONFIG_DIR, "server.json"), "utf8"));
+        if (info && info.port) {
+          serverUp = true;
+          const res = await fetch(`http://127.0.0.1:${info.port}/instances`, {
+            headers: { "x-api-key": LOCAL_TOKEN },
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (res.ok) instances = (await res.json()).instances;
+        }
+      } catch { serverUp = false; }
+
+      if (hasFlag(args, "--json")) {
+        console.log(JSON.stringify(instances || [], null, 2));
+        break;
+      }
+      if (!serverUp) { console.log("  No iframer server running — no live windows."); break; }
+      if (!instances) { console.log("  Server is running but didn't report windows (may be an older build — restart it)."); break; }
+      if (!instances.length) { console.log("  No live browser windows."); break; }
+      console.log(`  ${instances.length} live window(s):\n`);
+      for (const i of instances) {
+        const busy = i.busy ? "busy" : "idle";
+        const age = i.ageSeconds < 90 ? `${i.ageSeconds}s` : `${Math.round(i.ageSeconds / 60)}m`;
+        console.log(`  ● ${i.instanceId}  [${i.mode}, ${busy}, ${age}]`);
+        console.log(`    ${i.title || "(untitled)"}`);
+        console.log(`    ${i.url || "(blank)"}`);
+        if (i.sessionProfile !== i.instanceId) console.log(`    session: ${i.sessionProfile}`);
+        console.log("");
+      }
+      console.log("  Reattach: run execute with the same instanceId and act on the");
+      console.log("  current page (snapshot/read/find) — don't navigate again.");
+      break;
+    }
+
     // ─── Modes ───────────────────────────────────────────────────────
 
     case "modes": {
@@ -1817,6 +1860,8 @@ async function main() {
     (opt out: IFRAMER_TELEMETRY=0 in the MCP env)
 
   Browser:
+    instances                       List live browser windows (instanceId -> current page)
+    windows                         Alias of instances
     modes                           Show available browser modes
     install chromium                Download Chrome for Testing
     status                          Show system status

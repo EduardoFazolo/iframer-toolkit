@@ -95,10 +95,16 @@ export class PipelineExecutor {
 
     const availableModes = this.deps.availableModes();
 
-    // Pick starting mode
+    // Pick starting mode. A live browser already holding this instanceId wins
+    // when no mode is forced — so resuming a named task (same instanceId, no
+    // navigate) reattaches that exact window instead of the mode heuristic
+    // spawning a fresh blank browser under a different mode::instanceId key.
+    const liveMode = forcedMode ? null : this.deps.daemon.findLiveMode(instanceId);
     let mode: BrowserMode;
     if (forcedMode && availableModes.includes(forcedMode)) {
       mode = forcedMode;
+    } else if (liveMode) {
+      mode = liveMode;
     } else if (domain) {
       mode = this.deps.domainModes.getBestMode(domain, availableModes);
     } else {
