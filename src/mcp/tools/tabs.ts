@@ -30,21 +30,11 @@ interface ClientInfo {
 export function registerTabsTool(server: McpServer) {
   server.tool(
     "tabs",
-    `List the tabs currently open in the user's REAL Chrome browser, through the iframer browser extension.
+    `List/control tabs in the user's REAL Chrome via the iframer extension (must be installed + paired; returns a connect hint otherwise).
 
-Use this when the user says something like "use my open tab", "the tab I have here", "my Gmail tab", or references a site/screenshot they already have open. Match their reference against the returned tabs (by url or title), pick the tab id, then call \`execute\` with options.mode="extension" and options.tabId=<id> to drive that exact tab on their real logged-in session (Chrome shows its "is being debugged" bar while a run is in progress).
+Use when the user references an open tab ("my Gmail tab"). Match by url/title from the returned tabs, then drive that tab with \`execute\` options.mode="extension", options.tabId=<id> (Chrome shows its debug bar during runs). Several matches → ask, don't guess.
 
-Requires the iframer Chrome extension to be installed and connected (paired once with the token). Once connected, iframer can see and drive any open tab. If nothing is connected, this returns a clear message telling the user how to connect.
-
-Returns: connected (bool), and tabs: [{ id, title, url, active, windowId }]. If several tabs match the user's reference, ask them which one rather than guessing.
-
-action="open" opens a NEW tab in the user's real Chrome (native — not a page popup) at options.url, and returns its tab id so you can immediately drive it with \`execute\` mode="extension".
-
-Tab GROUP management (native Chrome tab groups):
-- action="group": put tabIds into a group (new, or add to an existing groupId); optionally title/color/collapsed.
-- action="ungroup": remove tabIds from their group.
-- action="update-group": rename/recolor/collapse an EXISTING group by groupId (no tabIds needed).
-- action="groups": list all current groups (id, title, color, collapsed) — use to find a groupId to update.`,
+Actions: list (default) → {connected, tabs:[{id,title,url,active,windowId}]} · open → new native tab at options.url, returns its id · group / ungroup / update-group / groups → native Chrome tab-group management (title/color/collapsed; groups lists ids).`,
     {
       action: z.enum(["list", "open", "group", "ungroup", "update-group", "groups"]).optional().describe("'list' (default) lists open tabs; 'open' opens a new tab; 'group'/'ungroup' add/remove tabIds to a group; 'update-group' renames/recolors an existing group by groupId; 'groups' lists all groups."),
       url: z.string().optional().describe("With action='open': the URL to open (omit for a blank tab)."),

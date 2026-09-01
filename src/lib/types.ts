@@ -18,6 +18,7 @@ export type PipelineStep =
   | { type: "wait"; ms: number }
   | { type: "wait-for"; selector: string; timeout?: number }
   | { type: "scroll"; deltaY?: number; selector?: string; human?: boolean }
+  | { type: "select"; selector: string; value: string }
   | { type: "keyboard"; key: string; meta?: boolean; ctrl?: boolean; shift?: boolean; alt?: boolean }
   | { type: "read"; selector?: string; maxChars?: number }
   | { type: "upload"; selector: string; files: string[] }

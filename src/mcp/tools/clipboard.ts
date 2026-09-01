@@ -23,12 +23,7 @@ import { clipboardRead, clipboardWrite } from "../../lib/clipboard";
 export function registerClipboardTool(server: McpServer) {
   server.tool(
     "clipboard",
-    `Read or write the machine's clipboard (the same one the user's Chrome pastes from — iframer runs locally).
-
-Use this instead of trying to grant a page clipboard permission (not possible via the extension):
-- To READ something a site copied (a code, a link): clipboard get.
-- To WRITE text to the clipboard: clipboard set <text>.
-- To PASTE the clipboard into a page field: use the \`paste\` execute step (do NOT rely on a ⌘V keyboard step — the extension relay ignores modifier keys).`,
+    `Read/write the machine's clipboard (the same one the user's Chrome uses). get → read what a site copied (codes, links); set <text> → write. To paste INTO a page field use the \`paste\` execute step, not a ⌘V keyboard step (the extension relay ignores modifier keys).`,
     {
       action: z.enum(["get", "set"]).describe("get: read clipboard text | set: write text to clipboard"),
       text: z.string().optional().describe("With action='set': the text to put on the clipboard."),
