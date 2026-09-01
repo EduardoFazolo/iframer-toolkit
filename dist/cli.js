@@ -8206,9 +8206,25 @@ ${this.readLogTail()}`);
       }
     }
   }
+  packageRoot() {
+    let dir = __dirname;
+    for (let i5 = 0;i5 < 8; i5++) {
+      try {
+        const pkg = JSON.parse(import_fs3.default.readFileSync(import_path4.default.join(dir, "package.json"), "utf8"));
+        if (pkg.name === "iframer-toolkit")
+          return dir;
+      } catch {}
+      const parent = import_path4.default.dirname(dir);
+      if (parent === dir)
+        break;
+      dir = parent;
+    }
+    return import_path4.default.join(__dirname, "..", "..");
+  }
   resolveRuntime() {
-    const serverTs = import_path4.default.join(__dirname, "..", "..", "index.ts");
-    const serverCjs = import_path4.default.join(__dirname, "..", "..", "dist", "local-server.cjs");
+    const root = this.packageRoot();
+    const serverTs = import_path4.default.join(root, "index.ts");
+    const serverCjs = import_path4.default.join(root, "dist", "local-server.cjs");
     if (import_fs3.default.existsSync(serverCjs)) {
       return { command: "node", args: [serverCjs] };
     }

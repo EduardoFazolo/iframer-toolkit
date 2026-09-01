@@ -149,14 +149,33 @@ export class LocalServerManager {
     }
   }
 
+  /** Package root, found by walking up for iframer-toolkit's package.json.
+   *  Robust to WHERE this code runs from: src/mcp/ (source), dist/ (bundled
+   *  CLI under node), or a global npm install — a fixed __dirname/../.. guess
+   *  breaks in the bundle (that's why the warm CLI silently ran in-process). */
+  private packageRoot(): string {
+    let dir = __dirname;
+    for (let i = 0; i < 8; i++) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+        if (pkg.name === "iframer-toolkit") return dir;
+      } catch {}
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+    return path.join(__dirname, "..", ".."); // legacy fallback
+  }
+
   private resolveRuntime(): { command: string; args: string[] } {
     // MUST run under node, not bun: extension mode uses playwright-core's
     // connectOverCDP, whose WebSocket transport hangs under bun. All other
     // modes work under node too, so node is the correct runtime everywhere.
-    const serverTs = path.join(__dirname, "..", "..", "index.ts");
+    const root = this.packageRoot();
+    const serverTs = path.join(root, "index.ts");
 
     // 1) node + built bundle (production / after `bun run build`).
-    const serverCjs = path.join(__dirname, "..", "..", "dist", "local-server.cjs");
+    const serverCjs = path.join(root, "dist", "local-server.cjs");
     if (fs.existsSync(serverCjs)) {
       return { command: "node", args: [serverCjs] };
     }
