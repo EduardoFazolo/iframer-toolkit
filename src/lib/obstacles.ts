@@ -38,24 +38,42 @@ class CookieConsentResolver implements ObstacleResolver {
   }
 
   async resolve(page: Page): Promise<ResolutionResult> {
-    const keywords = ["accept all", "accept cookies", "allow cookies", "i accept", "agree"];
+    // Same three gates as CookieConsentDetector (detector.ts — keep in sync):
+    // buttons only, keyword ≈ whole label, visible inside an overlay/dialog.
+    // The qualified button is tagged page-side and clicked via that attribute —
+    // no fragile className-derived selectors, no risk of clicking a link.
     try {
-      const buttons = await page.$$("button, a");
-      for (const btn of buttons) {
-        const text = (await btn.innerText().catch(() => "")).toLowerCase();
-        if (keywords.some((kw) => text.includes(kw))) {
-          const visible = await btn.isVisible().catch(() => false);
-          if (visible) {
-            await humanClick(page, await btn.evaluate((el) => {
-              // Generate a unique selector
-              if (el.id) return `#${el.id}`;
-              if ((el as HTMLElement).className) return `${el.tagName.toLowerCase()}.${(el as HTMLElement).className.split(" ")[0]}`;
-              return el.tagName.toLowerCase();
-            }));
-            await page.waitForTimeout(500);
-            return { resolved: true, resolution: "dismissed-cookie-consent" };
+      const tagged = await page.evaluate(() => {
+        const el = Array.from(document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]')).find((el) => {
+          const label = (((el as HTMLElement).innerText || (el as HTMLInputElement).value || "") + "").trim().toLowerCase();
+          if (!label || label.length > 32) return false;
+          const kws = ["accept cookies", "accept all", "allow cookies", "i accept", "i agree", "agree"];
+          if (!kws.some((kw) => label === kw || (label.includes(kw) && kw.length / label.length >= 0.5))) return false;
+          const r = el.getBoundingClientRect();
+          if (r.width < 20 || r.height < 10) return false;
+          const s = getComputedStyle(el);
+          if (s.visibility === "hidden" || s.display === "none" || s.opacity === "0") return false;
+          let n = el.parentElement;
+          let depth = 0;
+          while (n && depth < 8) {
+            const cs = getComputedStyle(n);
+            if (cs.position === "fixed" || cs.position === "sticky" || n.getAttribute("role") === "dialog" || n.getAttribute("aria-modal") === "true") return true;
+            n = n.parentElement;
+            depth++;
           }
-        }
+          return false;
+        });
+        if (!el) return false;
+        el.setAttribute("data-iframer-consent", "1");
+        return true;
+      });
+      if (tagged) {
+        await humanClick(page, '[data-iframer-consent="1"]');
+        await page.evaluate(() => {
+          document.querySelector('[data-iframer-consent="1"]')?.removeAttribute("data-iframer-consent");
+        }).catch(() => {});
+        await page.waitForTimeout(500);
+        return { resolved: true, resolution: "dismissed-cookie-consent" };
       }
     } catch {}
     return { resolved: false, error: "Could not dismiss cookie consent" };

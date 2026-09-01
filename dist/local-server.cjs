@@ -4075,14 +4075,30 @@ class HCaptchaDetector {
 class CookieConsentDetector {
   async detect(page) {
     try {
-      const found = await page.evaluate(() => {
-        const keywords = ["accept cookies", "accept all", "allow cookies", "i accept", "agree"];
-        const buttons = Array.from(document.querySelectorAll("button, a"));
-        return buttons.some((el) => {
-          const text = el.innerText?.toLowerCase() || "";
-          return keywords.some((kw) => text.includes(kw));
-        });
-      });
+      const found = await page.evaluate(() => Array.from(document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]')).some((el) => {
+        const label = ((el.innerText || el.value || "") + "").trim().toLowerCase();
+        if (!label || label.length > 32)
+          return false;
+        const kws = ["accept cookies", "accept all", "allow cookies", "i accept", "i agree", "agree"];
+        if (!kws.some((kw) => label === kw || label.includes(kw) && kw.length / label.length >= 0.5))
+          return false;
+        const r = el.getBoundingClientRect();
+        if (r.width < 20 || r.height < 10)
+          return false;
+        const s = getComputedStyle(el);
+        if (s.visibility === "hidden" || s.display === "none" || s.opacity === "0")
+          return false;
+        let n = el.parentElement;
+        let depth = 0;
+        while (n && depth < 8) {
+          const cs = getComputedStyle(n);
+          if (cs.position === "fixed" || cs.position === "sticky" || n.getAttribute("role") === "dialog" || n.getAttribute("aria-modal") === "true")
+            return true;
+          n = n.parentElement;
+          depth++;
+        }
+        return false;
+      }));
       if (found) {
         return { type: "cookie-consent", confidence: 0.8 };
       }
@@ -4135,25 +4151,44 @@ class CookieConsentResolver {
     return obstacle.type === "cookie-consent";
   }
   async resolve(page) {
-    const keywords = ["accept all", "accept cookies", "allow cookies", "i accept", "agree"];
     try {
-      const buttons = await page.$$("button, a");
-      for (const btn of buttons) {
-        const text = (await btn.innerText().catch(() => "")).toLowerCase();
-        if (keywords.some((kw) => text.includes(kw))) {
-          const visible = await btn.isVisible().catch(() => false);
-          if (visible) {
-            await humanClick(page, await btn.evaluate((el) => {
-              if (el.id)
-                return `#${el.id}`;
-              if (el.className)
-                return `${el.tagName.toLowerCase()}.${el.className.split(" ")[0]}`;
-              return el.tagName.toLowerCase();
-            }));
-            await page.waitForTimeout(500);
-            return { resolved: true, resolution: "dismissed-cookie-consent" };
+      const tagged = await page.evaluate(() => {
+        const el = Array.from(document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]')).find((el2) => {
+          const label = ((el2.innerText || el2.value || "") + "").trim().toLowerCase();
+          if (!label || label.length > 32)
+            return false;
+          const kws = ["accept cookies", "accept all", "allow cookies", "i accept", "i agree", "agree"];
+          if (!kws.some((kw) => label === kw || label.includes(kw) && kw.length / label.length >= 0.5))
+            return false;
+          const r = el2.getBoundingClientRect();
+          if (r.width < 20 || r.height < 10)
+            return false;
+          const s = getComputedStyle(el2);
+          if (s.visibility === "hidden" || s.display === "none" || s.opacity === "0")
+            return false;
+          let n = el2.parentElement;
+          let depth = 0;
+          while (n && depth < 8) {
+            const cs = getComputedStyle(n);
+            if (cs.position === "fixed" || cs.position === "sticky" || n.getAttribute("role") === "dialog" || n.getAttribute("aria-modal") === "true")
+              return true;
+            n = n.parentElement;
+            depth++;
           }
-        }
+          return false;
+        });
+        if (!el)
+          return false;
+        el.setAttribute("data-iframer-consent", "1");
+        return true;
+      });
+      if (tagged) {
+        await humanClick(page, '[data-iframer-consent="1"]');
+        await page.evaluate(() => {
+          document.querySelector('[data-iframer-consent="1"]')?.removeAttribute("data-iframer-consent");
+        }).catch(() => {});
+        await page.waitForTimeout(500);
+        return { resolved: true, resolution: "dismissed-cookie-consent" };
       }
     } catch {}
     return { resolved: false, error: "Could not dismiss cookie consent" };
