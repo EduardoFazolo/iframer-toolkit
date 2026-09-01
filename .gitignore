@@ -42,3 +42,4 @@ secret
 # local API reverse-engineering scratch (not committed)
 api-tests/
 /benchmark/
+/docs/todo/
