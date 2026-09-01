@@ -10,6 +10,7 @@ Resulting rev API example:
 Ships as:
 - **CLI** (`iframer-toolkit` / `iframer`) — browse, screenshot, credentials, sessions, reverse-engineer APIs
 - **MCP server** — plugs directly into Claude Code or Codex so agents can drive the browser themselves
+- **Browser extension** (optional) — lets the agent drive tabs in **your real Chrome**, on your real logged-in session
 - **Self-hosted Docker server** (optional) — adds live headful browsing over noVNC for remote/multi-user setups
 
 ## Install
@@ -21,19 +22,26 @@ npm install -g iframer-toolkit
 Then pull in the runtime dependencies (Chrome for Testing + MCP registration):
 
 ```sh
-iframer-toolkit install deps
+iframer-toolkit install
 ```
 
 This is shorthand for:
 
 ```sh
 iframer-toolkit install chromium   # downloads Chrome for Testing to ~/.iframer
-iframer-toolkit install-mcp        # registers the MCP server in ~/.claude.json and ~/.codex/config.toml
+iframer-toolkit install mcp        # registers the MCP server in ~/.claude.json and ~/.codex/config.toml
 ```
 
 Restart Claude Code or Codex and the `iframer` tools will be available.
 
-> **Note:** If you prefer, your agent can run `iframer-toolkit install deps` for you — it'll figure the rest out.
+To update later:
+
+```sh
+iframer-toolkit update             # update via npm (also refreshes the extension if installed)
+iframer-toolkit update --check     # just report whether a newer version exists
+```
+
+> **Note:** If you prefer, your agent can run `iframer-toolkit install` for you — it'll figure the rest out.
 
 ## Quick start
 
@@ -50,7 +58,7 @@ iframer-toolkit reverse-engineer https://some-spa.com       # capture the APIs i
 iframer-toolkit --cache                                     # list cached domains
 ```
 
-**From Claude Code or Codex** (after `install-mcp`):
+**From Claude Code or Codex** (after `install mcp`):
 
 > "Log into my account on example.com and extract the latest invoice."
 
@@ -59,15 +67,16 @@ The agent will call `knowledge` first (to see if a direct-API path is cached), f
 ## How it works
 
 ```
-Claude / Codex (MCP) ──→ iframer MCP server ──→ Iframer (local)
+Claude / Codex (MCP) ──→ iframer MCP server ──→ shared local server (127.0.0.1)
                                                     ├─ patchright (stealth Chromium)
                                                     ├─ Chrome for Testing
+                                                    ├─ your real Chrome (optional, via extension)
                                                     └─ SQLite at ~/.iframer — one file for
                                                        encrypted credentials, session state,
                                                        and per-domain knowledge cache
 ```
 
-By default, `install-mcp` runs in **local mode**: no Docker needed. The MCP spawns a stealth-patched Chromium (via [patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright)) on your machine. `install-mcp` registers the server in both Claude Code (`~/.claude.json`) and Codex (`~/.codex/config.toml`).
+By default, `install mcp` runs in **local mode**: no Docker needed. All MCP clients on the machine talk to **one shared local server** (discovered via `~/.iframer/server.json`, loopback-only) that keeps a stealth-patched Chromium (via [patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright)) warm between calls, tracks every browser it spawns in an on-disk PID registry so nothing leaks, and idle-exits when no one needs it. `install mcp` registers the server in both Claude Code (`~/.claude.json`) and Codex (`~/.codex/config.toml`).
 
 **One credential store for every browser mode.** Stored credentials, session cookies/localStorage, and the knowledge cache all live in a single SQLite file at `~/.iframer/iframer.db`. Store a password once (via CLI or MCP) and every mode — `headless`, `binary-headful`, `docker-headful` — uses the same row. No split-brain between modes.
 
@@ -76,6 +85,17 @@ By default, `install-mcp` runs in **local mode**: no Docker needed. The MCP spaw
 **Knowledge cache.** After every successful run, iframer writes a per-domain markdown file at `~/.iframer/knowledge/<domain>.md` recording which cookies / localStorage keys / headers the site uses for auth, plus any API endpoints observed along the way. Next time the agent needs data from that domain, it reads the cache first — if there's a direct-API path, it skips the browser entirely. See [Knowledge cache](#knowledge-cache) below.
 
 For live remote viewing, multi-user, or Linux server deployments, see [Self-hosting with Docker](#self-hosting-with-docker) below.
+
+## Extension mode — drive your real Chrome
+
+The optional browser extension lets the agent drive **a tab you already have open in your real Chrome** — no relaunch, no remote-debugging port, on your real logged-in session. The extension dials out to iframer's local server and relays the CDP protocol via `chrome.debugger`, so your live tab is driven by the exact same pipeline engine (find / click / snapshot / obstacle handling / API capture) as every other mode, with real trusted input. While a run is active, Chrome shows its yellow "started debugging" bar.
+
+```sh
+iframer install extension chrome   # installs the pairing host, prints the folder to load
+iframer extension path             # prints it again
+```
+
+Then load it once: `chrome://extensions` → Developer mode → **Load unpacked** → the printed folder. Once paired, the agent lists your open tabs with the `tabs` tool and drives the one you mean. Multiple Chrome profiles/browsers can be paired at once — each identifies itself with a profile name, and iframer routes work to the profile that owns the target tab. See [`extension/README.md`](extension/README.md) for details.
 
 ## CLI reference
 
@@ -88,6 +108,7 @@ Pipeline:
     --capture-api                  Record XHR/fetch requests during execution
     --continue-on-error            Don't stop on step failure
     --timeout <ms>                 Stale-state timeout (default: 20000)
+    --json                         Print raw PipelineResult JSON (default: compact agent-readable text)
 
 Quick actions:
   browse <url>                     Headless fetch with JS rendering
@@ -124,12 +145,18 @@ Knowledge cache:
   knowledge get <domain>           Same as --cache <domain>
   knowledge clear [domain]         Same as --clear-cache [domain]
 
+Telemetry:
+  telemetry                        Report estimated session tokens consumed by MCP tool calls
+  telemetry --clear                Wipe the telemetry log
+
 Setup:
+  install                          Install everything (Chromium + MCP)
   install chromium                 Download Chrome for Testing
-  install mcp                      Register MCP server in Claude Code and Codex
-  install deps                     Run both of the above
-  install-mcp [--dev]              Same as `install mcp`
-  remove-mcp [--dev]               Remove iframer MCP from Claude Code and Codex
+  install mcp [--dev]              Register MCP server in Claude Code and Codex
+  install extension chrome         Install the optional browser extension pairing host
+  extension path                   Print the extension folder to load in chrome://extensions
+  update [--check]                 Update iframer via npm (--check: report only)
+  remove [chromium|mcp|extension]  Remove everything, or one piece
 
 Browser:
   modes                            Show available browser modes
@@ -144,9 +171,12 @@ Once the MCP is registered, the agent has access to:
 
 - **`status`** — system health, session state, stored credentials, available browser modes
 - **`knowledge`** — read / list / clear the per-domain knowledge cache. Agents are told to check this **before** every `execute` or `browse` — if the cache has a direct-API path for the data, the browser doesn't launch at all.
-- **`execute`** — run a pipeline of browser steps (navigate, click, fill, human-click, human-type, scroll, wait, evaluate, extract, keyboard, login, solve-captcha, screenshot, snapshot, find). Each step has a 20s stale-state timeout. On failure, returns the exact step, error type, and a screenshot of the page at the point of failure. Auto-escalates browser modes transparently on bot-block.
+- **`execute`** — run a pipeline of browser steps (navigate, click, right-click, fill, select, human-click, human-type, type-code, read, evaluate, extract, wait, wait-for, scroll, keyboard, upload, paste, download, login, solve-captcha, recaptcha, screenshot, snapshot, find). Each step has a 20s stale-state timeout. On failure, returns the exact step, error type, and a screenshot of the page at the point of failure. Auto-escalates browser modes transparently on bot-block.
 - **`browse`** — fast headless fetch with session persistence for pages that don't need a full pipeline
 - **`reverse-engineer`** — capture the APIs a site calls (feeds into the knowledge cache so future runs can skip the browser)
+- **`remember`** — per-domain **element anchors**: save a selector once under a name, then target it as `@a:<name>` in any later pipeline — no re-finding the element on every visit. Anchors self-heal (a failed anchor triggers re-discovery, not blind retries) and the tool also records per-site quirks.
+- **`tabs`** — list and target tabs in your real Chrome (requires the [extension](#extension-mode--drive-your-real-chrome))
+- **`clipboard`** — read/write the machine's clipboard (the same one your Chrome uses): read a code a site just copied, or stage text to paste into a field via the `paste` step
 - **`session`** — `stop` (save state) or `clear` (wipe)
 - **`credentials`** — `store` (secure form via MCP elicitation), `list`. The `store` action will **refuse to overwrite** existing credentials unless explicitly told to (`force: true`) — this blocks the common "login failed, re-ask for password" anti-pattern when the real problem is browser mode / bot detection.
 
@@ -154,7 +184,7 @@ Once the MCP is registered, the agent has access to:
 
 Session data (cookies + localStorage) and credentials are stored in SQLite at `~/.iframer/iframer.db` and encrypted with AES-256-GCM. Data is automatically re-injected on the next `execute` or `browse` so agents stay logged in across restarts — and across browser modes: a session captured in `binary-headful` will transparently load into `headless` on the next run.
 
-The encryption key lives at `~/.iframer/secret` (0600 permissions), generated on first `install-mcp`. Set `IFRAMER_SECRET` in your environment to override it — useful if you want to synchronize the key across multiple machines.
+The encryption key lives at `~/.iframer/secret` (0600 permissions), generated on first `install mcp`. Set `IFRAMER_SECRET` in your environment to override it — useful if you want to synchronize the key across multiple machines.
 
 ## Knowledge cache
 
@@ -191,7 +221,9 @@ Requires `ANTHROPIC_API_KEY` in your environment.
 | Variable            | Required | Description |
 |---------------------|----------|-------------|
 | `ANTHROPIC_API_KEY` | For captcha | Used for vision-based captcha solving |
-| `IFRAMER_SECRET`    | No       | Encryption key for sessions & credentials. Defaults to the value at `~/.iframer/secret` (auto-generated on first `install-mcp`). Override in the shell or in `.env` to pin a specific key. |
+| `IFRAMER_SECRET`    | No       | Encryption key for sessions & credentials. Defaults to the value at `~/.iframer/secret` (auto-generated on first `install mcp`). Override in the shell or in `.env` to pin a specific key. |
+| `IFRAMER_TELEMETRY` | No       | Set to `0` in the MCP env to disable the local token-telemetry log (`iframer telemetry` reads it). |
+| `IFRAMER_LOCAL_PORT`| No       | Base port for the shared local server (default: `3022`, loopback only). |
 | `IFRAMER_DATA_DIR`  | No       | Override the data directory. Default: `~/.iframer`. The Docker container sets this to `/iframer-data` so a bind mount makes host and container share one database. |
 | `IFRAMER_MODE`      | No       | `local` (default) or `docker`. Force a mode regardless of what's running. |
 | `IFRAMER_URL`       | No       | Docker API URL when self-hosting (default: `http://localhost:3021`). |
@@ -224,7 +256,7 @@ bun run stop:docker    # stop containers
 If you're running Docker on a remote machine and the MCP on a different machine, install the MCP with the remote URL:
 
 ```sh
-IFRAMER_URL=https://your-host:3021 iframer-toolkit install-mcp --dev
+IFRAMER_URL=https://your-host:3021 iframer-toolkit install mcp --dev
 ```
 
 When Docker is on the same host as the MCP, no extra setup is needed — the local MCP server will auto-detect the Docker API on `localhost:3021` and route only `docker-headful` requests through it.
@@ -245,6 +277,8 @@ Or run `iframer-toolkit watch` to auto-open it.
 |--------------------|------------|
 | Browser engine     | [patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright) (stealth-patched Playwright fork) |
 | Browser binary     | Chrome for Testing (downloaded to `~/.iframer/chrome/`) |
+| Local server       | One shared warm server per machine (loopback-only, discovered via `~/.iframer/server.json`), on-disk browser PID registry, idle auto-exit |
+| Extension mode     | Chrome extension relaying CDP over WebSocket (`chrome.debugger` → `connectOverCDP`) — drives tabs in your real Chrome |
 | Stealth            | Fingerprint injection, WebRTC leak prevention, worker patching |
 | Credential store   | SQLite at `~/.iframer/iframer.db`, AES-256-GCM encrypted, shared by every browser mode |
 | Session persistence| Same SQLite file — cookies + localStorage re-injected across runs and modes |
