@@ -18871,9 +18871,27 @@ Screenshot: ${shot}`);
           }
           console.log(`  Session stopped. State saved: ${data.sessionSaved}`);
         } else {
-          const iframer = await getLocalIframer();
-          const result = await iframer.stopSession(LOCAL_USER_ID, LOCAL_TOKEN);
-          console.log(`  Session stopped. State saved: ${result.sessionSaved}`);
+          let stopped = false;
+          try {
+            const info = JSON.parse(fs13.readFileSync(path13.join(CONFIG_DIR, "server.json"), "utf8"));
+            if (info && info.port) {
+              const res = await fetch(`http://127.0.0.1:${info.port}/interactive/stop`, {
+                method: "POST",
+                headers: { "x-api-key": LOCAL_TOKEN },
+                signal: AbortSignal.timeout(15000)
+              });
+              if (res.ok) {
+                const data = await res.json();
+                console.log(`  Session stopped. State saved: ${data.sessionSaved}`);
+                stopped = true;
+              }
+            }
+          } catch {}
+          if (!stopped) {
+            const iframer = await getLocalIframer();
+            const result = await iframer.stopSession(LOCAL_USER_ID, LOCAL_TOKEN);
+            console.log(`  Session stopped. State saved: ${result.sessionSaved}`);
+          }
         }
       } else if (sub === "clear") {
         const docker = await isDockerRunning();
