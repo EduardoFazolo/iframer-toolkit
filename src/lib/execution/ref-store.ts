@@ -4,8 +4,7 @@ import type { ExecutionConfig } from "./config";
 
 /**
  * Owns per-user @e ref maps and the nextRefId counter, and builds the
- * ExecutionContext passed into the pipeline. Extracted from Iframer so ref
- * bookkeeping lives in one place.
+ * ExecutionContext passed into the pipeline.
  */
 export class RefStore {
   private userRefs = new Map<string, { refMap: Map<string, ElementRef>; nextRefId: number }>();

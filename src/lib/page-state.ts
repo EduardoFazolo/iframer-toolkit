@@ -9,13 +9,7 @@ export interface CapturePageStateOptions {
   namePrefix?: string;
 }
 
-/**
- * Snapshot the page's URL + title, optionally with a screenshot.
- * Unifies the previously-duplicated getPageState implementations in
- * pipeline.ts ("state-" prefix, screenshot optional) and iframer.ts
- * ("block-" prefix, screenshot always on) — pass options to reproduce
- * either caller's behavior.
- */
+/** Capture URL and title, with a best-effort screenshot when requested. */
 export async function capturePageState(
   page: Page,
   ctx: ExecutionContext,

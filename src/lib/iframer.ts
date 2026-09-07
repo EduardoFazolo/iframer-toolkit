@@ -67,11 +67,8 @@ export class Iframer {
 
     // Storage: SQLite in data directory (honors IFRAMER_DATA_DIR for Docker bind-mount)
     this.store = createStore({ dataDir: config.dataDir });
-    // Browser daemon for local modes (headless + binary-headful)
     this.daemon = new BrowserDaemon(config.sessionTimeoutMs);
-    // Domain mode memory
     this.domainModes = new DomainModeStore();
-    // Operating mode — Docker session-manager vs local daemon
     this.operatingMode = config.mode || "local";
 
     this.refStore = new RefStore(this.store, this.config);

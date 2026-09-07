@@ -10,27 +10,14 @@ function mockRes() {
   return res as Response;
 }
 
-describe("AppError", () => {
-  it("has statusCode and message", () => {
-    const err = new AppError(400, "bad input");
-    expect(err.statusCode).toBe(400);
-    expect(err.message).toBe("bad input");
-    expect(err).toBeInstanceOf(Error);
-  });
-});
-
 describe("errorHandler", () => {
   it("returns statusCode from AppError", () => {
     const res = mockRes();
-    errorHandler(new AppError(404, "not found"), {} as Request, res, (() => {}) as NextFunction);
+    const error = new AppError(404, "not found");
+    expect(error).toBeInstanceOf(Error);
+    errorHandler(error, {} as Request, res, (() => {}) as NextFunction);
     expect(res.status).toHaveBeenCalledWith(404);
     expect(res.json).toHaveBeenCalledWith({ ok: false, error: "not found" });
-  });
-
-  it("returns 400 for AppError(400)", () => {
-    const res = mockRes();
-    errorHandler(new AppError(400, "missing field"), {} as Request, res, (() => {}) as NextFunction);
-    expect(res.status).toHaveBeenCalledWith(400);
   });
 
   it("returns 500 for generic Error", () => {

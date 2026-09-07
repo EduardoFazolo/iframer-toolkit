@@ -34,13 +34,11 @@ export interface PipelineExecutorDeps {
 }
 
 /**
- * Owns pipeline execution across the three browser modes plus the auto-
- * escalation ladder. Extracted from Iframer; the elicitOtp hook lives here
- * because it's consumed only on the local execution path.
+ * Executes pipelines across browser modes and manages auto-escalation.
  */
 export class PipelineExecutor {
-  /** Runtime elicitation hook, set per-call via execute(). Consumed once by
-   *  executeLocal and immediately cleared. */
+  /** Shared runtime hook read by local and extension execution;
+   *  execute() clears it when the call finishes. */
   private pendingElicitOtp?: (domain: string) => Promise<string | null>;
 
   /** One pipeline per real tab at a time: chrome.debugger and the CDP relay

@@ -11,7 +11,7 @@ import { TIMEOUTS } from "../constants";
 import { getErrorMessage } from "../errors";
 
 /** One-shot headless fetch on an ephemeral context (no daemon, no persistence
- *  beyond the optional session blob). Extracted verbatim from Iframer.fetch. */
+ *  beyond the optional session blob). */
 export class FetchService {
   constructor(private store: StorageBackend) {}
 

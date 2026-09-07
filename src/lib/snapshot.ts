@@ -98,28 +98,23 @@ export async function takeSnapshot(
     }
 
     function getName(el: Element): string {
-      // aria-label first
       const ariaLabel = el.getAttribute("aria-label");
       if (ariaLabel) return ariaLabel.trim();
 
-      // associated label
       const id = el.id;
       if (id) {
         const label = document.querySelector(`label[for="${id}"]`);
         if (label) return label.textContent?.trim() || "";
       }
 
-      // placeholder
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
         if (el.placeholder) return el.placeholder.trim();
       }
 
-      // text content (for buttons, links)
       const text = el.textContent?.trim() || "";
       return text.slice(0, 60);
     }
 
-    // Walk the DOM
     const allElements = document.querySelectorAll("*");
     for (const el of allElements) {
       if (results.length >= maxElements) break;
@@ -151,7 +146,6 @@ export async function takeSnapshot(
   for (const el of elements) {
     const ref = `@e${ctx.nextRefId++}`;
 
-    // Determine display role
     let displayRole = el.role || el.tag;
     if (el.tag === "input") {
       displayRole = el.type === "password" ? "password" : el.type === "checkbox" ? "checkbox" : el.type === "radio" ? "radio" : "input";
@@ -185,7 +179,6 @@ export async function takeSnapshot(
 
     nodes.push(node);
 
-    // Store ref for later resolution
     ctx.refMap.set(ref, {
       ref,
       role: displayRole,
@@ -195,7 +188,6 @@ export async function takeSnapshot(
     });
   }
 
-  // Format as text
   const lines: string[] = [];
   for (const node of nodes) {
     let line = `${node.ref} ${node.role}`;

@@ -117,8 +117,6 @@ export class PipelineRunner {
       if (name && this.ctx.anchorDomain) recordAnchorResult(this.ctx.anchorDomain, name, ok, new Date().toISOString());
     };
 
-    // API capture — hook network events when enabled. Bound to the initial page;
-    // capturing traffic from followed tabs is a separate follow-up.
     const capture = opts.captureApi ? new ApiCapture(initialPage) : null;
     if (capture) capture.start();
 

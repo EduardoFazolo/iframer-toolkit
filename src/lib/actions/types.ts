@@ -95,18 +95,14 @@ export type StepHandler<TStep extends PipelineStep, TResult> = (
   monitor?: StaleStateMonitor
 ) => Promise<TResult>;
 
-/**
- * The registry type. Because it is a mapped type over every PipelineStep
- * variant, omitting a handler for any of the 25 step types is a COMPILE error —
- * strictly stronger than the old runtime `default: never` exhaustiveness check.
- */
+/** Requires a handler for every PipelineStep variant. */
 export type StepHandlerRegistry = {
   [K in PipelineStep["type"]]: StepHandler<Extract<PipelineStep, { type: K }>, StepResultMap[K]>;
 };
 
 /**
- * Result of executing one step. Distributed discriminated union: narrowing on
- * `.step.type` narrows `.result` to that step's concrete shape (StepResultMap[K]).
+ * Pairs each step variant with its result shape. TypeScript does not narrow
+ * the sibling result from the nested step.type discriminant.
  */
 export type StepResult = {
   [K in PipelineStep["type"]]: {

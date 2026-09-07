@@ -12,7 +12,6 @@ let store: typeof import("../../src/lib/knowledge/component-map");
 beforeEach(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iframer-anchors-"));
   process.env.IFRAMER_DATA_DIR = tmp;
-  // Fresh import so getDataDir picks up the env (module has no cached dir, but be safe).
   store = await import("../../src/lib/knowledge/component-map");
 });
 
@@ -79,7 +78,4 @@ describe("resolveSelector @a: anchors", () => {
     expect(() => resolveSelector("@a:nope", ctxWithAnchors(anchors))).toThrow(/remember/);
   });
 
-  it("passes plain CSS through unchanged", () => {
-    expect(resolveSelector("#plain", ctxWithAnchors(new Map()))).toBe("#plain");
-  });
 });

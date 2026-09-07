@@ -7,7 +7,7 @@ import { createLogger } from "../logger";
 const log = createLogger("cdp-relay");
 
 /**
- * Presents a CDP endpoint that patchright's `chromium.connectOverCDP` connects
+ * Presents a CDP endpoint that playwright-core's `chromium.connectOverCDP` connects
  * to, backed by the browser extension's `chrome.debugger` session for one tab.
  *
  * This lets iframer's real pipeline (find/click/snapshot/navigate/capture) drive
@@ -162,7 +162,7 @@ export class CdpRelay {
       case "Browser.setDownloadBehavior":
         return {};
       case "Browser.close":
-        return {}; // patchright disconnect — don't kill the user's Chrome
+        return {}; // Disconnect without closing the user's Chrome.
       case "Target.setDiscoverTargets":
         return {};
       case "Target.getTargets":

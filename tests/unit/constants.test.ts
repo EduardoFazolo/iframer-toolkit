@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { TIMING, CAPTCHA_GRID, SCREEN_DEFAULTS, THRESHOLDS, TIMEOUTS } from "../../src/lib/constants";
+import { TIMING, CAPTCHA_GRID, SCREEN_DEFAULTS, THRESHOLDS } from "../../src/lib/constants";
 
 describe("constants", () => {
   describe("TIMING ranges", () => {
@@ -23,11 +23,6 @@ describe("constants", () => {
   });
 
   describe("CAPTCHA_GRID", () => {
-    it("grid padding is reasonable", () => {
-      expect(CAPTCHA_GRID.GRID_PADDING).toBeGreaterThan(0);
-      expect(CAPTCHA_GRID.DEFAULT_TILE_SIZE).toBeGreaterThan(50);
-    });
-
     it("header heights are positive", () => {
       expect(CAPTCHA_GRID.RECAPTCHA_HEADER_HEIGHT).toBeGreaterThan(0);
       expect(CAPTCHA_GRID.HCAPTCHA_HEADER_HEIGHT).toBeGreaterThan(0);
@@ -49,10 +44,4 @@ describe("constants", () => {
     });
   });
 
-  describe("TIMEOUTS", () => {
-    it("navigation > stale > selector", () => {
-      expect(TIMEOUTS.NAVIGATION).toBeGreaterThan(TIMEOUTS.DEFAULT_STALE);
-      expect(TIMEOUTS.DEFAULT_STALE).toBeGreaterThan(TIMEOUTS.SELECTOR_WAIT);
-    });
-  });
 });

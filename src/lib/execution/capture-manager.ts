@@ -7,7 +7,7 @@ type Cookie = Awaited<ReturnType<BrowserContext["cookies"]>>[number];
 type OriginStore = Record<string, Record<string, string>>;
 
 /** Persistent XHR/fetch capture + CDP cookie/storage extraction, keyed by
- *  `mode::instanceId`. Extracted from Iframer. */
+ *  `mode::instanceId`. */
 export class CaptureManager {
   private captures = new Map<string, ApiCapture>();
 

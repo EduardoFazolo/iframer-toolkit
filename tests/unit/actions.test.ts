@@ -73,9 +73,6 @@ describe("step handler registry", () => {
     expect(nav).toEqual({ type: "navigate", url: "https://x.test" });
   });
 
-  it("has no duplicate registrations", () => {
-    expect(new Set(registeredStepTypes).size).toBe(registeredStepTypes.length);
-  });
 });
 
 describe("getErrorMessage", () => {

@@ -67,10 +67,7 @@ const server = app.listen(PORT, "127.0.0.1", () => {
 extensionBridge.attach(server);
 
 // ─── Shutdown: single owner, cannot wedge ──────────────────────────
-// Polite teardown races a hard deadline. The old version awaited
-// iframer.shutdown() with no timeout and latched a `shuttingDown` flag —
-// one hung context.close() wedged the process forever AND blocked every
-// later shutdown attempt. Chrome then outlived everything.
+// Arm the exit deadline before teardown so a hung browser close cannot block shutdown.
 
 let shutdownStarted = false;
 async function gracefulShutdown(reason: string): Promise<void> {
