@@ -43,3 +43,7 @@ secret
 api-tests/
 /benchmark/
 /docs/todo/
+
+# build output — published via npm \"files\", never committed (baked-path leak came from committing these)
+/dist/
+bin/*.cjs
