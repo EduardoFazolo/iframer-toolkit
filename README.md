@@ -1,6 +1,10 @@
 # iframer-toolkit
 
-Browser access for AI agents when normal fetching fails. Give Claude, Codex, or any MCP-compatible agent a real browser — with session persistence, stealth fingerprinting, encrypted credential storage, and automatic captcha solving, and most af all, API Reverse Engineering.
+Browser access for AI agents when normal fetching fails. Give Claude, Codex, or any MCP-compatible agent a real browser — with session persistence, stealth fingerprinting, encrypted credential storage, and automatic captcha solving, and most of all, API Reverse Engineering.
+
+### Is this AI slop?
+No. This is a tool I use almost EVERY SINGLE DAY and I have put a lot of thought and real engineering to actually make this a tool I am proud of.
+Why did I develop this? Because I felt like the other agentic browsers didn't give me enough power and felt very expensive token-wise.
 
 ## Example:
 <img width="2962" height="1116" alt="image" src="https://github.com/user-attachments/assets/c937b39c-5dba-4d6a-892d-71243ecf8146" />
