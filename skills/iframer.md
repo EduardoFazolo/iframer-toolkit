@@ -199,7 +199,7 @@ session: { action: "restart" }
 ```
 This kills ALL running browser instances (local + Docker) and resets state. Credentials and knowledge cache are NOT affected. The next `execute` call launches a fresh browser automatically.
 
-**The execute tool also auto-recovers:** if it detects a crash (connection closed, timeout, ECONNREFUSED), it automatically restarts the browser and retries once before reporting failure. If auto-recovery also fails, the agent should call `session restart` manually and try again.
+**The execute tool also auto-recovers:** if it detects a *connection-level* crash (connection closed, ECONNREFUSED/ECONNRESET/EPIPE, socket hang up), it restarts the browser server and retries once before reporting failure. Timeouts are deliberately NOT auto-retried — a slow-but-healthy pipeline that hit the client timeout must not be re-run, or non-idempotent steps (form submits, purchases) would double-execute. If auto-recovery fails, or a step timed out, call `session restart` manually and continue from where you left off (don't blindly re-run the whole pipeline).
 
 ### Manage credentials
 
@@ -274,7 +274,7 @@ Many modern sites don't have email+password on one page. The login step handles 
 
 ## Recovering from MCP disconnect
 
-The iframer MCP server runs Chrome in-process. If Chrome crashes hard enough (native segfault, out of memory), the entire MCP server process dies and Claude Code shows "MCP disconnected."
+The iframer MCP server does NOT run Chrome — Chrome lives in a separate, shared local background server (the daemon on 127.0.0.1). The MCP process is just a thin HTTP/stdio client. So a browser crash can't take the MCP down with it: if Chrome dies, the daemon's own recovery handles it and the MCP keeps running. A real "MCP disconnected" in Claude Code means the MCP client process itself dropped (session killed, pipe closed), not a browser crash — the daemon and its warm browsers survive that too.
 
 **Recovery is simple — Claude Code auto-reconnects MCP servers.** Just wait 2-3 seconds and retry the tool call. Don't:
 - Try to run `claude mcp` commands
