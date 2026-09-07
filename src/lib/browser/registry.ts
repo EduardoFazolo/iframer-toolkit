@@ -24,6 +24,10 @@ export interface ServerInfo {
   pid: number;
   port: number;
   startedAt: string;
+  /** Package version of the running server, so clients (CLI) can detect a
+   *  stale daemon after an update and retire it instead of sending it steps
+   *  it doesn't understand. */
+  version?: string;
 }
 
 function browsersDir(): string {

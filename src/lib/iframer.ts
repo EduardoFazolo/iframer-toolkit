@@ -180,7 +180,7 @@ export class Iframer {
           const data = await extractSession(inst.context, inst.page);
           if (data) {
             const encrypted = encrypt(JSON.stringify(data), encryptionKey);
-            await this.store.setSession(sessionStoreKey(userId, inst.instanceId), encrypted);
+            await this.store.setSession(sessionStoreKey(userId, inst.sessionProfile ?? inst.instanceId), encrypted);
             sessionSaved = true;
           }
         } catch (err) {
@@ -230,6 +230,12 @@ export class Iframer {
   browserHealth(): { alive: boolean; modes: string[] } {
     const modes = this.daemon.runningModes();
     return { alive: modes.length > 0, modes };
+  }
+
+  /** Live daemon browsers (which page each is on) so an agent can reattach a
+   *  task's window by instanceId after an interrupt instead of re-navigating. */
+  listInstances() {
+    return this.daemon.instancesInfo();
   }
 
   /** Kill all browser instances and reset state. Next execute call will

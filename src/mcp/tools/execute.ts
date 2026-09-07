@@ -25,6 +25,8 @@ Selectors: every selector field accepts @e refs (PREFER them over CSS) and persi
 
 FORMS: use \`fill\` for text inputs — never evaluate-set .value (fill fires the framework-aware events; see its description). If a submit still claims fields are empty/required, re-run fill on the flagged field rather than assuming the value didn't land.
 
+RESUMING A TASK: name a multi-step or human-in-the-loop task's browser with a stable \`options.instanceId\` (e.g. "otp-login") — the browser and its page PERSIST between calls and survive an interrupt. To resume (after a stop, an interrupt, or a wait for the user to enter a code), call execute again with the SAME instanceId and act on the CURRENT page (snapshot/read/find) — do NOT navigate again, which reloads and discards the state (e.g. an OTP screen). \`status\` lists live windows (instanceId → current url) so you can find the right one.
+
 Returns: ok, completedSteps, output for snapshot/find/read/extract steps, obstacles, capturedApi, and on failure a screenshot path + errorType + suggestion + retryable.`,
     {
       steps: z.array(stepSchema).describe("Pipeline steps to execute sequentially"),

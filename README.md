@@ -76,7 +76,11 @@ Claude / Codex (MCP) ──→ iframer MCP server ──→ shared local server 
                                                        and per-domain knowledge cache
 ```
 
-By default, `install mcp` runs in **local mode**: no Docker needed. All MCP clients on the machine talk to **one shared local server** (discovered via `~/.iframer/server.json`, loopback-only) that keeps a stealth-patched Chromium (via [patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright)) warm between calls, tracks every browser it spawns in an on-disk PID registry so nothing leaks, and idle-exits when no one needs it. `install mcp` registers the server in both Claude Code (`~/.claude.json`) and Codex (`~/.codex/config.toml`).
+By default, `install mcp` runs in **local mode**: no Docker needed. Both the MCP clients and the `iframer execute` CLI talk to **one shared local server** (discovered via `~/.iframer/server.json`, loopback-only) that keeps a stealth-patched Chromium (via [patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright)) warm between calls, tracks every browser it spawns in an on-disk PID registry so nothing leaks, and idle-exits when no one needs it. `install mcp` registers the server in both Claude Code (`~/.claude.json`) and Codex (`~/.codex/config.toml`).
+
+**Warm CLI.** `iframer execute` routes to that shared daemon instead of launching a cold browser per invocation, so after the first call it's as fast as the MCP (pass `--in-process` to force a private throwaway browser). Each agent gets its own browser instance (keyed off `CLAUDE_CODE_SESSION_ID` / `TERM_SESSION_ID`, or set `IFRAMER_INSTANCE`), so concurrent agents never share a window, while all CLI calls share one login session.
+
+**Resuming a task.** The browser and its page persist in the daemon between calls and survive an interrupt (Ctrl-C). Name a multi-step or human-in-the-loop task's browser with a stable `instanceId`, and to resume just run `execute` again with the same `instanceId` and act on the current page (`snapshot`/`read`/`find`) — don't navigate again, which would reload and lose the state (e.g. an OTP screen). `iframer instances` lists the live windows and which page each is on.
 
 **One credential store for every browser mode.** Stored credentials, session cookies/localStorage, and the knowledge cache all live in a single SQLite file at `~/.iframer/iframer.db`. Store a password once (via CLI or MCP) and every mode — `headless`, `binary-headful`, `docker-headful` — uses the same row. No split-brain between modes.
 
@@ -109,6 +113,7 @@ Pipeline:
     --continue-on-error            Don't stop on step failure
     --timeout <ms>                 Stale-state timeout (default: 20000)
     --json                         Print raw PipelineResult JSON (default: compact agent-readable text)
+    --in-process                   Skip the shared warm daemon; run a private in-process browser
 
 Quick actions:
   browse <url>                     Headless fetch with JS rendering
@@ -123,8 +128,12 @@ Quick actions:
     --output <dir>                 Save directory
     --typed                        Generate TypeScript
 
+Browser windows:
+  instances                        List live browser windows (instanceId → current page)
+  windows                          Alias of instances
+
 Session:
-  session stop                     Stop and save cookies/localStorage
+  session stop                     Save state + close idle browsers on the shared daemon
   session clear                    Wipe stored session data
   session status                   Check session state
 

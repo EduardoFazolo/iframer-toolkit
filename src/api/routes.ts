@@ -36,6 +36,11 @@ export function registerRoutes(app: Express): void {
     res.json({ ok: true, ...iframer.browserHealth() });
   });
 
+  // Live daemon browsers + the page each is on — for reattach-by-instanceId.
+  app.get("/instances", asyncHandler(async (_req: Request, res: Response) => {
+    res.json({ ok: true, instances: await iframer.listInstances() });
+  }));
+
   app.post("/browser/restart", asyncHandler(async (_req: Request, res: Response) => {
     const result = await iframer.restartBrowser();
     res.json({ ok: true, ...result });
