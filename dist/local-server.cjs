@@ -1,65 +1,57 @@
+const importMetaUrl = require('node:url').pathToFileURL(__filename).href;
+"use strict";
 var __create = Object.create;
-var __getProtoOf = Object.getPrototypeOf;
 var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
-function __accessProp(key) {
-  return this[key];
-}
-var __toESMCache_node;
-var __toESMCache_esm;
-var __toESM = (mod, isNodeMode, target) => {
-  var canCache = mod != null && typeof mod === "object";
-  if (canCache) {
-    var cache = isNodeMode ? __toESMCache_node ??= new WeakMap : __toESMCache_esm ??= new WeakMap;
-    var cached = cache.get(mod);
-    if (cached)
-      return cached;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
   }
-  target = mod != null ? __create(__getProtoOf(mod)) : {};
-  const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
-  for (let key of __getOwnPropNames(mod))
-    if (!__hasOwnProp.call(to, key))
-      __defProp(to, key, {
-        get: __accessProp.bind(mod, key),
-        enumerable: true
-      });
-  if (canCache)
-    cache.set(mod, to);
-  return to;
 };
-var __returnValue = (v) => v;
-function __exportSetter(name, newValue) {
-  this[name] = __returnValue.bind(null, newValue);
-}
 var __export = (target, all) => {
   for (var name in all)
-    __defProp(target, name, {
-      get: all[name],
-      enumerable: true,
-      configurable: true,
-      set: __exportSetter.bind(all, name)
-    });
+    __defProp(target, name, { get: all[name], enumerable: true });
 };
-var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
 
 // src/lib/session/persistence.ts
-var exports_persistence = {};
-__export(exports_persistence, {
-  injectStorage: () => injectStorage,
+var persistence_exports = {};
+__export(persistence_exports, {
+  extractSession: () => extractSession,
   injectCookies: () => injectCookies,
-  extractSession: () => extractSession
+  injectStorage: () => injectStorage
 });
 async function extractSession(context, page) {
   const cookies = await context.cookies();
   const { localStorage, sessionStorage } = await page.evaluate(() => {
     const ls = {};
     const ss = {};
-    for (let i = 0;i < window.localStorage.length; i++) {
+    for (let i = 0; i < window.localStorage.length; i++) {
       const key = window.localStorage.key(i);
       ls[key] = window.localStorage.getItem(key);
     }
-    for (let i = 0;i < window.sessionStorage.length; i++) {
+    for (let i = 0; i < window.sessionStorage.length; i++) {
       const key = window.sessionStorage.key(i);
       ss[key] = window.sessionStorage.getItem(key);
     }
@@ -70,7 +62,7 @@ async function extractSession(context, page) {
     cookies,
     localStorage: { [origin]: localStorage },
     sessionStorage: { [origin]: sessionStorage },
-    extractedAt: new Date().toISOString()
+    extractedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
 }
 async function injectCookies(context, sessionData) {
@@ -79,8 +71,7 @@ async function injectCookies(context, sessionData) {
   }
 }
 async function injectStorage(page, sessionData) {
-  if (!sessionData)
-    return;
+  if (!sessionData) return;
   const origin = new URL(page.url()).origin;
   const ls = sessionData.localStorage?.[origin];
   const ss = sessionData.sessionStorage?.[origin];
@@ -99,19 +90,27 @@ async function injectStorage(page, sessionData) {
     }, ss);
   }
 }
+var init_persistence = __esm({
+  "src/lib/session/persistence.ts"() {
+    "use strict";
+  }
+});
 
 // src/lib/paths.ts
-var exports_paths = {};
-__export(exports_paths, {
+var paths_exports = {};
+__export(paths_exports, {
   getDataDir: () => getDataDir
 });
 function getDataDir() {
   return process.env.IFRAMER_DATA_DIR || import_path.default.join(import_os.default.homedir(), ".iframer");
 }
 var import_path, import_os;
-var init_paths = __esm(() => {
-  import_path = __toESM(require("path"));
-  import_os = __toESM(require("os"));
+var init_paths = __esm({
+  "src/lib/paths.ts"() {
+    "use strict";
+    import_path = __toESM(require("path"));
+    import_os = __toESM(require("os"));
+  }
 });
 
 // index.ts
@@ -136,7 +135,7 @@ var import_fs = __toESM(require("fs"));
 var import_patchright = require("patchright");
 
 // src/lib/browser/stealth.ts
-var contextStealthScripts = new Map;
+var contextStealthScripts = /* @__PURE__ */ new Map();
 var CHROME_VERSION = "136.0.7103.93";
 var USER_AGENT = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME_VERSION} Safari/537.36`;
 var NATIVE_TOSTRING_HELPER = `
@@ -239,7 +238,7 @@ function buildStealthScriptInner(p) {
     };
   }
 
-  // Safely patch Navigator.prototype — delete first to handle non-configurable properties
+  // Safely patch Navigator.prototype \u2014 delete first to handle non-configurable properties
   (function() {
     function safeProp(obj, prop, descriptor) {
       try { delete obj[prop]; } catch(e) {}
@@ -355,7 +354,7 @@ function buildStealthScriptInner(p) {
   // devicePixelRatio
   try { Object.defineProperty(window, "devicePixelRatio", { get: () => ${p.dpr}, configurable: true }); } catch(e) {}
 
-  // WebRTC IP leak prevention — filter private/container IP candidates
+  // WebRTC IP leak prevention \u2014 filter private/container IP candidates
   (function() {
     const _RTC = window.RTCPeerConnection;
     if (!_RTC) return;
@@ -432,7 +431,7 @@ function buildStealthScriptInner(p) {
   }
 
   // Patch Worker constructor to inject navigator overrides into Web Workers
-  // Workers have their own WorkerNavigator global — page.addInitScript doesn't reach them
+  // Workers have their own WorkerNavigator global \u2014 page.addInitScript doesn't reach them
   (function() {
     const _OrigWorker = window.Worker;
     if (!_OrigWorker) return;
@@ -446,7 +445,7 @@ function buildStealthScriptInner(p) {
     \`;
 
     function PatchedWorker(url, opts) {
-      // Skip wrapping module workers — importScripts doesn't exist in ES module scope
+      // Skip wrapping module workers \u2014 importScripts doesn't exist in ES module scope
       if (opts && opts.type === 'module') {
         return new _OrigWorker(url, opts);
       }
@@ -529,20 +528,16 @@ function createLogger(tag) {
   const prefix = `[${tag}]`;
   return {
     debug: (...args) => {
-      if (LEVELS[currentLevel] <= 0)
-        console.log(prefix, ...args);
+      if (LEVELS[currentLevel] <= 0) console.log(prefix, ...args);
     },
     info: (...args) => {
-      if (LEVELS[currentLevel] <= 1)
-        console.log(prefix, ...args);
+      if (LEVELS[currentLevel] <= 1) console.log(prefix, ...args);
     },
     warn: (...args) => {
-      if (LEVELS[currentLevel] <= 2)
-        console.warn(prefix, ...args);
+      if (LEVELS[currentLevel] <= 2) console.warn(prefix, ...args);
     },
     error: (...args) => {
-      if (LEVELS[currentLevel] <= 3)
-        console.error(prefix, ...args);
+      if (LEVELS[currentLevel] <= 3) console.error(prefix, ...args);
     }
   };
 }
@@ -551,17 +546,14 @@ function createLogger(tag) {
 var log = createLogger("launcher");
 var UBLOCK_PATH = "/extensions/uBlock0.chromium";
 function findChromeExecutable() {
-  if (process.env.CHROME_EXECUTABLE)
-    return process.env.CHROME_EXECUTABLE;
-  if (import_fs.default.existsSync("/usr/bin/google-chrome-stable"))
-    return "/usr/bin/google-chrome-stable";
-  return;
+  if (process.env.CHROME_EXECUTABLE) return process.env.CHROME_EXECUTABLE;
+  if (import_fs.default.existsSync("/usr/bin/google-chrome-stable")) return "/usr/bin/google-chrome-stable";
+  return void 0;
 }
 var cachedBrowser = null;
 async function getBrowser(_name = "chromium") {
   if (cachedBrowser) {
-    if (cachedBrowser.isConnected())
-      return cachedBrowser;
+    if (cachedBrowser.isConnected()) return cachedBrowser;
     try {
       await cachedBrowser.close();
     } catch (e) {
@@ -576,8 +568,7 @@ async function getBrowser(_name = "chromium") {
   return cachedBrowser;
 }
 async function closeBrowser() {
-  if (!cachedBrowser)
-    return;
+  if (!cachedBrowser) return;
   try {
     await cachedBrowser.close();
   } catch (e) {
@@ -603,15 +594,13 @@ async function launchHeadful(displayNum) {
     "--use-gl=angle",
     "--use-angle=swiftshader"
   ];
-  if (hasExtensions)
-    args.push(`--load-extension=${UBLOCK_PATH}`);
+  if (hasExtensions) args.push(`--load-extension=${UBLOCK_PATH}`);
   const launchOpts = {
     headless: false,
     args,
     env: { ...process.env, DISPLAY: `:${displayNum}` }
   };
-  if (executablePath)
-    launchOpts.executablePath = executablePath;
+  if (executablePath) launchOpts.executablePath = executablePath;
   log.debug(`headful: ${executablePath || "patchright chromium"}, extensions: ${hasExtensions}`);
   return import_patchright.chromium.launch(launchOpts);
 }
@@ -621,40 +610,70 @@ var import_fingerprint_generator = require("fingerprint-generator");
 
 // src/lib/constants.ts
 var TIMING = {
+  /** Mouse move settle delay */
   MOUSE_MOVE: [50, 200],
+  /** Click down→up delay */
   CLICK_HOLD: [30, 90],
+  /** Post-click settle */
   POST_CLICK: [100, 300],
+  /** Per-character typing delay */
   CHAR_DELAY: [30, 150],
+  /** Occasional word-boundary pause */
   WORD_PAUSE: [200, 500],
+  /** Pre-action move range */
   IDLE_MOUSE_X: [100, 400],
   IDLE_MOUSE_Y: [100, 300],
+  /** Pre-checkbox random move */
   PRE_CHECKBOX_X: [200, 600],
   PRE_CHECKBOX_Y: [150, 400],
+  /** Pause after moving to checkbox area */
   PRE_CHECKBOX_WAIT: [300, 800],
+  /** Wait after clicking reCAPTCHA checkbox */
   POST_CHECKBOX_WAIT: 2500,
-  POST_VERIFY_WAIT: 2000,
+  /** Wait after clicking verify button */
+  POST_VERIFY_WAIT: 2e3,
+  /** Wait between clicking captcha tiles */
   TILE_CLICK_DELAY: [200, 500],
+  /** Time to wait for reCAPTCHA tile images to settle */
   TILE_SETTLE: 800,
+  /** Delay before captcha auto-detection */
   CAPTCHA_DETECT_WAIT: 1500,
+  /** Post-login navigation settle */
   POST_LOGIN_WAIT: 1500,
+  /** Post-submit form delay */
   POST_SUBMIT_WAIT: 500,
-  POST_SUBMIT_EXTENDED: 2000,
+  /** Post-submit form extended wait */
+  POST_SUBMIT_EXTENDED: 2e3,
+  /** Delay before navigating (human hesitation) */
   PRE_NAVIGATE: [300, 700],
+  /** Per-digit input delay base */
   DIGIT_DELAY_BASE: 80,
   DIGIT_DELAY_RANGE: 120,
+  /** Post-click in forms */
   POST_FORM_CLICK: 200,
+  /** Post-TOTP entry wait */
   POST_TOTP_WAIT: 300,
+  /** Post-cookies inject wait */
   POST_COOKIES_WAIT: 300,
+  /** Scroll step delay */
   SCROLL_DELAY: 150,
-  STALE_CHECK_INTERVAL: 2000
+  /** Stale state check interval */
+  STALE_CHECK_INTERVAL: 2e3
 };
 var CAPTCHA_GRID = {
+  /** Pixels from bframe top to grid start (reCAPTCHA) */
   RECAPTCHA_HEADER_HEIGHT: 112,
+  /** Pixels from bframe top to grid start (hCaptcha) — slightly different */
   HCAPTCHA_HEADER_HEIGHT: 110,
+  /** Default tile size when bframeBox is unavailable */
   DEFAULT_TILE_SIZE: 125,
+  /** Grid padding (left+right total) */
   GRID_PADDING: 24,
+  /** Grid left margin */
   GRID_MARGIN: 12,
+  /** Verify button offset from bframe bottom */
   VERIFY_BTN_BOTTOM_OFFSET: 35,
+  /** Verify button offset from bframe right */
   VERIFY_BTN_RIGHT_OFFSET: 60
 };
 var SCREEN_DEFAULTS = {
@@ -664,22 +683,31 @@ var SCREEN_DEFAULTS = {
   DPR: 1.25
 };
 var THRESHOLDS = {
+  /** Minimum character change to consider page "changed" */
   STALE_CHAR_CHANGE: 100,
+  /** Minimum percentage change to consider page "changed" */
   STALE_PERCENT_CHANGE: 0.05,
+  /** Minimum body text length to not be considered "empty" */
   MIN_BODY_TEXT: 200,
+  /** Maximum response text length to capture */
   MAX_RESPONSE_TEXT: 1e5
 };
 var TIMEOUTS = {
-  DEFAULT_STALE: 20000,
-  NAVIGATION: 60000,
+  DEFAULT_STALE: 2e4,
+  NAVIGATION: 6e4,
   SELECTOR_WAIT: 1e4,
-  TOTP_INPUT: 5000,
-  API_REQUEST: 180000,
-  HEALTH_CHECK: 3000,
-  CHALLENGE_FRAME_WAIT: 5000,
+  TOTP_INPUT: 5e3,
+  API_REQUEST: 18e4,
+  HEALTH_CHECK: 3e3,
+  CHALLENGE_FRAME_WAIT: 5e3,
+  // New-tab following: after a click, how long to wait for a just-opened tab's
+  // 'page' event to arrive (only applies when no tab has registered yet), and
+  // how long to let the followed tab reach domcontentloaded before continuing.
   TAB_FOLLOW_SETTLE: 400,
-  TAB_LOAD: 15000,
-  TAB_BLANK_RESOLVE: 3000
+  TAB_LOAD: 15e3,
+  // A new tab usually opens at about:blank then navigates to its real URL —
+  // wait this long for that first real navigation before judging it blank.
+  TAB_BLANK_RESOLVE: 3e3
 };
 var CHROME_MIN_VERSION = 130;
 
@@ -703,6 +731,7 @@ function generateWindowsFingerprint() {
     screenWidth: w,
     screenHeight: h,
     screenAvailHeight: h - 40,
+    // Windows taskbar ~40px
     colorDepth: 24,
     deviceScaleFactor: dpr,
     hardwareConcurrency: nav.hardwareConcurrency || 8,
@@ -717,10 +746,10 @@ var log2 = createLogger("session");
 var BASE_DISPLAY = parseInt(process.env.VNC_BASE_DISPLAY || "99", 10);
 var MAX_SESSIONS = parseInt(process.env.VNC_MAX_SESSIONS || "20", 10);
 var SESSION_TIMEOUT = parseInt(process.env.VNC_SESSION_TIMEOUT_MS || "300000", 10);
-var sessions = new Map;
-var usedDisplays = new Set;
+var sessions = /* @__PURE__ */ new Map();
+var usedDisplays = /* @__PURE__ */ new Set();
 function allocateDisplay() {
-  for (let i = 0;i < MAX_SESSIONS; i++) {
+  for (let i = 0; i < MAX_SESSIONS; i++) {
     const num = BASE_DISPLAY + i;
     if (!usedDisplays.has(num)) {
       usedDisplays.add(num);
@@ -732,15 +761,13 @@ function allocateDisplay() {
 function freeDisplay(num) {
   usedDisplays.delete(num);
 }
-function waitForSocket(displayNum, timeoutMs = 5000) {
+function waitForSocket(displayNum, timeoutMs = 5e3) {
   const socketPath = `/tmp/.X11-unix/X${displayNum}`;
   return new Promise((resolve, reject) => {
     const start = Date.now();
     const check = () => {
-      if (import_fs2.default.existsSync(socketPath))
-        return resolve();
-      if (Date.now() - start > timeoutMs)
-        return reject(new Error(`Xvfb socket not ready after ${timeoutMs}ms`));
+      if (import_fs2.default.existsSync(socketPath)) return resolve();
+      if (Date.now() - start > timeoutMs) return reject(new Error(`Xvfb socket not ready after ${timeoutMs}ms`));
       setTimeout(check, 100);
     };
     check();
@@ -750,7 +777,8 @@ function killProcess(proc) {
   if (proc && !proc.killed) {
     try {
       proc.kill("SIGTERM");
-    } catch {}
+    } catch {
+    }
   }
 }
 async function startSession(userId) {
@@ -760,13 +788,17 @@ async function startSession(userId) {
   const displayNum = allocateDisplay();
   const vncPort = 5900 + displayNum;
   const wsPort = 6080 + (displayNum - BASE_DISPLAY);
-  const xvfb = import_child_process.spawn("Xvfb", [`:${displayNum}`, "-screen", "0", "1920x1080x24", "-ac"], {
+  const xvfb = (0, import_child_process.spawn)("Xvfb", [`:${displayNum}`, "-screen", "0", "1920x1080x24", "-ac"], {
     stdio: "ignore"
   });
   await waitForSocket(displayNum);
-  const x11vnc = import_child_process.spawn("x11vnc", ["-display", `:${displayNum}`, "-nopw", "-listen", "localhost", "-rfbport", String(vncPort), "-shared", "-forever"], { stdio: "ignore" });
+  const x11vnc = (0, import_child_process.spawn)(
+    "x11vnc",
+    ["-display", `:${displayNum}`, "-nopw", "-listen", "localhost", "-rfbport", String(vncPort), "-shared", "-forever"],
+    { stdio: "ignore" }
+  );
   const noVncPath = import_fs2.default.existsSync("/usr/share/novnc") ? "/usr/share/novnc" : "/usr/share/noVNC";
-  const websockify = import_child_process.spawn("websockify", ["--web", noVncPath, String(wsPort), `localhost:${vncPort}`], {
+  const websockify = (0, import_child_process.spawn)("websockify", ["--web", noVncPath, String(wsPort), `localhost:${vncPort}`], {
     stdio: "ignore"
   });
   await new Promise((r) => setTimeout(r, 500));
@@ -788,7 +820,7 @@ async function startSession(userId) {
     browser,
     context,
     page,
-    createdAt: new Date,
+    createdAt: /* @__PURE__ */ new Date(),
     timeoutTimer: null
   };
   session.timeoutTimer = setTimeout(() => stopSession(userId), SESSION_TIMEOUT);
@@ -807,28 +839,31 @@ function getSession(userId) {
 }
 async function stopSession(userId) {
   const session = sessions.get(userId);
-  if (!session)
-    return null;
+  if (!session) return null;
   clearTimeout(session.timeoutTimer);
   let sessionData = null;
   try {
-    const { extractSession: extractSession2 } = await Promise.resolve().then(() => exports_persistence);
+    const { extractSession: extractSession2 } = await Promise.resolve().then(() => (init_persistence(), persistence_exports));
     sessionData = await extractSession2(session.context, session.page);
-  } catch {}
+  } catch {
+  }
   contextStealthScripts.delete(session.context);
   try {
     await session.context.close();
-  } catch {}
+  } catch {
+  }
   try {
     await session.browser.close();
-  } catch {}
+  } catch {
+  }
   killProcess(session.websockify);
   killProcess(session.x11vnc);
   killProcess(session.xvfb);
-  await new Promise((r) => setTimeout(r, 1000));
+  await new Promise((r) => setTimeout(r, 1e3));
   try {
     import_fs2.default.unlinkSync(`/tmp/.X11-unix/X${session.displayNum}`);
-  } catch {}
+  } catch {
+  }
   freeDisplay(session.displayNum);
   sessions.delete(userId);
   return sessionData;
@@ -839,19 +874,18 @@ async function cleanupAllSessions() {
 }
 
 // src/lib/auth/crypto.ts
-init_paths();
 var import_crypto = __toESM(require("crypto"));
 var import_fs3 = __toESM(require("fs"));
 var import_os2 = __toESM(require("os"));
 var import_path2 = __toESM(require("path"));
+init_paths();
 var SALT = "iframer-session";
 var INFO = "encryption";
 var KEY_LENGTH = 32;
 var IV_LENGTH = 12;
 var TAG_LENGTH = 16;
 function getLocalToken() {
-  if (process.env.IFRAMER_SECRET)
-    return process.env.IFRAMER_SECRET;
+  if (process.env.IFRAMER_SECRET) return process.env.IFRAMER_SECRET;
   const candidates = [
     import_path2.default.join(getDataDir(), "secret"),
     import_path2.default.join(process.env.XDG_RUNTIME_DIR || import_os2.default.tmpdir(), "iframer-secret")
@@ -859,9 +893,9 @@ function getLocalToken() {
   for (const file of candidates) {
     try {
       const existing = import_fs3.default.readFileSync(file, "utf8").trim();
-      if (existing)
-        return existing;
-    } catch {}
+      if (existing) return existing;
+    } catch {
+    }
   }
   for (const file of candidates) {
     try {
@@ -869,15 +903,17 @@ function getLocalToken() {
       const secret = import_crypto.default.randomBytes(32).toString("hex");
       import_fs3.default.writeFileSync(file, secret, { mode: 384 });
       return secret;
-    } catch {}
+    } catch {
+    }
   }
-  throw new Error("iframer: could not read or create a persistent encryption secret in any " + `writable location (${candidates.join(", ")}). Set IFRAMER_SECRET to a ` + "stable value shared between the MCP server and CLI (openssl rand -hex 32).");
+  throw new Error(
+    `iframer: could not read or create a persistent encryption secret in any writable location (${candidates.join(", ")}). Set IFRAMER_SECRET to a stable value shared between the MCP server and CLI (openssl rand -hex 32).`
+  );
 }
 function deriveKey(token, purpose = INFO) {
   return new Promise((resolve, reject) => {
     import_crypto.default.hkdf("sha256", token, SALT, purpose, KEY_LENGTH, (err, key) => {
-      if (err)
-        return reject(err);
+      if (err) return reject(err);
       resolve(Buffer.from(key));
     });
   });
@@ -895,7 +931,7 @@ function decrypt(blob, key) {
   const ciphertext = blob.subarray(IV_LENGTH + TAG_LENGTH);
   const decipher = import_crypto.default.createDecipheriv("aes-256-gcm", key, iv);
   decipher.setAuthTag(tag);
-  return decipher.update(ciphertext, undefined, "utf8") + decipher.final("utf8");
+  return decipher.update(ciphertext, void 0, "utf8") + decipher.final("utf8");
 }
 function generateTOTP(secret, period = 30, digits = 6) {
   const base32Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -903,16 +939,15 @@ function generateTOTP(secret, period = 30, digits = 6) {
   let bits = "";
   for (const c of cleanSecret) {
     const val = base32Chars.indexOf(c);
-    if (val === -1)
-      continue;
+    if (val === -1) continue;
     bits += val.toString(2).padStart(5, "0");
   }
   const keyBytes = [];
-  for (let i = 0;i + 8 <= bits.length; i += 8) {
+  for (let i = 0; i + 8 <= bits.length; i += 8) {
     keyBytes.push(parseInt(bits.substring(i, i + 8), 2));
   }
   const key = Buffer.from(keyBytes);
-  const time = Math.floor(Date.now() / 1000 / period);
+  const time = Math.floor(Date.now() / 1e3 / period);
   const timeBuffer = Buffer.alloc(8);
   timeBuffer.writeUInt32BE(Math.floor(time / 4294967296), 0);
   timeBuffer.writeUInt32BE(time & 4294967295, 4);
@@ -921,13 +956,17 @@ function generateTOTP(secret, period = 30, digits = 6) {
   const code = ((hmac[offset] & 127) << 24 | (hmac[offset + 1] & 255) << 16 | (hmac[offset + 2] & 255) << 8 | hmac[offset + 3] & 255) % Math.pow(10, digits);
   return code.toString().padStart(digits, "0");
 }
+
+// src/lib/iframer.ts
+init_persistence();
+
 // src/lib/screenshot.ts
 var import_fs4 = __toESM(require("fs"));
 var import_path3 = __toESM(require("path"));
 var log3 = createLogger("screenshot");
-var MAX_AGE_MS = parseInt(process.env.IFRAMER_SCREENSHOT_MAX_AGE_MS || String(24 * 60 * 60 * 1000), 10);
+var MAX_AGE_MS = parseInt(process.env.IFRAMER_SCREENSHOT_MAX_AGE_MS || String(24 * 60 * 60 * 1e3), 10);
 var MAX_FILES = parseInt(process.env.IFRAMER_SCREENSHOT_MAX_FILES || "500", 10);
-var PRUNE_THROTTLE_MS = 5 * 60 * 1000;
+var PRUNE_THROTTLE_MS = 5 * 60 * 1e3;
 var lastPruneAt = 0;
 function saveScreenshot(buffer, filename, screenshotDir, publicUrl) {
   import_fs4.default.mkdirSync(screenshotDir, { recursive: true });
@@ -938,8 +977,7 @@ function saveScreenshot(buffer, filename, screenshotDir, publicUrl) {
 }
 function maybePrune(dir) {
   const now = Date.now();
-  if (now - lastPruneAt < PRUNE_THROTTLE_MS)
-    return;
+  if (now - lastPruneAt < PRUNE_THROTTLE_MS) return;
   lastPruneAt = now;
   pruneScreenshots(dir);
 }
@@ -963,7 +1001,8 @@ function pruneScreenshots(dir, opts = {}) {
         try {
           import_fs4.default.unlinkSync(e.full);
           removed++;
-        } catch {}
+        } catch {
+        }
       } else {
         survivors.push(e);
       }
@@ -974,11 +1013,11 @@ function pruneScreenshots(dir, opts = {}) {
         try {
           import_fs4.default.unlinkSync(e.full);
           removed++;
-        } catch {}
+        } catch {
+        }
       }
     }
-    if (removed > 0)
-      log3.debug(`pruned ${removed} old screenshot(s) from ${dir}`);
+    if (removed > 0) log3.debug(`pruned ${removed} old screenshot(s) from ${dir}`);
     return removed;
   } catch (err) {
     log3.warn(`screenshot prune failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -1024,8 +1063,7 @@ function createNodeDb(dbPath) {
     close: () => db.close()
   };
 }
-
-class SqliteStore {
+var SqliteStore = class {
   db;
   constructor(dataDir) {
     import_fs5.default.mkdirSync(dataDir, { recursive: true });
@@ -1051,12 +1089,21 @@ class SqliteStore {
     const CANONICAL = "iframer-local";
     const LEGACY = ["cli-user", "mcp-user", "default"];
     for (const legacy of LEGACY) {
-      this.db.run(`INSERT OR IGNORE INTO credentials (user_id, domain, blob)
-         SELECT ?, domain, blob FROM credentials WHERE user_id = ?`, CANONICAL, legacy);
-      this.db.run(`INSERT OR IGNORE INTO sessions (user_id, blob)
-         SELECT ?, blob FROM sessions WHERE user_id = ?`, CANONICAL, legacy);
+      this.db.run(
+        `INSERT OR IGNORE INTO credentials (user_id, domain, blob)
+         SELECT ?, domain, blob FROM credentials WHERE user_id = ?`,
+        CANONICAL,
+        legacy
+      );
+      this.db.run(
+        `INSERT OR IGNORE INTO sessions (user_id, blob)
+         SELECT ?, blob FROM sessions WHERE user_id = ?`,
+        CANONICAL,
+        legacy
+      );
     }
   }
+  // ─── Sessions ───────────────────────────────────────────────────────
   async getSession(userId) {
     const row = this.db.queryGet("SELECT blob FROM sessions WHERE user_id = ?", userId);
     return row ? Buffer.from(row.blob) : null;
@@ -1067,6 +1114,7 @@ class SqliteStore {
   async deleteSession(userId) {
     this.db.run("DELETE FROM sessions WHERE user_id = ?", userId);
   }
+  // ─── Credentials ────────────────────────────────────────────────────
   async setCredential(userId, domain, encryptedBlob) {
     this.db.run("INSERT OR REPLACE INTO credentials (user_id, domain, blob) VALUES (?, ?, ?)", userId, domain, encryptedBlob);
   }
@@ -1081,10 +1129,11 @@ class SqliteStore {
     const rows = this.db.queryAll("SELECT domain FROM credentials WHERE user_id = ?", userId);
     return rows.map((r) => r.domain);
   }
+  // ─── Lifecycle ──────────────────────────────────────────────────────
   close() {
     this.db.close();
   }
-}
+};
 
 // src/lib/storage.ts
 init_paths();
@@ -1108,12 +1157,9 @@ var DEFAULT_INSTALL_DIR = import_path5.default.join(import_os3.default.homedir()
 function getPlatform() {
   const arch = process.arch;
   const platform = process.platform;
-  if (platform === "darwin")
-    return arch === "arm64" ? "mac-arm64" : "mac-x64";
-  if (platform === "linux")
-    return arch === "arm64" ? "linux-arm64" : "linux64";
-  if (platform === "win32")
-    return "win64";
+  if (platform === "darwin") return arch === "arm64" ? "mac-arm64" : "mac-x64";
+  if (platform === "linux") return arch === "arm64" ? "linux-arm64" : "linux64";
+  if (platform === "win32") return "win64";
   throw new Error(`Unsupported platform: ${platform}-${arch}`);
 }
 function getChromeExecutablePath(installDir) {
@@ -1138,29 +1184,25 @@ function getChromeExecutablePath(installDir) {
 async function downloadChrome(installDir = DEFAULT_INSTALL_DIR) {
   log4.info("Downloading Chrome for Testing (first time only)...");
   const res = await fetch(CHROME_VERSIONS_URL);
-  if (!res.ok)
-    throw new Error(`Failed to fetch Chrome versions: ${res.status}`);
+  if (!res.ok) throw new Error(`Failed to fetch Chrome versions: ${res.status}`);
   const data = await res.json();
   const channel = data.channels?.Stable;
-  if (!channel)
-    throw new Error("No Stable channel found in Chrome for Testing versions");
+  if (!channel) throw new Error("No Stable channel found in Chrome for Testing versions");
   const platform = getPlatform();
-  const download = channel.downloads?.chrome?.find((d) => d.platform === platform);
-  if (!download)
-    throw new Error(`No Chrome for Testing download for platform: ${platform}`);
-  const url = download.url;
+  const download2 = channel.downloads?.chrome?.find((d) => d.platform === platform);
+  if (!download2) throw new Error(`No Chrome for Testing download for platform: ${platform}`);
+  const url = download2.url;
   const version = channel.version;
   log4.debug(`Version ${version} for ${platform}`);
   log4.debug(`URL: ${url}`);
   import_fs6.default.mkdirSync(installDir, { recursive: true });
   const zipPath = import_path5.default.join(installDir, "chrome.zip");
   const dlRes = await fetch(url);
-  if (!dlRes.ok)
-    throw new Error(`Download failed: ${dlRes.status}`);
+  if (!dlRes.ok) throw new Error(`Download failed: ${dlRes.status}`);
   const buf = Buffer.from(await dlRes.arrayBuffer());
   import_fs6.default.writeFileSync(zipPath, buf);
   log4.info(`Downloaded ${(buf.length / 1024 / 1024).toFixed(1)}MB`);
-  import_child_process2.execSync(`unzip -o -q "${zipPath}" -d "${installDir}"`, { stdio: "inherit" });
+  (0, import_child_process2.execSync)(`unzip -o -q "${zipPath}" -d "${installDir}"`, { stdio: "inherit" });
   import_fs6.default.unlinkSync(zipPath);
   const execPath = getChromeExecutablePath(installDir);
   if (!import_fs6.default.existsSync(execPath)) {
@@ -1169,26 +1211,24 @@ async function downloadChrome(installDir = DEFAULT_INSTALL_DIR) {
   if (process.platform !== "win32") {
     import_fs6.default.chmodSync(execPath, 493);
   }
-  import_fs6.default.writeFileSync(import_path5.default.join(installDir, "version.json"), JSON.stringify({ version, platform, downloadedAt: new Date().toISOString() }));
+  import_fs6.default.writeFileSync(import_path5.default.join(installDir, "version.json"), JSON.stringify({ version, platform, downloadedAt: (/* @__PURE__ */ new Date()).toISOString() }));
   log4.info(`Installed at: ${execPath}`);
   return execPath;
 }
 function findChromeForTesting() {
   if (process.env.CHROME_EXECUTABLE) {
-    if (import_fs6.default.existsSync(process.env.CHROME_EXECUTABLE))
-      return process.env.CHROME_EXECUTABLE;
+    if (import_fs6.default.existsSync(process.env.CHROME_EXECUTABLE)) return process.env.CHROME_EXECUTABLE;
   }
   try {
     const execPath = getChromeExecutablePath(DEFAULT_INSTALL_DIR);
-    if (import_fs6.default.existsSync(execPath))
-      return execPath;
-  } catch {}
+    if (import_fs6.default.existsSync(execPath)) return execPath;
+  } catch {
+  }
   return null;
 }
 function findChrome() {
   const cft = findChromeForTesting();
-  if (cft)
-    return cft;
+  if (cft) return cft;
   const systemPaths = process.platform === "darwin" ? [
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
@@ -1198,6 +1238,7 @@ function findChrome() {
     "/usr/bin/google-chrome",
     "/usr/bin/chromium-browser",
     "/usr/bin/chromium",
+    // Playwright/Patchright installed browsers (Docker containers)
     ...(() => {
       try {
         const dirs = import_fs6.default.readdirSync("/ms-playwright").filter((d) => d.startsWith("chromium-")).sort().reverse();
@@ -1211,15 +1252,13 @@ function findChrome() {
     "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
   ];
   for (const p of systemPaths) {
-    if (import_fs6.default.existsSync(p))
-      return p;
+    if (import_fs6.default.existsSync(p)) return p;
   }
   return null;
 }
 async function ensureChrome() {
   const cft = findChromeForTesting();
-  if (cft)
-    return cft;
+  if (cft) return cft;
   try {
     return await downloadChrome();
   } catch (err) {
@@ -1240,8 +1279,7 @@ function cloakEnabled() {
   return process.env.IFRAMER_USE_CLOAKBROWSER === "1" || process.env.IFRAMER_USE_CLOAKBROWSER === "true";
 }
 async function tryImport() {
-  if (!cloakEnabled())
-    return null;
+  if (!cloakEnabled()) return null;
   try {
     return await import("cloakbrowser");
   } catch {
@@ -1250,8 +1288,7 @@ async function tryImport() {
 }
 async function ensureBinary() {
   const cloak = await tryImport();
-  if (!cloak)
-    return false;
+  if (!cloak) return false;
   try {
     const info = cloak.binaryInfo();
     if (!info.installed) {
@@ -1269,12 +1306,10 @@ async function ensureBinary() {
 }
 async function launchCloakBrowser(options) {
   const cloak = await tryImport();
-  if (!cloak)
-    return null;
+  if (!cloak) return null;
   try {
     const ok = await ensureBinary();
-    if (!ok)
-      return null;
+    if (!ok) return null;
     const browser = await cloak.launch({
       headless: options.headless,
       args: options.args
@@ -1288,10 +1323,10 @@ async function launchCloakBrowser(options) {
 }
 
 // src/lib/browser/registry.ts
-init_paths();
 var import_fs7 = __toESM(require("fs"));
 var import_path6 = __toESM(require("path"));
 var import_child_process3 = require("child_process");
+init_paths();
 var log6 = createLogger("registry");
 function browsersDir() {
   const dir = import_path6.default.join(getDataDir(), "browsers");
@@ -1302,8 +1337,7 @@ function serverInfoPath() {
   return import_path6.default.join(getDataDir(), "server.json");
 }
 function isPidAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 1)
-    return false;
+  if (!Number.isInteger(pid) || pid <= 1) return false;
   try {
     process.kill(pid, 0);
     return true;
@@ -1312,10 +1346,9 @@ function isPidAlive(pid) {
   }
 }
 function pidMatchesMarker(pid, marker) {
-  if (!isPidAlive(pid))
-    return false;
+  if (!isPidAlive(pid)) return false;
   try {
-    const cmd = import_child_process3.execSync(`ps -o command= -p ${pid}`, { encoding: "utf8" });
+    const cmd = (0, import_child_process3.execSync)(`ps -o command= -p ${pid}`, { encoding: "utf8" });
     return cmd.includes(marker);
   } catch {
     return false;
@@ -1323,11 +1356,9 @@ function pidMatchesMarker(pid, marker) {
 }
 function findChromePidByMarker(marker) {
   try {
-    const out = import_child_process3.execSync(`pgrep -f -- "${marker}"`, { encoding: "utf8" }).trim();
-    const pids = out.split(`
-`).map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n !== process.pid);
-    if (pids.length === 0)
-      return null;
+    const out = (0, import_child_process3.execSync)(`pgrep -f -- "${marker}"`, { encoding: "utf8" }).trim();
+    const pids = out.split("\n").map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n !== process.pid);
+    if (pids.length === 0) return null;
     return Math.min(...pids);
   } catch {
     return null;
@@ -1343,22 +1374,22 @@ function registerBrowser(rec) {
 function unregisterBrowser(chromePid) {
   try {
     import_fs7.default.unlinkSync(import_path6.default.join(browsersDir(), `${chromePid}.json`));
-  } catch {}
+  } catch {
+  }
 }
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function forceKillBrowser(rec) {
-  if (!isPidAlive(rec.chromePid))
-    return true;
+  if (!isPidAlive(rec.chromePid)) return true;
   if (!pidMatchesMarker(rec.chromePid, rec.marker)) {
     return true;
   }
   try {
     process.kill(rec.chromePid, "SIGKILL");
-  } catch {}
-  const deadline = Date.now() + 2000;
+  } catch {
+  }
+  const deadline = Date.now() + 2e3;
   while (Date.now() < deadline) {
-    if (!isPidAlive(rec.chromePid))
-      return true;
+    if (!isPidAlive(rec.chromePid)) return true;
     await sleep(100);
   }
   return !isPidAlive(rec.chromePid);
@@ -1380,13 +1411,15 @@ async function reapOrphanBrowsers() {
     } catch {
       try {
         import_fs7.default.unlinkSync(full);
-      } catch {}
+      } catch {
+      }
       continue;
     }
     if (!isPidAlive(rec.chromePid) || !pidMatchesMarker(rec.chromePid, rec.marker)) {
       try {
         import_fs7.default.unlinkSync(full);
-      } catch {}
+      } catch {
+      }
       continue;
     }
     if (isPidAlive(rec.ownerPid)) {
@@ -1397,10 +1430,11 @@ async function reapOrphanBrowsers() {
     if (await forceKillBrowser(rec)) {
       try {
         import_fs7.default.unlinkSync(full);
-      } catch {}
+      } catch {
+      }
       reaped++;
     } else {
-      log6.warn(`failed to kill orphan Chrome pid=${rec.chromePid} — leaving record for next sweep`);
+      log6.warn(`failed to kill orphan Chrome pid=${rec.chromePid} \u2014 leaving record for next sweep`);
     }
   }
   return { reaped, skipped };
@@ -1411,8 +1445,7 @@ function writeServerInfo(info) {
 function readServerInfo() {
   try {
     const info = JSON.parse(import_fs7.default.readFileSync(serverInfoPath(), "utf8"));
-    if (!Number.isInteger(info.pid) || !Number.isInteger(info.port))
-      return null;
+    if (!Number.isInteger(info.pid) || !Number.isInteger(info.port)) return null;
     return info;
   } catch {
     return null;
@@ -1423,23 +1456,23 @@ function clearServerInfo(pid) {
   if (info && info.pid === pid) {
     try {
       import_fs7.default.unlinkSync(serverInfoPath());
-    } catch {}
+    } catch {
+    }
   }
 }
 
 // src/lib/browser/daemon.ts
 var log7 = createLogger("daemon");
-var DEFAULT_IDLE_TIMEOUT = 5 * 60 * 1000;
-var CLOSE_GRACE_MS = 5000;
+var DEFAULT_IDLE_TIMEOUT = 5 * 60 * 1e3;
+var CLOSE_GRACE_MS = 5e3;
 var DEFAULT_INSTANCE = "default";
 function keyOf(mode, instanceId) {
   return `${mode}::${instanceId}`;
 }
 var sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
-
-class BrowserDaemon {
-  instances = new Map;
-  idleTimers = new Map;
+var BrowserDaemon = class {
+  instances = /* @__PURE__ */ new Map();
+  idleTimers = /* @__PURE__ */ new Map();
   idleTimeout;
   constructor(idleTimeout = DEFAULT_IDLE_TIMEOUT) {
     this.idleTimeout = idleTimeout;
@@ -1473,11 +1506,12 @@ class BrowserDaemon {
           this.resetIdleTimer(key);
           return { browser: instance.browser, context: context2, page: page2 };
         }
-      } catch {}
+      } catch {
+      }
       log7.info(`Browser for ${key} disconnected (window closed?), relaunching...`);
       await this.stopMode(mode, instanceId);
     }
-    const marker = `--iframer-key=${key}-${import_crypto2.randomUUID()}`;
+    const marker = `--iframer-key=${key}-${(0, import_crypto2.randomUUID)()}`;
     let browser;
     const cloakBrowser = await launchCloakBrowser({ headless: mode === "headless", args: [marker] });
     if (cloakBrowser) {
@@ -1505,10 +1539,10 @@ class BrowserDaemon {
         chromePid,
         ownerPid: process.pid,
         marker,
-        launchedAt: new Date().toISOString()
+        launchedAt: (/* @__PURE__ */ new Date()).toISOString()
       });
     } else {
-      log7.warn(`could not resolve Chrome PID for ${key} — force-kill unavailable for this instance`);
+      log7.warn(`could not resolve Chrome PID for ${key} \u2014 force-kill unavailable for this instance`);
     }
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -1519,7 +1553,7 @@ class BrowserDaemon {
       mode,
       instanceId,
       sessionProfile,
-      createdAt: new Date,
+      createdAt: /* @__PURE__ */ new Date(),
       chromePid,
       marker,
       active: 0
@@ -1529,33 +1563,34 @@ class BrowserDaemon {
     log7.info(`Chrome ${key} ready (pid=${chromePid ?? "unknown"})`);
     return { browser, context, page };
   }
+  /** Mark an instance busy for the duration of a pipeline run. While busy,
+   *  the idle timer re-arms instead of killing the browser mid-work.
+   *  Always pair with release() in a finally block. */
   acquire(mode, instanceId = DEFAULT_INSTANCE) {
     const instance = this.instances.get(keyOf(mode, instanceId));
-    if (instance)
-      instance.active++;
+    if (instance) instance.active++;
   }
   release(mode, instanceId = DEFAULT_INSTANCE) {
     const key = keyOf(mode, instanceId);
     const instance = this.instances.get(key);
-    if (!instance)
-      return;
+    if (!instance) return;
     instance.active = Math.max(0, instance.active - 1);
-    if (instance.active === 0)
-      this.resetIdleTimer(key);
+    if (instance.active === 0) this.resetIdleTimer(key);
   }
   isRunning(mode, instanceId = DEFAULT_INSTANCE) {
     const instance = this.instances.get(keyOf(mode, instanceId));
-    if (!instance)
-      return false;
+    if (!instance) return false;
     try {
       return instance.browser.isConnected();
     } catch {
       return false;
     }
   }
+  /** Distinct modes that currently have at least one live instance. */
   runningModes() {
     return [...new Set(this.liveInstances().map((i) => i.mode))];
   }
+  /** Return all currently-live instances (for extracting session state before teardown) */
   liveInstances() {
     return [...this.instances.values()].filter((inst) => {
       try {
@@ -1565,13 +1600,18 @@ class BrowserDaemon {
       }
     });
   }
+  /** Mode of a live browser with this instanceId, if any (first match). Lets
+   *  a resume reattach the SAME window by instanceId even when the call forces
+   *  no mode and has no navigate step to infer one from. */
   findLiveMode(instanceId) {
     for (const inst of this.liveInstances()) {
-      if (inst.instanceId === instanceId)
-        return inst.mode;
+      if (inst.instanceId === instanceId) return inst.mode;
     }
     return null;
   }
+  /** Live browsers as InstanceInfo — what page each is on right now, so an
+   *  agent can see which window is which task and reattach by instanceId
+   *  after an interrupt (instead of re-navigating and losing the state). */
   async instancesInfo() {
     const now = Date.now();
     const out = [];
@@ -1580,10 +1620,12 @@ class BrowserDaemon {
       let title = "";
       try {
         url = inst.page.url();
-      } catch {}
+      } catch {
+      }
       try {
         title = await inst.page.title();
-      } catch {}
+      } catch {
+      }
       out.push({
         mode: inst.mode,
         instanceId: inst.instanceId,
@@ -1592,7 +1634,7 @@ class BrowserDaemon {
         title,
         busy: inst.active > 0,
         createdAt: inst.createdAt.toISOString(),
-        ageSeconds: Math.round((now - inst.createdAt.getTime()) / 1000)
+        ageSeconds: Math.round((now - inst.createdAt.getTime()) / 1e3)
       });
     }
     return out;
@@ -1600,13 +1642,17 @@ class BrowserDaemon {
   async stopMode(mode, instanceId = DEFAULT_INSTANCE) {
     await this.stopKey(keyOf(mode, instanceId));
   }
+  /**
+   * Stop one browser: polite close with a hard deadline, then SIGKILL by PID.
+   * This can NEVER hang — a wedged context.close() (the historical source of
+   * permanently orphaned Chromes) is abandoned after CLOSE_GRACE_MS and the
+   * process is killed by PID instead.
+   */
   async stopKey(key) {
     const instance = this.instances.get(key);
-    if (!instance)
-      return;
+    if (!instance) return;
     const timer = this.idleTimers.get(key);
-    if (timer)
-      clearTimeout(timer);
+    if (timer) clearTimeout(timer);
     this.idleTimers.delete(key);
     log7.info(`Stopping Chrome ${key} (pid=${instance.chromePid ?? "unknown"})...`);
     const politeClose = (async () => {
@@ -1636,33 +1682,43 @@ class BrowserDaemon {
         log7.warn(`Chrome pid=${instance.chromePid} survived SIGKILL?! leaving registry record for reaper`);
       }
     } else if (!closedInTime) {
-      log7.warn(`no PID recorded for ${key} and polite close hung — this Chrome may leak until the next reap`);
+      log7.warn(`no PID recorded for ${key} and polite close hung \u2014 this Chrome may leak until the next reap`);
     }
     this.instances.delete(key);
     log7.info(`Stopped Chrome ${key}`);
   }
+  /**
+   * Stop browsers. By default skips instances that are mid-pipeline (active>0)
+   * so one agent's "session stop" can't kill another agent's running work on
+   * a shared server. Pass force=true (crash recovery / shutdown) to kill all.
+   */
   async stopAll(force = false) {
     const keys = [...this.instances.entries()].filter(([, inst]) => force || inst.active === 0).map(([k]) => k);
     await Promise.all(keys.map((k) => this.stopKey(k)));
   }
   resetIdleTimer(key) {
     const existing = this.idleTimers.get(key);
-    if (existing)
-      clearTimeout(existing);
-    this.idleTimers.set(key, setTimeout(() => {
-      const instance = this.instances.get(key);
-      if (instance && instance.active > 0) {
-        this.resetIdleTimer(key);
-        return;
-      }
-      log7.info(`Idle timeout for ${key}, stopping...`);
-      this.stopKey(key).catch((err) => log7.warn(`idle stop failed for ${key}: ${err}`));
-    }, this.idleTimeout));
+    if (existing) clearTimeout(existing);
+    this.idleTimers.set(
+      key,
+      setTimeout(() => {
+        const instance = this.instances.get(key);
+        if (instance && instance.active > 0) {
+          this.resetIdleTimer(key);
+          return;
+        }
+        log7.info(`Idle timeout for ${key}, stopping...`);
+        this.stopKey(key).catch((err) => log7.warn(`idle stop failed for ${key}: ${err}`));
+      }, this.idleTimeout)
+    );
   }
+  /** True if any registered Chrome PID from this daemon is still alive. */
   hasLiveProcesses() {
-    return [...this.instances.values()].some((inst) => inst.chromePid !== null && isPidAlive(inst.chromePid));
+    return [...this.instances.values()].some(
+      (inst) => inst.chromePid !== null && isPidAlive(inst.chromePid)
+    );
   }
-}
+};
 
 // src/lib/domain-modes.ts
 var import_fs8 = __toESM(require("fs"));
@@ -1674,24 +1730,23 @@ function defaultFile() {
 }
 var TTL_DAYS = 14;
 var ESCALATION_LADDER = ["headless", "docker-headful", "binary-headful"];
-
-class DomainModeStore {
+var DomainModeStore = class {
   data = {};
   filePath;
   constructor(filePath = defaultFile()) {
     this.filePath = filePath;
     this.load();
   }
+  /** Get the recommended mode for a domain, or null if unknown/expired */
   getMode(domain) {
     const entry = this.data[domain];
-    if (!entry)
-      return null;
-    if (this.isExpired(entry))
-      return null;
+    if (!entry) return null;
+    if (this.isExpired(entry)) return null;
     return entry.mode;
   }
+  /** Record a successful access */
   recordSuccess(domain, mode) {
-    const now = new Date().toISOString();
+    const now = (/* @__PURE__ */ new Date()).toISOString();
     const existing = this.data[domain];
     this.data[domain] = {
       mode,
@@ -1703,8 +1758,9 @@ class DomainModeStore {
     };
     this.save();
   }
+  /** Record a blocked attempt */
   recordFailure(domain, mode, reason) {
-    const now = new Date().toISOString();
+    const now = (/* @__PURE__ */ new Date()).toISOString();
     const existing = this.data[domain];
     this.data[domain] = {
       mode: existing?.mode || mode,
@@ -1716,26 +1772,28 @@ class DomainModeStore {
     };
     this.save();
   }
+  /** Get the next mode to try after a failure, or null if exhausted */
   getNextMode(failedMode, availableModes) {
     const idx = ESCALATION_LADDER.indexOf(failedMode);
-    for (let i = idx + 1;i < ESCALATION_LADDER.length; i++) {
+    for (let i = idx + 1; i < ESCALATION_LADDER.length; i++) {
       if (availableModes.includes(ESCALATION_LADDER[i])) {
         return ESCALATION_LADDER[i];
       }
     }
     return null;
   }
+  /** Get the best starting mode: domain memory > first available in ladder */
   getBestMode(domain, availableModes) {
     const remembered = this.getMode(domain);
     if (remembered && availableModes.includes(remembered)) {
       return remembered;
     }
     for (const mode of ESCALATION_LADDER) {
-      if (availableModes.includes(mode))
-        return mode;
+      if (availableModes.includes(mode)) return mode;
     }
     return "headless";
   }
+  /** Get summary stats for the status tool */
   getSummary() {
     const entries = Object.entries(this.data).filter(([, e]) => !this.isExpired(e)).sort(([, a], [, b]) => b.lastSuccess.localeCompare(a.lastSuccess));
     return {
@@ -1744,10 +1802,9 @@ class DomainModeStore {
     };
   }
   isExpired(entry) {
-    if (!entry.lastSuccess)
-      return true;
+    if (!entry.lastSuccess) return true;
     const age = Date.now() - new Date(entry.lastSuccess).getTime();
-    return age > TTL_DAYS * 24 * 60 * 60 * 1000;
+    return age > TTL_DAYS * 24 * 60 * 60 * 1e3;
   }
   load() {
     try {
@@ -1766,17 +1823,17 @@ class DomainModeStore {
       log8.error("Failed to save:", err);
     }
   }
-}
+};
 
 // src/lib/browser/cdp-launcher.ts
 function hasDisplay() {
-  if (process.platform === "darwin" || process.platform === "win32")
-    return true;
+  if (process.platform === "darwin" || process.platform === "win32") return true;
   return !!process.env.DISPLAY;
 }
 function checkModeAvailability() {
   return {
     headless: true,
+    // Always available — we can auto-download Chrome
     binaryHeadful: hasDisplay()
   };
 }
@@ -1792,17 +1849,17 @@ function sessionStoreKey(userId, instanceId = DEFAULT_INSTANCE) {
 }
 
 // src/lib/execution/ref-store.ts
-class RefStore {
-  store;
-  config;
-  userRefs = new Map;
+var RefStore = class {
   constructor(store, config) {
     this.store = store;
     this.config = config;
   }
+  store;
+  config;
+  userRefs = /* @__PURE__ */ new Map();
   makeContext(userId, token) {
     if (!this.userRefs.has(userId)) {
-      this.userRefs.set(userId, { refMap: new Map, nextRefId: 1 });
+      this.userRefs.set(userId, { refMap: /* @__PURE__ */ new Map(), nextRefId: 1 });
     }
     const refs = this.userRefs.get(userId);
     return {
@@ -1816,12 +1873,12 @@ class RefStore {
       store: this.store
     };
   }
+  /** Persist the ref counter advanced by a run back onto the user's ref state. */
   sync(userId, ctx) {
     const refs = this.userRefs.get(userId);
-    if (refs)
-      refs.nextRefId = ctx.nextRefId;
+    if (refs) refs.nextRefId = ctx.nextRefId;
   }
-}
+};
 
 // src/lib/execution/pipeline-executor.ts
 var import_playwright_core = require("playwright-core");
@@ -1834,17 +1891,15 @@ function failedStepResult(step, error, durationMs, stepIndex = -1) {
 // src/lib/clipboard.ts
 var import_child_process4 = require("child_process");
 function platformTools(mode) {
-  if (process.platform === "darwin")
-    return [[mode === "read" ? "pbpaste" : "pbcopy"]];
-  if (mode === "read")
-    return [["wl-paste", "-n"], ["xclip", "-selection", "clipboard", "-o"], ["xsel", "-b", "-o"]];
+  if (process.platform === "darwin") return [[mode === "read" ? "pbpaste" : "pbcopy"]];
+  if (mode === "read") return [["wl-paste", "-n"], ["xclip", "-selection", "clipboard", "-o"], ["xsel", "-b", "-o"]];
   return [["wl-copy"], ["xclip", "-selection", "clipboard", "-i"], ["xsel", "-b", "-i"]];
 }
 function run(cmd, input) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = import_child_process4.spawn(cmd[0], cmd.slice(1));
+      child = (0, import_child_process4.spawn)(cmd[0], cmd.slice(1));
     } catch {
       resolve({ ok: false, out: "", err: `spawn ${cmd[0]} failed` });
       return;
@@ -1855,7 +1910,7 @@ function run(cmd, input) {
     child.stderr?.on("data", (d) => errOut += d);
     child.on("error", (e) => resolve({ ok: false, out: "", err: e.message }));
     child.on("close", (code) => resolve({ ok: code === 0, out, err: errOut }));
-    if (input !== undefined) {
+    if (input !== void 0) {
       child.stdin?.write(input);
       child.stdin?.end();
     }
@@ -1866,8 +1921,7 @@ async function clipboardRead() {
   let lastErr = "";
   for (const cmd of tools) {
     const r = await run(cmd);
-    if (r.ok)
-      return r.out;
+    if (r.ok) return r.out;
     lastErr = r.err;
   }
   throw new Error(`No working clipboard tool found (${tools.map((t) => t[0]).join(", ")}). ${lastErr}`);
@@ -1891,7 +1945,7 @@ function generatePath(fromX, fromY, toX, toY) {
   const cy1 = fromY + (toY - fromY) * rand(-0.2, 0.5) + rand(-50, 50);
   const cx2 = fromX + (toX - fromX) * rand(0.6, 0.9) + rand(-30, 30);
   const cy2 = fromY + (toY - fromY) * rand(0.5, 1.2) + rand(-30, 30);
-  for (let i = 0;i <= steps; i++) {
+  for (let i = 0; i <= steps; i++) {
     const t = i / steps;
     const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
     let x = bezierPoint(eased, fromX, cx1, cx2, toX);
@@ -1904,14 +1958,14 @@ function generatePath(fromX, fromY, toX, toY) {
   points[points.length - 1] = { x: Math.round(toX), y: Math.round(toY) };
   return points;
 }
-var mousePositions = new WeakMap;
+var mousePositions = /* @__PURE__ */ new WeakMap();
 async function humanMove(page, toX, toY) {
   const mouse = page.mouse;
   const lastPos = mousePositions.get(page);
   const fromX = lastPos?.x ?? randRange(TIMING.IDLE_MOUSE_X);
   const fromY = lastPos?.y ?? randRange(TIMING.IDLE_MOUSE_Y);
-  const path8 = generatePath(fromX, fromY, toX, toY);
-  for (const point of path8) {
+  const path13 = generatePath(fromX, fromY, toX, toY);
+  for (const point of path13) {
     await mouse.move(point.x, point.y);
     await sleep3(rand(2, 12));
   }
@@ -1919,12 +1973,11 @@ async function humanMove(page, toX, toY) {
 }
 async function humanClick(page, selector) {
   const element = await page.waitForSelector(selector, { timeout: TIMEOUTS.SELECTOR_WAIT });
-  if (!element)
-    throw new Error(`Element not found: ${selector}`);
-  await element.scrollIntoViewIfNeeded().catch(() => {});
+  if (!element) throw new Error(`Element not found: ${selector}`);
+  await element.scrollIntoViewIfNeeded().catch(() => {
+  });
   const box = await element.boundingBox();
-  if (!box)
-    throw new Error(`Element not visible: ${selector}`);
+  if (!box) throw new Error(`Element not visible: ${selector}`);
   const targetX = box.x + box.width * rand(0.3, 0.7);
   const targetY = box.y + box.height * rand(0.3, 0.7);
   await humanMove(page, targetX, targetY);
@@ -1945,15 +1998,16 @@ async function humanClickXY(page, x, y) {
 async function assertFocused(page, selector, clicked) {
   const r = await page.evaluate((sel) => {
     const el = document.querySelector(sel);
-    if (!el)
-      return { ok: false, active: "(target not found)" };
+    if (!el) return { ok: false, active: "(target not found)" };
     const a = document.activeElement;
     const ok = !!a && (a === el || el.contains(a));
     const desc = a ? `${a.tagName.toLowerCase()}${a.id ? "#" + a.id : ""}` : "nothing";
     return { ok, active: desc };
   }, selector);
   if (!r.ok) {
-    throw new Error(`human-type aborted: after ${clicked ? "clicking" : "skip-click on"} "${selector}", it is NOT focused ` + `(focus is on ${r.active}). Typing now would send keystrokes to the page, where single keys act as ` + `shortcuts — a real hazard. Fix the selector, or focus the field first and pass skipClick. No keys were sent.`);
+    throw new Error(
+      `human-type aborted: after ${clicked ? "clicking" : "skip-click on"} "${selector}", it is NOT focused (focus is on ${r.active}). Typing now would send keystrokes to the page, where single keys act as shortcuts \u2014 a real hazard. Fix the selector, or focus the field first and pass skipClick. No keys were sent.`
+    );
   }
 }
 var SPEED_FACTOR = { slow: 1.5, normal: 1, fast: 0.35 };
@@ -1974,38 +2028,34 @@ async function humanType(page, selector, text, opts = {}) {
 }
 async function humanScroll(page, deltaY) {
   const abs = Math.abs(deltaY);
-  if (abs === 0)
-    return;
+  if (abs === 0) return;
   const dir = Math.sign(deltaY) || 1;
   const ticks = Math.max(3, Math.min(20, Math.round(abs / rand(80, 140))));
   let done = 0;
-  for (let i = 0;i < ticks; i++) {
+  for (let i = 0; i < ticks; i++) {
     const t = (i + 1) / ticks;
     const ease = Math.sin(t * Math.PI);
     let step = Math.round(abs / ticks * (0.6 + ease * 0.8) + rand(-8, 8));
     step = Math.max(10, step);
-    if (done + step > abs)
-      step = abs - done;
+    if (done + step > abs) step = abs - done;
     await page.mouse.wheel(0, dir * step);
     done += step;
     await sleep3(rand(30, 90));
-    if (Math.random() < 0.15)
-      await sleep3(rand(120, 300));
-    if (done >= abs)
-      break;
+    if (Math.random() < 0.15) await sleep3(rand(120, 300));
+    if (done >= abs) break;
   }
 }
 async function clickRecaptchaCheckbox(page) {
-  const recaptchaFrame = await page.waitForSelector('iframe[title*="reCAPTCHA"], iframe[src*="recaptcha/api2/anchor"]', { timeout: TIMEOUTS.SELECTOR_WAIT });
-  if (!recaptchaFrame)
-    throw new Error("reCAPTCHA iframe not found");
+  const recaptchaFrame = await page.waitForSelector(
+    'iframe[title*="reCAPTCHA"], iframe[src*="recaptcha/api2/anchor"]',
+    { timeout: TIMEOUTS.SELECTOR_WAIT }
+  );
+  if (!recaptchaFrame) throw new Error("reCAPTCHA iframe not found");
   const frame = await recaptchaFrame.contentFrame();
-  if (!frame)
-    throw new Error("Could not access reCAPTCHA iframe");
+  if (!frame) throw new Error("Could not access reCAPTCHA iframe");
   await frame.waitForSelector(".recaptcha-checkbox-border, #recaptcha-anchor", { timeout: TIMEOUTS.SELECTOR_WAIT });
   const recaptchaBox = await recaptchaFrame.boundingBox();
-  if (!recaptchaBox)
-    throw new Error("reCAPTCHA iframe not visible");
+  if (!recaptchaBox) throw new Error("reCAPTCHA iframe not visible");
   const checkboxX = recaptchaBox.x + rand(20, 35);
   const checkboxY = recaptchaBox.y + recaptchaBox.height * rand(0.35, 0.65);
   await humanMove(page, randRange(TIMING.PRE_CHECKBOX_X), randRange(TIMING.PRE_CHECKBOX_Y));
@@ -2017,26 +2067,28 @@ async function clickRecaptchaCheckbox(page) {
       const anchor = document.querySelector("#recaptcha-anchor");
       return anchor && anchor.getAttribute("aria-checked") === "true";
     });
-    if (checked)
-      return { solved: true, challenge: false };
-  } catch {}
+    if (checked) return { solved: true, challenge: false };
+  } catch {
+  }
   const challengeInfo = await getChallengeInfo(page);
   return { solved: false, challenge: true, challengeInfo };
 }
 async function getChallengeInfo(page) {
-  const bframe = await page.waitForSelector('iframe[title*="desafio reCAPTCHA"], iframe[title*="recaptcha challenge"], iframe[src*="recaptcha/api2/bframe"]', { timeout: TIMEOUTS.CHALLENGE_FRAME_WAIT }).catch(() => null);
-  if (!bframe)
-    return null;
+  const bframe = await page.waitForSelector(
+    'iframe[title*="desafio reCAPTCHA"], iframe[title*="recaptcha challenge"], iframe[src*="recaptcha/api2/bframe"]',
+    { timeout: TIMEOUTS.CHALLENGE_FRAME_WAIT }
+  ).catch(() => null);
+  if (!bframe) return null;
   const bframeBox = await bframe.boundingBox();
-  if (!bframeBox)
-    return null;
+  if (!bframeBox) return null;
   const frame = await bframe.contentFrame();
-  if (!frame)
-    return null;
+  if (!frame) return null;
   const info = await frame.evaluate(() => {
     const promptEl = document.querySelector(".rc-imageselect-desc-wrapper, .rc-imageselect-instructions");
     const prompt = promptEl ? promptEl.innerText.trim() : "";
-    const table = document.querySelector("table.rc-imageselect-table, table.rc-imageselect-table-33, table.rc-imageselect-table-44");
+    const table = document.querySelector(
+      "table.rc-imageselect-table, table.rc-imageselect-table-33, table.rc-imageselect-table-44"
+    );
     let rows = 0, cols = 0;
     if (table) {
       const trs = table.querySelectorAll("tr");
@@ -2054,8 +2106,8 @@ async function getChallengeInfo(page) {
   const tileWidth = info.cols > 0 ? gridWidth / info.cols : 0;
   const tileHeight = info.rows > 0 ? gridHeight / info.rows : 0;
   const tiles = [];
-  for (let r = 0;r < info.rows; r++) {
-    for (let c = 0;c < info.cols; c++) {
+  for (let r = 0; r < info.rows; r++) {
+    for (let c = 0; c < info.cols; c++) {
       tiles.push({
         row: r,
         col: c,
@@ -2084,8 +2136,7 @@ async function clickChallengeTiles(page, tileIndices) {
   const clicked = [];
   for (const idx of tileIndices) {
     const tile = challengeInfo.tiles.find((t) => t.index === idx);
-    if (!tile)
-      continue;
+    if (!tile) continue;
     await humanClickXY(page, tile.centerX, tile.centerY);
     await sleep3(randRange(TIMING.TILE_CLICK_DELAY));
     clicked.push(idx);
@@ -2094,8 +2145,7 @@ async function clickChallengeTiles(page, tileIndices) {
 }
 async function clickChallengeVerify(page) {
   const challengeInfo = await getChallengeInfo(page);
-  if (!challengeInfo)
-    throw new Error("No active reCAPTCHA challenge found");
+  if (!challengeInfo) throw new Error("No active reCAPTCHA challenge found");
   await humanClickXY(page, challengeInfo.verifyButton.x, challengeInfo.verifyButton.y);
   await sleep3(TIMING.POST_VERIFY_WAIT);
   const anchorFrame = await page.waitForSelector('iframe[title*="reCAPTCHA"], iframe[src*="recaptcha/api2/anchor"]', { timeout: TIMEOUTS.CHALLENGE_FRAME_WAIT }).catch(() => null);
@@ -2107,9 +2157,9 @@ async function clickChallengeVerify(page) {
           const anchor = document.querySelector("#recaptcha-anchor");
           return anchor && anchor.getAttribute("aria-checked") === "true";
         });
-        if (checked)
-          return { solved: true };
-      } catch {}
+        if (checked) return { solved: true };
+      } catch {
+      }
     }
   }
   const newInfo = await getChallengeInfo(page);
@@ -2118,6 +2168,10 @@ async function clickChallengeVerify(page) {
 function sleep3(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
+
+// src/lib/actions/handlers/navigation.ts
+init_persistence();
+
 // src/lib/actions/resolve-selector.ts
 function resolveSelector(selector, ctx) {
   if (selector.startsWith("@a:")) {
@@ -2125,7 +2179,9 @@ function resolveSelector(selector, ctx) {
     const anchor = ctx.anchors?.get(name);
     if (!anchor) {
       const available = ctx.anchors ? Array.from(ctx.anchors.keys()).join(", ") : "";
-      throw new Error(`Unknown anchor: @a:${name}${ctx.anchorDomain ? ` for ${ctx.anchorDomain}` : ""}. ` + `${available ? `Known anchors: ${available}. ` : "This domain has no saved anchors yet. "}` + `Run a snapshot/find to locate the element, act on it, then save it with the ` + `\`remember\` tool so future runs skip the search.`);
+      throw new Error(
+        `Unknown anchor: @a:${name}${ctx.anchorDomain ? ` for ${ctx.anchorDomain}` : ""}. ${available ? `Known anchors: ${available}. ` : "This domain has no saved anchors yet. "}Run a snapshot/find to locate the element, act on it, then save it with the \`remember\` tool so future runs skip the search.`
+      );
     }
     return anchor.selector;
   }
@@ -2133,7 +2189,7 @@ function resolveSelector(selector, ctx) {
     const ref = ctx.refMap.get(selector);
     if (!ref) {
       const available = Array.from(ctx.refMap.keys()).join(", ");
-      throw new Error(`Unknown ref: ${selector}. ${available ? `Available refs: ${available}` : "No refs available — run a snapshot or annotated screenshot step first."}`);
+      throw new Error(`Unknown ref: ${selector}. ${available ? `Available refs: ${available}` : "No refs available \u2014 run a snapshot or annotated screenshot step first."}`);
     }
     return ref.selector;
   }
@@ -2171,27 +2227,31 @@ async function fill(page, step, ctx) {
   const selector = resolveSelector(step.selector, ctx);
   const value = step.value;
   await page.fill(selector, value);
-  const stuck = await page.evaluate(({ sel, val }) => {
-    const el = document.querySelector(sel);
-    if (!el)
-      return false;
-    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-    const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
-    try {
-      el.focus();
-    } catch {}
-    try {
-      setter ? setter.call(el, val) : el.value = val;
-    } catch {
-      el.value = val;
-    }
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-    try {
-      el.blur();
-    } catch {}
-    return el.value === val;
-  }, { sel: selector, val: value });
+  const stuck = await page.evaluate(
+    ({ sel, val }) => {
+      const el = document.querySelector(sel);
+      if (!el) return false;
+      const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+      try {
+        el.focus();
+      } catch {
+      }
+      try {
+        setter ? setter.call(el, val) : el.value = val;
+      } catch {
+        el.value = val;
+      }
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      try {
+        el.blur();
+      } catch {
+      }
+      return el.value === val;
+    },
+    { sel: selector, val: value }
+  );
   if (!stuck) {
     const loc = page.locator(selector);
     try {
@@ -2202,13 +2262,14 @@ async function fill(page, step, ctx) {
         const el = document.querySelector(sel);
         el?.blur?.();
       }, selector);
-    } catch {}
+    } catch {
+    }
   }
 }
 async function humanClickStep(page, step, ctx) {
   if (step.selector) {
     await humanClick(page, resolveSelector(step.selector, ctx));
-  } else if (step.x !== undefined && step.y !== undefined) {
+  } else if (step.x !== void 0 && step.y !== void 0) {
     await humanClickXY(page, step.x, step.y);
   } else {
     throw new Error("human-click requires selector or x/y coordinates");
@@ -2217,7 +2278,7 @@ async function humanClickStep(page, step, ctx) {
 async function rightClick(page, step, ctx) {
   if (step.selector) {
     await page.click(resolveSelector(step.selector, ctx), { button: "right" });
-  } else if (step.x !== undefined && step.y !== undefined) {
+  } else if (step.x !== void 0 && step.y !== void 0) {
     await page.mouse.click(step.x, step.y, { button: "right" });
   } else {
     throw new Error("right-click requires selector or x/y coordinates");
@@ -2249,22 +2310,23 @@ async function scroll(page, step, ctx) {
     if (selector) {
       const el = await page.$(selector);
       const box = el ? await el.boundingBox() : null;
-      if (box)
-        await humanMove(page, box.x + box.width / 2, box.y + box.height / 2);
+      if (box) await humanMove(page, box.x + box.width / 2, box.y + box.height / 2);
     }
     await humanScroll(page, dy);
     return;
   }
-  await page.evaluate(({ dy, sel }) => {
-    if (sel) {
-      const el = document.querySelector(sel);
-      if (!el)
-        throw new Error(`scroll: no element for selector ${sel}`);
-      el.scrollBy(0, dy || el.scrollHeight);
-    } else {
-      window.scrollBy(0, dy || document.body.scrollHeight);
-    }
-  }, { dy: step.deltaY ?? 0, sel: selector });
+  await page.evaluate(
+    ({ dy, sel }) => {
+      if (sel) {
+        const el = document.querySelector(sel);
+        if (!el) throw new Error(`scroll: no element for selector ${sel}`);
+        el.scrollBy(0, dy || el.scrollHeight);
+      } else {
+        window.scrollBy(0, dy || document.body.scrollHeight);
+      }
+    },
+    { dy: step.deltaY ?? 0, sel: selector }
+  );
 }
 async function keyboard(page, step) {
   const mods = [
@@ -2279,21 +2341,16 @@ async function read(page, step, ctx) {
   const selector = step.selector ? resolveSelector(step.selector, ctx) : "body";
   const raw = await page.evaluate((sel) => {
     const el = sel === "body" ? document.body : document.querySelector(sel);
-    if (!el)
-      return null;
+    if (!el) return null;
     return el.innerText || el.textContent || "";
   }, selector);
-  if (raw == null)
-    throw new Error(`read: no element for selector ${selector}`);
-  const text = raw.replace(/\n{3,}/g, `
-
-`).trim();
-  const max = step.maxChars || 6000;
+  if (raw == null) throw new Error(`read: no element for selector ${selector}`);
+  const text = raw.replace(/\n{3,}/g, "\n\n").trim();
+  const max = step.maxChars || 6e3;
   return { text: text.slice(0, max), truncated: text.length > max };
 }
 async function upload(page, step, ctx) {
-  if (!step.files || step.files.length === 0)
-    throw new Error("upload: `files` must be a non-empty array of local paths");
+  if (!step.files || step.files.length === 0) throw new Error("upload: `files` must be a non-empty array of local paths");
   await page.setInputFiles(resolveSelector(step.selector, ctx), step.files);
   return { uploaded: step.files.length, files: step.files };
 }
@@ -2306,16 +2363,14 @@ async function paste(page, step, ctx) {
   return { pasted: text.length };
 }
 async function download(page, step) {
-  if (!step.url)
-    throw new Error("download: `url` is required");
+  if (!step.url) throw new Error("download: `url` is required");
   const resp = await page.request.get(step.url);
   const status = resp.status();
-  if (!resp.ok())
-    throw new Error(`download: HTTP ${status} for ${step.url}`);
+  if (!resp.ok()) throw new Error(`download: HTTP ${status} for ${step.url}`);
   const buf = await resp.body();
-  const fs9 = await import("fs");
+  const fs14 = await import("fs");
   const pathMod = await import("path");
-  const { getDataDir: getDataDir2 } = await Promise.resolve().then(() => (init_paths(), exports_paths));
+  const { getDataDir: getDataDir2 } = await Promise.resolve().then(() => (init_paths(), paths_exports));
   let outPath;
   if (step.path && pathMod.isAbsolute(step.path)) {
     outPath = step.path;
@@ -2323,19 +2378,19 @@ async function download(page, step) {
     let name = "download";
     try {
       name = decodeURIComponent(new URL(step.url).pathname.split("/").pop() || "") || "download";
-    } catch {}
+    } catch {
+    }
     outPath = pathMod.join(getDataDir2(), "downloads", step.path || name);
   }
-  fs9.mkdirSync(pathMod.dirname(outPath), { recursive: true });
-  fs9.writeFileSync(outPath, buf);
+  fs14.mkdirSync(pathMod.dirname(outPath), { recursive: true });
+  fs14.writeFileSync(outPath, buf);
   return { path: outPath, size: buf.length, status };
 }
 async function typeCode(page, step, ctx) {
   const code = String(step.value || "");
   const selector = step.selector ? resolveSelector(step.selector, ctx) : 'input[type="tel"]';
   const firstInput = await page.waitForSelector(selector, { timeout: TIMEOUTS.TOTP_INPUT });
-  if (!firstInput)
-    throw new Error(`Input not found: ${selector}`);
+  if (!firstInput) throw new Error(`Input not found: ${selector}`);
   await firstInput.click();
   await page.waitForTimeout(TIMING.POST_FORM_CLICK);
   for (const digit of code) {
@@ -2353,10 +2408,8 @@ async function find(page, step, ctx) {
   let locator;
   if (step.role) {
     const opts = {};
-    if (step.name)
-      opts.name = step.exact ? step.name : new RegExp(step.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-    if (step.exact !== undefined)
-      opts.exact = step.exact;
+    if (step.name) opts.name = step.exact ? step.name : new RegExp(step.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    if (step.exact !== void 0) opts.exact = step.exact;
     locator = page.getByRole(step.role, opts);
   } else if (step.label) {
     locator = page.getByLabel(step.label, { exact: step.exact });
@@ -2376,12 +2429,12 @@ async function find(page, step, ctx) {
   const elInfo = await element.evaluate((el) => {
     const tag = el.tagName.toLowerCase();
     const text = (el.textContent?.trim() || "").slice(0, 60);
-    const path8 = [];
+    const path13 = [];
     let current = el;
     while (current && current !== document.body && current !== document.documentElement) {
       let seg = current.tagName.toLowerCase();
       if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-        path8.unshift(`#${current.id}`);
+        path13.unshift(`#${current.id}`);
         break;
       }
       const parent = current.parentElement;
@@ -2393,10 +2446,10 @@ async function find(page, step, ctx) {
           seg += `:nth-of-type(${idx})`;
         }
       }
-      path8.unshift(seg);
+      path13.unshift(seg);
       current = parent;
     }
-    return { tag, text, selector: path8.join(" > ") };
+    return { tag, text, selector: path13.join(" > ") };
   });
   const ref = `@e${ctx.nextRefId++}`;
   const displayRole = step.role || elInfo.tag;
@@ -2417,32 +2470,6 @@ async function find(page, step, ctx) {
 }
 
 // src/lib/snapshot.ts
-var INTERACTIVE_ROLES = new Set([
-  "button",
-  "link",
-  "textbox",
-  "checkbox",
-  "radio",
-  "combobox",
-  "listbox",
-  "menuitem",
-  "menuitemcheckbox",
-  "menuitemradio",
-  "option",
-  "searchbox",
-  "slider",
-  "spinbutton",
-  "switch",
-  "tab",
-  "treeitem"
-]);
-var INTERACTIVE_TAGS = new Set([
-  "input",
-  "textarea",
-  "select",
-  "button",
-  "a"
-]);
 async function takeSnapshot(page, ctx, options) {
   const interactiveOnly = options?.interactiveOnly ?? true;
   const maxElements = options?.maxElements ?? 80;
@@ -2450,8 +2477,8 @@ async function takeSnapshot(page, ctx, options) {
   ctx.nextRefId = 1;
   const elements = await page.evaluate(({ interactiveOnly: interactiveOnly2, maxElements: maxElements2 }) => {
     const results = [];
-    const interactiveTags = new Set(["INPUT", "TEXTAREA", "SELECT", "BUTTON", "A"]);
-    const interactiveRoles = new Set([
+    const interactiveTags = /* @__PURE__ */ new Set(["INPUT", "TEXTAREA", "SELECT", "BUTTON", "A"]);
+    const interactiveRoles = /* @__PURE__ */ new Set([
       "button",
       "link",
       "textbox",
@@ -2471,35 +2498,28 @@ async function takeSnapshot(page, ctx, options) {
       "treeitem"
     ]);
     function isInteractive(el) {
-      if (interactiveTags.has(el.tagName))
-        return true;
+      if (interactiveTags.has(el.tagName)) return true;
       const role = el.getAttribute("role");
-      if (role && interactiveRoles.has(role))
-        return true;
-      if (el.hasAttribute("contenteditable"))
-        return true;
-      if (el.hasAttribute("tabindex") && el.getAttribute("tabindex") !== "-1")
-        return true;
+      if (role && interactiveRoles.has(role)) return true;
+      if (el.hasAttribute("contenteditable")) return true;
+      if (el.hasAttribute("tabindex") && el.getAttribute("tabindex") !== "-1") return true;
       return false;
     }
     function isVisible(el) {
       const rect = el.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0)
-        return false;
+      if (rect.width === 0 || rect.height === 0) return false;
       const style = getComputedStyle(el);
-      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0")
-        return false;
-      if (rect.bottom < 0 || rect.top > window.innerHeight + 200)
-        return false;
+      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
+      if (rect.bottom < 0 || rect.top > window.innerHeight + 200) return false;
       return true;
     }
     function buildSelector(el) {
-      const path8 = [];
+      const path13 = [];
       let current = el;
       while (current && current !== document.body && current !== document.documentElement) {
         let seg = current.tagName.toLowerCase();
         if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-          path8.unshift(`#${current.id}`);
+          path13.unshift(`#${current.id}`);
           break;
         }
         const parent = current.parentElement;
@@ -2511,36 +2531,30 @@ async function takeSnapshot(page, ctx, options) {
             seg += `:nth-of-type(${idx})`;
           }
         }
-        path8.unshift(seg);
+        path13.unshift(seg);
         current = parent;
       }
-      return path8.join(" > ");
+      return path13.join(" > ");
     }
     function getName(el) {
       const ariaLabel = el.getAttribute("aria-label");
-      if (ariaLabel)
-        return ariaLabel.trim();
+      if (ariaLabel) return ariaLabel.trim();
       const id = el.id;
       if (id) {
         const label = document.querySelector(`label[for="${id}"]`);
-        if (label)
-          return label.textContent?.trim() || "";
+        if (label) return label.textContent?.trim() || "";
       }
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-        if (el.placeholder)
-          return el.placeholder.trim();
+        if (el.placeholder) return el.placeholder.trim();
       }
       const text2 = el.textContent?.trim() || "";
       return text2.slice(0, 60);
     }
     const allElements = document.querySelectorAll("*");
     for (const el of allElements) {
-      if (results.length >= maxElements2)
-        break;
-      if (interactiveOnly2 && !isInteractive(el))
-        continue;
-      if (!isVisible(el))
-        continue;
+      if (results.length >= maxElements2) break;
+      if (interactiveOnly2 && !isInteractive(el)) continue;
+      if (!isVisible(el)) continue;
       const tag = el.tagName.toLowerCase();
       const role = el.getAttribute("role") || "";
       const type = el.type || "";
@@ -2572,13 +2586,10 @@ async function takeSnapshot(page, ctx, options) {
       displayRole = "link";
     }
     const state = [];
-    if (el.disabled)
-      state.push("disabled");
-    if (el.checked)
-      state.push("checked");
+    if (el.disabled) state.push("disabled");
+    if (el.checked) state.push("checked");
     let description = "";
-    if (el.placeholder && el.name !== el.placeholder)
-      description = `placeholder="${el.placeholder}"`;
+    if (el.placeholder && el.name !== el.placeholder) description = `placeholder="${el.placeholder}"`;
     if (el.type && !["text", "submit", "button", ""].includes(el.type)) {
       description = description ? `${description} type=${el.type}` : `type=${el.type}`;
     }
@@ -2603,16 +2614,12 @@ async function takeSnapshot(page, ctx, options) {
   const lines = [];
   for (const node of nodes) {
     let line = `${node.ref} ${node.role}`;
-    if (node.name)
-      line += ` "${node.name}"`;
-    if (node.state.length > 0)
-      line += ` [${node.state.join(", ")}]`;
-    if (node.description)
-      line += ` (${node.description})`;
+    if (node.name) line += ` "${node.name}"`;
+    if (node.state.length > 0) line += ` [${node.state.join(", ")}]`;
+    if (node.description) line += ` (${node.description})`;
     lines.push(line);
   }
-  const text = lines.join(`
-`);
+  const text = lines.join("\n");
   return { nodes, text };
 }
 
@@ -2621,8 +2628,8 @@ async function annotatedScreenshot(page, ctx) {
   ctx.refMap.clear();
   ctx.nextRefId = 1;
   const elements = await page.evaluate(() => {
-    const interactiveTags = new Set(["INPUT", "TEXTAREA", "SELECT", "BUTTON", "A"]);
-    const interactiveRoles = new Set([
+    const interactiveTags = /* @__PURE__ */ new Set(["INPUT", "TEXTAREA", "SELECT", "BUTTON", "A"]);
+    const interactiveRoles = /* @__PURE__ */ new Set([
       "button",
       "link",
       "textbox",
@@ -2636,35 +2643,28 @@ async function annotatedScreenshot(page, ctx) {
       "tab"
     ]);
     function isInteractive(el) {
-      if (interactiveTags.has(el.tagName))
-        return true;
+      if (interactiveTags.has(el.tagName)) return true;
       const role = el.getAttribute("role");
-      if (role && interactiveRoles.has(role))
-        return true;
-      if (el.hasAttribute("contenteditable"))
-        return true;
-      if (el.hasAttribute("tabindex") && el.getAttribute("tabindex") !== "-1")
-        return true;
+      if (role && interactiveRoles.has(role)) return true;
+      if (el.hasAttribute("contenteditable")) return true;
+      if (el.hasAttribute("tabindex") && el.getAttribute("tabindex") !== "-1") return true;
       return false;
     }
     function isVisible(el) {
       const rect = el.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0)
-        return false;
+      if (rect.width === 0 || rect.height === 0) return false;
       const style = getComputedStyle(el);
-      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0")
-        return false;
-      if (rect.bottom < 0 || rect.top > window.innerHeight)
-        return false;
+      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
+      if (rect.bottom < 0 || rect.top > window.innerHeight) return false;
       return true;
     }
     function buildSelector(el) {
-      const path8 = [];
+      const path13 = [];
       let current = el;
       while (current && current !== document.body && current !== document.documentElement) {
         let seg = current.tagName.toLowerCase();
         if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-          path8.unshift(`#${current.id}`);
+          path13.unshift(`#${current.id}`);
           break;
         }
         const parent = current.parentElement;
@@ -2676,36 +2676,30 @@ async function annotatedScreenshot(page, ctx) {
             seg += `:nth-of-type(${idx})`;
           }
         }
-        path8.unshift(seg);
+        path13.unshift(seg);
         current = parent;
       }
-      return path8.join(" > ");
+      return path13.join(" > ");
     }
     function getName(el) {
       const ariaLabel = el.getAttribute("aria-label");
-      if (ariaLabel)
-        return ariaLabel.trim();
+      if (ariaLabel) return ariaLabel.trim();
       const id = el.id;
       if (id) {
         const label = document.querySelector(`label[for="${id}"]`);
-        if (label)
-          return label.textContent?.trim() || "";
+        if (label) return label.textContent?.trim() || "";
       }
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-        if (el.placeholder)
-          return el.placeholder.trim();
+        if (el.placeholder) return el.placeholder.trim();
       }
       return (el.textContent?.trim() || "").slice(0, 60);
     }
     const results = [];
     const allElements = document.querySelectorAll("*");
     for (const el of allElements) {
-      if (results.length >= 50)
-        break;
-      if (!isInteractive(el))
-        continue;
-      if (!isVisible(el))
-        continue;
+      if (results.length >= 50) break;
+      if (!isInteractive(el)) continue;
+      if (!isVisible(el)) continue;
       const rect = el.getBoundingClientRect();
       const tag = el.tagName.toLowerCase();
       const role = el.getAttribute("role") || "";
@@ -2725,14 +2719,10 @@ async function annotatedScreenshot(page, ctx) {
     const ref = `@e${ctx.nextRefId++}`;
     const num = ctx.nextRefId - 1;
     let displayRole = el.role;
-    if (el.tag === "a")
-      displayRole = "link";
-    if (el.tag === "input")
-      displayRole = "input";
-    if (el.tag === "textarea")
-      displayRole = "textarea";
-    if (el.tag === "select")
-      displayRole = "select";
+    if (el.tag === "a") displayRole = "link";
+    if (el.tag === "input") displayRole = "input";
+    if (el.tag === "textarea") displayRole = "textarea";
+    if (el.tag === "select") displayRole = "select";
     refs.push({ ref, role: displayRole, name: el.name, x: el.x, y: el.y });
     ctx.refMap.set(ref, {
       ref,
@@ -2769,8 +2759,7 @@ async function annotatedScreenshot(page, ctx) {
   const screenshotUrl = saveScreenshot(buf, `annotated-${Date.now()}.jpg`, ctx.screenshotDir, ctx.publicUrl);
   await page.evaluate(() => {
     const el = document.getElementById("__iframer_annotations__");
-    if (el)
-      el.remove();
+    if (el) el.remove();
   });
   return { screenshotUrl, refs };
 }
@@ -2779,8 +2768,7 @@ async function annotatedScreenshot(page, ctx) {
 async function screenshot(page, step, ctx) {
   if (step.annotate) {
     const annotated = await annotatedScreenshot(page, ctx);
-    const refLines = annotated.refs.map((r) => `  ${r.ref} ${r.role} "${r.name}"`).join(`
-`);
+    const refLines = annotated.refs.map((r) => `  ${r.ref} ${r.role} "${r.name}"`).join("\n");
     return { screenshotUrl: annotated.screenshotUrl, refs: refLines };
   }
   const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
@@ -2799,19 +2787,17 @@ async function snapshot(page, step, ctx) {
 var import_sdk = __toESM(require("@anthropic-ai/sdk"));
 var log10 = createLogger("captcha-solver");
 var MAX_ROUNDS = 8;
-var MAX_DURATION_MS = 45000;
+var MAX_DURATION_MS = 45e3;
 var TILE_SETTLE_MS = TIMING.TILE_SETTLE;
 var MODEL = "claude-haiku-4-5-20251001";
 function getClient() {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey)
-    throw new Error("ANTHROPIC_API_KEY not set — required for captcha auto-solve");
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set \u2014 required for captcha auto-solve");
   return new import_sdk.default({ apiKey });
 }
 function extractTarget(prompt) {
-  const lines = prompt.split(`
-`).map((l) => l.trim()).filter(Boolean);
-  for (let i = 0;i < lines.length; i++) {
+  const lines = prompt.split("\n").map((l) => l.trim()).filter(Boolean);
+  for (let i = 0; i < lines.length; i++) {
     if (/select all (images|squares) with/i.test(lines[i])) {
       const afterWith = lines[i].replace(/.*with\s*/i, "").trim();
       if (afterWith && afterWith.length > 1 && !/click/i.test(afterWith)) {
@@ -2826,8 +2812,7 @@ function extractTarget(prompt) {
 }
 async function screenshotFullGrid(page, challengeInfo) {
   const { bframeBox, rows, cols } = challengeInfo;
-  if (!bframeBox || rows === 0 || cols === 0)
-    return null;
+  if (!bframeBox || rows === 0 || cols === 0) return null;
   const gridClip = {
     x: bframeBox.x + 14,
     y: bframeBox.y + 112,
@@ -2844,16 +2829,15 @@ async function screenshotFullGrid(page, challengeInfo) {
 }
 async function screenshotTiles(page, challengeInfo) {
   const { bframeBox, rows, cols } = challengeInfo;
-  if (!bframeBox)
-    return [];
+  if (!bframeBox) return [];
   const gridX = bframeBox.x + 14;
   const gridY = bframeBox.y + 112;
   const gridSize = bframeBox.width - 28;
   const tileW = gridSize / cols;
   const tileH = gridSize / rows;
   const tiles = [];
-  for (let r = 0;r < rows; r++) {
-    for (let c = 0;c < cols; c++) {
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
       const clip = {
         x: gridX + c * tileW + 2,
         y: gridY + r * tileH + 2,
@@ -2863,51 +2847,53 @@ async function screenshotTiles(page, challengeInfo) {
       try {
         const buf = await page.screenshot({ type: "jpeg", quality: 85, clip });
         tiles.push({ index: r * cols + c, imageBase64: buf.toString("base64") });
-      } catch {}
+      } catch {
+      }
     }
   }
   return tiles;
 }
 async function classifyTiles(client, fullGridBase64, tiles, target, rows, cols) {
-  const results = await Promise.all(tiles.map(async (tile) => {
-    const tileRow = Math.floor(tile.index / cols) + 1;
-    const tileCol = tile.index % cols + 1;
-    try {
-      const response = await client.messages.create({
-        model: MODEL,
-        max_tokens: 10,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "image",
-                source: { type: "base64", media_type: "image/jpeg", data: fullGridBase64 }
-              },
-              {
-                type: "image",
-                source: { type: "base64", media_type: "image/jpeg", data: tile.imageBase64 }
-              },
-              {
-                type: "text",
-                text: `Image 1 is a full picture divided into a ${rows}x${cols} grid. Image 2 is the tile at row ${tileRow}, column ${tileCol} of that grid.
+  const results = await Promise.all(
+    tiles.map(async (tile) => {
+      const tileRow = Math.floor(tile.index / cols) + 1;
+      const tileCol = tile.index % cols + 1;
+      try {
+        const response = await client.messages.create({
+          model: MODEL,
+          max_tokens: 10,
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "image",
+                  source: { type: "base64", media_type: "image/jpeg", data: fullGridBase64 }
+                },
+                {
+                  type: "image",
+                  source: { type: "base64", media_type: "image/jpeg", data: tile.imageBase64 }
+                },
+                {
+                  type: "text",
+                  text: `Image 1 is a full picture divided into a ${rows}x${cols} grid. Image 2 is the tile at row ${tileRow}, column ${tileCol} of that grid.
 
 Does this tile contain a ${target}? Reply ONLY "yes" or "no".`
-              }
-            ]
-          }
-        ]
-      });
-      const answer = (response.content[0].text ?? "").toLowerCase().trim();
-      const match = answer.startsWith("yes");
-      if (match)
-        log10.debug(`tile ${tile.index} (r${tileRow}c${tileCol}): YES`);
-      return { index: tile.index, match };
-    } catch (err) {
-      log10.error(`tile ${tile.index} classification failed: ${err instanceof Error ? err.message : String(err)}`);
-      return { index: tile.index, match: false };
-    }
-  }));
+                }
+              ]
+            }
+          ]
+        });
+        const answer = (response.content[0].text ?? "").toLowerCase().trim();
+        const match = answer.startsWith("yes");
+        if (match) log10.debug(`tile ${tile.index} (r${tileRow}c${tileCol}): YES`);
+        return { index: tile.index, match };
+      } catch (err) {
+        log10.error(`tile ${tile.index} classification failed: ${err instanceof Error ? err.message : String(err)}`);
+        return { index: tile.index, match: false };
+      }
+    })
+  );
   return results.filter((r) => r.match).map((r) => r.index);
 }
 async function submitForm(page) {
@@ -2929,13 +2915,14 @@ async function submitForm(page) {
           log10.info(`Submitting form via: ${selector}`);
           await new Promise((r) => setTimeout(r, 500));
           await humanClick(page, selector);
-          await new Promise((r) => setTimeout(r, 2000));
+          await new Promise((r) => setTimeout(r, 2e3));
           return true;
         }
       }
-    } catch {}
+    } catch {
+    }
   }
-  log10.info("No submit button found — skipping form submission");
+  log10.info("No submit button found \u2014 skipping form submission");
   return false;
 }
 async function solveRecaptcha(page, monitor) {
@@ -2970,7 +2957,14 @@ async function solveRecaptcha(page, monitor) {
       return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Failed to screenshot challenge" };
     }
     monitor?.reportActivity();
-    const matchingIndices = await classifyTiles(client, fullGridImage, tileImages, target, challengeInfo.rows, challengeInfo.cols);
+    const matchingIndices = await classifyTiles(
+      client,
+      fullGridImage,
+      tileImages,
+      target,
+      challengeInfo.rows,
+      challengeInfo.cols
+    );
     log10.info(`Round ${rounds}: matched tiles [${matchingIndices.join(", ")}]`);
     monitor?.reportActivity();
     if (matchingIndices.length > 0) {
@@ -2988,7 +2982,14 @@ async function solveRecaptcha(page, monitor) {
             const replacedTiles = newTiles.filter((t) => matchingIndices.includes(t.index));
             if (replacedTiles.length > 0) {
               monitor?.reportActivity();
-              const newMatches = await classifyTiles(client, newFullGrid, replacedTiles, target, newInfo.rows, newInfo.cols);
+              const newMatches = await classifyTiles(
+                client,
+                newFullGrid,
+                replacedTiles,
+                target,
+                newInfo.rows,
+                newInfo.cols
+              );
               if (newMatches.length > 0) {
                 log10.info(`Round ${rounds}: dynamic tiles matched [${newMatches.join(", ")}]`);
                 await clickChallengeTiles(page, newMatches);
@@ -3019,12 +3020,11 @@ async function solveRecaptcha(page, monitor) {
 var import_sdk2 = __toESM(require("@anthropic-ai/sdk"));
 var log11 = createLogger("hcaptcha-solver");
 var MAX_ROUNDS2 = 8;
-var MAX_DURATION_MS2 = 60000;
+var MAX_DURATION_MS2 = 6e4;
 var MODEL2 = "claude-haiku-4-5-20251001";
 function getClient2() {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey)
-    throw new Error("ANTHROPIC_API_KEY not set — required for captcha auto-solve");
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set \u2014 required for captcha auto-solve");
   return new import_sdk2.default({ apiKey });
 }
 function rand2(min, max) {
@@ -3034,12 +3034,13 @@ function sleep4(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 async function clickCheckbox(page) {
-  const checkboxFrame = await page.waitForSelector('iframe[src*="hcaptcha.com"], iframe[data-hcaptcha-widget-id], iframe[title*="hCaptcha"]', { timeout: 1e4 }).catch(() => null);
-  if (!checkboxFrame)
-    throw new Error("hCaptcha checkbox iframe not found");
+  const checkboxFrame = await page.waitForSelector(
+    'iframe[src*="hcaptcha.com"], iframe[data-hcaptcha-widget-id], iframe[title*="hCaptcha"]',
+    { timeout: 1e4 }
+  ).catch(() => null);
+  if (!checkboxFrame) throw new Error("hCaptcha checkbox iframe not found");
   const box = await checkboxFrame.boundingBox();
-  if (!box)
-    throw new Error("hCaptcha iframe not visible");
+  if (!box) throw new Error("hCaptcha iframe not visible");
   await humanMove(page, rand2(200, 500), rand2(150, 400));
   await sleep4(rand2(300, 700));
   const cx = box.x + box.width * rand2(0.15, 0.35);
@@ -3053,26 +3054,30 @@ async function clickCheckbox(page) {
         const cb = document.querySelector("#checkbox");
         return cb?.getAttribute("aria-checked") === "true";
       });
-      if (checked)
-        return true;
-    } catch {}
+      if (checked) return true;
+    } catch {
+    }
   }
   return false;
 }
 async function getChallengeInfo2(page) {
-  const challengeFrame = await page.waitForSelector('iframe[title="hCaptcha challenge"], iframe[title*="hcaptcha challenge" i]', { timeout: 8000 }).catch(() => null);
-  if (!challengeFrame)
-    return null;
+  const challengeFrame = await page.waitForSelector(
+    'iframe[title="hCaptcha challenge"], iframe[title*="hcaptcha challenge" i]',
+    { timeout: 8e3 }
+  ).catch(() => null);
+  if (!challengeFrame) return null;
   const frameBox = await challengeFrame.boundingBox();
-  if (!frameBox)
-    return null;
+  if (!frameBox) return null;
   const frame = await challengeFrame.contentFrame();
-  if (!frame)
-    return null;
+  if (!frame) return null;
   const info = await frame.evaluate(() => {
-    const promptEl = document.querySelector(".prompt-text, .task-instructions, [class*='prompt'], [class*='task-description']");
+    const promptEl = document.querySelector(
+      ".prompt-text, .task-instructions, [class*='prompt'], [class*='task-description']"
+    );
     const prompt = promptEl ? promptEl.innerText.trim() : "";
-    const tileEls = document.querySelectorAll(".task-image, [class*='task-grid'] > *, [class*='challenge-container'] .image-wrapper, .image-wrapper");
+    const tileEls = document.querySelectorAll(
+      ".task-image, [class*='task-grid'] > *, [class*='challenge-container'] .image-wrapper, .image-wrapper"
+    );
     const count = tileEls.length;
     let rows = 3, cols = 3;
     if (count === 16) {
@@ -3087,8 +3092,7 @@ async function getChallengeInfo2(page) {
     }
     return { prompt, count, rows, cols };
   }).catch(() => ({ prompt: "", count: 0, rows: 3, cols: 3 }));
-  if (!info.prompt && info.count === 0)
-    return null;
+  if (!info.prompt && info.count === 0) return null;
   const gridPadTop = 150;
   const gridPadLeft = 20;
   const gridPadRight = 20;
@@ -3098,8 +3102,8 @@ async function getChallengeInfo2(page) {
   const tileW = gridWidth / info.cols;
   const tileH = gridHeight / info.rows;
   const tiles = [];
-  for (let r = 0;r < info.rows; r++) {
-    for (let c = 0;c < info.cols; c++) {
+  for (let r = 0; r < info.rows; r++) {
+    for (let c = 0; c < info.cols; c++) {
       tiles.push({
         index: r * info.cols + c,
         centerX: Math.round(frameBox.x + gridPadLeft + c * tileW + tileW / 2),
@@ -3109,8 +3113,7 @@ async function getChallengeInfo2(page) {
   }
   const verifyBtnBox = await frame.evaluate(() => {
     const btn = document.querySelector('.button-submit.button, [aria-label="Verify"], [aria-label="Skip Challenge"]');
-    if (!btn)
-      return null;
+    if (!btn) return null;
     const r = btn.getBoundingClientRect();
     return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
   }).catch(() => null);
@@ -3121,7 +3124,7 @@ async function getChallengeInfo2(page) {
 async function screenshotChallenge(page, challenge) {
   const { frameBox } = challenge;
   try {
-    await sleep4(1000);
+    await sleep4(1e3);
     const challengeEl = await page.$('iframe[title="hCaptcha challenge"], iframe[title*="hcaptcha challenge" i]').catch(() => null);
     let buf;
     if (challengeEl) {
@@ -3147,14 +3150,13 @@ async function classifyTiles2(client, screenshotBase64, challenge) {
         role: "user",
         content: [
           { type: "image", source: { type: "base64", media_type: "image/jpeg", data: screenshotBase64 } },
-          { type: "text", text: `Task: "${prompt}". Tiles 0-${total - 1} left-to-right top-to-bottom in a ${rows}×${cols} grid. Which tiles match? Reply ONLY with numbers or "none".` }
+          { type: "text", text: `Task: "${prompt}". Tiles 0-${total - 1} left-to-right top-to-bottom in a ${rows}\xD7${cols} grid. Which tiles match? Reply ONLY with numbers or "none".` }
         ]
       }]
     });
     const text = (response.content[0].text ?? "").trim();
     log11.debug(`classify response: "${text}"`);
-    if (text.toLowerCase().startsWith("none"))
-      return [];
+    if (text.toLowerCase().startsWith("none")) return [];
     return text.split(/[,\s]+/).map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n) && n >= 0 && n < total);
   } catch (err) {
     log11.error(`classification failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -3163,8 +3165,7 @@ async function classifyTiles2(client, screenshotBase64, challenge) {
 }
 async function isSolved(page) {
   const el = await page.$('iframe[title="hCaptcha challenge"], iframe[title*="hcaptcha challenge" i]').catch(() => null);
-  if (!el)
-    return true;
+  if (!el) return true;
   const visible = await el.isVisible().catch(() => false);
   return !visible;
 }
@@ -3195,7 +3196,7 @@ async function solveHCaptcha(page, monitor) {
     monitor?.reportActivity();
     const challenge = await getChallengeInfo2(page);
     if (!challenge) {
-      log11.info("Challenge frame gone — assuming solved");
+      log11.info("Challenge frame gone \u2014 assuming solved");
       return { solved: true, rounds, durationMs: Date.now() - startTime };
     }
     const screenshotBase64 = await screenshotChallenge(page, challenge);
@@ -3208,12 +3209,11 @@ async function solveHCaptcha(page, monitor) {
     monitor?.reportActivity();
     for (const idx of matchingIndices) {
       const tile = challenge.tiles[idx];
-      if (!tile)
-        continue;
+      if (!tile) continue;
       await humanClickXY(page, tile.centerX + rand2(-5, 5), tile.centerY + rand2(-5, 5));
       await sleep4(rand2(150, 400));
     }
-    await sleep4(rand2(500, 1000));
+    await sleep4(rand2(500, 1e3));
     const solved = await clickVerify(page, challenge);
     monitor?.reportActivity();
     if (solved) {
@@ -3221,7 +3221,7 @@ async function solveHCaptcha(page, monitor) {
       return { solved: true, rounds, durationMs: Date.now() - startTime };
     }
     log11.info(`Round ${rounds}: not solved, retrying`);
-    await sleep4(rand2(500, 1000));
+    await sleep4(rand2(500, 1e3));
   }
   return { solved: false, rounds, durationMs: Date.now() - startTime, reason: `Max rounds (${MAX_ROUNDS2}) exceeded` };
 }
@@ -3261,8 +3261,7 @@ function recaptchaInfo(page) {
 }
 async function recaptchaSolve(page) {
   const solveResult = await clickRecaptchaCheckbox(page);
-  if (solveResult.solved)
-    return { solved: true };
+  if (solveResult.solved) return { solved: true };
   const ci = solveResult.challengeInfo;
   if (ci && ci.tiles && ci.tiles.length > 0) {
     return { solved: false, prompt: ci.prompt, rows: ci.rows, cols: ci.cols, tiles: await screenshotTiles2(page, ci) };
@@ -3272,8 +3271,7 @@ async function recaptchaSolve(page) {
 async function recaptchaAnswer(page, step) {
   await clickChallengeTiles(page, step.tiles);
   const verifyResult = await clickChallengeVerify(page);
-  if (verifyResult.solved)
-    return { solved: true };
+  if (verifyResult.solved) return { solved: true };
   const ci = verifyResult.challengeInfo;
   if (ci && ci.tiles && ci.tiles.length > 0) {
     return { solved: false, prompt: ci.prompt, rows: ci.rows, cols: ci.cols, tiles: await screenshotTiles2(page, ci) };
@@ -3312,19 +3310,19 @@ async function setValueNative(handle, value) {
   await handle.evaluate(applyNativeValue, value);
 }
 async function fillHandleNative(page, handle, value, opts = {}) {
-  await handle.scrollIntoViewIfNeeded().catch(() => {});
-  await handle.click({ delay: 40 }).catch(() => {});
+  await handle.scrollIntoViewIfNeeded().catch(() => {
+  });
+  await handle.click({ delay: 40 }).catch(() => {
+  });
   await handle.evaluate(applyNativeValue, value);
-  if (opts.delay !== false)
-    await humanDelay(page);
+  if (opts.delay !== false) await humanDelay(page);
 }
 async function fillSelectorNative(page, selector, value) {
   await page.click(selector);
   await page.waitForTimeout(TIMING.SCROLL_DELAY);
   await page.evaluate(([sel, val]) => {
     const el = document.querySelector(sel);
-    if (!el)
-      return;
+    if (!el) return;
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
     setter?.call(el, val);
     el.dispatchEvent(new Event("input", { bubbles: true }));
@@ -3337,16 +3335,14 @@ async function findSubmitButton(page, opts) {
     const re = new RegExp(reSource, reFlags);
     const pick = (scope) => {
       const typed = scope.querySelector('button[type="submit"]:not([disabled]), input[type="submit"]:not([disabled])');
-      if (typed)
-        return typed;
+      if (typed) return typed;
       const buttons = Array.from(scope.querySelectorAll('button:not([disabled]), [role="button"]:not([disabled])'));
       return buttons.find((b) => re.test(b.textContent || "") && b.offsetParent !== null) || null;
     };
     const form = document.querySelector(formAnchor)?.closest("form");
     if (form) {
       const found = pick(form);
-      if (found)
-        return found;
+      if (found) return found;
     }
     return pick(document);
   }, opts);
@@ -3367,23 +3363,22 @@ function getKnowledgePath(domain) {
 }
 function normalizeDomain(input) {
   let d = (input || "").trim().toLowerCase();
-  if (!d)
-    return "";
+  if (!d) return "";
   try {
     if (d.includes("://")) {
       d = new URL(d).hostname;
     } else if (d.includes("/")) {
       d = new URL(`https://${d}`).hostname;
     }
-  } catch {}
+  } catch {
+  }
   d = d.replace(/:\d+$/, "");
   d = d.replace(/^www\./, "");
   return d;
 }
 function domainLookupChain(input) {
   const normalized = normalizeDomain(input);
-  if (!normalized)
-    return [];
+  if (!normalized) return [];
   const chain = [normalized];
   const parts = normalized.split(".");
   while (parts.length > 2) {
@@ -3409,8 +3404,7 @@ function readKnowledge(domain) {
 }
 function parseKnowledge(domain) {
   const raw = readKnowledge(domain);
-  if (!raw)
-    return null;
+  if (!raw) return null;
   return parseMarkdown(raw);
 }
 function mergeKnowledge(domain, updates) {
@@ -3418,7 +3412,7 @@ function mergeKnowledge(domain, updates) {
   const existing = parseKnowledge(domain);
   const merged = {
     domain: sanitizeDomain(domain),
-    lastVerified: updates.lastVerified ?? new Date().toISOString(),
+    lastVerified: updates.lastVerified ?? (/* @__PURE__ */ new Date()).toISOString(),
     lastMode: updates.lastMode ?? existing?.lastMode ?? "unknown",
     browserRequired: updates.browserRequired ?? existing?.browserRequired ?? true,
     auth: updates.auth ?? existing?.auth ?? { type: "unknown" },
@@ -3430,7 +3424,7 @@ function mergeKnowledge(domain, updates) {
   log13.info(`knowledge updated: ${merged.domain} (${merged.endpoints.length} endpoints)`);
 }
 function dedupeEndpoints(endpoints) {
-  const seen = new Map;
+  const seen = /* @__PURE__ */ new Map();
   for (const ep of endpoints) {
     const key = `${ep.method.toUpperCase()} ${ep.path}`;
     const existing = seen.get(key);
@@ -3446,13 +3440,12 @@ function dedupeEndpoints(endpoints) {
     }
   }
   return [...seen.values()].sort((a, b) => {
-    if (a.path !== b.path)
-      return a.path < b.path ? -1 : 1;
+    if (a.path !== b.path) return a.path < b.path ? -1 : 1;
     return a.method < b.method ? -1 : 1;
   });
 }
 function dedupeNotes(notes) {
-  const seen = new Set;
+  const seen = /* @__PURE__ */ new Set();
   const out = [];
   for (const note of notes) {
     const n = note.trim();
@@ -3493,7 +3486,7 @@ function renderMarkdown(data) {
     lines.push(`**Request headers:** ${data.auth.headers.map((n) => `\`${n}\``).join(", ")}`);
   }
   lines.push("");
-  lines.push("> _Structure only — actual values are stored encrypted in the session store._");
+  lines.push("> _Structure only \u2014 actual values are stored encrypted in the session store._");
   lines.push("");
   if (data.endpoints.length > 0) {
     lines.push("## Known endpoints");
@@ -3502,10 +3495,8 @@ function renderMarkdown(data) {
     lines.push("");
     for (const ep of data.endpoints) {
       lines.push(`### ${ep.method.toUpperCase()} ${ep.path}`);
-      if (ep.description)
-        lines.push("");
-      if (ep.description)
-        lines.push(ep.description);
+      if (ep.description) lines.push("");
+      if (ep.description) lines.push(ep.description);
       if (ep.example) {
         lines.push("");
         lines.push("```");
@@ -3523,32 +3514,27 @@ function renderMarkdown(data) {
   if (data.notes.length > 0) {
     lines.push("## Notes");
     lines.push("");
-    for (const n of data.notes)
-      lines.push(`- ${n}`);
+    for (const n of data.notes) lines.push(`- ${n}`);
     lines.push("");
   }
-  return lines.join(`
-`);
+  return lines.join("\n");
 }
 function parseMarkdown(raw) {
   const frontmatterMatch = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n/);
-  if (!frontmatterMatch)
-    return null;
+  if (!frontmatterMatch) return null;
   const fm = {};
-  for (const line of frontmatterMatch[1].split(`
-`)) {
+  for (const line of frontmatterMatch[1].split("\n")) {
     const m = line.match(/^(\w+):\s*(.*)$/);
-    if (m)
-      fm[m[1]] = m[2].trim();
+    if (m) fm[m[1]] = m[2].trim();
   }
   const body = raw.slice(frontmatterMatch[0].length);
-  const auth = { type: fm.authType ?? "unknown" };
+  const auth2 = { type: fm.authType ?? "unknown" };
   const authSection = extractSection(body, "Auth material");
   if (authSection) {
-    auth.cookieNames = extractBackticks(/\*\*Required cookies:\*\*\s+(.+)/, authSection);
-    auth.localStorageKeys = extractBackticks(/\*\*localStorage keys:\*\*\s+(.+)/, authSection);
-    auth.sessionStorageKeys = extractBackticks(/\*\*sessionStorage keys:\*\*\s+(.+)/, authSection);
-    auth.headers = extractBackticks(/\*\*Request headers:\*\*\s+(.+)/, authSection);
+    auth2.cookieNames = extractBackticks(/\*\*Required cookies:\*\*\s+(.+)/, authSection);
+    auth2.localStorageKeys = extractBackticks(/\*\*localStorage keys:\*\*\s+(.+)/, authSection);
+    auth2.sessionStorageKeys = extractBackticks(/\*\*sessionStorage keys:\*\*\s+(.+)/, authSection);
+    auth2.headers = extractBackticks(/\*\*Request headers:\*\*\s+(.+)/, authSection);
   }
   const endpoints = [];
   const endpointSection = extractSection(body, "Known endpoints");
@@ -3562,11 +3548,9 @@ function parseMarkdown(raw) {
   const notes = [];
   const notesSection = extractSection(body, "Notes");
   if (notesSection) {
-    for (const line of notesSection.split(`
-`)) {
+    for (const line of notesSection.split("\n")) {
       const m = line.match(/^-\s+(.+)$/);
-      if (m)
-        notes.push(m[1].trim());
+      if (m) notes.push(m[1].trim());
     }
   }
   return {
@@ -3574,7 +3558,7 @@ function parseMarkdown(raw) {
     lastVerified: fm.lastVerified ?? "",
     lastMode: fm.lastMode ?? "unknown",
     browserRequired: fm.browserRequired !== "false",
-    auth,
+    auth: auth2,
     endpoints,
     notes
   };
@@ -3582,8 +3566,7 @@ function parseMarkdown(raw) {
 function extractSection(body, heading) {
   const re = new RegExp(`^##\\s+${heading}\\s*$`, "m");
   const match = body.match(re);
-  if (!match || match.index === undefined)
-    return null;
+  if (!match || match.index === void 0) return null;
   const start = match.index + match[0].length;
   const nextSection = body.slice(start).match(/^##\s+/m);
   const end = nextSection?.index != null ? start + nextSection.index : body.length;
@@ -3591,27 +3574,28 @@ function extractSection(body, heading) {
 }
 function extractBackticks(re, text) {
   const m = text.match(re);
-  if (!m)
-    return;
+  if (!m) return void 0;
   const items = [...m[1].matchAll(/`([^`]+)`/g)].map((x) => x[1]);
-  return items.length > 0 ? items : undefined;
+  return items.length > 0 ? items : void 0;
 }
 
 // src/lib/auth/credential-resolver.ts
-class CredentialDecryptError extends Error {
-  domain;
-  cause;
+var CredentialDecryptError = class extends Error {
   constructor(domain, cause) {
-    super(`Credentials for ${domain} exist in the store but cannot be decrypted (${cause}). ` + `This usually means the encryption key (~/.iframer/secret or IFRAMER_SECRET) ` + `changed since the row was written, orphaning the old blob. ` + `Fix: ask the user to re-store the credentials by running in their terminal:
+    super(
+      `Credentials for ${domain} exist in the store but cannot be decrypted (${cause}). This usually means the encryption key (~/.iframer/secret or IFRAMER_SECRET) changed since the row was written, orphaning the old blob. Fix: ask the user to re-store the credentials by running in their terminal:
 
-` + `  iframer-toolkit credentials add ${normalizeDomain(domain)}
+  iframer-toolkit credentials add ${normalizeDomain(domain)}
 
-` + `After they confirm it ran, retry.`);
+After they confirm it ran, retry.`
+    );
     this.domain = domain;
     this.cause = cause;
     this.name = "CredentialDecryptError";
   }
-}
+  domain;
+  cause;
+};
 async function resolveCredential(store, userId, token, domain) {
   const credKey = await deriveKey(token, "credentials");
   let blob = null;
@@ -3624,8 +3608,7 @@ async function resolveCredential(store, userId, token, domain) {
       break;
     }
   }
-  if (!blob)
-    return null;
+  if (!blob) return null;
   try {
     const credential = JSON.parse(decrypt(blob, credKey));
     return { credential, matchedDomain };
@@ -3662,7 +3645,9 @@ async function login(page, step, ctx) {
   if (!resolved) {
     const stored = await ctx.store.listCredentialDomains(ctx.userId);
     const storedList = stored.length > 0 ? stored.join(", ") : "(none)";
-    throw new Error(`No credentials stored for ${normalizeDomain(step.domain)}. Stored domains: ${storedList}. ` + `If you stored credentials under a different domain name, retry the login step with that domain. ` + `If no credentials are stored at all, call the \`credentials\` tool with action=store first.`);
+    throw new Error(
+      `No credentials stored for ${normalizeDomain(step.domain)}. Stored domains: ${storedList}. If you stored credentials under a different domain name, retry the login step with that domain. If no credentials are stored at all, call the \`credentials\` tool with action=store first.`
+    );
   }
   const { credential, matchedDomain } = resolved;
   if (matchedDomain !== normalizeDomain(step.domain)) {
@@ -3674,8 +3659,7 @@ async function login(page, step, ctx) {
     await runExplicitFlow(page, step, ctx, credential);
   } else {
     const early = await runAutoDetect(page, step, ctx, credential, beforeUrl);
-    if (early)
-      return early;
+    if (early) return early;
   }
   return honestSignal(page, beforeUrl);
 }
@@ -3688,7 +3672,8 @@ async function runExplicitFlow(page, step, ctx, credential) {
   }
   if (step.submitSelector) {
     await humanClick(page, resolveSelector(step.submitSelector, ctx));
-    await page.waitForLoadState("domcontentloaded").catch(() => {});
+    await page.waitForLoadState("domcontentloaded").catch(() => {
+    });
     await page.waitForTimeout(TIMING.POST_LOGIN_WAIT);
   }
   if (step.totpSelector && credential.totp_secret) {
@@ -3700,7 +3685,8 @@ async function runExplicitFlow(page, step, ctx, credential) {
 }
 async function runAutoDetect(page, step, ctx, credential, beforeUrl) {
   log14.info(`login: auto-detecting form on ${beforeUrl}`);
-  await page.waitForLoadState("domcontentloaded").catch(() => {});
+  await page.waitForLoadState("domcontentloaded").catch(() => {
+  });
   await page.waitForTimeout(500);
   const initialCheck = await page.evaluate((pwdSel) => {
     const pwd = document.querySelector(pwdSel);
@@ -3713,10 +3699,10 @@ async function runAutoDetect(page, step, ctx, credential, beforeUrl) {
       loggedIn: true,
       alreadyLoggedIn: true,
       url: initialCheck.url,
-      reason: "Session already authenticated — no login form detected"
+      reason: "Session already authenticated \u2014 no login form detected"
     };
   }
-  const passwordHandle = await page.waitForSelector(PASSWORD_SELECTOR, { state: "visible", timeout: 5000 }).catch(() => null);
+  const passwordHandle = await page.waitForSelector(PASSWORD_SELECTOR, { state: "visible", timeout: 5e3 }).catch(() => null);
   if (!passwordHandle) {
     return runNoPasswordBranch(page, step, ctx, credential, beforeUrl);
   }
@@ -3728,19 +3714,18 @@ async function runAutoDetect(page, step, ctx, credential, beforeUrl) {
 async function runNoPasswordBranch(page, step, ctx, credential, beforeUrl) {
   const currentUrl = page.url();
   if (!LOGIN_URL_RE.test(currentUrl)) {
-    log14.info(`login: no password field and URL left login area (${currentUrl}) — treating as success`);
+    log14.info(`login: no password field and URL left login area (${currentUrl}) \u2014 treating as success`);
     return {
       loggedIn: true,
       alreadyLoggedIn: true,
       url: currentUrl,
-      reason: "No login form detected after wait — assumed already authenticated"
+      reason: "No login form detected after wait \u2014 assumed already authenticated"
     };
   }
   const emailOnlyHandle = await page.evaluateHandle((candidates) => {
     for (const sel of candidates) {
       const el = document.querySelector(sel);
-      if (el && el.offsetParent !== null)
-        return el;
+      if (el && el.offsetParent !== null) return el;
     }
     return null;
   }, EMAIL_CANDIDATES);
@@ -3756,22 +3741,20 @@ async function runNoPasswordBranch(page, step, ctx, credential, beforeUrl) {
     const hasCloudflare = !!document.querySelector('[class*="cf-" i], iframe[src*="challenges.cloudflare"]');
     return { title: document.title, visibleText, inputCount, hiddenPassword, hasCaptcha, hasCloudflare };
   }).catch(() => ({ title: "", visibleText: "", inputCount: 0, hiddenPassword: false, hasCaptcha: false, hasCloudflare: false }));
-  log14.warn(`login: no visible password or email field on ${currentUrl} — title="${pageDiag.title}", inputs=${pageDiag.inputCount}`);
+  log14.warn(`login: no visible password or email field on ${currentUrl} \u2014 title="${pageDiag.title}", inputs=${pageDiag.inputCount}`);
   const indicators = [];
-  if (pageDiag.hasCaptcha)
-    indicators.push("CAPTCHA detected");
-  if (pageDiag.hasCloudflare)
-    indicators.push("Cloudflare challenge");
-  if (pageDiag.inputCount === 0)
-    indicators.push("no input elements at all");
-  if (pageDiag.hiddenPassword)
-    indicators.push("password field exists but is hidden/disabled");
+  if (pageDiag.hasCaptcha) indicators.push("CAPTCHA detected");
+  if (pageDiag.hasCloudflare) indicators.push("Cloudflare challenge");
+  if (pageDiag.inputCount === 0) indicators.push("no input elements at all");
+  if (pageDiag.hiddenPassword) indicators.push("password field exists but is hidden/disabled");
   const indicatorStr = indicators.length > 0 ? ` (${indicators.join(", ")})` : "";
-  throw new Error(`login: no visible password or email field on ${currentUrl} after 5000ms${indicatorStr}. ` + `Page title: "${pageDiag.title}". ` + `The site may be showing a bot-detection wall, captcha, or an unsupported login flow. ` + `Retry with a stronger browser mode (binary-headful or docker-headful).`);
+  throw new Error(
+    `login: no visible password or email field on ${currentUrl} after 5000ms${indicatorStr}. Page title: "${pageDiag.title}". The site may be showing a bot-detection wall, captcha, or an unsupported login flow. Retry with a stronger browser mode (binary-headful or docker-headful).`
+  );
 }
 async function runEmailFirstFlow(page, credential, beforeUrl, emailEl) {
   const currentUrl = page.url();
-  log14.info(`login: no password field but found email input — running email-first flow on ${currentUrl}`);
+  log14.info(`login: no password field but found email input \u2014 running email-first flow on ${currentUrl}`);
   await fillHandleNative(page, emailEl, credential.username);
   const submitEl = await findSubmitButton(page, {
     formAnchor: EMAIL_FORM_ANCHOR,
@@ -3779,32 +3762,40 @@ async function runEmailFirstFlow(page, credential, beforeUrl, emailEl) {
     reFlags: EMAIL_FIRST_SUBMIT_RE.flags
   });
   if (submitEl) {
-    await submitEl.scrollIntoViewIfNeeded().catch(() => {});
+    await submitEl.scrollIntoViewIfNeeded().catch(() => {
+    });
     await submitEl.click({ delay: 40 }).catch(async () => {
       await submitEl.evaluate((el) => el.click());
     });
   } else {
-    log14.warn("login: email-first flow, no submit button found — pressing Enter");
-    await emailEl.press("Enter").catch(() => {});
+    log14.warn("login: email-first flow, no submit button found \u2014 pressing Enter");
+    await emailEl.press("Enter").catch(() => {
+    });
   }
-  await page.waitForLoadState("domcontentloaded").catch(() => {});
+  await page.waitForLoadState("domcontentloaded").catch(() => {
+  });
   await Promise.race([
-    page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {}),
+    page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {
+    }),
     page.waitForSelector('input[type="password"]:not([disabled])', { state: "visible", timeout: TIMEOUTS.NAVIGATION }).catch(() => null),
     page.waitForSelector('input[inputmode="numeric"]:not([disabled]), input[autocomplete="one-time-code"]:not([disabled])', { state: "visible", timeout: TIMEOUTS.NAVIGATION }).catch(() => null)
   ]);
   const laterPasswordHandle = await page.$(PASSWORD_SELECTOR);
   if (laterPasswordHandle && credential.password) {
-    log14.info("login: password field appeared after email submit — filling it");
+    log14.info("login: password field appeared after email submit \u2014 filling it");
     await fillHandleNative(page, laterPasswordHandle, credential.password);
     const laterSubmit = await page.$('button[type="submit"]:not([disabled])');
     if (laterSubmit) {
-      await laterSubmit.click({ delay: 40 }).catch(() => {});
+      await laterSubmit.click({ delay: 40 }).catch(() => {
+      });
     } else {
-      await laterPasswordHandle.press("Enter").catch(() => {});
+      await laterPasswordHandle.press("Enter").catch(() => {
+      });
     }
-    await page.waitForLoadState("domcontentloaded").catch(() => {});
-    await page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {});
+    await page.waitForLoadState("domcontentloaded").catch(() => {
+    });
+    await page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {
+    });
   }
   const afterUrl = page.url();
   const emailFlowDone = afterUrl !== beforeUrl;
@@ -3812,19 +3803,17 @@ async function runEmailFirstFlow(page, credential, beforeUrl, emailEl) {
     loggedIn: emailFlowDone,
     emailSubmitted: true,
     url: afterUrl,
-    reason: emailFlowDone ? "Email-first flow completed — check for code/OTP prompt if login isn't complete." : "Email submitted, waiting for next step (code entry, password page, or redirect)."
+    reason: emailFlowDone ? "Email-first flow completed \u2014 check for code/OTP prompt if login isn't complete." : "Email submitted, waiting for next step (code entry, password page, or redirect)."
   };
 }
 async function runPasswordFlow(page, credential, beforeUrl, passwordHandle) {
   const usernameHandle = await page.evaluateHandle((args) => {
     const pwd = document.querySelector(args.pwdSel);
-    if (!pwd)
-      return null;
+    if (!pwd) return null;
     const scope = pwd.closest("form") || document;
     for (const sel of args.candidates) {
       const el = scope.querySelector(sel);
-      if (el && el.offsetParent !== null)
-        return el;
+      if (el && el.offsetParent !== null) return el;
     }
     return null;
   }, { candidates: EMAIL_CANDIDATES, pwdSel: PASSWORD_SELECTOR });
@@ -3843,24 +3832,27 @@ async function runPasswordFlow(page, credential, beforeUrl, passwordHandle) {
     reFlags: PASSWORD_SUBMIT_RE.flags
   });
   if (submitEl) {
-    await submitEl.scrollIntoViewIfNeeded().catch(() => {});
+    await submitEl.scrollIntoViewIfNeeded().catch(() => {
+    });
     await submitEl.click({ delay: 40 }).catch(async () => {
       await submitEl.evaluate((el) => el.click());
     });
   } else {
     log14.warn("login: no submit button detected, pressing Enter in password field");
-    await passwordHandle.press("Enter").catch(() => {});
+    await passwordHandle.press("Enter").catch(() => {
+    });
   }
-  await page.waitForLoadState("domcontentloaded").catch(() => {});
+  await page.waitForLoadState("domcontentloaded").catch(() => {
+  });
   await Promise.race([
-    page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {}),
+    page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {
+    }),
     page.waitForSelector(OTP_SELECTOR, { state: "visible", timeout: TIMEOUTS.NAVIGATION }).catch(() => null)
   ]);
 }
 async function handleOtp(page, step, ctx, credential, beforeUrl) {
   const totpHandle = await page.$(OTP_SELECTOR);
-  if (!totpHandle)
-    return;
+  if (!totpHandle) return;
   let code = null;
   if (credential.totp_secret) {
     code = generateTOTP(credential.totp_secret);
@@ -3885,7 +3877,8 @@ async function handleOtp(page, step, ctx, credential, beforeUrl) {
       await totpSubmit.evaluate((el) => el.click());
     });
   }
-  await page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {});
+  await page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: TIMEOUTS.NAVIGATION }).catch(() => {
+  });
 }
 async function honestSignal(page, beforeUrl) {
   const afterUrl = page.url();
@@ -3942,9 +3935,8 @@ async function executeAction(page, step, ctx, monitor) {
 }
 
 // src/lib/stale-monitor.ts
-var DEFAULT_STALE_TIMEOUT_MS = 20000;
-
-class StaleStateMonitor {
+var DEFAULT_STALE_TIMEOUT_MS = 2e4;
+var StaleStateMonitor = class _StaleStateMonitor {
   page;
   timeoutMs;
   timer = null;
@@ -3983,10 +3975,8 @@ class StaleStateMonitor {
     }
   }
   static hasChanged(before, after) {
-    if (before.url !== after.url)
-      return true;
-    if (before.documentReadyState !== after.documentReadyState)
-      return true;
+    if (before.url !== after.url) return true;
+    if (before.documentReadyState !== after.documentReadyState) return true;
     const textDiff = Math.abs(after.bodyTextLength - before.bodyTextLength);
     if (textDiff > THRESHOLDS.STALE_CHAR_CHANGE || before.bodyTextLength > 0 && textDiff / before.bodyTextLength > THRESHOLDS.STALE_PERCENT_CHANGE) {
       return true;
@@ -3997,9 +3987,18 @@ class StaleStateMonitor {
     }
     return false;
   }
+  /**
+   * Call this to report that something is happening (e.g., captcha solver making progress).
+   * Resets the stale-state timer.
+   */
   reportActivity() {
     this.lastActivity = Date.now();
   }
+  /**
+   * Run a function with stale-state monitoring.
+   * If the function takes longer than timeoutMs with no state change and no activity reported,
+   * the returned promise rejects with a StaleStateError.
+   */
   async withMonitoring(fn) {
     this.lastActivity = Date.now();
     const beforeSnapshot = await this.snapshot();
@@ -4008,21 +4007,17 @@ class StaleStateMonitor {
       let checkInterval = null;
       const cleanup = () => {
         resolved = true;
-        if (checkInterval)
-          clearInterval(checkInterval);
-        if (this.timer)
-          clearTimeout(this.timer);
+        if (checkInterval) clearInterval(checkInterval);
+        if (this.timer) clearTimeout(this.timer);
         this.timer = null;
       };
       checkInterval = setInterval(async () => {
-        if (resolved)
-          return;
+        if (resolved) return;
         const elapsed = Date.now() - this.lastActivity;
-        if (elapsed < this.timeoutMs)
-          return;
+        if (elapsed < this.timeoutMs) return;
         try {
           const currentSnapshot = await this.snapshot();
-          if (StaleStateMonitor.hasChanged(beforeSnapshot, currentSnapshot)) {
+          if (_StaleStateMonitor.hasChanged(beforeSnapshot, currentSnapshot)) {
             this.lastActivity = Date.now();
             return;
           }
@@ -4031,7 +4026,10 @@ class StaleStateMonitor {
           return;
         }
         cleanup();
-        reject(new StaleStateError(`No state change detected for ${this.timeoutMs}ms`, this.timeoutMs));
+        reject(new StaleStateError(
+          `No state change detected for ${this.timeoutMs}ms`,
+          this.timeoutMs
+        ));
       }, TIMING.STALE_CHECK_INTERVAL);
       fn().then((result) => {
         if (!resolved) {
@@ -4046,102 +4044,96 @@ class StaleStateMonitor {
       });
     });
   }
-}
-
-class StaleStateError extends Error {
+};
+var StaleStateError = class extends Error {
   timeoutMs;
   constructor(message, timeoutMs) {
     super(message);
     this.name = "StaleStateError";
     this.timeoutMs = timeoutMs;
   }
-}
+};
 
 // src/lib/captcha/detector.ts
-class RecaptchaDetector {
+var RecaptchaDetector = class {
   async detect(page) {
     try {
-      const active = await page.evaluate(() => [
-        'iframe[src*="recaptcha/api2/anchor"], iframe[title*="reCAPTCHA"]',
-        'iframe[src*="recaptcha/api2/bframe"]',
-        '.g-recaptcha:not([data-size="invisible"]), [data-sitekey]:not([data-size="invisible"])'
-      ].some((sel) => {
-        const el = document.querySelector(sel);
-        if (!el)
-          return false;
-        const r = el.getBoundingClientRect();
-        if (r.width < 20 || r.height < 20)
-          return false;
-        const s = getComputedStyle(el);
-        return s.visibility !== "hidden" && s.display !== "none" && s.opacity !== "0";
-      }));
-      if (active)
-        return { type: "captcha", confidence: 0.95 };
-    } catch {}
+      const active = await page.evaluate(
+        () => [
+          'iframe[src*="recaptcha/api2/anchor"], iframe[title*="reCAPTCHA"]',
+          'iframe[src*="recaptcha/api2/bframe"]',
+          '.g-recaptcha:not([data-size="invisible"]), [data-sitekey]:not([data-size="invisible"])'
+        ].some((sel) => {
+          const el = document.querySelector(sel);
+          if (!el) return false;
+          const r = el.getBoundingClientRect();
+          if (r.width < 20 || r.height < 20) return false;
+          const s = getComputedStyle(el);
+          return s.visibility !== "hidden" && s.display !== "none" && s.opacity !== "0";
+        })
+      );
+      if (active) return { type: "captcha", confidence: 0.95 };
+    } catch {
+    }
     return null;
   }
-}
-
-class HCaptchaDetector {
+};
+var HCaptchaDetector = class {
   async detect(page) {
     try {
-      const active = await page.evaluate(() => [
-        'iframe[src*="hcaptcha.com"]',
-        'iframe[title*="hCaptcha"]',
-        "[data-hcaptcha-widget-id]"
-      ].some((sel) => {
-        const el = document.querySelector(sel);
-        if (!el)
-          return false;
-        const r = el.getBoundingClientRect();
-        if (r.width < 20 || r.height < 20)
-          return false;
-        const s = getComputedStyle(el);
-        return s.visibility !== "hidden" && s.display !== "none" && s.opacity !== "0";
-      }));
-      if (active)
-        return { type: "hcaptcha", confidence: 0.95 };
-    } catch {}
+      const active = await page.evaluate(
+        () => [
+          'iframe[src*="hcaptcha.com"]',
+          'iframe[title*="hCaptcha"]',
+          "[data-hcaptcha-widget-id]"
+        ].some((sel) => {
+          const el = document.querySelector(sel);
+          if (!el) return false;
+          const r = el.getBoundingClientRect();
+          if (r.width < 20 || r.height < 20) return false;
+          const s = getComputedStyle(el);
+          return s.visibility !== "hidden" && s.display !== "none" && s.opacity !== "0";
+        })
+      );
+      if (active) return { type: "hcaptcha", confidence: 0.95 };
+    } catch {
+    }
     return null;
   }
-}
-
-class CookieConsentDetector {
+};
+var CookieConsentDetector = class {
   async detect(page) {
     try {
-      const found = await page.evaluate(() => Array.from(document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]')).some((el) => {
-        const label = ((el.innerText || el.value || "") + "").trim().toLowerCase();
-        if (!label || label.length > 32)
+      const found = await page.evaluate(
+        () => Array.from(document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]')).some((el) => {
+          const label = ((el.innerText || el.value || "") + "").trim().toLowerCase();
+          if (!label || label.length > 32) return false;
+          const kws = ["accept cookies", "accept all", "allow cookies", "i accept", "i agree", "agree"];
+          if (!kws.some((kw) => label === kw || label.includes(kw) && kw.length / label.length >= 0.5)) return false;
+          const r = el.getBoundingClientRect();
+          if (r.width < 20 || r.height < 10) return false;
+          const s = getComputedStyle(el);
+          if (s.visibility === "hidden" || s.display === "none" || s.opacity === "0") return false;
+          let n = el.parentElement;
+          let depth = 0;
+          while (n && depth < 8) {
+            const cs = getComputedStyle(n);
+            if (cs.position === "fixed" || cs.position === "sticky" || n.getAttribute("role") === "dialog" || n.getAttribute("aria-modal") === "true") return true;
+            n = n.parentElement;
+            depth++;
+          }
           return false;
-        const kws = ["accept cookies", "accept all", "allow cookies", "i accept", "i agree", "agree"];
-        if (!kws.some((kw) => label === kw || label.includes(kw) && kw.length / label.length >= 0.5))
-          return false;
-        const r = el.getBoundingClientRect();
-        if (r.width < 20 || r.height < 10)
-          return false;
-        const s = getComputedStyle(el);
-        if (s.visibility === "hidden" || s.display === "none" || s.opacity === "0")
-          return false;
-        let n = el.parentElement;
-        let depth = 0;
-        while (n && depth < 8) {
-          const cs = getComputedStyle(n);
-          if (cs.position === "fixed" || cs.position === "sticky" || n.getAttribute("role") === "dialog" || n.getAttribute("aria-modal") === "true")
-            return true;
-          n = n.parentElement;
-          depth++;
-        }
-        return false;
-      }));
+        })
+      );
       if (found) {
         return { type: "cookie-consent", confidence: 0.8 };
       }
-    } catch {}
+    } catch {
+    }
     return null;
   }
-}
-
-class LoginWallDetector {
+};
+var LoginWallDetector = class {
   async detect(page) {
     try {
       const found = await page.evaluate(() => {
@@ -4151,19 +4143,20 @@ class LoginWallDetector {
       if (found) {
         return { type: "login-wall", confidence: 0.85, details: "Login form detected" };
       }
-    } catch {}
+    } catch {
+    }
     return null;
   }
-}
+};
 var defaultDetectors = [
-  new RecaptchaDetector,
-  new HCaptchaDetector,
-  new CookieConsentDetector,
-  new LoginWallDetector
+  new RecaptchaDetector(),
+  new HCaptchaDetector(),
+  new CookieConsentDetector(),
+  new LoginWallDetector()
 ];
 
 // src/lib/obstacles.ts
-class RecaptchaResolver {
+var RecaptchaResolver = class {
   canResolve(obstacle) {
     return obstacle.type === "captcha";
   }
@@ -4178,9 +4171,8 @@ class RecaptchaResolver {
       return { resolved: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
-}
-
-class CookieConsentResolver {
+};
+var CookieConsentResolver = class {
   canResolve(obstacle) {
     return obstacle.type === "cookie-consent";
   }
@@ -4189,30 +4181,24 @@ class CookieConsentResolver {
       const tagged = await page.evaluate(() => {
         const el = Array.from(document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]')).find((el2) => {
           const label = ((el2.innerText || el2.value || "") + "").trim().toLowerCase();
-          if (!label || label.length > 32)
-            return false;
+          if (!label || label.length > 32) return false;
           const kws = ["accept cookies", "accept all", "allow cookies", "i accept", "i agree", "agree"];
-          if (!kws.some((kw) => label === kw || label.includes(kw) && kw.length / label.length >= 0.5))
-            return false;
+          if (!kws.some((kw) => label === kw || label.includes(kw) && kw.length / label.length >= 0.5)) return false;
           const r = el2.getBoundingClientRect();
-          if (r.width < 20 || r.height < 10)
-            return false;
+          if (r.width < 20 || r.height < 10) return false;
           const s = getComputedStyle(el2);
-          if (s.visibility === "hidden" || s.display === "none" || s.opacity === "0")
-            return false;
+          if (s.visibility === "hidden" || s.display === "none" || s.opacity === "0") return false;
           let n = el2.parentElement;
           let depth = 0;
           while (n && depth < 8) {
             const cs = getComputedStyle(n);
-            if (cs.position === "fixed" || cs.position === "sticky" || n.getAttribute("role") === "dialog" || n.getAttribute("aria-modal") === "true")
-              return true;
+            if (cs.position === "fixed" || cs.position === "sticky" || n.getAttribute("role") === "dialog" || n.getAttribute("aria-modal") === "true") return true;
             n = n.parentElement;
             depth++;
           }
           return false;
         });
-        if (!el)
-          return false;
+        if (!el) return false;
         el.setAttribute("data-iframer-consent", "1");
         return true;
       });
@@ -4220,16 +4206,17 @@ class CookieConsentResolver {
         await humanClick(page, '[data-iframer-consent="1"]');
         await page.evaluate(() => {
           document.querySelector('[data-iframer-consent="1"]')?.removeAttribute("data-iframer-consent");
-        }).catch(() => {});
+        }).catch(() => {
+        });
         await page.waitForTimeout(500);
         return { resolved: true, resolution: "dismissed-cookie-consent" };
       }
-    } catch {}
+    } catch {
+    }
     return { resolved: false, error: "Could not dismiss cookie consent" };
   }
-}
-
-class HCaptchaResolver {
+};
+var HCaptchaResolver = class {
   canResolve(obstacle) {
     return obstacle.type === "hcaptcha";
   }
@@ -4244,17 +4231,16 @@ class HCaptchaResolver {
       return { resolved: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
-}
+};
 var resolvers = [
-  new RecaptchaResolver,
-  new HCaptchaResolver,
-  new CookieConsentResolver
+  new RecaptchaResolver(),
+  new HCaptchaResolver(),
+  new CookieConsentResolver()
 ];
 async function detectObstacles(page, detectors = defaultDetectors) {
   for (const detector of detectors) {
     const obstacle = await detector.detect(page);
-    if (obstacle)
-      return obstacle;
+    if (obstacle) return obstacle;
   }
   return null;
 }
@@ -4273,10 +4259,10 @@ async function capturePageState(page, ctx, opts) {
   let url = "";
   try {
     url = page.url();
-  } catch {}
+  } catch {
+  }
   const title = await page.title().catch(() => "");
-  if (!screenshot2)
-    return { url, title };
+  if (!screenshot2) return { url, title };
   try {
     const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
     const screenshotUrl = saveScreenshot(buf, `${namePrefix}-${Date.now()}.jpg`, ctx.screenshotDir, ctx.publicUrl);
@@ -4287,7 +4273,7 @@ async function capturePageState(page, ctx, opts) {
 }
 
 // src/lib/api-capture.ts
-var SKIP_RESOURCE_TYPES = new Set([
+var SKIP_RESOURCE_TYPES = /* @__PURE__ */ new Set([
   "stylesheet",
   "image",
   "media",
@@ -4296,7 +4282,7 @@ var SKIP_RESOURCE_TYPES = new Set([
   "other"
 ]);
 var SKIP_EXTENSIONS = /\.(css|js|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot|map)(\?|$)/i;
-var BROWSER_NOISE_HEADERS = new Set([
+var BROWSER_NOISE_HEADERS = /* @__PURE__ */ new Set([
   "accept-encoding",
   "accept-language",
   "cache-control",
@@ -4346,8 +4332,8 @@ function isLikelyId(segment) {
 function isRecord(x) {
   return typeof x === "object" && x !== null && !Array.isArray(x);
 }
-function parameterizePath(path9) {
-  const parts = path9.split("/");
+function parameterizePath(path13) {
+  const parts = path13.split("/");
   let idCount = 0;
   const parameterized = parts.map((part) => {
     if (part && isLikelyId(part)) {
@@ -4361,15 +4347,14 @@ function parameterizePath(path9) {
 function parseQueryParams(url) {
   try {
     const u = new URL(url);
-    if (u.searchParams.toString() === "")
-      return;
+    if (u.searchParams.toString() === "") return void 0;
     const params = {};
     u.searchParams.forEach((v, k) => {
       params[k] = v;
     });
     return params;
   } catch {
-    return;
+    return void 0;
   }
 }
 function parseCookies(cookieHeader) {
@@ -4388,17 +4373,15 @@ function tryParseJson(text) {
   try {
     return JSON.parse(text);
   } catch {
-    return;
+    return void 0;
   }
 }
 function sanitizeString(s) {
-  return s.replace(/[\uD800-\uDFFF]/g, "�");
+  return s.replace(/[\uD800-\uDFFF]/g, "\uFFFD");
 }
 function sanitizeDeep(val) {
-  if (typeof val === "string")
-    return sanitizeString(val);
-  if (Array.isArray(val))
-    return val.map(sanitizeDeep);
+  if (typeof val === "string") return sanitizeString(val);
+  if (Array.isArray(val)) return val.map(sanitizeDeep);
   if (val && typeof val === "object") {
     const out = {};
     for (const [k, v] of Object.entries(val)) {
@@ -4409,58 +4392,46 @@ function sanitizeDeep(val) {
   return val;
 }
 function hasGraphQLShape(body) {
-  if (!body || typeof body !== "object")
-    return false;
+  if (!body || typeof body !== "object") return false;
   const b = body;
-  if (typeof b.query === "string" && /^\s*(query|mutation|subscription|fragment|\{)/.test(b.query))
-    return true;
-  if (typeof b.operationName === "string" && (("variables" in b) || ("query" in b) || ("doc_id" in b)))
-    return true;
-  if ("doc_id" in b && "variables" in b)
-    return true;
+  if (typeof b.query === "string" && /^\s*(query|mutation|subscription|fragment|\{)/.test(b.query)) return true;
+  if (typeof b.operationName === "string" && ("variables" in b || "query" in b || "doc_id" in b)) return true;
+  if ("doc_id" in b && "variables" in b) return true;
   return false;
 }
 function gqlActionFromBody(body) {
   if (typeof body === "object" && body !== null) {
     const b = body;
-    if (typeof b.operationName === "string" && b.operationName)
-      return b.operationName;
-    if (typeof b.fb_api_req_friendly_name === "string")
-      return b.fb_api_req_friendly_name;
-    if (b.doc_id != null)
-      return `doc_${String(b.doc_id)}`;
-    if (typeof b.queryId === "string")
-      return b.queryId;
+    if (typeof b.operationName === "string" && b.operationName) return b.operationName;
+    if (typeof b.fb_api_req_friendly_name === "string") return b.fb_api_req_friendly_name;
+    if (b.doc_id != null) return `doc_${String(b.doc_id)}`;
+    if (typeof b.queryId === "string") return b.queryId;
     if (typeof b.query === "string") {
       const m = b.query.match(/\b(?:query|mutation|subscription)\s+(\w+)/);
-      if (m)
-        return m[1];
+      if (m) return m[1];
     }
   }
   if (typeof body === "string") {
     const friendly = body.match(/fb_api_req_friendly_name=([^&]+)/);
-    if (friendly)
-      return decodeURIComponent(friendly[1]);
+    if (friendly) return decodeURIComponent(friendly[1]);
     const op = body.match(/(?:^|&)operationName=([^&]+)/);
-    if (op)
-      return decodeURIComponent(op[1]);
+    if (op) return decodeURIComponent(op[1]);
     const doc = body.match(/(?:^|&)doc_id=(\d+)/);
-    if (doc)
-      return `doc_${doc[1]}`;
+    if (doc) return `doc_${doc[1]}`;
   }
-  return;
+  return void 0;
 }
 function classifyRequest(req) {
-  const path9 = req.path;
-  const lowerPath = path9.toLowerCase();
+  const path13 = req.path;
+  const lowerPath = path13.toLowerCase();
   const ct = (req.requestHeaders["content-type"] || req.requestHeaders["Content-Type"] || "").toLowerCase();
   const body = req.requestBody;
   if (ct.includes("application/grpc")) {
-    return { protocol: "grpc-web", action: path9.replace(/^\//, "") };
+    return { protocol: "grpc-web", action: path13.replace(/^\//, "") };
   }
   const soapAction = req.requestHeaders["soapaction"] || req.requestHeaders["SOAPAction"];
   if (soapAction || ct.includes("text/xml") || ct.includes("application/soap+xml")) {
-    return { protocol: "soap", action: (soapAction || path9).replace(/^["/]|["/]$/g, "") };
+    return { protocol: "soap", action: (soapAction || path13).replace(/^["/]|["/]$/g, "") };
   }
   if (/\/graphql\b/.test(lowerPath) || hasGraphQLShape(body)) {
     return { protocol: "graphql", action: gqlActionFromBody(body) ?? "anonymous" };
@@ -4473,39 +4444,28 @@ function classifyRequest(req) {
   }
   if (typeof body === "string" && /fb_api_req_friendly_name=|^[^=&]+=.+&/.test(body)) {
     const friendly = gqlActionFromBody(body);
-    if (friendly)
-      return { protocol: "form-rpc", action: friendly };
+    if (friendly) return { protocol: "form-rpc", action: friendly };
   }
-  return { protocol: "rest", action: `${req.method} ${parameterizePath(path9)}` };
+  return { protocol: "rest", action: `${req.method} ${parameterizePath(path13)}` };
 }
 function inferVerb(protocol, action, method, responseBody) {
   const lower = action.toLowerCase();
   if (protocol === "rest") {
     const m = method.toUpperCase();
-    if (m === "DELETE")
-      return "delete";
-    if (m === "POST")
-      return "create";
-    if (m === "PUT" || m === "PATCH")
-      return "update";
-    if (m === "GET")
-      return Array.isArray(responseBody) || isRecord(responseBody) && Array.isArray(responseBody.data) ? "list" : "read";
+    if (m === "DELETE") return "delete";
+    if (m === "POST") return "create";
+    if (m === "PUT" || m === "PATCH") return "update";
+    if (m === "GET") return Array.isArray(responseBody) || isRecord(responseBody) && Array.isArray(responseBody.data) ? "list" : "read";
     return "action";
   }
-  if (/\b(delete|remove|destroy|unfollow|unlike|dislike)\b/.test(lower))
-    return "delete";
-  if (/\b(create|add|insert|post|send|submit|publish|upload|register|signup|like|follow|react)\b/.test(lower))
-    return "create";
-  if (/\b(update|edit|patch|set|change|rename|modify|mark|move)\b/.test(lower))
-    return "update";
-  if (/\b(list|search|feed|timeline|paginated|browse|index|all|many)\b/.test(lower))
-    return "list";
-  if (/\b(get|fetch|load|read|query|view|show|profile|info|detail|me)\b/.test(lower))
-    return "read";
+  if (/\b(delete|remove|destroy|unfollow|unlike|dislike)\b/.test(lower)) return "delete";
+  if (/\b(create|add|insert|post|send|submit|publish|upload|register|signup|like|follow|react)\b/.test(lower)) return "create";
+  if (/\b(update|edit|patch|set|change|rename|modify|mark|move)\b/.test(lower)) return "update";
+  if (/\b(list|search|feed|timeline|paginated|browse|index|all|many)\b/.test(lower)) return "list";
+  if (/\b(get|fetch|load|read|query|view|show|profile|info|detail|me)\b/.test(lower)) return "read";
   if (protocol === "graphql") {
-    const q = isRecord(responseBody) ? responseBody.query : undefined;
-    if (typeof q === "string" && /^\s*mutation\b/.test(q))
-      return "action";
+    const q = isRecord(responseBody) ? responseBody.query : void 0;
+    if (typeof q === "string" && /^\s*mutation\b/.test(q)) return "action";
     return "read";
   }
   return "action";
@@ -4521,8 +4481,8 @@ function buildFunctionName(protocol, action, method, verb) {
   if (protocol === "rest") {
     const parts = action.split(" ");
     const httpMethod = parts[0];
-    const path9 = parts.slice(1).join(" ");
-    const segs = path9.split("/").filter((s) => s && !s.startsWith("{"));
+    const path13 = parts.slice(1).join(" ");
+    const segs = path13.split("/").filter((s) => s && !s.startsWith("{"));
     const verbPrefix = httpMethod === "GET" ? verb === "list" ? "list" : "get" : httpMethod === "POST" ? "create" : httpMethod === "PUT" ? "update" : httpMethod === "PATCH" ? "patch" : httpMethod === "DELETE" ? "delete" : httpMethod.toLowerCase();
     return camelCase(`${verbPrefix} ${segs.join(" ")}`) || camelCase(action);
   }
@@ -4530,30 +4490,29 @@ function buildFunctionName(protocol, action, method, verb) {
     const base = action.replace(/^(Use|FB|IG)/, "").replace(/(Query|Mutation|Subscription|RootQuery)$/, "");
     return camelCase(base) || camelCase(action);
   }
-  if (protocol === "json-rpc")
-    return camelCase(action.replace(/[._]/g, " "));
+  if (protocol === "json-rpc") return camelCase(action.replace(/[._]/g, " "));
   if (protocol === "grpc-web") {
     const last = action.split("/").pop() || action;
     return camelCase(last);
   }
   return camelCase(action);
 }
-function buildCurl(method, url, headers, auth, body) {
+function buildCurl(method, url, headers, auth2, body) {
   const parts = [`curl -X ${method}`];
-  if (auth.authorization) {
-    parts.push(`  -H 'Authorization: ${auth.authorization}'`);
+  if (auth2.authorization) {
+    parts.push(`  -H 'Authorization: ${auth2.authorization}'`);
   }
-  if (Object.keys(auth.cookies).length > 0) {
-    const cookieStr = Object.entries(auth.cookies).map(([k, v]) => `${k}=${v}`).join("; ");
+  if (Object.keys(auth2.cookies).length > 0) {
+    const cookieStr = Object.entries(auth2.cookies).map(([k, v]) => `${k}=${v}`).join("; ");
     parts.push(`  -H 'Cookie: ${cookieStr}'`);
   }
-  for (const [k, v] of Object.entries(auth.tokens)) {
+  for (const [k, v] of Object.entries(auth2.tokens)) {
     parts.push(`  -H '${k}: ${v}'`);
   }
   for (const [k, v] of Object.entries(headers)) {
     parts.push(`  -H '${k}: ${v}'`);
   }
-  if (body !== undefined) {
+  if (body !== void 0) {
     const bodyStr = typeof body === "string" ? body : JSON.stringify(body);
     const safeBody = bodyStr.length > 1e4 ? bodyStr.slice(0, 1e4) + "...[truncated]" : bodyStr;
     parts.push(`  -d '${safeBody.replace(/'/g, "'\\''")}'`);
@@ -4561,29 +4520,16 @@ function buildCurl(method, url, headers, auth, body) {
   parts.push(`  '${url}'`);
   return parts.join(" \\\n");
 }
-
-class ApiCapture {
-  page;
-  requests = [];
-  pendingRequests = new Map;
-  currentStep = 0;
-  requestHandler;
-  responseHandler;
-  context;
-  hookedPages = new Set;
-  pageHandler;
+var ApiCapture = class {
   constructor(page) {
     this.page = page;
     this.context = page.context();
     this.pageHandler = (p) => this.hookPage(p);
     this.requestHandler = (req) => {
       const resourceType = req.resourceType();
-      if (SKIP_RESOURCE_TYPES.has(resourceType))
-        return;
-      if (SKIP_EXTENSIONS.test(req.url()))
-        return;
-      if (resourceType !== "xhr" && resourceType !== "fetch")
-        return;
+      if (SKIP_RESOURCE_TYPES.has(resourceType)) return;
+      if (SKIP_EXTENSIONS.test(req.url())) return;
+      if (resourceType !== "xhr" && resourceType !== "fetch") return;
       this.pendingRequests.set(req, {
         stepIndex: this.currentStep,
         timestamp: Date.now()
@@ -4592,14 +4538,13 @@ class ApiCapture {
     this.responseHandler = async (res) => {
       const req = res.request();
       const meta = this.pendingRequests.get(req);
-      if (!meta)
-        return;
+      if (!meta) return;
       this.pendingRequests.delete(req);
       try {
         const url = req.url();
         const parsed = new URL(url);
         const allHeaders = req.headers();
-        let requestBody = undefined;
+        let requestBody = void 0;
         try {
           const ct = (allHeaders["content-type"] || allHeaders["Content-Type"] || "").toLowerCase();
           const postData = req.postData();
@@ -4609,22 +4554,24 @@ class ApiCapture {
               requestBody = { _type: "multipart/form-data", fields: [...new Set(fields)] };
             } else if (ct.includes("application/octet-stream") || ct.startsWith("video/") || ct.startsWith("image/") || ct.startsWith("audio/")) {
               requestBody = { _type: ct, _size: postData.length };
-            } else if (postData.length < 500000) {
+            } else if (postData.length < 5e5) {
               requestBody = sanitizeDeep(tryParseJson(postData) ?? postData);
             } else {
-              requestBody = `[body truncated — ${postData.length} bytes, content-type: ${ct}]`;
+              requestBody = `[body truncated \u2014 ${postData.length} bytes, content-type: ${ct}]`;
             }
           }
-        } catch {}
-        let responseBody = undefined;
+        } catch {
+        }
+        let responseBody = void 0;
         try {
           const resText = await res.text();
-          if (resText && resText.length < 500000) {
+          if (resText && resText.length < 5e5) {
             responseBody = sanitizeDeep(tryParseJson(resText) ?? resText);
           } else if (resText) {
-            responseBody = `[response truncated — ${resText.length} bytes]`;
+            responseBody = `[response truncated \u2014 ${resText.length} bytes]`;
           }
-        } catch {}
+        } catch {
+        }
         this.requests.push({
           method: req.method(),
           url,
@@ -4639,12 +4586,24 @@ class ApiCapture {
           triggeredAtStep: meta.stepIndex,
           timestamp: meta.timestamp
         });
-      } catch {}
+      } catch {
+      }
     };
   }
+  page;
+  requests = [];
+  pendingRequests = /* @__PURE__ */ new Map();
+  currentStep = 0;
+  requestHandler;
+  responseHandler;
+  // Capture spans every tab in the context, not just the initial page: a click
+  // that opens a new tab (which the pipeline now follows) makes its XHR/fetch on
+  // a separate Page, so we hook each page opened while capturing.
+  context;
+  hookedPages = /* @__PURE__ */ new Set();
+  pageHandler;
   hookPage(p) {
-    if (this.hookedPages.has(p))
-      return;
+    if (this.hookedPages.has(p)) return;
     this.hookedPages.add(p);
     p.on("request", this.requestHandler);
     p.on("response", this.responseHandler);
@@ -4662,11 +4621,15 @@ class ApiCapture {
       try {
         p.off("request", this.requestHandler);
         p.off("response", this.responseHandler);
-      } catch {}
+      } catch {
+      }
     }
     this.hookedPages.clear();
   }
-  async drain(ms = 3000, pendingTimeoutMs = 5000) {
+  /** Keep listening for `ms` additional milliseconds, then wait up to `pendingTimeoutMs`
+   *  for any in-flight requests (fired but not yet responded) to complete before stopping.
+   *  Catches async post-step requests like auth re-challenges + delayed mutations. */
+  async drain(ms = 3e3, pendingTimeoutMs = 5e3) {
     await new Promise((r) => setTimeout(r, ms));
     const deadline = Date.now() + pendingTimeoutMs;
     while (this.pendingRequests.size > 0 && Date.now() < deadline) {
@@ -4676,52 +4639,49 @@ class ApiCapture {
   getResults() {
     return buildCapturedApi(this.requests);
   }
-}
+};
 function extractAuth(requests) {
-  const auth = { cookies: {}, tokens: {} };
+  const auth2 = { cookies: {}, tokens: {} };
   for (const req of requests) {
     for (const [key, value] of Object.entries(req.requestHeaders)) {
       const lower = key.toLowerCase();
-      if (lower === "authorization" && !auth.authorization) {
-        auth.authorization = value;
+      if (lower === "authorization" && !auth2.authorization) {
+        auth2.authorization = value;
       } else if (lower === "cookie") {
         const cookies = parseCookies(value);
-        Object.assign(auth.cookies, cookies);
+        Object.assign(auth2.cookies, cookies);
       } else if (isAuthHeader(key) && lower !== "authorization" && lower !== "cookie") {
-        auth.tokens[key] = value;
+        auth2.tokens[key] = value;
       }
     }
   }
-  return auth;
+  return auth2;
 }
 function splitHeaders(headers) {
   const endpointHeaders = {};
   for (const [key, value] of Object.entries(headers)) {
     const lower = key.toLowerCase();
-    if (BROWSER_NOISE_HEADERS.has(lower))
-      continue;
-    if (isAuthHeader(key))
-      continue;
-    if (lower === "user-agent")
-      continue;
+    if (BROWSER_NOISE_HEADERS.has(lower)) continue;
+    if (isAuthHeader(key)) continue;
+    if (lower === "user-agent") continue;
     endpointHeaders[key] = value;
   }
   return endpointHeaders;
 }
 function buildCapturedApi(requests) {
-  const byDomain = new Map;
+  const byDomain = /* @__PURE__ */ new Map();
   for (const req of requests) {
     try {
       const host = new URL(req.url).origin;
-      if (!byDomain.has(host))
-        byDomain.set(host, []);
+      if (!byDomain.has(host)) byDomain.set(host, []);
       byDomain.get(host)?.push(req);
-    } catch {}
+    } catch {
+    }
   }
   const apis = [];
   for (const [baseUrl, domainRequests] of byDomain) {
-    const auth = extractAuth(domainRequests);
-    const endpointMap = new Map;
+    const auth2 = extractAuth(domainRequests);
+    const endpointMap = /* @__PURE__ */ new Map();
     for (const req of domainRequests) {
       const paramPath = parameterizePath(req.path);
       const { protocol, action } = classifyRequest(req);
@@ -4740,7 +4700,7 @@ function buildCapturedApi(requests) {
           responseStatus: req.responseStatus,
           responseBody: req.responseBody,
           triggeredAtStep: req.triggeredAtStep,
-          curl: buildCurl(req.method, req.url, endpointHeaders, auth, req.requestBody),
+          curl: buildCurl(req.method, req.url, endpointHeaders, auth2, req.requestBody),
           protocol,
           action,
           verb,
@@ -4748,8 +4708,7 @@ function buildCapturedApi(requests) {
         });
       } else {
         const existing = endpointMap.get(key);
-        if (!existing)
-          continue;
+        if (!existing) continue;
         if (!existing.rawPaths.includes(req.path)) {
           existing.rawPaths.push(req.path);
         }
@@ -4759,9 +4718,9 @@ function buildCapturedApi(requests) {
     apis.push({
       domain,
       baseUrl,
-      auth,
+      auth: auth2,
       endpoints: Array.from(endpointMap.values()).sort((a, b) => a.triggeredAtStep - b.triggeredAtStep),
-      capturedAt: new Date().toISOString()
+      capturedAt: (/* @__PURE__ */ new Date()).toISOString()
     });
   }
   return apis.sort((a, b) => b.endpoints.length - a.endpoints.length);
@@ -4769,24 +4728,21 @@ function buildCapturedApi(requests) {
 
 // src/lib/browser/tab-tracker.ts
 var log15 = createLogger("tabs");
-
-class TabTracker {
+var TabTracker = class {
+  constructor(context, initial) {
+    this.context = context;
+    this.activePage = initial;
+    this.pages = [...context.pages()];
+    if (!this.pages.includes(initial)) this.pages.push(initial);
+    context.on("page", this.onNewPage);
+  }
   context;
   pages;
   activePage;
   newlyOpened = [];
   disposed = false;
-  constructor(context, initial) {
-    this.context = context;
-    this.activePage = initial;
-    this.pages = [...context.pages()];
-    if (!this.pages.includes(initial))
-      this.pages.push(initial);
-    context.on("page", this.onNewPage);
-  }
   onNewPage = (p) => {
-    if (this.disposed)
-      return;
+    if (this.disposed) return;
     this.pages.push(p);
     this.newlyOpened.push(p);
     p.on("close", () => this.onClose(p));
@@ -4800,40 +4756,52 @@ class TabTracker {
       log15.debug(`active tab closed, fell back to: ${safeUrl(this.activePage)}`);
     }
   };
+  /** The page the pipeline should currently drive. */
   active() {
     return this.activePage;
   }
+  /** Number of live tabs currently tracked. */
   count() {
     return this.pages.length;
   }
+  /**
+   * If a tab opened since the last settle, switch to the newest one (waiting
+   * for it to load) and return info about the switch. Returns null if nothing
+   * opened. Never throws.
+   */
   async settle(opts) {
     if (this.newlyOpened.length === 0 && opts.waitForPendingMs > 0) {
       await this.context.waitForEvent("page", { timeout: opts.waitForPendingMs }).catch(() => null);
     }
-    if (this.newlyOpened.length === 0)
-      return null;
+    if (this.newlyOpened.length === 0) return null;
     const target = this.newlyOpened[this.newlyOpened.length - 1];
     this.newlyOpened = [];
-    if (target.isClosed())
-      return null;
-    await target.waitForLoadState("domcontentloaded", { timeout: opts.loadTimeoutMs }).catch(() => {});
+    if (target.isClosed()) return null;
+    await target.waitForLoadState("domcontentloaded", { timeout: opts.loadTimeoutMs }).catch(() => {
+    });
     if (safeUrl(target) === "about:blank" || safeUrl(target) === "") {
       await target.waitForURL((u) => {
         const s = u.toString();
         return !!s && s !== "about:blank";
-      }, { timeout: opts.blankResolveMs }).catch(() => {});
-      await target.waitForLoadState("domcontentloaded", { timeout: opts.loadTimeoutMs }).catch(() => {});
+      }, { timeout: opts.blankResolveMs }).catch(() => {
+      });
+      await target.waitForLoadState("domcontentloaded", { timeout: opts.loadTimeoutMs }).catch(() => {
+      });
     }
     const url = safeUrl(target);
     if (!url || url === "about:blank") {
       return null;
     }
-    await target.bringToFront().catch(() => {});
+    await target.bringToFront().catch(() => {
+    });
     this.activePage = target;
     const sw = { url, title: await target.title().catch(() => "") };
-    log15.info(`followed new tab → ${sw.url}`);
+    log15.info(`followed new tab \u2192 ${sw.url}`);
     return sw;
   }
+  /** Drop pending new-tab opens without following them. Used when a step opened
+   *  a tab we should NOT switch to (e.g. an incidental popup while the main page
+   *  navigated, or any tab opened by a non-click step like login). */
   discardPending() {
     this.newlyOpened = [];
   }
@@ -4841,9 +4809,10 @@ class TabTracker {
     this.disposed = true;
     try {
       this.context.off("page", this.onNewPage);
-    } catch {}
+    } catch {
+    }
   }
-}
+};
 function safeUrl(p) {
   try {
     return p.url();
@@ -4873,10 +4842,9 @@ function loadComponentMap(domain) {
   }
 }
 function loadAnchors(domain) {
-  const map = new Map;
+  const map = /* @__PURE__ */ new Map();
   const cm = loadComponentMap(domain);
-  for (const [name, a] of Object.entries(cm.anchors))
-    map.set(name, a);
+  for (const [name, a] of Object.entries(cm.anchors)) map.set(name, a);
   return map;
 }
 function write(cm) {
@@ -4887,8 +4855,7 @@ function recordAnchorResult(domain, name, ok, now) {
   try {
     const cm = loadComponentMap(domain);
     const a = cm.anchors[name];
-    if (!a)
-      return;
+    if (!a) return;
     if (ok) {
       a.uses += 1;
       a.lastVerified = now;
@@ -4896,11 +4863,12 @@ function recordAnchorResult(domain, name, ok, now) {
       a.fails += 1;
     }
     write(cm);
-  } catch {}
+  } catch {
+  }
 }
 
 // src/lib/pipeline.ts
-var DEFAULT_STALE_TIMEOUT_MS2 = 20000;
+var DEFAULT_STALE_TIMEOUT_MS2 = 2e4;
 function safePageUrl(page) {
   try {
     return page.url();
@@ -4909,20 +4877,15 @@ function safePageUrl(page) {
   }
 }
 function classifyError(err, step) {
-  if (err instanceof StaleStateError)
-    return "stale-state";
+  if (err instanceof StaleStateError) return "stale-state";
   const msg = err.message.toLowerCase();
   if (step.type === "login" && (msg.includes("no visible password field") || msg.includes("password field was not visible"))) {
     return "bot-blocked";
   }
-  if (msg.includes("timeout") || msg.includes("timed out"))
-    return "timeout";
-  if (msg.includes("not found") || msg.includes("no element") || msg.includes("waiting for selector"))
-    return "element-not-found";
-  if (msg.includes("navigation") || msg.includes("net::err"))
-    return "navigation-failed";
-  if (step.type === "solve-captcha")
-    return "captcha-unsolvable";
+  if (msg.includes("timeout") || msg.includes("timed out")) return "timeout";
+  if (msg.includes("not found") || msg.includes("no element") || msg.includes("waiting for selector")) return "element-not-found";
+  if (msg.includes("navigation") || msg.includes("net::err")) return "navigation-failed";
+  if (step.type === "solve-captcha") return "captcha-unsolvable";
   return "action-failed";
 }
 function isRetryable(errorType) {
@@ -4931,7 +4894,7 @@ function isRetryable(errorType) {
 function getSuggestion(errorType, step) {
   const usedEphemeralRef = typeof step.selector === "string" && step.selector.startsWith("@e");
   if (usedEphemeralRef && (errorType === "element-not-found" || errorType === "timeout" || errorType === "stale-state")) {
-    return "The @e ref went stale — the page (likely a React/SPA) re-rendered and dropped it since the snapshot. Take a fresh `snapshot`/`find` right before acting, or save the element as a durable `@a:` anchor with the `remember` tool.";
+    return "The @e ref went stale \u2014 the page (likely a React/SPA) re-rendered and dropped it since the snapshot. Take a fresh `snapshot`/`find` right before acting, or save the element as a durable `@a:` anchor with the `remember` tool.";
   }
   switch (errorType) {
     case "stale-state":
@@ -4945,15 +4908,14 @@ function getSuggestion(errorType, step) {
     case "timeout":
       return "Operation timed out. The page may be slow or the element may not appear.";
     default:
-      return;
+      return void 0;
   }
 }
-
-class PipelineRunner {
-  ctx;
+var PipelineRunner = class {
   constructor(ctx) {
     this.ctx = ctx;
   }
+  ctx;
   async run(initialPage, pipeline) {
     const tracker = new TabTracker(initialPage.context(), initialPage);
     try {
@@ -4978,24 +4940,21 @@ class PipelineRunner {
         this.ctx.anchors = loadAnchors(host);
         this.ctx.anchorDomain = host;
       }
-    } catch {}
+    } catch {
+    }
     const recordAnchor = (step, ok) => {
       const name = anchorNameOf(step.selector);
-      if (name && this.ctx.anchorDomain)
-        recordAnchorResult(this.ctx.anchorDomain, name, ok, new Date().toISOString());
+      if (name && this.ctx.anchorDomain) recordAnchorResult(this.ctx.anchorDomain, name, ok, (/* @__PURE__ */ new Date()).toISOString());
     };
     const capture = opts.captureApi ? new ApiCapture(initialPage) : null;
-    if (capture)
-      capture.start();
+    if (capture) capture.start();
     const finishCapture = async () => {
-      if (!capture)
-        return;
+      if (!capture) return void 0;
       capture.stop();
       return capture.getResults();
     };
-    for (let i = 0;i < pipeline.steps.length; i++) {
-      if (capture)
-        capture.setStep(i);
+    for (let i = 0; i < pipeline.steps.length; i++) {
+      if (capture) capture.setStep(i);
       const step = pipeline.steps[i];
       const page = tracker.active();
       const urlBefore = safePageUrl(page);
@@ -5043,16 +5002,21 @@ class PipelineRunner {
           loadTimeoutMs: TIMEOUTS.TAB_LOAD,
           blankResolveMs: TIMEOUTS.TAB_BLANK_RESOLVE
         });
-        if (switched)
-          stepResult.tabSwitchedTo = switched.url;
+        if (switched) stepResult.tabSwitchedTo = switched.url;
       } else {
         tracker.discardPending();
       }
       if (screenshotAfterEach && stepResult.ok) {
         try {
           const buf = await tracker.active().screenshot({ type: "jpeg", quality: 50, fullPage: false });
-          stepResult.screenshotUrl = saveScreenshot(buf, `step-${i}-${Date.now()}.jpg`, this.ctx.screenshotDir, this.ctx.publicUrl);
-        } catch {}
+          stepResult.screenshotUrl = saveScreenshot(
+            buf,
+            `step-${i}-${Date.now()}.jpg`,
+            this.ctx.screenshotDir,
+            this.ctx.publicUrl
+          );
+        } catch {
+        }
       }
       results.push(stepResult);
       if (!stepResult.ok && !continueOnError) {
@@ -5129,7 +5093,11 @@ class PipelineRunner {
       capturedApi
     };
   }
-}
+};
+
+// src/lib/execution/pipeline-executor.ts
+init_persistence();
+
 // src/lib/block-detection.ts
 var log16 = createLogger("block-detection");
 async function detectBlock(page) {
@@ -5137,7 +5105,7 @@ async function detectBlock(page) {
     const [title, url, bodyText] = await Promise.all([
       page.title().catch(() => ""),
       Promise.resolve(page.url()),
-      page.evaluate(() => document.body?.innerText?.slice(0, 1000) || "").catch(() => "")
+      page.evaluate(() => document.body?.innerText?.slice(0, 1e3) || "").catch(() => "")
     ]);
     if (title.includes("Just a moment") || title.includes("Attention Required")) {
       return { blocked: true, reason: "cloudflare-challenge" };
@@ -5180,7 +5148,8 @@ async function detectBlock(page) {
     if (title.includes("403") || title.includes("Forbidden")) {
       return { blocked: true, reason: "http-403" };
     }
-    if (!url.includes("about:blank") && bodyText.trim().length < 20 && title.length < 5) {}
+    if (!url.includes("about:blank") && bodyText.trim().length < 20 && title.length < 5) {
+    }
     return { blocked: false };
   } catch (err) {
     log16.warn(`page evaluation failed, assuming blocked: ${err}`);
@@ -5191,8 +5160,7 @@ async function detectBlock(page) {
 // src/lib/knowledge/extract-from-run.ts
 function extractKnowledgeFromRun(pipeline, result, sessionData, mode) {
   const firstNav = pipeline.steps.find((s) => s.type === "navigate");
-  if (!firstNav || firstNav.type !== "navigate")
-    return;
+  if (!firstNav || firstNav.type !== "navigate") return;
   let domain;
   try {
     domain = new URL(firstNav.url).hostname;
@@ -5201,80 +5169,69 @@ function extractKnowledgeFromRun(pipeline, result, sessionData, mode) {
   }
   const domainRoot = domain.replace(/^www\./, "");
   const hadLogin = pipeline.steps.some((s) => s.type === "login");
-  const auth = { type: "unknown" };
+  const auth2 = { type: "unknown" };
   const cookieNames = [];
   const localStorageKeys = [];
   const sessionStorageKeys = [];
   if (sessionData) {
     for (const c of sessionData.cookies ?? []) {
       if (c.domain.endsWith(domainRoot) || domainRoot.endsWith(c.domain.replace(/^\./, ""))) {
-        if (!cookieNames.includes(c.name))
-          cookieNames.push(c.name);
+        if (!cookieNames.includes(c.name)) cookieNames.push(c.name);
       }
     }
     for (const [origin, store] of Object.entries(sessionData.localStorage ?? {})) {
       if (origin.includes(domainRoot)) {
         for (const k of Object.keys(store)) {
-          if (!localStorageKeys.includes(k))
-            localStorageKeys.push(k);
+          if (!localStorageKeys.includes(k)) localStorageKeys.push(k);
         }
       }
     }
     for (const [origin, store] of Object.entries(sessionData.sessionStorage ?? {})) {
       if (origin.includes(domainRoot)) {
         for (const k of Object.keys(store)) {
-          if (!sessionStorageKeys.includes(k))
-            sessionStorageKeys.push(k);
+          if (!sessionStorageKeys.includes(k)) sessionStorageKeys.push(k);
         }
       }
     }
   }
   if (cookieNames.length > 0 && localStorageKeys.length > 0) {
-    auth.type = "cookies+localStorage";
+    auth2.type = "cookies+localStorage";
   } else if (localStorageKeys.length > 0) {
-    auth.type = "localStorage";
+    auth2.type = "localStorage";
   } else if (cookieNames.length > 0) {
-    auth.type = "cookies";
+    auth2.type = "cookies";
   }
-  if (cookieNames.length > 0)
-    auth.cookieNames = cookieNames;
-  if (localStorageKeys.length > 0)
-    auth.localStorageKeys = localStorageKeys;
-  if (sessionStorageKeys.length > 0)
-    auth.sessionStorageKeys = sessionStorageKeys;
+  if (cookieNames.length > 0) auth2.cookieNames = cookieNames;
+  if (localStorageKeys.length > 0) auth2.localStorageKeys = localStorageKeys;
+  if (sessionStorageKeys.length > 0) auth2.sessionStorageKeys = sessionStorageKeys;
   const endpoints = [];
-  const replayHeaders = new Set;
+  const replayHeaders = /* @__PURE__ */ new Set();
   for (const api of result.capturedApi ?? []) {
-    if (!api.domain.includes(domainRoot) && !domainRoot.includes(api.domain.replace(/^www\./, "")))
-      continue;
-    if (api.auth?.authorization)
-      replayHeaders.add("Authorization");
-    for (const name of Object.keys(api.auth?.tokens ?? {}))
-      replayHeaders.add(name);
+    if (!api.domain.includes(domainRoot) && !domainRoot.includes(api.domain.replace(/^www\./, ""))) continue;
+    if (api.auth?.authorization) replayHeaders.add("Authorization");
+    for (const name of Object.keys(api.auth?.tokens ?? {})) replayHeaders.add(name);
     for (const ep of api.endpoints ?? []) {
       endpoints.push({
         method: ep.method,
         path: ep.path,
         description: `Status ${ep.responseStatus}. Triggered at step ${ep.triggeredAtStep}.`,
         example: ep.curl,
-        firstSeen: new Date().toISOString()
+        firstSeen: (/* @__PURE__ */ new Date()).toISOString()
       });
     }
   }
   if (replayHeaders.size > 0) {
-    auth.headers = [...replayHeaders];
-    if (!auth.type.includes("header"))
-      auth.type = auth.type === "unknown" ? "headers" : `${auth.type}+headers`;
+    auth2.headers = [...replayHeaders];
+    if (!auth2.type.includes("header")) auth2.type = auth2.type === "unknown" ? "headers" : `${auth2.type}+headers`;
   }
   const notes = [];
-  if (hadLogin)
-    notes.push(`Last successful login via browser in ${mode} mode.`);
-  if (result.obstacles?.some((o) => o.type?.includes("captcha")))
-    notes.push("Captcha encountered — browser required for fresh logins.");
+  if (hadLogin) notes.push(`Last successful login via browser in ${mode} mode.`);
+  if (result.obstacles?.some((o) => o.type?.includes("captcha"))) notes.push("Captcha encountered \u2014 browser required for fresh logins.");
   mergeKnowledge(domainRoot, {
     lastMode: mode,
     browserRequired: true,
-    auth,
+    // will flip to false only when the agent proves direct API works
+    auth: auth2,
     endpoints,
     notes
   });
@@ -5292,44 +5249,50 @@ var import_crypto5 = __toESM(require("crypto"));
 // src/lib/version.ts
 var import_fs11 = __toESM(require("fs"));
 var import_path10 = __toESM(require("path"));
-var __dirname = "/Users/redacted/tools/iframer-toolkit/src/lib";
 var cached = null;
 function getVersion() {
-  if (cached)
-    return cached;
-  if (process.env.IFRAMER_VERSION)
-    return cached = process.env.IFRAMER_VERSION;
+  if (cached) return cached;
+  if (process.env.IFRAMER_VERSION) return cached = process.env.IFRAMER_VERSION;
   const candidates = [
     import_path10.default.join(__dirname, "..", "..", "package.json"),
+    // src/lib -> root (dev)
     import_path10.default.join(__dirname, "..", "package.json"),
+    // dist -> root (bundled)
     import_path10.default.join(process.cwd(), "package.json")
   ];
   for (const p of candidates) {
     try {
       const v = JSON.parse(import_fs11.default.readFileSync(p, "utf8")).version;
-      if (v)
-        return cached = v;
-    } catch {}
+      if (v) return cached = v;
+    } catch {
+    }
   }
   return cached = "0.0.0";
 }
 
 // src/lib/extension/bridge.ts
-var REQUEST_TIMEOUT_MS = 180000;
-var HEARTBEAT_MS = 15000;
-
-class ExtensionBridge {
+var REQUEST_TIMEOUT_MS = 18e4;
+var HEARTBEAT_MS = 15e3;
+var ExtensionBridge = class {
   wss = null;
-  clients = new Map;
-  pending = new Map;
+  clients = /* @__PURE__ */ new Map();
+  pending = /* @__PURE__ */ new Map();
   nextReqId = 1;
-  tabOwner = new Map;
-  collidingTabs = new Set;
-  cdpListeners = new Map;
-  attach(server) {
-    if (this.wss)
-      return;
-    this.wss = new import_ws.WebSocketServer({ server, path: "/extension/ws" });
+  // tabId -> clientId, refreshed on every listTabs() so execute can route.
+  tabOwner = /* @__PURE__ */ new Map();
+  // Tab ids that two connected browsers BOTH reported (separate Chromium
+  // instances have independent tab-id spaces, so ids can collide). Routing
+  // one of these without an explicit clientId would silently pick a winner —
+  // refuse instead.
+  collidingTabs = /* @__PURE__ */ new Set();
+  // CDP relay listeners, one per (clientId, tabId). Each active relay owns
+  // exactly one entry; a second relay on the same tab is refused at register
+  // time instead of silently stealing the first one's events.
+  cdpListeners = /* @__PURE__ */ new Map();
+  /** Attach the WS server to the already-listening HTTP server. Idempotent. */
+  attach(server2) {
+    if (this.wss) return;
+    this.wss = new import_ws.WebSocketServer({ server: server2, path: "/extension/ws" });
     this.wss.on("connection", (ws, req) => {
       let expected = "";
       try {
@@ -5350,7 +5313,7 @@ class ExtensionBridge {
         this.acceptClient(ws);
         return;
       }
-      const timer = setTimeout(() => ws.close(4001, "auth timeout"), 3000);
+      const timer = setTimeout(() => ws.close(4001, "auth timeout"), 3e3);
       ws.once("message", (data) => {
         clearTimeout(timer);
         try {
@@ -5359,7 +5322,8 @@ class ExtensionBridge {
             this.acceptClient(ws);
             return;
           }
-        } catch {}
+        } catch {
+        }
         ws.close(4001, "unauthorized");
       });
     });
@@ -5376,26 +5340,27 @@ class ExtensionBridge {
     this.startHeartbeat(client);
     try {
       ws.send(JSON.stringify({ type: "server_info", version: getVersion() }));
-    } catch {}
+    } catch {
+    }
     ws.on("message", (data) => this.onMessage(client, data));
     ws.on("close", () => this.dropClient(client, "socket closed"));
-    ws.on("error", () => {});
+    ws.on("error", () => {
+    });
   }
   startHeartbeat(client) {
     client.heartbeat = setInterval(() => {
-      this.send(client, "ping", {}).catch(() => {});
+      this.send(client, "ping", {}).catch(() => {
+      });
     }, HEARTBEAT_MS);
     client.heartbeat.unref?.();
   }
   dropClient(client, _reason) {
-    if (client.heartbeat)
-      clearInterval(client.heartbeat);
+    if (client.heartbeat) clearInterval(client.heartbeat);
     if (this.clients.get(client.clientId) === client) {
       this.clients.delete(client.clientId);
     }
     for (const [tabId, owner] of this.tabOwner) {
-      if (owner === client.clientId)
-        this.tabOwner.delete(tabId);
+      if (owner === client.clientId) this.tabOwner.delete(tabId);
     }
     for (const [id, p] of this.pending) {
       if (p.clientId === client.clientId) {
@@ -5421,7 +5386,8 @@ class ExtensionBridge {
           if (other !== client && other.profileId === msg.profileId) {
             try {
               other.socket.close(4002, "replaced by same profile reconnect");
-            } catch {}
+            } catch {
+            }
           }
         }
       }
@@ -5431,22 +5397,17 @@ class ExtensionBridge {
       const ev = msg;
       if (typeof ev.tabId === "number") {
         const fn = this.cdpListeners.get(cdpKey(client.clientId, ev.tabId));
-        if (fn)
-          fn(ev);
+        if (fn) fn(ev);
       }
       return;
     }
-    if (typeof msg.id !== "number")
-      return;
+    if (typeof msg.id !== "number") return;
     const p = this.pending.get(msg.id);
-    if (!p || p.clientId !== client.clientId)
-      return;
+    if (!p || p.clientId !== client.clientId) return;
     this.pending.delete(msg.id);
     clearTimeout(p.timer);
-    if (msg.ok)
-      p.resolve(msg.result);
-    else
-      p.reject(new Error(msg.error || "Extension reported an error."));
+    if (msg.ok) p.resolve(msg.result);
+    else p.reject(new Error(msg.error || "Extension reported an error."));
   }
   send(client, type, payload) {
     const ws = client.socket;
@@ -5485,42 +5446,48 @@ class ExtensionBridge {
       }))
     };
   }
+  /** List tabs across ALL connected clients, tagged with profile/client, and
+   *  refresh the tabId → client ownership map used for routing. */
   async listTabs() {
     const all = [];
     this.tabOwner.clear();
     this.collidingTabs.clear();
-    await Promise.all([...this.clients.values()].map(async (client) => {
-      try {
-        const res = await this.send(client, "list_tabs", {}) || { tabs: [] };
-        const tagged = (res.tabs || []).map((t) => ({
-          ...t,
-          clientId: client.clientId,
-          profileId: client.profileId,
-          profileName: client.profileName
-        }));
-        client.tabs = tagged;
-        for (const t of tagged) {
-          const prev = this.tabOwner.get(t.id);
-          if (prev !== undefined && prev !== client.clientId)
-            this.collidingTabs.add(t.id);
-          this.tabOwner.set(t.id, client.clientId);
+    await Promise.all(
+      [...this.clients.values()].map(async (client) => {
+        try {
+          const res = await this.send(client, "list_tabs", {}) || { tabs: [] };
+          const tagged = (res.tabs || []).map((t) => ({
+            ...t,
+            clientId: client.clientId,
+            profileId: client.profileId,
+            profileName: client.profileName
+          }));
+          client.tabs = tagged;
+          for (const t of tagged) {
+            const prev = this.tabOwner.get(t.id);
+            if (prev !== void 0 && prev !== client.clientId) this.collidingTabs.add(t.id);
+            this.tabOwner.set(t.id, client.clientId);
+          }
+          all.push(...tagged);
+        } catch {
+          client.tabs = [];
         }
-        all.push(...tagged);
-      } catch {
-        client.tabs = [];
-      }
-    }));
+      })
+    );
     return { tabs: all, clients: this.status().clients };
   }
+  /** Resolve which client should run a tab. Prefer an explicit clientId, else
+   *  the ownership map, refreshing once if unknown. Errors clearly on ambiguity. */
   async resolveClient(tabId, clientId) {
     if (clientId) {
       const c = this.clients.get(clientId);
-      if (!c)
-        throw new Error(`No connected extension with clientId ${clientId}.`);
+      if (!c) throw new Error(`No connected extension with clientId ${clientId}.`);
       return c;
     }
     if (this.clients.size === 0) {
-      throw new Error("No iframer extension is connected. Open Chrome, install/enable the iframer " + "extension, and pair it (paste the token, dot goes green).");
+      throw new Error(
+        "No iframer extension is connected. Open Chrome, install/enable the iframer extension, and pair it (paste the token, dot goes green)."
+      );
     }
     if (this.clients.size === 1) {
       return [...this.clients.values()][0];
@@ -5531,34 +5498,46 @@ class ExtensionBridge {
       owner = this.tabOwner.get(tabId);
     }
     if (this.collidingTabs.has(tabId)) {
-      throw new Error(`Tab id ${tabId} exists in more than one connected browser (separate browsers ` + `have independent tab-id spaces). Call \`tabs\` and pass the tab's clientId ` + `alongside tabId to pick the right one.`);
+      throw new Error(
+        `Tab id ${tabId} exists in more than one connected browser (separate browsers have independent tab-id spaces). Call \`tabs\` and pass the tab's clientId alongside tabId to pick the right one.`
+      );
     }
     if (owner) {
       const c = this.clients.get(owner);
-      if (c)
-        return c;
+      if (c) return c;
     }
-    throw new Error(`Could not determine which browser profile owns tab ${tabId}. Call \`tabs\` to ` + `refresh the list, then pass the tab's clientId alongside tabId.`);
+    throw new Error(
+      `Could not determine which browser profile owns tab ${tabId}. Call \`tabs\` to refresh the list, then pass the tab's clientId alongside tabId.`
+    );
   }
+  /** Pick a client for a browser-level op that has no tabId (create tab, etc.).
+   *  Explicit clientId wins; otherwise require exactly one connected profile. */
   resolveClientNoTab(clientId) {
     if (clientId) {
       const c = this.clients.get(clientId);
-      if (!c)
-        throw new Error(`No connected extension with clientId ${clientId}.`);
+      if (!c) throw new Error(`No connected extension with clientId ${clientId}.`);
       return c;
     }
     if (this.clients.size === 0) {
-      throw new Error("No iframer extension is connected. Open Chrome, install/enable the iframer " + "extension, and pair it (paste the token, dot goes green).");
+      throw new Error(
+        "No iframer extension is connected. Open Chrome, install/enable the iframer extension, and pair it (paste the token, dot goes green)."
+      );
     }
-    if (this.clients.size === 1)
-      return [...this.clients.values()][0];
-    throw new Error("Multiple browser profiles are connected — pass clientId to say which one to act in. " + "Call `tabs` to see the profiles and their clientIds.");
+    if (this.clients.size === 1) return [...this.clients.values()][0];
+    throw new Error(
+      "Multiple browser profiles are connected \u2014 pass clientId to say which one to act in. Call `tabs` to see the profiles and their clientIds."
+    );
   }
+  /** Hot-reload every connected extension (chrome.runtime.reload) so new
+   *  background.js takes effect without a manual chrome://extensions reload.
+   *  Dev/iteration aid. Clients drop and auto-reconnect within ~seconds. */
   async reloadAll() {
     const clients = [...this.clients.values()];
-    await Promise.all(clients.map((c) => this.send(c, "reload", {}).catch(() => {})));
+    await Promise.all(clients.map((c) => this.send(c, "reload", {}).catch(() => {
+    })));
     return { reloaded: clients.length };
   }
+  /** Group tabs into a native Chrome tab group. */
   async groupTabs(tabIds, opts = {}, clientId) {
     const client = clientId ? this.resolveClientNoTab(clientId) : await this.resolveClient(tabIds[0]);
     return this.send(client, "group_tabs", {
@@ -5569,18 +5548,22 @@ class ExtensionBridge {
       groupId: opts.groupId
     });
   }
+  /** Remove tabs from their group (chrome.tabs.ungroup). */
   async ungroupTabs(tabIds, clientId) {
     const client = clientId ? this.resolveClientNoTab(clientId) : await this.resolveClient(tabIds[0]);
     return this.send(client, "ungroup_tabs", { tabIds });
   }
+  /** Rename / recolor / collapse an existing group by id. */
   async updateGroup(groupId, opts, clientId) {
     const client = this.resolveClientNoTab(clientId);
     return this.send(client, "update_group", { groupId, ...opts });
   }
+  /** List all tab groups across the browser. */
   async listGroups(clientId) {
     const client = this.resolveClientNoTab(clientId);
     return this.send(client, "list_groups", {});
   }
+  /** Open a new tab in the user's real Chrome via chrome.tabs.create. */
   async createTab(url, opts = {}, clientId) {
     const client = this.resolveClientNoTab(clientId);
     const res = await this.send(client, "create_tab", {
@@ -5590,6 +5573,9 @@ class ExtensionBridge {
     });
     return { tab: { ...res.tab, clientId: client.clientId, profileId: client.profileId, profileName: client.profileName }, clientId: client.clientId };
   }
+  // ─── CDP relay plumbing ───────────────────────────────────────────
+  /** Register the relay that owns (clientId, tabId). Throws if another relay
+   *  already drives that tab — a loud error instead of a silent event steal. */
   addCdpListener(clientId, tabId, fn) {
     const key = cdpKey(clientId, tabId);
     if (this.cdpListeners.has(key)) {
@@ -5609,28 +5595,31 @@ class ExtensionBridge {
   }
   async cdpCommand(clientId, tabId, sessionId, method, params) {
     const client = this.clients.get(clientId);
-    if (!client)
-      throw new Error(`CDP: client ${clientId} is gone.`);
+    if (!client) throw new Error(`CDP: client ${clientId} is gone.`);
     return this.send(client, "cdp_command", { tabId, sessionId, method, params });
   }
   async cdpDetach(clientId, tabId) {
     const client = this.clients.get(clientId);
-    if (!client)
-      return;
+    if (!client) return;
     try {
       await this.send(client, "cdp_detach", { tabId });
-    } catch {}
+    } catch {
+    }
   }
-}
+};
 function cdpKey(clientId, tabId) {
   return `${clientId}:${tabId}`;
 }
-var extensionBridge = new ExtensionBridge;
+var extensionBridge = new ExtensionBridge();
 
 // src/lib/extension/cdp-relay.ts
 var log17 = createLogger("cdp-relay");
-
-class CdpRelay {
+var CdpRelay = class {
+  constructor(tabId, clientId, focus) {
+    this.tabId = tabId;
+    this.clientId = clientId;
+    this.focus = focus;
+  }
   tabId;
   clientId;
   focus;
@@ -5638,16 +5627,15 @@ class CdpRelay {
   wss = null;
   pw = null;
   port = 0;
-  path = `/cdp/${import_crypto7.randomUUID()}`;
+  path = `/cdp/${(0, import_crypto7.randomUUID)()}`;
   tabSessionId = "pw-tab-1";
   targetInfo = null;
   ownerClientId = "";
+  // True only once addCdpListener succeeded — stop() must not remove a
+  // listener that belongs to another relay driving the same tab.
   listenerRegistered = false;
-  constructor(tabId, clientId, focus) {
-    this.tabId = tabId;
-    this.clientId = clientId;
-    this.focus = focus;
-  }
+  /** Attach the extension debugger, wire event forwarding, and start listening.
+   *  Must complete BEFORE connectOverCDP is called. */
   async start() {
     const { targetInfo, clientId } = await extensionBridge.cdpAttach(this.tabId, this.clientId, this.focus);
     this.ownerClientId = clientId;
@@ -5669,38 +5657,38 @@ class CdpRelay {
       this.httpServer = import_http.default.createServer((req, res) => {
         if (req.url === "/json/version" || req.url === "/json/version/") {
           res.setHeader("content-type", "application/json");
-          res.end(JSON.stringify({
-            Browser: "Chrome/iframer-extension",
-            "Protocol-Version": "1.3",
-            "User-Agent": "iframer-cdp-relay/1.0",
-            "V8-Version": "",
-            "WebKit-Version": "",
-            webSocketDebuggerUrl: `ws://127.0.0.1:${this.port}${this.path}`
-          }));
+          res.end(
+            JSON.stringify({
+              Browser: "Chrome/iframer-extension",
+              "Protocol-Version": "1.3",
+              "User-Agent": "iframer-cdp-relay/1.0",
+              "V8-Version": "",
+              "WebKit-Version": "",
+              webSocketDebuggerUrl: `ws://127.0.0.1:${this.port}${this.path}`
+            })
+          );
           return;
         }
         res.writeHead(404);
         res.end();
       });
       this.httpServer.on("upgrade", (req) => {
-        if (process.env.IFRAMER_RELAY_DEBUG)
-          log17.info(`[relay] upgrade request url=${req.url}`);
+        if (process.env.IFRAMER_RELAY_DEBUG) log17.info(`[relay] upgrade request url=${req.url}`);
       });
       this.wss = new import_ws2.WebSocketServer({ server: this.httpServer, path: this.path });
       this.wss.on("connection", (ws) => {
-        if (process.env.IFRAMER_RELAY_DEBUG)
-          log17.info(`[relay] playwright connected`);
+        if (process.env.IFRAMER_RELAY_DEBUG) log17.info(`[relay] playwright connected`);
         if (this.pw) {
-          ws.close(4000, "relay already has a client");
+          ws.close(4e3, "relay already has a client");
           return;
         }
         this.pw = ws;
         ws.on("message", (data) => this.onPwMessage(data));
         ws.on("close", () => {
-          if (this.pw === ws)
-            this.pw = null;
+          if (this.pw === ws) this.pw = null;
         });
-        ws.on("error", () => {});
+        ws.on("error", () => {
+        });
       });
       this.httpServer.on("error", reject);
       this.httpServer.listen(0, "127.0.0.1", () => {
@@ -5710,9 +5698,12 @@ class CdpRelay {
       });
     });
   }
+  /** WS URL (used by the low-level protocol test). */
   cdpEndpoint() {
     return `ws://127.0.0.1:${this.port}${this.path}`;
   }
+  /** HTTP DevTools endpoint — pass THIS to connectOverCDP so it fetches
+   *  /json/version/ and discovers the ws url (the reliable path). */
   httpEndpoint() {
     return `http://127.0.0.1:${this.port}`;
   }
@@ -5720,12 +5711,12 @@ class CdpRelay {
     if (this.pw && this.pw.readyState === import_ws2.WebSocket.OPEN) {
       try {
         this.pw.send(JSON.stringify(msg));
-      } catch {}
+      } catch {
+      }
     }
   }
   async onPwMessage(data) {
-    if (process.env.IFRAMER_RELAY_DEBUG)
-      log17.info(`[relay] raw pw msg (${data?.length ?? 0} bytes): ${data?.toString().slice(0, 120)}`);
+    if (process.env.IFRAMER_RELAY_DEBUG) log17.info(`[relay] raw pw msg (${data?.length ?? 0} bytes): ${data?.toString().slice(0, 120)}`);
     let msg;
     try {
       msg = JSON.parse(data.toString());
@@ -5733,14 +5724,11 @@ class CdpRelay {
       return;
     }
     const { id, sessionId, method, params } = msg;
-    if (process.env.IFRAMER_RELAY_DEBUG)
-      log17.info(`[relay] pw→ ${method} (id=${id}, sess=${sessionId || "-"})`);
-    if (!method)
-      return;
+    if (process.env.IFRAMER_RELAY_DEBUG) log17.info(`[relay] pw\u2192 ${method} (id=${id}, sess=${sessionId || "-"})`);
+    if (!method) return;
     try {
       const result = await this.handleCdpCommand(method, params, sessionId);
-      if (typeof id === "number")
-        this.sendToPw({ id, sessionId, result });
+      if (typeof id === "number") this.sendToPw({ id, sessionId, result });
     } catch (e) {
       if (typeof id === "number") {
         this.sendToPw({ id, sessionId, error: { message: e instanceof Error ? e.message : String(e) } });
@@ -5755,6 +5743,7 @@ class CdpRelay {
         return {};
       case "Browser.close":
         return {};
+      // patchright disconnect — don't kill the user's Chrome
       case "Target.setDiscoverTargets":
         return {};
       case "Target.getTargets":
@@ -5772,24 +5761,27 @@ class CdpRelay {
           return {};
         }
         break;
+      // child auto-attach (has sessionId) → forward so OOPIFs/workers attach
       case "Target.getTargetInfo":
-        if (!sessionId)
-          return { targetInfo: this.targetInfo };
+        if (!sessionId) return { targetInfo: this.targetInfo };
         break;
     }
-    const realSessionId = sessionId === this.tabSessionId ? undefined : sessionId;
+    const realSessionId = sessionId === this.tabSessionId ? void 0 : sessionId;
     if (method === "Page.captureScreenshot") {
       return this.captureScreenshotWithFallback(params, realSessionId);
     }
     return extensionBridge.cdpCommand(this.ownerClientId, this.tabId, realSessionId, method, params);
   }
+  /** Screenshots need a compositor frame; a minimized/occluded window may
+   *  never produce one, stalling the command indefinitely. Give the normal
+   *  capture a short window, then fall back to fromSurface:false — capturing
+   *  straight from the renderer, which works without a visible surface (at
+   *  the cost of minor scale/color differences on some displays). */
   async captureScreenshotWithFallback(params, sessionId) {
     const base = params && typeof params === "object" ? { ...params } : {};
     const attempt = (p) => extensionBridge.cdpCommand(this.ownerClientId, this.tabId, sessionId, "Page.captureScreenshot", p);
     const first = attempt(base);
-    first.catch(() => {
-      return;
-    });
+    first.catch(() => void 0);
     try {
       return await Promise.race([
         first,
@@ -5812,12 +5804,15 @@ class CdpRelay {
       this.wss?.clients.forEach((c) => {
         try {
           c.terminate();
-        } catch {}
+        } catch {
+        }
       });
-    } catch {}
+    } catch {
+    }
     try {
       this.pw?.terminate();
-    } catch {}
+    } catch {
+    }
     this.pw = null;
     const withTimeout = (fn) => new Promise((resolve) => {
       let done = false;
@@ -5832,12 +5827,10 @@ class CdpRelay {
       } catch {
         finish();
       }
-      setTimeout(finish, 1000).unref?.();
+      setTimeout(finish, 1e3).unref?.();
     });
-    if (this.wss)
-      await withTimeout((cb) => this.wss.close(cb));
-    if (this.httpServer)
-      await withTimeout((cb) => this.httpServer.close(cb));
+    if (this.wss) await withTimeout((cb) => this.wss.close(cb));
+    if (this.httpServer) await withTimeout((cb) => this.httpServer.close(cb));
     this.wss = null;
     this.httpServer = null;
     if (ownedTab) {
@@ -5848,24 +5841,27 @@ class CdpRelay {
       }
     }
   }
-}
+};
 
 // src/lib/execution/pipeline-executor.ts
 var log18 = createLogger("iframer");
-
-class PipelineExecutor {
-  deps;
-  pendingElicitOtp;
-  extensionTabLocks = new Map;
+var PipelineExecutor = class {
   constructor(deps) {
     this.deps = deps;
   }
+  deps;
+  /** Runtime elicitation hook, set per-call via execute(). Consumed once by
+   *  executeLocal and immediately cleared. */
+  pendingElicitOtp;
+  /** One pipeline per real tab at a time: chrome.debugger and the CDP relay
+   *  can't share a tab, so concurrent executes on the same tab queue up here. */
+  extensionTabLocks = /* @__PURE__ */ new Map();
   async execute(userId, token, pipeline, runtime) {
     this.pendingElicitOtp = runtime?.elicitOtp;
     try {
       return await this.executeInner(userId, token, pipeline);
     } finally {
-      this.pendingElicitOtp = undefined;
+      this.pendingElicitOtp = void 0;
     }
   }
   async executeInner(userId, token, pipeline) {
@@ -5874,15 +5870,12 @@ class PipelineExecutor {
       const tabId = opts.extensionTabId;
       const lockKey = `${opts.clientId || "auto"}:${tabId}`;
       const prev = this.extensionTabLocks.get(lockKey);
-      const run2 = (prev ? prev.catch(() => {
-        return;
-      }) : Promise.resolve()).then(() => this.executeExtension(userId, token, pipeline, tabId, opts.clientId));
+      const run2 = (prev ? prev.catch(() => void 0) : Promise.resolve()).then(
+        () => this.executeExtension(userId, token, pipeline, tabId, opts.clientId)
+      );
       this.extensionTabLocks.set(lockKey, run2);
-      run2.catch(() => {
-        return;
-      }).finally(() => {
-        if (this.extensionTabLocks.get(lockKey) === run2)
-          this.extensionTabLocks.delete(lockKey);
+      run2.catch(() => void 0).finally(() => {
+        if (this.extensionTabLocks.get(lockKey) === run2) this.extensionTabLocks.delete(lockKey);
       });
       return run2;
     }
@@ -5906,8 +5899,7 @@ class PipelineExecutor {
     let result = await this.executeWithMode(userId, token, pipeline, mode, instanceId);
     if (!result.ok && autoEscalate && domain && result.error?.errorType === "bot-blocked") {
       const failedMode = mode;
-      if (domain)
-        this.deps.domainModes.recordFailure(domain, failedMode, result.error?.message || "blocked");
+      if (domain) this.deps.domainModes.recordFailure(domain, failedMode, result.error?.message || "blocked");
       const nextMode = this.deps.domainModes.getNextMode(failedMode, availableModes);
       if (nextMode) {
         log18.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
@@ -5947,50 +5939,52 @@ class PipelineExecutor {
     }
     return this.executeLocal(userId, token, pipeline, mode, instanceId);
   }
+  /** Execute against the user's real Chrome tab via the extension CDP relay,
+   *  using the SAME PipelineRunner as every other mode. No session inject/extract
+   *  (the real profile owns auth) and no escalation (can't escalate a live tab). */
   async executeExtension(userId, token, pipeline, tabId, clientId) {
     const startTime = Date.now();
     const relay = new CdpRelay(tabId, clientId, pipeline.options?.focus);
     let browser;
     try {
       await relay.start();
-      browser = await import_playwright_core.chromium.connectOverCDP(relay.httpEndpoint(), { timeout: 30000 });
+      browser = await import_playwright_core.chromium.connectOverCDP(relay.httpEndpoint(), { timeout: 3e4 });
       const context = browser.contexts()[0];
-      if (!context)
-        throw new Error("no CDP browser context for the tab");
+      if (!context) throw new Error("no CDP browser context for the tab");
       let page = context.pages()[0];
       if (!page) {
-        page = await context.waitForEvent("page", { timeout: 5000 }).catch(() => {
-          return;
-        });
+        page = await context.waitForEvent("page", { timeout: 5e3 }).catch(() => void 0);
       }
-      if (!page)
-        throw new Error("no page available for the tab (is it still open?)");
+      if (!page) throw new Error("no page available for the tab (is it still open?)");
       const ctx = this.deps.refStore.makeContext(userId, token);
-      if (this.pendingElicitOtp)
-        ctx.elicitOtp = this.pendingElicitOtp;
+      if (this.pendingElicitOtp) ctx.elicitOtp = this.pendingElicitOtp;
       const runner = new PipelineRunner(ctx);
       const typeChars = pipeline.steps.reduce((n, s) => {
         const v = s.value;
         return (s.type === "human-type" || s.type === "type-code") && typeof v === "string" ? n + v.length : n;
       }, 0);
-      const capMs = Math.min(60000 + pipeline.steps.length * 15000 + typeChars * 250, 1200000);
+      const capMs = Math.min(6e4 + pipeline.steps.length * 15e3 + typeChars * 250, 12e5);
       let watchdog;
       let result;
       try {
         const runPromise = runner.run(page, pipeline);
-        runPromise.catch(() => {
-          return;
-        });
+        runPromise.catch(() => void 0);
         result = await Promise.race([
           runPromise,
           new Promise((_, reject) => {
-            watchdog = setTimeout(() => reject(new Error(`pipeline exceeded ${Math.round(capMs / 1000)}s — the tab may have stopped ` + `rendering (minimized window?). Un-minimize the Chrome window or retry ` + `with options.focus=true.`)), capMs);
+            watchdog = setTimeout(
+              () => reject(
+                new Error(
+                  `pipeline exceeded ${Math.round(capMs / 1e3)}s \u2014 the tab may have stopped rendering (minimized window?). Un-minimize the Chrome window or retry with options.focus=true.`
+                )
+              ),
+              capMs
+            );
             watchdog.unref?.();
           })
         ]);
       } finally {
-        if (watchdog)
-          clearTimeout(watchdog);
+        if (watchdog) clearTimeout(watchdog);
       }
       this.deps.refStore.sync(userId, ctx);
       result.modeUsed = "extension";
@@ -6020,20 +6014,22 @@ class PipelineExecutor {
           errorType: "action-failed",
           message: `Extension mode failed: ${msg}`,
           pageState: { url: "", title: "" },
-          suggestion: stalled ? "STOP retrying and tell the user what happened: the Chrome tab being driven stopped " + "responding — its window is likely minimized or the page is wedged. Ask them to " + "un-minimize the Chrome window (leaving it behind other windows is fine), or ask " + "permission to rerun with options.focus=true to bring it to the front." : "Ensure the iframer extension is connected (green dot) and the tab is still open. See chrome://extensions.",
+          suggestion: stalled ? "STOP retrying and tell the user what happened: the Chrome tab being driven stopped responding \u2014 its window is likely minimized or the page is wedged. Ask them to un-minimize the Chrome window (leaving it behind other windows is fine), or ask permission to rerun with options.focus=true to bring it to the front." : "Ensure the iframer extension is connected (green dot) and the tab is still open. See chrome://extensions.",
           retryable: !stalled
         }
       };
     } finally {
       try {
-        if (browser)
-          await browser.close();
-      } catch {}
+        if (browser) await browser.close();
+      } catch {
+      }
       try {
         await relay.stop();
-      } catch {}
+      } catch {
+      }
     }
   }
+  /** Execute via Docker session-manager. */
   async executeDocker(userId, token, pipeline) {
     let session = getSession(userId);
     if (!session) {
@@ -6069,6 +6065,7 @@ class PipelineExecutor {
     result.modeUsed = "docker-headful";
     return result;
   }
+  /** Execute via local Chrome daemon (headless + binary-headful). */
   async executeLocal(userId, token, pipeline, mode, instanceId = DEFAULT_INSTANCE) {
     const startTime = Date.now();
     let acquired = false;
@@ -6085,13 +6082,12 @@ class PipelineExecutor {
         try {
           sessionData = JSON.parse(decrypt(blob, encryptionKey));
           await injectCookies(page.context(), sessionData);
-        } catch {}
+        } catch {
+        }
       }
       const ctx = this.deps.refStore.makeContext(userId, token);
-      if (sessionData)
-        ctx.sessionData = sessionData;
-      if (this.pendingElicitOtp)
-        ctx.elicitOtp = this.pendingElicitOtp;
+      if (sessionData) ctx.sessionData = sessionData;
+      if (this.pendingElicitOtp) ctx.elicitOtp = this.pendingElicitOtp;
       const runner = new PipelineRunner(ctx);
       const result = await runner.run(page, pipeline);
       if (result.ok) {
@@ -6120,7 +6116,8 @@ class PipelineExecutor {
           updatedSession = await extractSession(page.context(), page);
           const encrypted = encrypt(JSON.stringify(updatedSession), encryptionKey);
           await this.deps.store.setSession(storeKey, encrypted);
-        } catch {}
+        } catch {
+        }
       }
       if (result.ok) {
         try {
@@ -6153,17 +6150,18 @@ class PipelineExecutor {
         modeUsed: mode
       };
     } finally {
-      if (acquired)
-        this.deps.daemon.release(mode, instanceId);
+      if (acquired) this.deps.daemon.release(mode, instanceId);
     }
   }
-}
+};
+
 // src/lib/execution/fetch-service.ts
-class FetchService {
-  store;
+init_persistence();
+var FetchService = class {
   constructor(store) {
     this.store = store;
   }
+  store;
   async fetch(userId, token, request) {
     const { url, browser: preferredBrowser, waitUntil = "domcontentloaded", waitForSelector, extract: extract2, actions = [], returnHtml = false, headers = {}, locale = "pt-BR", sessionless = false } = request;
     const useSession = !sessionless && !!userId && !!token;
@@ -6180,16 +6178,13 @@ class FetchService {
         }
       }
       const { browser, name: browserName } = await getBrowserWithFallback(preferredBrowser);
-      context = await browser.newContext(stealthContextOptions({ locale, extraHTTPHeaders: { ...headers } }, userId ?? undefined));
-      if (sessionData)
-        await injectCookies(context, sessionData);
+      context = await browser.newContext(stealthContextOptions({ locale, extraHTTPHeaders: { ...headers } }, userId ?? void 0));
+      if (sessionData) await injectCookies(context, sessionData);
       const page = await context.newPage();
       await applyStealthToPage(page);
       await page.goto(url, { waitUntil: waitUntil || "domcontentloaded", timeout: TIMEOUTS.NAVIGATION });
-      if (sessionData)
-        await injectStorage(page, sessionData);
-      if (waitForSelector)
-        await page.waitForSelector(waitForSelector, { timeout: TIMEOUTS.SELECTOR_WAIT });
+      if (sessionData) await injectStorage(page, sessionData);
+      if (waitForSelector) await page.waitForSelector(waitForSelector, { timeout: TIMEOUTS.SELECTOR_WAIT });
       for (const action of actions) {
         switch (action.type) {
           case "click":
@@ -6222,8 +6217,8 @@ class FetchService {
         }
       }
       const finalUrl = page.url();
-      const html = returnHtml ? await page.content() : undefined;
-      const result = extract2 ? await page.evaluate(extract2) : undefined;
+      const html = returnHtml ? await page.content() : void 0;
+      const result = extract2 ? await page.evaluate(extract2) : void 0;
       if (useSession) {
         const updatedSession = await extractSession(context, page);
         const encrypted = encrypt(JSON.stringify(updatedSession), encryptionKey);
@@ -6233,19 +6228,18 @@ class FetchService {
     } catch (err) {
       return { ok: false, browser: "unknown", url, error: getErrorMessage(err), durationMs: Date.now() - startedAt };
     } finally {
-      if (context)
-        await context.close();
+      if (context) await context.close();
     }
   }
-}
+};
 
 // src/lib/execution/capture-manager.ts
-class CaptureManager {
-  daemon;
-  captures = new Map;
+var CaptureManager = class {
   constructor(daemon) {
     this.daemon = daemon;
   }
+  daemon;
+  captures = /* @__PURE__ */ new Map();
   async startCapture(mode = "binary-headful", instanceId = DEFAULT_INSTANCE) {
     const key = `${mode}::${instanceId}`;
     if (this.captures.has(key)) {
@@ -6261,7 +6255,7 @@ class CaptureManager {
     const key = `${mode}::${instanceId}`;
     const capture = this.captures.get(key);
     if (!capture) {
-      return { ok: false, capturedApi: undefined, message: `No active capture on ${key}. Start one with 'session capture-start'.` };
+      return { ok: false, capturedApi: void 0, message: `No active capture on ${key}. Start one with 'session capture-start'.` };
     }
     capture.stop();
     this.captures.delete(key);
@@ -6269,11 +6263,14 @@ class CaptureManager {
     const total = capturedApi.reduce((n, a) => n + a.endpoints.length, 0);
     return { ok: true, capturedApi, message: `Capture stopped. ${total} endpoints across ${capturedApi.length} domain(s).` };
   }
+  /** Extract all cookies from the browser context via CDP — includes HttpOnly/Secure.
+   *  No JS sandbox restrictions. Pass urls to scope (e.g. ['https://youtube.com']). */
   async getCookies(mode = "binary-headful", urls, instanceId = DEFAULT_INSTANCE) {
     const { context } = await this.daemon.ensure(mode, instanceId);
     const cookies = urls && urls.length > 0 ? await context.cookies(urls) : await context.cookies();
     return { ok: true, cookies, message: `${cookies.length} cookies extracted via CDP.` };
   }
+  /** Extract cookies + localStorage + sessionStorage in one shot. */
   async getFullAuth(mode = "binary-headful", urls, instanceId = DEFAULT_INSTANCE) {
     const { context, page } = await this.daemon.ensure(mode, instanceId);
     const cookies = urls && urls.length > 0 ? await context.cookies(urls) : await context.cookies();
@@ -6283,11 +6280,11 @@ class CaptureManager {
       const stores = await page.evaluate(() => {
         const ls = {};
         const ss = {};
-        for (let i = 0;i < window.localStorage.length; i++) {
+        for (let i = 0; i < window.localStorage.length; i++) {
           const k = window.localStorage.key(i);
           ls[k] = window.localStorage.getItem(k) ?? "";
         }
-        for (let i = 0;i < window.sessionStorage.length; i++) {
+        for (let i = 0; i < window.sessionStorage.length; i++) {
           const k = window.sessionStorage.key(i);
           ss[k] = window.sessionStorage.getItem(k) ?? "";
         }
@@ -6295,7 +6292,8 @@ class CaptureManager {
       });
       localStorage[stores.origin] = stores.ls;
       sessionStorage[stores.origin] = stores.ss;
-    } catch {}
+    } catch {
+    }
     return {
       ok: true,
       cookies,
@@ -6304,24 +6302,24 @@ class CaptureManager {
       message: `${cookies.length} cookies, ${Object.values(localStorage).reduce((n, s) => n + Object.keys(s).length, 0)} localStorage keys, ${Object.values(sessionStorage).reduce((n, s) => n + Object.keys(s).length, 0)} sessionStorage keys.`
     };
   }
-}
+};
 
 // src/lib/auth/credential-store.ts
-class CredentialStore {
-  store;
-  config;
+var CredentialStore = class {
   constructor(store, config) {
     this.store = store;
     this.config = config;
   }
+  store;
+  config;
   async storeCredential(userId, token, credential) {
     const credKey = await deriveKey(token, "credentials");
     const normalizedDomain = normalizeDomain(credential.domain);
     const data = {
       ...credential,
       domain: normalizedDomain,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
     };
     const encrypted = encrypt(JSON.stringify(data), credKey);
     await this.store.setCredential(userId, normalizedDomain, encrypted);
@@ -6338,8 +6336,7 @@ class CredentialStore {
   }
   async loginWithCredentials(userId, token, domain, selectors) {
     const session = getSession(userId);
-    if (!session)
-      return { ok: false, url: "", title: "", error: "No active interactive session. Start one first." };
+    if (!session) return { ok: false, url: "", title: "", error: "No active interactive session. Start one first." };
     const resolved = await resolveCredential(this.store, userId, token, domain);
     if (!resolved) {
       const stored = await this.store.listCredentialDomains(userId);
@@ -6358,7 +6355,8 @@ class CredentialStore {
     }
     if (selectors.submit) {
       await humanClick(page, selectors.submit);
-      await page.waitForLoadState("domcontentloaded").catch(() => {});
+      await page.waitForLoadState("domcontentloaded").catch(() => {
+      });
       await page.waitForTimeout(TIMING.POST_LOGIN_WAIT);
     }
     if (selectors.totp && credential.totp_secret) {
@@ -6371,15 +6369,14 @@ class CredentialStore {
     const screenshotUrl = saveScreenshot(buf, `login-${Date.now()}.jpg`, this.config.screenshotDir, this.config.publicUrl);
     return { ok: true, url: page.url(), title: await page.title(), screenshotUrl };
   }
-}
+};
 
 // src/lib/iframer.ts
 var log19 = createLogger("iframer");
-var DEFAULT_SCREENSHOT_DIR = import_path11.default.join(import_path11.default.dirname(import_url.fileURLToPath("file:///Users/redacted/tools/iframer-toolkit/src/lib/iframer.ts")), "../../.screenshots");
+var DEFAULT_SCREENSHOT_DIR = import_path11.default.join(import_path11.default.dirname((0, import_url.fileURLToPath)(importMetaUrl)), "../../.screenshots");
 var DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
-var DEFAULT_STALE_TIMEOUT_MS3 = 20000;
-
-class Iframer {
+var DEFAULT_STALE_TIMEOUT_MS3 = 2e4;
+var Iframer = class {
   store;
   daemon;
   domainModes;
@@ -6398,7 +6395,7 @@ class Iframer {
     };
     this.store = createStore({ dataDir: config.dataDir });
     this.daemon = new BrowserDaemon(config.sessionTimeoutMs);
-    this.domainModes = new DomainModeStore;
+    this.domainModes = new DomainModeStore();
     this.operatingMode = config.mode || "local";
     this.refStore = new RefStore(this.store, this.config);
     this.fetchService = new FetchService(this.store);
@@ -6413,13 +6410,12 @@ class Iframer {
       startSession: (userId, token, options) => this.startSession(userId, token, options)
     });
   }
+  // ─── Mode Detection ─────────────────────────────────────────────────
   getAvailableModes() {
     const modes = ["headless"];
     const { binaryHeadful } = checkModeAvailability();
-    if (binaryHeadful)
-      modes.push("binary-headful");
-    if (this.operatingMode === "docker")
-      modes.push("docker-headful");
+    if (binaryHeadful) modes.push("binary-headful");
+    if (this.operatingMode === "docker") modes.push("docker-headful");
     return modes;
   }
   async getModeAvailability() {
@@ -6428,20 +6424,23 @@ class Iframer {
       headless: { available: true },
       "binary-headful": {
         available: binaryHeadful,
-        reason: binaryHeadful ? undefined : "No display available"
+        reason: binaryHeadful ? void 0 : "No display available"
       },
       "docker-headful": {
         available: this.operatingMode === "docker",
-        reason: this.operatingMode === "docker" ? undefined : "Docker not configured"
+        reason: this.operatingMode === "docker" ? void 0 : "Docker not configured"
       }
     };
   }
+  // ─── Headless Fetch ──────────────────────────────────────────────
   fetch(userId, token, request) {
     return this.fetchService.fetch(userId, token, request);
   }
+  // ─── Pipeline Execution ──────────────────────────────────────────
   execute(userId, token, pipeline, runtime) {
     return this.executor.execute(userId, token, pipeline, runtime);
   }
+  // ─── Interactive Sessions (Docker mode) ──────────────────────────
   async startSession(userId, token, options = {}) {
     const existing = getSession(userId);
     if (existing) {
@@ -6457,13 +6456,11 @@ class Iframer {
     let sessionData = null;
     if (blob && blob.length > 0) {
       sessionData = JSON.parse(decrypt(blob, encryptionKey));
-      if (sessionData)
-        await injectCookies(session.context, sessionData);
+      if (sessionData) await injectCookies(session.context, sessionData);
     }
     if (options.url) {
       await session.page.goto(options.url, { waitUntil: "domcontentloaded", timeout: TIMEOUTS.NAVIGATION });
-      if (sessionData)
-        await injectStorage(session.page, sessionData);
+      if (sessionData) await injectStorage(session.page, sessionData);
     }
     return {
       noVncUrl: `http://localhost:${session.wsPort}/vnc.html?autoconnect=true`,
@@ -6500,6 +6497,7 @@ class Iframer {
     await this.daemon.stopAll();
     return { ok: true, sessionSaved };
   }
+  // ─── Persistent Capture / Auth extraction ────────────────────────
   startCapture(mode = "binary-headful", instanceId = DEFAULT_INSTANCE) {
     return this.captureManager.startCapture(mode, instanceId);
   }
@@ -6512,13 +6510,19 @@ class Iframer {
   getFullAuth(mode = "binary-headful", urls, instanceId = DEFAULT_INSTANCE) {
     return this.captureManager.getFullAuth(mode, urls, instanceId);
   }
+  // ─── Browser health / lifecycle ──────────────────────────────────
+  /** Check if any browser is alive and connected (across all named instances). */
   browserHealth() {
     const modes = this.daemon.runningModes();
     return { alive: modes.length > 0, modes };
   }
+  /** Live daemon browsers (which page each is on) so an agent can reattach a
+   *  task's window by instanceId after an interrupt instead of re-navigating. */
   listInstances() {
     return this.daemon.instancesInfo();
   }
+  /** Kill all browser instances and reset state. Next execute call will
+   *  launch a fresh browser automatically — no manual restart needed. */
   async restartBrowser() {
     const health = this.browserHealth();
     await this.daemon.stopAll(true);
@@ -6528,10 +6532,10 @@ class Iframer {
       message: health.modes.length > 0 ? `Killed browser(s): ${health.modes.join(", ")}. Next execute call will launch a fresh instance.` : "No browsers were running. Next execute call will launch fresh."
     };
   }
+  // ─── Screenshots ─────────────────────────────────────────────────
   async screenshot(userId) {
     const session = getSession(userId);
-    if (!session)
-      return null;
+    if (!session) return null;
     resetTimeout(userId);
     const buf = await session.page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
     const screenshotUrl = saveScreenshot(buf, `screenshot-${Date.now()}.jpg`, this.config.screenshotDir, this.config.publicUrl);
@@ -6541,6 +6545,7 @@ class Iframer {
       title: await session.page.title()
     };
   }
+  // ─── Credentials ─────────────────────────────────────────────────
   storeCredential(userId, token, credential) {
     return this.credentials.storeCredential(userId, token, credential);
   }
@@ -6556,9 +6561,11 @@ class Iframer {
   loginWithCredentials(userId, token, domain, selectors) {
     return this.credentials.loginWithCredentials(userId, token, domain, selectors);
   }
+  // ─── Session Data ─────────────────────────────────────────────────
   async clearSession(userId) {
     await this.store.deleteSession(userId);
   }
+  // ─── Lifecycle ───────────────────────────────────────────────────
   async shutdown() {
     await this.daemon.stopAll(true);
     await closeBrowser();
@@ -6567,16 +6574,16 @@ class Iframer {
       this.store.close();
     }
   }
-}
+};
 
 // src/api/error-handler.ts
-class AppError extends Error {
-  statusCode;
+var AppError = class extends Error {
   constructor(statusCode, message) {
     super(message);
     this.statusCode = statusCode;
   }
-}
+  statusCode;
+};
 function asyncHandler(fn) {
   return (req, res, next) => {
     fn(req, res, next).catch(next);
@@ -6599,9 +6606,9 @@ function auth(req) {
 var iframer = new Iframer({
   mode: process.env.IFRAMER_MODE || "local"
 });
-function registerRoutes(app) {
-  app.get("/health", (_req, res) => res.json({ ok: true }));
-  app.get("/browsers", async (_req, res) => {
+function registerRoutes(app2) {
+  app2.get("/health", (_req, res) => res.json({ ok: true }));
+  app2.get("/browsers", async (_req, res) => {
     const browsers = [];
     try {
       const execPath = import_patchright3.chromium.executablePath();
@@ -6611,37 +6618,37 @@ function registerRoutes(app) {
     }
     res.json({ ok: true, browsers });
   });
-  app.get("/browser/health", (_req, res) => {
+  app2.get("/browser/health", (_req, res) => {
     res.json({ ok: true, ...iframer.browserHealth() });
   });
-  app.get("/instances", asyncHandler(async (_req, res) => {
+  app2.get("/instances", asyncHandler(async (_req, res) => {
     res.json({ ok: true, instances: await iframer.listInstances() });
   }));
-  app.post("/browser/restart", asyncHandler(async (_req, res) => {
+  app2.post("/browser/restart", asyncHandler(async (_req, res) => {
     const result = await iframer.restartBrowser();
     res.json({ ok: true, ...result });
   }));
-  app.post("/auth/cookies", asyncHandler(async (req, res) => {
+  app2.post("/auth/cookies", asyncHandler(async (req, res) => {
     const { mode, urls, instanceId } = req.body || {};
     const result = await iframer.getCookies(mode, urls, instanceId);
     res.json(result);
   }));
-  app.post("/auth/full", asyncHandler(async (req, res) => {
+  app2.post("/auth/full", asyncHandler(async (req, res) => {
     const { mode, urls, instanceId } = req.body || {};
     const result = await iframer.getFullAuth(mode, urls, instanceId);
     res.json(result);
   }));
-  app.post("/capture/start", asyncHandler(async (req, res) => {
+  app2.post("/capture/start", asyncHandler(async (req, res) => {
     const { mode, instanceId } = req.body || {};
     const result = await iframer.startCapture(mode, instanceId);
     res.json(result);
   }));
-  app.post("/capture/stop", asyncHandler(async (req, res) => {
+  app2.post("/capture/stop", asyncHandler(async (req, res) => {
     const { mode, instanceId } = req.body || {};
     const result = await iframer.stopCapture(mode, instanceId);
     res.json(result);
   }));
-  app.post("/execute", asyncHandler(async (req, res) => {
+  app2.post("/execute", asyncHandler(async (req, res) => {
     const { steps, options } = req.body || {};
     if (!Array.isArray(steps) || steps.length === 0) {
       throw new AppError(400, "steps must be a non-empty array");
@@ -6650,7 +6657,7 @@ function registerRoutes(app) {
     const result = await iframer.execute(r.userId, r.token, { steps, options });
     res.json(result);
   }));
-  app.post("/interactive/start", asyncHandler(async (req, res) => {
+  app2.post("/interactive/start", asyncHandler(async (req, res) => {
     const { url } = req.body || {};
     const r = auth(req);
     const result = await iframer.startSession(r.userId, r.token, { url });
@@ -6659,13 +6666,12 @@ function registerRoutes(app) {
       ok: true,
       noVncUrl: result.noVncUrl,
       wsPort: result.wsPort,
-      message: existing ? "Session already active" : undefined
+      message: existing ? "Session already active" : void 0
     });
   }));
-  app.get("/interactive/status", (req, res) => {
+  app2.get("/interactive/status", (req, res) => {
     const session = iframer.getSession(auth(req).userId);
-    if (!session)
-      return res.json({ ok: true, active: false });
+    if (!session) return res.json({ ok: true, active: false });
     res.json({
       ok: true,
       active: true,
@@ -6674,16 +6680,15 @@ function registerRoutes(app) {
       createdAt: session.createdAt.toISOString()
     });
   });
-  app.post("/interactive/stop", asyncHandler(async (req, res) => {
+  app2.post("/interactive/stop", asyncHandler(async (req, res) => {
     const r = auth(req);
     const result = await iframer.stopSession(r.userId, r.token);
     res.json(result);
   }));
-  app.get("/interactive/screenshot", asyncHandler(async (req, res) => {
+  app2.get("/interactive/screenshot", asyncHandler(async (req, res) => {
     const r = auth(req);
     const session = iframer.getSession(r.userId);
-    if (!session)
-      throw new AppError(404, "No active interactive session");
+    if (!session) throw new AppError(404, "No active interactive session");
     if (req.query.format === "raw") {
       const buf = await session.page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
       res.set("Content-Type", "image/jpeg");
@@ -6691,18 +6696,15 @@ function registerRoutes(app) {
       return;
     }
     const result = await iframer.screenshot(r.userId);
-    if (!result)
-      throw new AppError(404, "No active interactive session");
+    if (!result) throw new AppError(404, "No active interactive session");
     res.json({ ok: true, ...result });
   }));
-  app.post("/interactive/act", asyncHandler(async (req, res) => {
+  app2.post("/interactive/act", asyncHandler(async (req, res) => {
     const r = auth(req);
     const session = iframer.getSession(r.userId);
-    if (!session)
-      throw new AppError(404, "No active interactive session");
+    if (!session) throw new AppError(404, "No active interactive session");
     const { action, screenshot: wantScreenshot = true } = req.body || {};
-    if (!action || !action.type)
-      throw new AppError(400, "Missing action.type");
+    if (!action || !action.type) throw new AppError(400, "Missing action.type");
     const result = await iframer.execute(r.userId, r.token, {
       steps: [action],
       options: { screenshotAfterEach: wantScreenshot, continueOnObstacle: false }
@@ -6717,11 +6719,10 @@ function registerRoutes(app) {
       error: result.error?.message
     });
   }));
-  app.post("/interactive/batch", asyncHandler(async (req, res) => {
+  app2.post("/interactive/batch", asyncHandler(async (req, res) => {
     const r = auth(req);
     const session = iframer.getSession(r.userId);
-    if (!session)
-      throw new AppError(404, "No active interactive session");
+    if (!session) throw new AppError(404, "No active interactive session");
     const { actions, screenshot: wantScreenshot = true, continueOnError = false } = req.body || {};
     if (!Array.isArray(actions) || actions.length === 0) {
       throw new AppError(400, "actions must be a non-empty array");
@@ -6733,19 +6734,18 @@ function registerRoutes(app) {
     res.json({
       ok: result.ok,
       results: result.results.map((r2) => ({ index: r2.stepIndex, ok: r2.ok, result: r2.result, error: r2.error })),
-      screenshotUrl: wantScreenshot ? result.finalState?.screenshotUrl : undefined,
+      screenshotUrl: wantScreenshot ? result.finalState?.screenshotUrl : void 0,
       url: result.finalState?.url,
       title: result.finalState?.title
     });
   }));
-  app.delete("/session", asyncHandler(async (req, res) => {
+  app2.delete("/session", asyncHandler(async (req, res) => {
     await iframer.clearSession(auth(req).userId);
     res.json({ ok: true });
   }));
-  app.post("/credentials", asyncHandler(async (req, res) => {
+  app2.post("/credentials", asyncHandler(async (req, res) => {
     const { domain, username, password, totp_secret, fields } = req.body || {};
-    if (!domain)
-      throw new AppError(400, "Missing domain");
+    if (!domain) throw new AppError(400, "Missing domain");
     if (!username && !password && !fields) {
       throw new AppError(400, "Must provide username, password, or fields");
     }
@@ -6753,18 +6753,17 @@ function registerRoutes(app) {
     await iframer.storeCredential(r.userId, r.token, { domain, username, password, totp_secret, fields });
     res.json({ ok: true, domain, message: "Credentials stored" });
   }));
-  app.get("/credentials", asyncHandler(async (req, res) => {
+  app2.get("/credentials", asyncHandler(async (req, res) => {
     const domains = await iframer.listCredentials(auth(req).userId);
     res.json({ ok: true, domains });
   }));
-  app.delete("/credentials/:domain", asyncHandler(async (req, res) => {
+  app2.delete("/credentials/:domain", asyncHandler(async (req, res) => {
     await iframer.deleteCredential(auth(req).userId, req.params.domain);
     res.json({ ok: true, message: `Credentials for ${req.params.domain} deleted` });
   }));
-  app.post("/credentials/login", asyncHandler(async (req, res) => {
+  app2.post("/credentials/login", asyncHandler(async (req, res) => {
     const { domain, usernameSelector, passwordSelector, submitSelector, totpSelector } = req.body || {};
-    if (!domain)
-      throw new AppError(400, "Missing domain");
+    if (!domain) throw new AppError(400, "Missing domain");
     const r = auth(req);
     const result = await iframer.loginWithCredentials(r.userId, r.token, domain, {
       username: usernameSelector,
@@ -6772,30 +6771,28 @@ function registerRoutes(app) {
       submit: submitSelector,
       totp: totpSelector
     });
-    if (!result.ok)
-      throw new AppError(400, result.error || "Login failed");
+    if (!result.ok) throw new AppError(400, result.error || "Login failed");
     const { ok: _ok, ...resultRest } = result;
     res.json({ ok: true, message: "Login attempted", ...resultRest });
   }));
-  app.get("/extension/status", (_req, res) => {
+  app2.get("/extension/status", (_req, res) => {
     res.json({ ok: true, version: getVersion(), ...extensionBridge.status() });
   });
-  app.post("/extension/tabs", asyncHandler(async (_req, res) => {
+  app2.post("/extension/tabs", asyncHandler(async (_req, res) => {
     const result = await extensionBridge.listTabs();
     res.json({ ok: true, ...result });
   }));
-  app.post("/extension/reload", asyncHandler(async (_req, res) => {
+  app2.post("/extension/reload", asyncHandler(async (_req, res) => {
     const result = await extensionBridge.reloadAll();
     res.json({ ok: true, ...result });
   }));
-  app.post("/extension/tab/create", asyncHandler(async (req, res) => {
+  app2.post("/extension/tab/create", asyncHandler(async (req, res) => {
     const { url, active, windowId, clientId } = req.body || {};
-    if (url !== undefined && typeof url !== "string")
-      throw new AppError(400, "url must be a string");
+    if (url !== void 0 && typeof url !== "string") throw new AppError(400, "url must be a string");
     const result = await extensionBridge.createTab(url || "", { active, windowId }, clientId);
     res.json({ ok: true, ...result });
   }));
-  app.post("/extension/tab/group", asyncHandler(async (req, res) => {
+  app2.post("/extension/tab/group", asyncHandler(async (req, res) => {
     const { tabIds, title, color, collapsed, groupId, clientId } = req.body || {};
     if (!Array.isArray(tabIds) || tabIds.length === 0 || !tabIds.every((t) => typeof t === "number")) {
       throw new AppError(400, "tabIds must be a non-empty array of numbers");
@@ -6803,7 +6800,7 @@ function registerRoutes(app) {
     const result = await extensionBridge.groupTabs(tabIds, { title, color, collapsed, groupId }, clientId);
     res.json({ ok: true, group: result });
   }));
-  app.post("/extension/tab/ungroup", asyncHandler(async (req, res) => {
+  app2.post("/extension/tab/ungroup", asyncHandler(async (req, res) => {
     const { tabIds, clientId } = req.body || {};
     if (!Array.isArray(tabIds) || tabIds.length === 0 || !tabIds.every((t) => typeof t === "number")) {
       throw new AppError(400, "tabIds must be a non-empty array of numbers");
@@ -6811,22 +6808,20 @@ function registerRoutes(app) {
     const result = await extensionBridge.ungroupTabs(tabIds, clientId);
     res.json({ ok: true, ...result });
   }));
-  app.post("/extension/group/update", asyncHandler(async (req, res) => {
+  app2.post("/extension/group/update", asyncHandler(async (req, res) => {
     const { groupId, title, color, collapsed, clientId } = req.body || {};
-    if (typeof groupId !== "number")
-      throw new AppError(400, "groupId (number) is required");
+    if (typeof groupId !== "number") throw new AppError(400, "groupId (number) is required");
     const result = await extensionBridge.updateGroup(groupId, { title, color, collapsed }, clientId);
     res.json({ ok: true, group: result });
   }));
-  app.post("/extension/groups", asyncHandler(async (req, res) => {
+  app2.post("/extension/groups", asyncHandler(async (req, res) => {
     const { clientId } = req.body || {};
     const result = await extensionBridge.listGroups(clientId);
     res.json({ ok: true, ...result });
   }));
-  app.post("/extension/execute", asyncHandler(async (req, res) => {
+  app2.post("/extension/execute", asyncHandler(async (req, res) => {
     const { tabId, steps, options, clientId } = req.body || {};
-    if (typeof tabId !== "number")
-      throw new AppError(400, "tabId (number) is required");
+    if (typeof tabId !== "number") throw new AppError(400, "tabId (number) is required");
     if (!Array.isArray(steps) || steps.length === 0) {
       throw new AppError(400, "steps must be a non-empty array");
     }
@@ -6837,10 +6832,9 @@ function registerRoutes(app) {
     });
     res.json(result);
   }));
-  app.post("/fetch", asyncHandler(async (req, res) => {
+  app2.post("/fetch", asyncHandler(async (req, res) => {
     const { url } = req.body || {};
-    if (!url)
-      throw new AppError(400, "Missing url");
+    if (!url) throw new AppError(400, "Missing url");
     const r = auth(req);
     const result = await iframer.fetch(r.userId || null, r.token || null, req.body);
     res.json(result);
@@ -6864,23 +6858,23 @@ function tokenAuth(req, res, next) {
 }
 
 // index.ts
-var app = import_express.default();
+var app = (0, import_express.default)();
 var PORT = parseInt(process.env.PORT || "3021", 10);
-var REAP_INTERVAL_MS = 60000;
-var IDLE_EXIT_MS = parseInt(process.env.IFRAMER_SERVER_IDLE_EXIT_MS || String(30 * 60 * 1000), 10);
+var REAP_INTERVAL_MS = 6e4;
+var IDLE_EXIT_MS = parseInt(process.env.IFRAMER_SERVER_IDLE_EXIT_MS || String(30 * 60 * 1e3), 10);
 var SHUTDOWN_DEADLINE_MS = 1e4;
-var SERVER_DIR = import_path12.default.dirname(import_url2.fileURLToPath("file:///Users/redacted/tools/iframer-toolkit/index.ts"));
+var SERVER_DIR = import_path12.default.dirname((0, import_url2.fileURLToPath)(importMetaUrl));
 var OWN_VERSION = (() => {
   for (const p of [import_path12.default.join(SERVER_DIR, "package.json"), import_path12.default.join(SERVER_DIR, "..", "package.json")]) {
     try {
       const pkg = JSON.parse(import_fs13.default.readFileSync(p, "utf8"));
-      if (pkg.name === "iframer-toolkit")
-        return pkg.version;
-    } catch {}
+      if (pkg.name === "iframer-toolkit") return pkg.version;
+    } catch {
+    }
   }
-  return;
+  return void 0;
 })();
-var SCREENSHOT_DIR = import_path12.default.join(import_path12.default.dirname(import_url2.fileURLToPath("file:///Users/redacted/tools/iframer-toolkit/index.ts")), ".screenshots");
+var SCREENSHOT_DIR = import_path12.default.join(import_path12.default.dirname((0, import_url2.fileURLToPath)(importMetaUrl)), ".screenshots");
 import_fs13.default.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 app.use("/screenshots", import_express.default.static(SCREENSHOT_DIR));
 app.use(import_express.default.json());
@@ -6900,13 +6894,12 @@ process.on("unhandledRejection", (reason) => {
 });
 var server = app.listen(PORT, "127.0.0.1", () => {
   console.log(`iframer listening on 127.0.0.1:${PORT}`);
-  writeServerInfo({ pid: process.pid, port: PORT, startedAt: new Date().toISOString(), version: OWN_VERSION });
+  writeServerInfo({ pid: process.pid, port: PORT, startedAt: (/* @__PURE__ */ new Date()).toISOString(), version: OWN_VERSION });
 });
 extensionBridge.attach(server);
 var shutdownStarted = false;
 async function gracefulShutdown(reason) {
-  if (shutdownStarted)
-    return;
+  if (shutdownStarted) return;
   shutdownStarted = true;
   console.log(`[local-server] shutting down (${reason})...`);
   const deadline = setTimeout(() => {
@@ -6934,8 +6927,7 @@ for (const signal of ["SIGTERM", "SIGINT"]) {
 (async () => {
   try {
     const { reaped } = await reapOrphanBrowsers();
-    if (reaped > 0)
-      console.log(`[local-server] reaped ${reaped} orphaned Chrome process(es) at boot`);
+    if (reaped > 0) console.log(`[local-server] reaped ${reaped} orphaned Chrome process(es) at boot`);
   } catch (err) {
     console.error(`[local-server] boot reap failed: ${err}`);
   }
@@ -6943,10 +6935,11 @@ for (const signal of ["SIGTERM", "SIGINT"]) {
 var reapTimer = setInterval(async () => {
   try {
     await reapOrphanBrowsers();
-  } catch {}
+  } catch {
+  }
   const idleMs = Date.now() - lastActivity;
   if (idleMs > IDLE_EXIT_MS && !iframer.browserHealth().alive && !extensionBridge.hasClients()) {
-    gracefulShutdown(`idle for ${Math.round(idleMs / 60000)}min with no browsers`);
+    gracefulShutdown(`idle for ${Math.round(idleMs / 6e4)}min with no browsers`);
   }
 }, REAP_INTERVAL_MS);
 reapTimer.unref?.();
