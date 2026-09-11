@@ -56,7 +56,7 @@ Most of iframer's savings come from the snapshot it hands back: capped and filte
 | Store purchase (login → sort → cart → checkout) | 552 | 697 | 851 | 2,739 |
 | Heavy-page recon (GitHub: look + pull 4 facts) | 986 | 1,058 | 8,433 | 19,906 |
 
-The gap grows with how much DOM the page has. On the GitHub page, iframer spent about 986 tokens where Playwright MCP spent about 19,900, roughly 20x. That's per-task cost. It doesn't include the roughly 5.1k tokens of MCP tool-definition overhead loaded once per session, not per task. The harness and fairness rules live in `benchmark/` locally; that folder is gitignored and not published with the repo.
+The gap grows with how much DOM the page has. On the GitHub page, iframer spent about 986 tokens where Playwright MCP spent about 19,900, roughly 20x. That's per-task cost. It doesn't include the roughly 5.1k tokens of MCP tool-definition overhead loaded once per session, not per task.
 
 ## Install
 
