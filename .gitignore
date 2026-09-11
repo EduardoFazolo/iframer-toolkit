@@ -11,8 +11,10 @@ node_modules/
 *.swp
 *.swo
 
-# Internal docs (pricing, strategy)
-docs/
+# Internal docs (pricing, strategy) — README assets stay public
+docs/*
+!docs/logo.svg
+!docs/example/
 
 # OS
 .DS_Store
@@ -27,6 +29,8 @@ Thumbs.db
 whatsapp-api/
 twitter-api/
 *-api/auth.ts
+# README demo capture: no auth data, safe to commit as an example
+!docs/example/api/captured-api.json
 
 # Secrets
 secret

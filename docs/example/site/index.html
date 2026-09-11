@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>iframer demo site</title>
+<style>
+  body { font: 15px/1.5 -apple-system, system-ui, sans-serif; max-width: 420px; margin: 60px auto; color: #1a1a1a; }
+  h1 { font-size: 18px; }
+  button { padding: 10px 16px; border: 0; border-radius: 6px; background: #1a1a1a; color: #fff; font-size: 14px; cursor: pointer; }
+  button:hover { background: #333; }
+  pre { background: #f4f4f4; padding: 12px; border-radius: 6px; font-size: 13px; white-space: pre-wrap; word-break: break-word; min-height: 20px; }
+</style>
+</head>
+<body>
+  <h1>Task tracker (demo)</h1>
+  <p>No visible URL for this. The button below hits a JSON API behind the scenes.</p>
+  <button id="load">Load task #1</button>
+  <pre id="out">(nothing loaded yet)</pre>
+
+  <script>
+    document.getElementById('load').addEventListener('click', async () => {
+      const out = document.getElementById('out');
+      out.textContent = 'loading...';
+      // artificial delay so the loading state is visible in the README demo; not needed to use this page
+      await new Promise(r => setTimeout(r, 500));
+      const res = await fetch('https://jsonplaceholder.typicode.com/todos/1');
+      const data = await res.json();
+      out.textContent = JSON.stringify(data, null, 2);
+    });
+  </script>
+</body>
+</html>

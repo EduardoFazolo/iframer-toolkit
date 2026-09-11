@@ -1,0 +1,38 @@
+[
+  {
+    "domain": "jsonplaceholder_typicode_com",
+    "baseUrl": "https://jsonplaceholder.typicode.com",
+    "auth": {
+      "cookies": {},
+      "tokens": {}
+    },
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/todos/{id}",
+        "rawPaths": [
+          "/todos/1"
+        ],
+        "headers": {
+          "accept": "*/*",
+          "origin": "http://localhost:8934",
+          "referer": "http://localhost:8934/"
+        },
+        "responseStatus": 200,
+        "responseBody": {
+          "userId": 1,
+          "id": 1,
+          "title": "delectus aut autem",
+          "completed": false
+        },
+        "triggeredAtStep": 1,
+        "curl": "curl -X GET \\\n  -H 'accept: */*' \\\n  -H 'origin: http://localhost:8934' \\\n  -H 'referer: http://localhost:8934/' \\\n  'https://jsonplaceholder.typicode.com/todos/1'",
+        "protocol": "rest",
+        "action": "GET /todos/{id}",
+        "verb": "read",
+        "functionName": "getTodos"
+      }
+    ],
+    "capturedAt": "2026-09-11T00:07:08.529Z"
+  }
+]
