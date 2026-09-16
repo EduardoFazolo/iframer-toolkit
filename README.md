@@ -145,12 +145,48 @@ For live remote viewing, multi-user, or Linux server deployments, see [Self-host
 
 The optional browser extension lets the agent drive a tab you already have open in your real Chrome. No relaunch, no remote-debugging port, your real logged-in session. The extension dials out to iframer's local server and relays the CDP protocol via `chrome.debugger`, so your live tab is driven by the exact same pipeline engine (find, click, snapshot, obstacle handling, API capture) as every other mode, with real trusted input. While a run is active, Chrome shows its yellow "started debugging" bar.
 
-```sh
-iframer install extension chrome   # installs the pairing host, prints the folder to load
-iframer extension path             # prints it again
-```
+There's no Chrome Web Store listing. You load it as an unpacked, developer-mode extension, straight from the files npm just installed on your machine.
 
-Then load it once: `chrome://extensions` → Developer mode → **Load unpacked** → the printed folder. Once paired, the agent lists your open tabs with the `tabs` tool and drives the one you mean. Multiple Chrome profiles or browsers can be paired at once; each identifies itself with a profile name, and iframer routes work to the profile that owns the target tab. See [`extension/README.md`](extension/README.md) for details.
+### Installing it
+
+1. Run:
+   ```sh
+   iframer install extension chrome
+   ```
+   This installs a small pairing host and prints a folder path. That folder is the extension itself.
+
+2. Open `chrome://extensions` in Chrome.
+3. Turn on **Developer mode**, the toggle is top right.
+4. Click **Load unpacked**.
+5. In the file picker, paste the folder path from step 1 and select it.
+
+Chrome loads the extension and pins its icon to the toolbar. That's the whole install, one time only.
+
+### Finding the path again
+
+Lost the path, or setting up a second machine? Run:
+```sh
+iframer extension path
+```
+It prints the same folder every time.
+
+That folder lives inside wherever npm put `iframer-toolkit` globally, not inside a git checkout of this repo. On most machines that's something like `/usr/local/lib/node_modules/iframer-toolkit/extension` or, with nvm, a path under `~/.nvm/versions/node/<version>/lib/node_modules/iframer-toolkit/extension`. Run the command above instead of guessing, the exact path depends on your Node setup.
+
+Loading it from that exact path matters: it's what lets `iframer update` refresh the extension files in place, then tell Chrome to reload it, no repeating the install steps after every update.
+
+### Pairing (automatic)
+
+Once loaded, the extension pairs itself. The pairing host installed in step 1 hands it the same local token the CLI and MCP already use, straight from `~/.iframer/secret`. Nothing to copy, nothing to type.
+
+If that ever fails (host not installed, or you're on a platform it doesn't support), click the iframer icon in the toolbar and paste the token yourself:
+```sh
+cat ~/.iframer/secret
+```
+then **Save & connect**.
+
+Either way, check the popup: the dot next to "iframer" turns green once it finds the running local server.
+
+You can repeat this whole install on more than one Chrome profile, or in Brave, Edge, or another Chromium-based browser, at the same time. Each one pairs under its own profile name, and iframer routes each task to whichever profile actually has the tab. Once paired, the agent lists your open tabs with the `tabs` tool and drives the one you mean. See [`extension/README.md`](extension/README.md) for how the pipeline and multi-profile routing work under the hood.
 
 ## CLI reference
 
