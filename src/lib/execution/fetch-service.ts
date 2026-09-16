@@ -1,3 +1,5 @@
+import { detectSiteProtection, paceProtectedDomain, PROTECTED_INTERVAL_MS } from "../site-protection";
+import { getHeadedBrowser } from "../browser/launcher";
 import type { Browser } from "patchright";
 import type { FetchRequest, FetchResult } from "../types";
 import type { StorageBackend } from "../storage";
@@ -39,14 +41,33 @@ export class FetchService {
 
       if (sessionData) await injectCookies(context, sessionData);
 
-      const page = await context.newPage();
+      let page = await context.newPage();
       await applyStealthToPage(page);
       await page.goto(url, { waitUntil: (waitUntil || "domcontentloaded") as "load" | "domcontentloaded" | "networkidle" | "commit", timeout: TIMEOUTS.NAVIGATION });
+
+      let protection = false;
+      const pivotIfDetected = async () => {
+        if (protection || !await detectSiteProtection(page)) return;
+        protection = true;
+        const targetUrl = page.url();
+        const cookies = await context!.cookies();
+        await context!.close();
+        context = await (await getHeadedBrowser()).newContext(stealthContextOptions({ locale, extraHTTPHeaders: { ...headers } }, userId ?? undefined));
+        await context.addCookies(cookies);
+        page = await context.newPage();
+        await applyStealthToPage(page);
+        await new Promise(resolve => setTimeout(resolve, PROTECTED_INTERVAL_MS));
+        await paceProtectedDomain(new URL(targetUrl).hostname);
+        await page.goto(targetUrl, { waitUntil: waitUntil as "load" | "domcontentloaded" | "networkidle" | "commit", timeout: TIMEOUTS.NAVIGATION });
+      };
+      await pivotIfDetected();
 
       if (sessionData) await injectStorage(page, sessionData);
       if (waitForSelector) await page.waitForSelector(waitForSelector, { timeout: TIMEOUTS.SELECTOR_WAIT });
 
       for (const action of actions) {
+        await pivotIfDetected();
+        if (protection) await paceProtectedDomain(new URL(page.url()).hostname);
         switch (action.type) {
           case "click": await page.click(action.selector!); break;
           case "fill": await page.fill(action.selector!, action.value!); break;
@@ -60,6 +81,7 @@ export class FetchService {
         }
       }
 
+      await pivotIfDetected();
       const finalUrl = page.url();
       const html = returnHtml ? await page.content() : undefined;
       const result = extract ? await page.evaluate(extract) : undefined;

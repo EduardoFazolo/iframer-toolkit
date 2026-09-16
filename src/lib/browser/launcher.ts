@@ -18,6 +18,11 @@ function findChromeExecutable(): string | undefined {
 export const BROWSER_ORDER = ["chromium"];
 
 let cachedBrowser: Browser | null = null;
+let headedBrowser: Browser | null = null;
+export async function getHeadedBrowser(): Promise<Browser> {
+  if (!headedBrowser?.isConnected()) headedBrowser = await chromium.launch({ headless: false, args: STEALTH_ARGS });
+  return headedBrowser;
+}
 
 export async function getBrowser(_name: string = "chromium"): Promise<Browser> {
   if (cachedBrowser) {
@@ -36,6 +41,7 @@ export async function getBrowser(_name: string = "chromium"): Promise<Browser> {
 
 /** Close the cached ephemeral browser (used by fetch()). Call on shutdown. */
 export async function closeBrowser(): Promise<void> {
+  if (headedBrowser) { await headedBrowser.close().catch(() => {}); headedBrowser = null; }
   if (!cachedBrowser) return;
   try { await cachedBrowser.close(); } catch (e) { log.warn(`closeBrowser failed: ${e}`); }
   cachedBrowser = null;

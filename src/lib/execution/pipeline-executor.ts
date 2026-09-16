@@ -1,3 +1,4 @@
+import { HeadedRequiredError, protectionHooks, PROTECTED_INTERVAL_MS } from "../site-protection";
 // connectOverCDP is used ONLY for extension mode. patchright (a stealth fork)
 // deliberately breaks connectOverCDP, so we use stock playwright-core for it —
 // its Page is API-compatible with patchright's, so the handlers work unchanged.
@@ -111,6 +112,8 @@ export class PipelineExecutor {
 
     let result = await this.executeWithMode(userId, token, pipeline, mode, instanceId);
 
+    mode = result.modeUsed || mode;
+
     // Auto-escalation: if blocked and autoEscalate is on, try next mode
     if (!result.ok && autoEscalate && domain && result.error?.errorType === "bot-blocked") {
       const failedMode = mode;
@@ -156,11 +159,11 @@ export class PipelineExecutor {
     return result;
   }
 
-  private async executeWithMode(userId: string, token: string, pipeline: Pipeline, mode: BrowserMode, instanceId: string = DEFAULT_INSTANCE): Promise<PipelineResult> {
+  private async executeWithMode(userId: string, token: string, pipeline: Pipeline, mode: BrowserMode, instanceId: string = DEFAULT_INSTANCE, respectful = false): Promise<PipelineResult> {
     if (mode === "docker-headful") {
-      return this.executeDocker(userId, token, pipeline);
+      return this.executeDocker(userId, token, pipeline, respectful);
     }
-    return this.executeLocal(userId, token, pipeline, mode, instanceId);
+    return this.executeLocal(userId, token, pipeline, mode, instanceId, respectful);
   }
 
   /** Execute against the user's real Chrome tab via the extension CDP relay,
@@ -288,7 +291,7 @@ export class PipelineExecutor {
   }
 
   /** Execute via Docker session-manager. */
-  private async executeDocker(userId: string, token: string, pipeline: Pipeline): Promise<PipelineResult> {
+  private async executeDocker(userId: string, token: string, pipeline: Pipeline, respectful = false): Promise<PipelineResult> {
     let session = sessionManager.getSession(userId);
     if (!session) {
       const firstNav = pipeline.steps.find((s) => s.type === "navigate");
@@ -299,7 +302,7 @@ export class PipelineExecutor {
     sessionManager.resetTimeout(userId);
 
     const ctx = this.deps.refStore.makeContext(userId, token);
-    const runner = new PipelineRunner(ctx);
+    const runner = new PipelineRunner(ctx, protectionHooks(false, respectful));
     const result = await runner.run(session.page, pipeline);
 
     if (result.ok) {
@@ -329,7 +332,7 @@ export class PipelineExecutor {
   }
 
   /** Execute via local Chrome daemon (headless + binary-headful). */
-  private async executeLocal(userId: string, token: string, pipeline: Pipeline, mode: BrowserMode, instanceId: string = DEFAULT_INSTANCE): Promise<PipelineResult> {
+  private async executeLocal(userId: string, token: string, pipeline: Pipeline, mode: BrowserMode, instanceId: string = DEFAULT_INSTANCE, respectful = false): Promise<PipelineResult> {
     const startTime = Date.now();
 
     let acquired = false;
@@ -356,8 +359,42 @@ export class PipelineExecutor {
       const ctx = this.deps.refStore.makeContext(userId, token);
       if (sessionData) ctx.sessionData = sessionData;
       if (this.pendingElicitOtp) ctx.elicitOtp = this.pendingElicitOtp;
-      const runner = new PipelineRunner(ctx);
-      const result = await runner.run(page, pipeline);
+      const runner = new PipelineRunner(ctx, protectionHooks(mode === "headless", respectful));
+      let result: PipelineResult;
+      try {
+        result = await runner.run(page, pipeline);
+      } catch (err) {
+        if (!(err instanceof HeadedRequiredError)) throw err;
+        // Close headless immediately. Do not wait for a blocked result or retry it.
+        this.deps.daemon.release(mode, instanceId);
+        acquired = false;
+        await this.deps.daemon.stopMode(mode, instanceId);
+        const available = this.deps.availableModes();
+        const headed = available.includes("binary-headful") ? "binary-headful" : "docker-headful";
+        if (!available.includes(headed)) throw new Error("A headed browser is required but unavailable.");
+        await new Promise(resolve => setTimeout(resolve, PROTECTED_INTERVAL_MS));
+        const index = err.stepIndex;
+        // Resume at the interrupted step, never replay earlier clicks/submissions.
+        const remaining = pipeline.steps.slice(index);
+        const insertedNavigation = remaining[0]?.type !== "navigate";
+        if (insertedNavigation) remaining.unshift({ type: "navigate", url: err.url });
+        const resumed = await this.executeWithMode(userId, token, { ...pipeline, steps: remaining }, headed, instanceId, true);
+        const offset = index - Number(insertedNavigation);
+        resumed.results = [...err.results, ...resumed.results
+          .filter(r => !insertedNavigation || r.stepIndex > 0)
+          .map(r => ({ ...r, stepIndex: r.stepIndex + offset }))];
+        resumed.completedSteps = index + Math.max(0, resumed.completedSteps - Number(insertedNavigation));
+        resumed.totalSteps = pipeline.steps.length;
+        resumed.obstacles = [...err.obstacles, ...resumed.obstacles];
+        if (resumed.error) {
+          resumed.error.failedAtStep = Math.max(index, resumed.error.failedAtStep + offset);
+          resumed.error.failedStep = pipeline.steps[resumed.error.failedAtStep];
+        }
+        resumed.durationMs = Date.now() - startTime;
+        resumed.modeEscalated = true;
+        resumed.modeUsed = headed;
+        return resumed;
+      }
 
       if (result.ok) {
         const blockResult = await detectBlock(page);

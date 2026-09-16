@@ -1,3 +1,4 @@
+import { HeadedRequiredError } from "./site-protection";
 import type { Page } from "patchright";
 import type {
   Pipeline,
@@ -72,7 +73,10 @@ function getSuggestion(errorType: ErrorContext["errorType"], step: PipelineStep)
 }
 
 export class PipelineRunner {
-  constructor(private ctx: ExecutionContext) {}
+  constructor(private ctx: ExecutionContext, private hooks?: {
+    before: (page: Page, step: PipelineStep) => Promise<void>;
+    after: (page: Page, requestedUrl?: string) => Promise<void>;
+  }) {}
 
   async run(initialPage: Page, pipeline: Pipeline): Promise<PipelineResult> {
     // The tracker is the single source of truth for the active page: it follows
@@ -136,12 +140,19 @@ export class PipelineRunner {
       let stepResult: StepResult;
 
       try {
+        await this.hooks?.before(page, step);
         stepResult = await monitor.withMonitoring(async () => {
           const r = await executeAction(page, step, this.ctx, monitor);
+          if (step.type === "navigate") await this.hooks?.after(page, step.url);
           r.stepIndex = i;
           return r;
         });
       } catch (err: unknown) {
+        if (err instanceof HeadedRequiredError) {
+          Object.assign(err, { stepIndex: i, results, obstacles });
+          await finishCapture();
+          throw err;
+        }
         // StaleStateError or other wrapper errors
         const asError = err instanceof Error ? err : new Error(String(err));
         const errorType = classifyError(asError, step);

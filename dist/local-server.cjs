@@ -551,6 +551,11 @@ function findChromeExecutable() {
   return void 0;
 }
 var cachedBrowser = null;
+var headedBrowser = null;
+async function getHeadedBrowser() {
+  if (!headedBrowser?.isConnected()) headedBrowser = await import_patchright.chromium.launch({ headless: false, args: STEALTH_ARGS });
+  return headedBrowser;
+}
 async function getBrowser(_name = "chromium") {
   if (cachedBrowser) {
     if (cachedBrowser.isConnected()) return cachedBrowser;
@@ -568,6 +573,11 @@ async function getBrowser(_name = "chromium") {
   return cachedBrowser;
 }
 async function closeBrowser() {
+  if (headedBrowser) {
+    await headedBrowser.close().catch(() => {
+    });
+    headedBrowser = null;
+  }
   if (!cachedBrowser) return;
   try {
     await cachedBrowser.close();
@@ -1879,6 +1889,53 @@ var RefStore = class {
     if (refs) refs.nextRefId = ctx.nextRefId;
   }
 };
+
+// src/lib/site-protection.ts
+var PROTECTED_INTERVAL_MS = 3e3;
+var nextRequest = /* @__PURE__ */ new Map();
+async function paceProtectedDomain(domain) {
+  const now = Date.now();
+  const slot = Math.max(now, nextRequest.get(domain) || 0);
+  nextRequest.set(domain, slot + PROTECTED_INTERVAL_MS);
+  if (slot > now) await new Promise((resolve) => setTimeout(resolve, slot - now));
+}
+async function detectSiteProtection(page) {
+  const cookies = await page.context().cookies(page.url()).catch(() => []);
+  if (cookies.some((c) => /^(incap_ses_|visid_incap_|nlbi_)/i.test(c.name))) return "imperva";
+  if (cookies.some((c) => /^(?:_abck|bm_sz|ak_bmsc|bm_sv)$/.test(c.name))) return "akamai";
+  const html = await page.content().catch(() => "");
+  if (/\/[_]Incapsula_Resource|incapsula incident id|powered by imperva/i.test(html)) return "imperva";
+  if (/errors\.edgesuite\.net|akamai bot manager/i.test(html)) return "akamai";
+  return null;
+}
+var HeadedRequiredError = class extends Error {
+  constructor(url) {
+    super("This site requires a headed browser.");
+    this.url = url;
+  }
+  url;
+  stepIndex = 0;
+  results = [];
+  obstacles = [];
+};
+function protectionHooks(headless, respectful = false) {
+  return {
+    before: async (page, step) => {
+      const protection = await detectSiteProtection(page);
+      if (protection) {
+        respectful = true;
+        if (headless) throw new HeadedRequiredError(page.url());
+      }
+      if (respectful) await paceProtectedDomain(new URL(step.url || page.url()).hostname);
+    },
+    after: async (page) => {
+      const protection = await detectSiteProtection(page);
+      if (!protection) return;
+      respectful = true;
+      if (headless) throw new HeadedRequiredError(page.url());
+    }
+  };
+}
 
 // src/lib/execution/pipeline-executor.ts
 var import_playwright_core = require("playwright-core");
@@ -4912,10 +4969,12 @@ function getSuggestion(errorType, step) {
   }
 }
 var PipelineRunner = class {
-  constructor(ctx) {
+  constructor(ctx, hooks) {
     this.ctx = ctx;
+    this.hooks = hooks;
   }
   ctx;
+  hooks;
   async run(initialPage, pipeline) {
     const tracker = new TabTracker(initialPage.context(), initialPage);
     try {
@@ -4961,12 +5020,19 @@ var PipelineRunner = class {
       const monitor = new StaleStateMonitor(page, staleTimeoutMs);
       let stepResult;
       try {
+        await this.hooks?.before(page, step);
         stepResult = await monitor.withMonitoring(async () => {
           const r = await executeAction(page, step, this.ctx, monitor);
+          if (step.type === "navigate") await this.hooks?.after(page, step.url);
           r.stepIndex = i;
           return r;
         });
       } catch (err) {
+        if (err instanceof HeadedRequiredError) {
+          Object.assign(err, { stepIndex: i, results, obstacles });
+          await finishCapture();
+          throw err;
+        }
         const asError = err instanceof Error ? err : new Error(String(err));
         const errorType = classifyError(asError, step);
         const pageState = await capturePageState(tracker.active(), this.ctx, { screenshot: true });
@@ -5743,7 +5809,7 @@ var CdpRelay = class {
         return {};
       case "Browser.close":
         return {};
-      // patchright disconnect — don't kill the user's Chrome
+      // Disconnect without closing the user's Chrome.
       case "Target.setDiscoverTargets":
         return {};
       case "Target.getTargets":
@@ -5850,8 +5916,8 @@ var PipelineExecutor = class {
     this.deps = deps;
   }
   deps;
-  /** Runtime elicitation hook, set per-call via execute(). Consumed once by
-   *  executeLocal and immediately cleared. */
+  /** Shared runtime hook read by local and extension execution;
+   *  execute() clears it when the call finishes. */
   pendingElicitOtp;
   /** One pipeline per real tab at a time: chrome.debugger and the CDP relay
    *  can't share a tab, so concurrent executes on the same tab queue up here. */
@@ -5897,6 +5963,7 @@ var PipelineExecutor = class {
       mode = availableModes[0] || "headless";
     }
     let result = await this.executeWithMode(userId, token, pipeline, mode, instanceId);
+    mode = result.modeUsed || mode;
     if (!result.ok && autoEscalate && domain && result.error?.errorType === "bot-blocked") {
       const failedMode = mode;
       if (domain) this.deps.domainModes.recordFailure(domain, failedMode, result.error?.message || "blocked");
@@ -5933,11 +6000,11 @@ var PipelineExecutor = class {
     }
     return result;
   }
-  async executeWithMode(userId, token, pipeline, mode, instanceId = DEFAULT_INSTANCE) {
+  async executeWithMode(userId, token, pipeline, mode, instanceId = DEFAULT_INSTANCE, respectful = false) {
     if (mode === "docker-headful") {
-      return this.executeDocker(userId, token, pipeline);
+      return this.executeDocker(userId, token, pipeline, respectful);
     }
-    return this.executeLocal(userId, token, pipeline, mode, instanceId);
+    return this.executeLocal(userId, token, pipeline, mode, instanceId, respectful);
   }
   /** Execute against the user's real Chrome tab via the extension CDP relay,
    *  using the SAME PipelineRunner as every other mode. No session inject/extract
@@ -6030,7 +6097,7 @@ var PipelineExecutor = class {
     }
   }
   /** Execute via Docker session-manager. */
-  async executeDocker(userId, token, pipeline) {
+  async executeDocker(userId, token, pipeline, respectful = false) {
     let session = getSession(userId);
     if (!session) {
       const firstNav = pipeline.steps.find((s) => s.type === "navigate");
@@ -6039,7 +6106,7 @@ var PipelineExecutor = class {
     }
     resetTimeout(userId);
     const ctx = this.deps.refStore.makeContext(userId, token);
-    const runner = new PipelineRunner(ctx);
+    const runner = new PipelineRunner(ctx, protectionHooks(false, respectful));
     const result = await runner.run(session.page, pipeline);
     if (result.ok) {
       const blockResult = await detectBlock(session.page);
@@ -6066,7 +6133,7 @@ var PipelineExecutor = class {
     return result;
   }
   /** Execute via local Chrome daemon (headless + binary-headful). */
-  async executeLocal(userId, token, pipeline, mode, instanceId = DEFAULT_INSTANCE) {
+  async executeLocal(userId, token, pipeline, mode, instanceId = DEFAULT_INSTANCE, respectful = false) {
     const startTime = Date.now();
     let acquired = false;
     try {
@@ -6088,8 +6155,38 @@ var PipelineExecutor = class {
       const ctx = this.deps.refStore.makeContext(userId, token);
       if (sessionData) ctx.sessionData = sessionData;
       if (this.pendingElicitOtp) ctx.elicitOtp = this.pendingElicitOtp;
-      const runner = new PipelineRunner(ctx);
-      const result = await runner.run(page, pipeline);
+      const runner = new PipelineRunner(ctx, protectionHooks(mode === "headless", respectful));
+      let result;
+      try {
+        result = await runner.run(page, pipeline);
+      } catch (err) {
+        if (!(err instanceof HeadedRequiredError)) throw err;
+        this.deps.daemon.release(mode, instanceId);
+        acquired = false;
+        await this.deps.daemon.stopMode(mode, instanceId);
+        const available = this.deps.availableModes();
+        const headed = available.includes("binary-headful") ? "binary-headful" : "docker-headful";
+        if (!available.includes(headed)) throw new Error("A headed browser is required but unavailable.");
+        await new Promise((resolve) => setTimeout(resolve, PROTECTED_INTERVAL_MS));
+        const index = err.stepIndex;
+        const remaining = pipeline.steps.slice(index);
+        const insertedNavigation = remaining[0]?.type !== "navigate";
+        if (insertedNavigation) remaining.unshift({ type: "navigate", url: err.url });
+        const resumed = await this.executeWithMode(userId, token, { ...pipeline, steps: remaining }, headed, instanceId, true);
+        const offset = index - Number(insertedNavigation);
+        resumed.results = [...err.results, ...resumed.results.filter((r) => !insertedNavigation || r.stepIndex > 0).map((r) => ({ ...r, stepIndex: r.stepIndex + offset }))];
+        resumed.completedSteps = index + Math.max(0, resumed.completedSteps - Number(insertedNavigation));
+        resumed.totalSteps = pipeline.steps.length;
+        resumed.obstacles = [...err.obstacles, ...resumed.obstacles];
+        if (resumed.error) {
+          resumed.error.failedAtStep = Math.max(index, resumed.error.failedAtStep + offset);
+          resumed.error.failedStep = pipeline.steps[resumed.error.failedAtStep];
+        }
+        resumed.durationMs = Date.now() - startTime;
+        resumed.modeEscalated = true;
+        resumed.modeUsed = headed;
+        return resumed;
+      }
       if (result.ok) {
         const blockResult = await detectBlock(page);
         if (blockResult.blocked) {
@@ -6180,12 +6277,30 @@ var FetchService = class {
       const { browser, name: browserName } = await getBrowserWithFallback(preferredBrowser);
       context = await browser.newContext(stealthContextOptions({ locale, extraHTTPHeaders: { ...headers } }, userId ?? void 0));
       if (sessionData) await injectCookies(context, sessionData);
-      const page = await context.newPage();
+      let page = await context.newPage();
       await applyStealthToPage(page);
       await page.goto(url, { waitUntil: waitUntil || "domcontentloaded", timeout: TIMEOUTS.NAVIGATION });
+      let protection = false;
+      const pivotIfDetected = async () => {
+        if (protection || !await detectSiteProtection(page)) return;
+        protection = true;
+        const targetUrl = page.url();
+        const cookies = await context.cookies();
+        await context.close();
+        context = await (await getHeadedBrowser()).newContext(stealthContextOptions({ locale, extraHTTPHeaders: { ...headers } }, userId ?? void 0));
+        await context.addCookies(cookies);
+        page = await context.newPage();
+        await applyStealthToPage(page);
+        await new Promise((resolve) => setTimeout(resolve, PROTECTED_INTERVAL_MS));
+        await paceProtectedDomain(new URL(targetUrl).hostname);
+        await page.goto(targetUrl, { waitUntil, timeout: TIMEOUTS.NAVIGATION });
+      };
+      await pivotIfDetected();
       if (sessionData) await injectStorage(page, sessionData);
       if (waitForSelector) await page.waitForSelector(waitForSelector, { timeout: TIMEOUTS.SELECTOR_WAIT });
       for (const action of actions) {
+        await pivotIfDetected();
+        if (protection) await paceProtectedDomain(new URL(page.url()).hostname);
         switch (action.type) {
           case "click":
             await page.click(action.selector);
@@ -6216,6 +6331,7 @@ var FetchService = class {
             break;
         }
       }
+      await pivotIfDetected();
       const finalUrl = page.url();
       const html = returnHtml ? await page.content() : void 0;
       const result = extract2 ? await page.evaluate(extract2) : void 0;

@@ -43,6 +43,8 @@ CRITICAL RULES:
 7. If the browser crashes, call "session restart" and retry. Don't panic.
 8. ALWAYS call "session" action=stop when you are done with browser work. It saves session state and frees the browser. Idle browsers are auto-reclaimed, but don't rely on that.
 
+If headless detects Imperva or Akamai, immediately stop headless and pivot to headed in the same run; do not wait for a block, retry headless, or defer the switch to a future request. Use headed from the outset when the provider is already known in the current task. On detection, switch to headed and use respectful pacing (at least 3 seconds between top-level actions; no parallel bursts or repeated blocked retries). Do not announce the provider or explain the switch unless the user asks why. Only when asked, explain that the site is covered by Imperva or Akamai and iframer adjusts its browser mode and pacing to respect it.
+
 BROWSER MODES: Don't specify options.mode — iframer auto-selects and auto-escalates (headless → binary-headful). Only set a mode if the user explicitly asks.
 
 CAPTCHA: In binary-headful mode, ask the user to solve it in the visible window. In docker-headful mode, use the "solve-captcha" step.
