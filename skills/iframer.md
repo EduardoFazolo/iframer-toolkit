@@ -33,11 +33,11 @@ The `execute` tool takes a `steps` array. Each step is an object with a `type` f
 |------|--------|-------------|
 | `navigate` | `url`, `waitUntil?` | Go to URL |
 | `login` | `domain` | Auto-detect form, fill stored credentials, handle 2FA. Handles email-first flows (Slack, Microsoft, Google) and standard email+password flows. |
-| `snapshot` | — | Get interactive elements as structured list with @e refs. **Do this BEFORE interacting.** |
+| `snapshot` | — | Get interactive elements as structured list with @e refs. **Do this BEFORE interacting.** Fields no human can reach (honeypots pushed offscreen/clipped/transparent by an ancestor) are omitted; bait-looking ones (`website`, `fax`, tabindex=-1) are marked `[honeypot?]` — leave those empty unless the task clearly needs them. |
 | `find` | `role?`, `name?`, `text?`, `placeholder?`, `label?` | Find a specific element, returns a ref |
 | `screenshot` | `annotate?` | Take a screenshot. `annotate: true` overlays numbered badges. |
 | `click` | `selector` | Click element (use @e refs from snapshot) |
-| `fill` | `selector`, `value` | Fill input (use @e refs) |
+| `fill` | `selector`, `value`, `force?` | Fill input (use @e refs). Refuses honeypot fields (unreachable by a human) with an explanatory error — skip the field. `force: true` bypasses, only when you are certain it is real. |
 | `human-click` | `selector` or `x`, `y` | Human-like click with random offset |
 | `human-type` | `selector`, `value` | Human-like typing with variable delays |
 | `scroll` | `deltaY?` | Scroll the page |
@@ -53,7 +53,7 @@ The `execute` tool takes a `steps` array. Each step is an object with a `type` f
 | Option | Default | Description |
 |--------|---------|-------------|
 | `mode` | auto | `headless`, `binary-headful`, `docker-headful`. Omit for auto-select + auto-escalation. |
-| `captureApi` | false | Record all XHR/fetch requests. Use for reverse-engineering. |
+| `captureApi` | false | Record all XHR/fetch requests. Use for reverse-engineering, and when a form submit fails with only a vague on-page message: every HTTP >= 400 response is reported per step, so you read the server's real answer (e.g. `POST /api/apply → 422: {"error":"..."}`) instead of guessing. |
 | `staleTimeoutMs` | 20000 | Per-step stale-state timeout |
 | `continueOnError` | false | Don't abort pipeline on step failure |
 | `screenshotAfterEach` | false | Screenshot after every step (expensive) |
@@ -233,7 +233,7 @@ If an `execute` call takes a very long time (30s+), it's probably stuck on one o
 
 2. **Waiting for a page transition that never happens** — the site didn't redirect after form submission. Take a screenshot to see the current state, then decide what to do (wrong button clicked, error message on page, etc.).
 
-3. **Stale-state timeout** — iframer's stale monitor will abort after `staleTimeoutMs` (default 20s). The error will say "stale-state" and include a screenshot. Read the screenshot to understand what the page looks like.
+3. **Stale-state timeout** — iframer's stale monitor will abort after `staleTimeoutMs` (default 20s). The error will say "stale-state" and include a screenshot. Read the screenshot to understand what the page looks like. If the step targeted a selector that no longer exists, the error is reported as `element-not-found` instead ("No element matches …"): the page re-rendered it away. Re-snapshot right before acting and retry — do not change styles or theorise about visibility.
 
 **Recovery pattern for all stalls:**
 ```

@@ -7,6 +7,7 @@ import { injectStorage } from "../../session/persistence";
 import { createLogger } from "../../logger";
 import { TIMING, TIMEOUTS } from "../../constants";
 import { resolveSelector } from "../resolve-selector";
+import { probeField, isHoneypotReason, honeypotRefusalMessage, type FieldProbe } from "../../reachability";
 
 const log = createLogger("actions");
 
@@ -41,6 +42,20 @@ export async function click(page: Page, step: Step<"click">, ctx: ExecutionConte
 export async function fill(page: Page, step: Step<"fill">, ctx: ExecutionContext): Promise<void> {
   const selector = resolveSelector(step.selector, ctx);
   const value = step.value;
+
+  // 0) Honeypot guard. Playwright's fill only checks the element's own box and
+  //    visibility, so a field pushed offscreen by an ANCESTOR (the classic
+  //    trap) fills fine — and the submission is silently rejected as a bot.
+  //    Ask the renderer whether a human could reach it; refuse if not. A probe
+  //    failure (bad selector, dead page) falls through to page.fill, which
+  //    reports it the way it always has.
+  if (!step.force) {
+    let probe: FieldProbe | null = null;
+    try { probe = await probeField(page, selector); } catch { probe = null; }
+    if (probe?.found && isHoneypotReason(probe.hiddenReason)) {
+      throw new Error(honeypotRefusalMessage(step.selector, probe.hiddenReason as string, probe.name));
+    }
+  }
 
   // 1) Playwright fill: focus + native value setter + input/change events.
   //    Works for most sites on its own.

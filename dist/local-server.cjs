@@ -668,7 +668,13 @@ var TIMING = {
   /** Scroll step delay */
   SCROLL_DELAY: 150,
   /** Stale state check interval */
-  STALE_CHECK_INTERVAL: 2e3
+  STALE_CHECK_INTERVAL: 2e3,
+  /** captureApi: grace period after the last step for a submit's XHR to fire */
+  CAPTURE_SETTLE: 300,
+  /** captureApi: max wait for in-flight requests to answer before stopping */
+  CAPTURE_PENDING_MAX: 3e3,
+  /** Post-failure probe ("does the selector exist right now?") budget */
+  FAILURE_PROBE: 3e3
 };
 var CAPTCHA_GRID = {
   /** Pixels from bframe top to grid start (reCAPTCHA) */
@@ -2256,6 +2262,101 @@ function anchorNameOf(selector) {
   return typeof selector === "string" && selector.startsWith("@a:") ? selector.slice(3) : null;
 }
 
+// src/lib/reachability.ts
+var HONEYPOT_REASONS = /* @__PURE__ */ new Set(["zero-size", "hidden", "transparent", "offscreen", "clipped"]);
+var HONEYPOT_NAME_RE = /^(website|url|homepage|fax|honeypot|honey|hp|hp_[\w-]*|bot|bot_[\w-]*|trap|_gotcha|leave_?blank|do_?not_?fill)$/i;
+function isHoneypotReason(reason) {
+  return !!reason && HONEYPOT_REASONS.has(reason);
+}
+function looksLikeBaitField(attrs) {
+  const name = attrs.name || "";
+  const id = attrs.id || "";
+  if (HONEYPOT_NAME_RE.test(name) || HONEYPOT_NAME_RE.test(id)) return true;
+  const textual = !attrs.type || /^(text|email|url|tel|search|number)$/i.test(attrs.type);
+  if (textual && attrs.tabindex === "-1") return true;
+  return false;
+}
+function honeypotRefusalMessage(selector, reason, name) {
+  const what = name ? `"${name}" (${selector})` : selector;
+  return `fill: refusing to fill ${what} \u2014 no human can reach this field (${reason}). It is almost certainly a honeypot: filling it marks the submission as a bot and the form fails with a generic error. Skip it. If you are certain it is a real field, retry with force: true.`;
+}
+async function probeField(page, selector) {
+  const r = await page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    if (!el) return { found: false };
+    const attrs = {
+      name: el.getAttribute("name"),
+      id: el.id || null,
+      tabindex: el.getAttribute("tabindex"),
+      type: el.getAttribute("type")
+    };
+    const tag = el.tagName.toLowerCase();
+    {
+      const r0 = el.getBoundingClientRect();
+      const cx0 = r0.left + r0.width / 2, cy0 = r0.top + r0.height / 2;
+      const dx = cx0 < 0 || cx0 >= window.innerWidth ? cx0 - window.innerWidth / 2 : 0;
+      const dy = cy0 < 0 || cy0 >= window.innerHeight ? cy0 - window.innerHeight / 2 : 0;
+      if (dx || dy) try {
+        window.scrollBy(dx, dy);
+      } catch {
+      }
+    }
+    const rect = el.getBoundingClientRect();
+    let reason = null;
+    if (rect.width === 0 || rect.height === 0) reason = "zero-size";
+    const style = getComputedStyle(el);
+    if (!reason && (style.display === "none" || style.visibility === "hidden")) reason = "hidden";
+    if (!reason) {
+      let opacity = 1;
+      for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
+        const o = parseFloat(getComputedStyle(n).opacity);
+        const animating = o < 1 && typeof n.getAnimations === "function" && n.getAnimations().length > 0;
+        if (!isNaN(o) && !animating) opacity *= o;
+      }
+      if (opacity < 0.05) reason = "transparent";
+    }
+    if (!reason) {
+      const docW = Math.max(document.documentElement.scrollWidth, window.innerWidth);
+      const docH = Math.max(document.documentElement.scrollHeight, window.innerHeight);
+      const left = rect.left + window.scrollX, right = rect.right + window.scrollX;
+      const top = rect.top + window.scrollY, bottom = rect.bottom + window.scrollY;
+      if (right <= 0 || left >= docW || bottom <= 0 || top >= docH) reason = "offscreen";
+    }
+    if (!reason) {
+      const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+      const inViewport = cx >= 0 && cy >= 0 && cx < window.innerWidth && cy < window.innerHeight;
+      let clipped = false;
+      for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+        const s = getComputedStyle(a);
+        const clipsX = /hidden|clip/.test(s.overflowX), clipsY = /hidden|clip/.test(s.overflowY);
+        if (!clipsX && !clipsY) continue;
+        const ar = a.getBoundingClientRect();
+        const outside = clipsX && (cx < ar.left || cx > ar.right) || clipsY && (cy < ar.top || cy > ar.bottom);
+        const tiny = clipsY && ar.height <= 2 || clipsX && ar.width <= 2;
+        if (outside || tiny) {
+          clipped = true;
+          break;
+        }
+      }
+      if (inViewport) {
+        const hit = document.elementFromPoint(cx, cy);
+        if (!(hit && (hit === el || el.contains(hit)))) reason = clipped ? "clipped" : "covered";
+      } else if (clipped) {
+        reason = "clipped";
+      }
+    }
+    return { found: true, reason, attrs, tag };
+  }, selector);
+  if (!r.found) return { found: false, hiddenReason: null, suspiciousName: false };
+  return {
+    found: true,
+    hiddenReason: r.reason ?? null,
+    suspiciousName: looksLikeBaitField(r.attrs),
+    tag: r.tag,
+    name: r.attrs.name ?? void 0
+  };
+}
+
 // src/lib/actions/handlers/navigation.ts
 var log9 = createLogger("actions");
 async function navigate(page, step, ctx) {
@@ -2283,6 +2384,17 @@ async function click(page, step, ctx) {
 async function fill(page, step, ctx) {
   const selector = resolveSelector(step.selector, ctx);
   const value = step.value;
+  if (!step.force) {
+    let probe = null;
+    try {
+      probe = await probeField(page, selector);
+    } catch {
+      probe = null;
+    }
+    if (probe?.found && isHoneypotReason(probe.hiddenReason)) {
+      throw new Error(honeypotRefusalMessage(step.selector, probe.hiddenReason, probe.name));
+    }
+  }
   await page.fill(selector, value);
   const stuck = await page.evaluate(
     ({ sel, val }) => {
@@ -2570,6 +2682,56 @@ async function takeSnapshot(page, ctx, options) {
       if (rect.bottom < 0 || rect.top > window.innerHeight + 200) return false;
       return true;
     }
+    function isFillable(el) {
+      if (el.tagName === "TEXTAREA" || el.tagName === "SELECT") return true;
+      if (el.hasAttribute("contenteditable") && el.getAttribute("contenteditable") !== "false") return true;
+      if (el.tagName !== "INPUT") return false;
+      const t = (el.type || "text").toLowerCase();
+      return !["button", "submit", "reset", "image", "checkbox", "radio", "file", "hidden", "range", "color"].includes(t);
+    }
+    function unreachableReason(el) {
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      let opacity = 1;
+      for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
+        const o = parseFloat(n === el ? style.opacity : getComputedStyle(n).opacity);
+        const animating = o < 1 && typeof n.getAnimations === "function" && n.getAnimations().length > 0;
+        if (!isNaN(o) && !animating) opacity *= o;
+      }
+      if (opacity < 0.05) return "transparent";
+      const docW = Math.max(document.documentElement.scrollWidth, window.innerWidth);
+      const docH = Math.max(document.documentElement.scrollHeight, window.innerHeight);
+      const left = rect.left + window.scrollX, right = rect.right + window.scrollX;
+      const top = rect.top + window.scrollY, bottom = rect.bottom + window.scrollY;
+      if (right <= 0 || left >= docW || bottom <= 0 || top >= docH) return "offscreen";
+      const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+      let clipped = false;
+      for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+        const s = getComputedStyle(a);
+        const clipsX = /hidden|clip/.test(s.overflowX), clipsY = /hidden|clip/.test(s.overflowY);
+        if (!clipsX && !clipsY) continue;
+        const ar = a.getBoundingClientRect();
+        const outside = clipsX && (cx < ar.left || cx > ar.right) || clipsY && (cy < ar.top || cy > ar.bottom);
+        const tiny = clipsY && ar.height <= 2 || clipsX && ar.width <= 2;
+        if (tiny) return "clipped";
+        if (outside) clipped = true;
+      }
+      const inViewport = cx >= 0 && cy >= 0 && cx < window.innerWidth && cy < window.innerHeight;
+      if (inViewport) {
+        const hit = document.elementFromPoint(cx, cy);
+        if (hit && (hit === el || el.contains(hit))) return null;
+        return clipped ? "clipped" : null;
+      }
+      return null;
+    }
+    const baitName = /^(website|url|homepage|fax|honeypot|honey|hp|hp_[\w-]*|bot|bot_[\w-]*|trap|_gotcha|leave_?blank|do_?not_?fill)$/i;
+    function looksLikeBait(el) {
+      const name = el.getAttribute("name") || "", id = el.id || "";
+      if (baitName.test(name) || baitName.test(id)) return true;
+      const type = (el.getAttribute("type") || "text").toLowerCase();
+      const textual = /^(text|email|url|tel|search|number)$/.test(type);
+      return textual && el.getAttribute("tabindex") === "-1";
+    }
     function buildSelector(el) {
       const path13 = [];
       let current = el;
@@ -2612,6 +2774,11 @@ async function takeSnapshot(page, ctx, options) {
       if (results.length >= maxElements2) break;
       if (interactiveOnly2 && !isInteractive(el)) continue;
       if (!isVisible(el)) continue;
+      let suspect;
+      if (isFillable(el)) {
+        if (unreachableReason(el)) continue;
+        if (looksLikeBait(el)) suspect = "honeypot?";
+      }
       const tag = el.tagName.toLowerCase();
       const role = el.getAttribute("role") || "";
       const type = el.type || "";
@@ -2624,7 +2791,8 @@ async function takeSnapshot(page, ctx, options) {
         checked: el.checked || false,
         disabled: el.disabled || false,
         selector: buildSelector(el),
-        isVisible: true
+        isVisible: true,
+        suspect
       });
     }
     return results;
@@ -2645,6 +2813,7 @@ async function takeSnapshot(page, ctx, options) {
     const state = [];
     if (el.disabled) state.push("disabled");
     if (el.checked) state.push("checked");
+    if (el.suspect) state.push(el.suspect);
     let description = "";
     if (el.placeholder && el.name !== el.placeholder) description = `placeholder="${el.placeholder}"`;
     if (el.type && !["text", "submit", "button", ""].includes(el.type)) {
@@ -4693,10 +4862,37 @@ var ApiCapture = class {
       await new Promise((r) => setTimeout(r, 100));
     }
   }
+  /** Requests fired but not yet answered. */
+  hasPending() {
+    return this.pendingRequests.size > 0;
+  }
   getResults() {
     return buildCapturedApi(this.requests);
   }
+  /** Every HTTP >= 400 response, compact, in capture order. */
+  getServerErrors() {
+    return serverErrorsFrom(this.requests);
+  }
 };
+var SERVER_ERROR_BODY_MAX = 600;
+function serverErrorsFrom(requests) {
+  const out = [];
+  for (const r of requests) {
+    if (r.responseStatus < 400) continue;
+    let body;
+    if (r.responseBody !== void 0 && r.responseBody !== null) {
+      const raw = typeof r.responseBody === "string" ? r.responseBody : JSON.stringify(r.responseBody);
+      const flat = raw.replace(/\s+/g, " ").trim();
+      body = flat.length > SERVER_ERROR_BODY_MAX ? flat.slice(0, SERVER_ERROR_BODY_MAX) + "\u2026" : flat;
+      if (/^\s*<(!doctype|html)/i.test(raw)) {
+        const m = raw.match(/<title[^>]*>([^<]*)<\/title>|<h1[^>]*>([^<]*)<\/h1>/i);
+        body = m ? `[html] ${(m[1] || m[2] || "").trim()}` : "[html page]";
+      }
+    }
+    out.push({ stepIndex: r.triggeredAtStep, method: r.method, url: r.url, status: r.responseStatus, body });
+  }
+  return out;
+}
 function extractAuth(requests) {
   const auth2 = { cookies: {}, tokens: {} };
   for (const req of requests) {
@@ -4945,6 +5141,30 @@ function classifyError(err, step) {
   if (step.type === "solve-captcha") return "captcha-unsolvable";
   return "action-failed";
 }
+async function refineError(page, step, ctx, errorType, message) {
+  if (errorType !== "stale-state" && errorType !== "timeout") return { errorType, message };
+  const raw = step.selector;
+  if (typeof raw !== "string") return { errorType, message };
+  let resolved;
+  try {
+    resolved = resolveSelector(raw, ctx);
+  } catch {
+    return { errorType, message };
+  }
+  try {
+    const probe = page.evaluate((sel) => !!document.querySelector(sel), resolved);
+    const budget = new Promise((r) => setTimeout(() => r(null), TIMING.FAILURE_PROBE));
+    const found = await Promise.race([probe, budget]);
+    if (found !== false) return { errorType, message };
+  } catch {
+    return { errorType, message };
+  }
+  const shown = resolved === raw ? `"${raw}"` : `"${raw}" (\u2192 ${resolved})`;
+  return {
+    errorType: "element-not-found",
+    message: `No element matches ${shown} on the current page \u2014 the step waited for it to appear and it never did. It most likely existed when you looked and was re-rendered away before this step ran. (${message})`
+  };
+}
 function isRetryable(errorType) {
   return errorType === "stale-state" || errorType === "timeout" || errorType === "element-not-found";
 }
@@ -4957,7 +5177,7 @@ function getSuggestion(errorType, step) {
     case "stale-state":
       return "The page stopped responding. The step may have triggered a very slow load or the server may be unreachable.";
     case "element-not-found":
-      return `Selector not found. The page structure may have changed. Take a screenshot to inspect the current state.`;
+      return "Selector not found. Either it is wrong, or the page re-rendered the element away (SPAs swap DOM nodes on every state change, so a selector that worked a second ago can return nothing now). Take a fresh `snapshot`/`find` immediately before acting and retry; if it keeps vanishing, `wait-for` it first.";
     case "navigation-failed":
       return "Navigation failed. The URL may be unreachable, blocked, or require authentication.";
     case "captcha-unsolvable":
@@ -5009,7 +5229,12 @@ var PipelineRunner = class {
     if (capture) capture.start();
     const finishCapture = async () => {
       if (!capture) return void 0;
+      await capture.drain(TIMING.CAPTURE_SETTLE, TIMING.CAPTURE_PENDING_MAX);
       capture.stop();
+      for (const se of capture.getServerErrors()) {
+        const r = results.find((x) => x.stepIndex === se.stepIndex);
+        if (r) (r.serverErrors ??= []).push(se);
+      }
       return capture.getResults();
     };
     for (let i = 0; i < pipeline.steps.length; i++) {
@@ -5034,9 +5259,10 @@ var PipelineRunner = class {
           throw err;
         }
         const asError = err instanceof Error ? err : new Error(String(err));
-        const errorType = classifyError(asError, step);
+        const refined = await refineError(tracker.active(), step, this.ctx, classifyError(asError, step), asError.message);
+        const errorType = refined.errorType;
         const pageState = await capturePageState(tracker.active(), this.ctx, { screenshot: true });
-        stepResult = failedStepResult(step, asError.message, Date.now() - startTime, i);
+        stepResult = failedStepResult(step, refined.message, Date.now() - startTime, i);
         results.push(stepResult);
         recordAnchor(step, false);
         return {
@@ -5050,7 +5276,7 @@ var PipelineRunner = class {
             failedAtStep: i,
             failedStep: step,
             errorType,
-            message: asError.message,
+            message: refined.message,
             pageState,
             suggestion: getSuggestion(errorType, step),
             retryable: isRetryable(errorType)
@@ -5086,8 +5312,16 @@ var PipelineRunner = class {
       }
       results.push(stepResult);
       if (!stepResult.ok && !continueOnError) {
+        const refined = await refineError(
+          tracker.active(),
+          step,
+          this.ctx,
+          classifyError(new Error(stepResult.error || ""), step),
+          stepResult.error || "Step failed"
+        );
+        stepResult.error = refined.message;
+        const errorType = refined.errorType;
         const pageState = await capturePageState(tracker.active(), this.ctx, { screenshot: true });
-        const errorType = classifyError(new Error(stepResult.error || ""), step);
         return {
           ok: false,
           completedSteps: i,

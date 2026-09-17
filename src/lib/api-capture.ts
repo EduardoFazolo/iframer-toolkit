@@ -1,5 +1,5 @@
 import type { Page, Request, Response, BrowserContext } from "patchright";
-import type { CapturedRequest, CapturedApi, CapturedAuth, CapturedEndpoint, ApiProtocol, ApiVerb } from "./types";
+import type { CapturedRequest, CapturedApi, CapturedAuth, CapturedEndpoint, ApiProtocol, ApiVerb, ServerError } from "./types";
 
 const SKIP_RESOURCE_TYPES = new Set([
   "stylesheet", "image", "media", "font", "manifest", "other",
@@ -425,9 +425,42 @@ export class ApiCapture {
     }
   }
 
+  /** Requests fired but not yet answered. */
+  hasPending(): boolean {
+    return this.pendingRequests.size > 0;
+  }
+
   getResults(): CapturedApi[] {
     return buildCapturedApi(this.requests);
   }
+
+  /** Every HTTP >= 400 response, compact, in capture order. */
+  getServerErrors(): ServerError[] {
+    return serverErrorsFrom(this.requests);
+  }
+}
+
+const SERVER_ERROR_BODY_MAX = 600;
+
+/** Pure: pick the failed responses out of captured requests. */
+export function serverErrorsFrom(requests: CapturedRequest[]): ServerError[] {
+  const out: ServerError[] = [];
+  for (const r of requests) {
+    if (r.responseStatus < 400) continue;
+    let body: string | undefined;
+    if (r.responseBody !== undefined && r.responseBody !== null) {
+      const raw = typeof r.responseBody === "string" ? r.responseBody : JSON.stringify(r.responseBody);
+      const flat = raw.replace(/\s+/g, " ").trim();
+      body = flat.length > SERVER_ERROR_BODY_MAX ? flat.slice(0, SERVER_ERROR_BODY_MAX) + "…" : flat;
+      // An HTML error page is noise; keep only its title/first heading if any.
+      if (/^\s*<(!doctype|html)/i.test(raw)) {
+        const m = raw.match(/<title[^>]*>([^<]*)<\/title>|<h1[^>]*>([^<]*)<\/h1>/i);
+        body = m ? `[html] ${(m[1] || m[2] || "").trim()}` : "[html page]";
+      }
+    }
+    out.push({ stepIndex: r.triggeredAtStep, method: r.method, url: r.url, status: r.responseStatus, body });
+  }
+  return out;
 }
 
 /** Extract shared auth (Authorization / Cookie / auth-like headers) from a set

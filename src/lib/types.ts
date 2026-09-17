@@ -9,7 +9,7 @@ export type BrowserMode = "headless" | "binary-headful" | "docker-headful" | "ex
 export type PipelineStep =
   | { type: "navigate"; url: string; waitUntil?: string }
   | { type: "click"; selector: string }
-  | { type: "fill"; selector: string; value: string }
+  | { type: "fill"; selector: string; value: string; force?: boolean }
   | { type: "human-click"; selector?: string; x?: number; y?: number }
   | { type: "right-click"; selector?: string; x?: number; y?: number }
   | { type: "human-type"; selector: string; value: string; skipClick?: boolean; speed?: "slow" | "normal" | "fast" }
@@ -176,6 +176,18 @@ export type PipelineErrorType =
   | "action-failed"
   | "session-not-found"
   | "bot-blocked";
+
+/** An HTTP >= 400 response the page received during a step (captureApi on).
+ *  Attributes a failed form submit to the server's real answer instead of the
+ *  page's cosmetic error text. */
+export interface ServerError {
+  stepIndex: number;
+  method: string;
+  url: string;
+  status: number;
+  /** Response body, stringified and truncated. */
+  body?: string;
+}
 
 export interface ErrorContext {
   failedAtStep: number;

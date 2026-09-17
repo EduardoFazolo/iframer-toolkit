@@ -35,7 +35,7 @@ Returns: ok, completedSteps, output for snapshot/find/read/extract steps, obstac
         screenshotAfterEach: z.boolean().optional().describe("Take a screenshot after every step (expensive)"),
         continueOnObstacle: z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
         continueOnError: z.boolean().optional().describe("Continue past failing steps (default: false)"),
-        captureApi: z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes."),
+        captureApi: z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes. Also surfaces every HTTP >= 400 response per step — turn it on when a form submit fails with only a vague on-page message, to read the server's real answer."),
         mode: z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("DO NOT SET unless the user explicitly requests a mode — iframer auto-selects and auto-escalates. 'extension' drives a real-Chrome tab (requires options.tabId from the `tabs` tool)."),
         autoEscalate: z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)"),
         instanceId: z.string().optional().describe("Named parallel browser (default 'default') — distinct ids drive several browsers at once, each with its own session state."),

@@ -113,6 +113,17 @@ export function formatExecuteResult(data: PipelineResult): string[] {
     }
   }
 
+  // The server's real answer to a submit (captureApi on). Printed for every
+  // step, success or not: a click that "worked" but got a 422 is the case
+  // where the page's cosmetic error text lies and this line tells the truth.
+  const serverErrors = (data.results || []).flatMap((r) => r.serverErrors || []);
+  if (serverErrors.length > 0) {
+    lines.push("\n--- Server errors (HTTP >= 400) ---");
+    for (const se of serverErrors) {
+      lines.push(`  [step ${se.stepIndex}] ${se.method} ${se.url} → ${se.status}${se.body ? `: ${se.body}` : ""}`);
+    }
+  }
+
   if (data.error) {
     lines.push("\n--- Failure ---");
     if (typeof data.error === "string") {
@@ -123,6 +134,10 @@ export function formatExecuteResult(data: PipelineResult): string[] {
       lines.push(`Message: ${data.error.message}`);
       lines.push(`Retryable: ${data.error.retryable}`);
       if (data.error.suggestion) lines.push(`Suggestion: ${data.error.suggestion}`);
+      const atFailure = serverErrors.filter((se) => se.stepIndex === data.error?.failedAtStep);
+      for (const se of atFailure) {
+        lines.push(`Server responded: ${se.method} ${se.url} → ${se.status}${se.body ? `: ${se.body}` : ""}`);
+      }
       if (data.error.pageState?.url) lines.push(`URL at failure: ${data.error.pageState.url}`);
     }
   }

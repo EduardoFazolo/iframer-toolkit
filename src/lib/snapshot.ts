@@ -45,6 +45,8 @@ export async function takeSnapshot(
       disabled: boolean;
       selector: string;
       isVisible: boolean;
+      /** "honeypot?" when the field looks like bait (name/tab-order signal). */
+      suspect?: string;
     }[] = [];
 
     const interactiveTags = new Set(["INPUT", "TEXTAREA", "SELECT", "BUTTON", "A"]);
@@ -71,6 +73,69 @@ export async function takeSnapshot(
       // In viewport (with some buffer)
       if (rect.bottom < 0 || rect.top > window.innerHeight + 200) return false;
       return true;
+    }
+
+    // Honeypot guard for fillable fields. Mirrors probeField() in
+    // ../reachability.ts (duplicated: this callback is serialised by
+    // Playwright, so it can't import). Keep both in sync.
+    function isFillable(el: Element): boolean {
+      if (el.tagName === "TEXTAREA" || el.tagName === "SELECT") return true;
+      if (el.hasAttribute("contenteditable") && el.getAttribute("contenteditable") !== "false") return true;
+      if (el.tagName !== "INPUT") return false;
+      const t = ((el as HTMLInputElement).type || "text").toLowerCase();
+      return !["button", "submit", "reset", "image", "checkbox", "radio", "file", "hidden", "range", "color"].includes(t);
+    }
+
+    /** Why a human can NEVER reach this field (honeypot-class), or null. A
+     *  field merely covered by an overlay is NOT reported — that's temporary. */
+    function unreachableReason(el: Element): string | null {
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      let opacity = 1;
+      for (let n: Element | null = el; n && n !== document.documentElement; n = n.parentElement) {
+        const o = parseFloat(n === el ? style.opacity : getComputedStyle(n).opacity);
+        // A node mid fade-in (CSS transition/animation running) is not a trap.
+        const animating = o < 1 && typeof n.getAnimations === "function" && n.getAnimations().length > 0;
+        if (!isNaN(o) && !animating) opacity *= o;
+      }
+      if (opacity < 0.05) return "transparent";
+      const docW = Math.max(document.documentElement.scrollWidth, window.innerWidth);
+      const docH = Math.max(document.documentElement.scrollHeight, window.innerHeight);
+      const left = rect.left + window.scrollX, right = rect.right + window.scrollX;
+      const top = rect.top + window.scrollY, bottom = rect.bottom + window.scrollY;
+      if (right <= 0 || left >= docW || bottom <= 0 || top >= docH) return "offscreen";
+      const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+      let clipped = false;
+      for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+        const s = getComputedStyle(a);
+        const clipsX = /hidden|clip/.test(s.overflowX), clipsY = /hidden|clip/.test(s.overflowY);
+        if (!clipsX && !clipsY) continue;
+        const ar = a.getBoundingClientRect();
+        // Centre outside the clip box, or a wrapper ≤2px in the clipping axis
+        // (no real layout puts a text field in a 1px-tall box).
+        const outside = (clipsX && (cx < ar.left || cx > ar.right)) || (clipsY && (cy < ar.top || cy > ar.bottom));
+        const tiny = (clipsY && ar.height <= 2) || (clipsX && ar.width <= 2);
+        if (tiny) return "clipped";
+        if (outside) clipped = true;
+      }
+      const inViewport = cx >= 0 && cy >= 0 && cx < window.innerWidth && cy < window.innerHeight;
+      if (inViewport) {
+        const hit = document.elementFromPoint(cx, cy);
+        if (hit && (hit === el || el.contains(hit))) return null;
+        return clipped ? "clipped" : null; // covered → keep listing
+      }
+      // Below the fold: no hit test possible, and "centre outside the clip box"
+      // alone is not proof (absolute children escape non-positioned wrappers).
+      return null;
+    }
+
+    const baitName = /^(website|url|homepage|fax|honeypot|honey|hp|hp_[\w-]*|bot|bot_[\w-]*|trap|_gotcha|leave_?blank|do_?not_?fill)$/i;
+    function looksLikeBait(el: Element): boolean {
+      const name = el.getAttribute("name") || "", id = el.id || "";
+      if (baitName.test(name) || baitName.test(id)) return true;
+      const type = (el.getAttribute("type") || "text").toLowerCase();
+      const textual = /^(text|email|url|tel|search|number)$/.test(type);
+      return textual && el.getAttribute("tabindex") === "-1";
     }
 
     function buildSelector(el: Element): string {
@@ -121,6 +186,14 @@ export async function takeSnapshot(
       if (interactiveOnly && !isInteractive(el)) continue;
       if (!isVisible(el)) continue;
 
+      // Fillable fields only: a text field no human can reach is a honeypot —
+      // never list it, or the agent will fill it. Buttons/links are untouched.
+      let suspect: string | undefined;
+      if (isFillable(el)) {
+        if (unreachableReason(el)) continue;
+        if (looksLikeBait(el)) suspect = "honeypot?";
+      }
+
       const tag = el.tagName.toLowerCase();
       const role = el.getAttribute("role") || "";
       const type = (el as HTMLInputElement).type || "";
@@ -135,6 +208,7 @@ export async function takeSnapshot(
         disabled: (el as HTMLInputElement).disabled || false,
         selector: buildSelector(el),
         isVisible: true,
+        suspect,
       });
     }
 
@@ -160,6 +234,10 @@ export async function takeSnapshot(
     const state: string[] = [];
     if (el.disabled) state.push("disabled");
     if (el.checked) state.push("checked");
+    // Bait-looking field (name like "website"/"fax", or a text input pulled out
+    // of the tab order). Still listed — real forms have Website fields — but
+    // the agent should leave it empty unless the task clearly needs it.
+    if (el.suspect) state.push(el.suspect);
 
     let description = "";
     if (el.placeholder && el.name !== el.placeholder) description = `placeholder="${el.placeholder}"`;

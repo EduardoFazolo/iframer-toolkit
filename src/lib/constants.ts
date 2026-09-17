@@ -50,6 +50,12 @@ export const TIMING = {
   SCROLL_DELAY: 150,
   /** Stale state check interval */
   STALE_CHECK_INTERVAL: 2000,
+  /** captureApi: grace period after the last step for a submit's XHR to fire */
+  CAPTURE_SETTLE: 300,
+  /** captureApi: max wait for in-flight requests to answer before stopping */
+  CAPTURE_PENDING_MAX: 3000,
+  /** Post-failure probe ("does the selector exist right now?") budget */
+  FAILURE_PROBE: 3000,
 } as const;
 
 // ─── reCAPTCHA / hCaptcha Grid Layout ──────────────────────────────

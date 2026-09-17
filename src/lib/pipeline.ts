@@ -20,7 +20,8 @@ import { ApiCapture } from "./api-capture";
 import { TabTracker } from "./browser/tab-tracker";
 import { TIMEOUTS } from "./constants";
 import { loadAnchors, recordAnchorResult } from "./knowledge/component-map";
-import { anchorNameOf } from "./actions/resolve-selector";
+import { anchorNameOf, resolveSelector } from "./actions/resolve-selector";
+import { TIMING } from "./constants";
 
 const DEFAULT_STALE_TIMEOUT_MS = 20_000;
 
@@ -45,6 +46,41 @@ function classifyError(err: Error, step: PipelineStep): ErrorContext["errorType"
   return "action-failed";
 }
 
+/**
+ * A stale-state or timeout on a selector step is, more often than not, Playwright
+ * waiting for an element that isn't there (an SPA re-rendered it away between the
+ * agent's query and this step). The stale monitor fires first and masks that as
+ * "no state change" — which sends agents chasing visibility theories. Probe the
+ * selector once, right now; if nothing matches, say so.
+ */
+async function refineError(
+  page: Page,
+  step: PipelineStep,
+  ctx: ExecutionContext,
+  errorType: ErrorContext["errorType"],
+  message: string,
+): Promise<{ errorType: ErrorContext["errorType"]; message: string }> {
+  if (errorType !== "stale-state" && errorType !== "timeout") return { errorType, message };
+  const raw = (step as { selector?: unknown }).selector;
+  if (typeof raw !== "string") return { errorType, message };
+  let resolved: string;
+  try { resolved = resolveSelector(raw, ctx); } catch { return { errorType, message }; }
+  try {
+    const probe = page.evaluate((sel) => !!document.querySelector(sel), resolved);
+    const budget = new Promise<null>((r) => setTimeout(() => r(null), TIMING.FAILURE_PROBE));
+    const found = await Promise.race([probe, budget]);
+    if (found !== false) return { errorType, message }; // exists, or probe inconclusive
+  } catch {
+    return { errorType, message };
+  }
+  const shown = resolved === raw ? `"${raw}"` : `"${raw}" (→ ${resolved})`;
+  return {
+    errorType: "element-not-found",
+    message: `No element matches ${shown} on the current page — the step waited for it to appear and it never did. ` +
+      `It most likely existed when you looked and was re-rendered away before this step ran. (${message})`,
+  };
+}
+
 function isRetryable(errorType: ErrorContext["errorType"]): boolean {
   return errorType === "stale-state" || errorType === "timeout" || errorType === "element-not-found";
 }
@@ -60,7 +96,7 @@ function getSuggestion(errorType: ErrorContext["errorType"], step: PipelineStep)
     case "stale-state":
       return "The page stopped responding. The step may have triggered a very slow load or the server may be unreachable.";
     case "element-not-found":
-      return `Selector not found. The page structure may have changed. Take a screenshot to inspect the current state.`;
+      return "Selector not found. Either it is wrong, or the page re-rendered the element away (SPAs swap DOM nodes on every state change, so a selector that worked a second ago can return nothing now). Take a fresh `snapshot`/`find` immediately before acting and retry; if it keeps vanishing, `wait-for` it first.";
     case "navigation-failed":
       return "Navigation failed. The URL may be unreachable, blocked, or require authentication.";
     case "captcha-unsolvable":
@@ -126,7 +162,15 @@ export class PipelineRunner {
 
     const finishCapture = async () => {
       if (!capture) return undefined;
+      // A submit's XHR usually lands AFTER the click step resolves. Give
+      // in-flight requests a moment so the server's real answer (a 422, a
+      // 403…) is attributed to the step instead of lost.
+      await capture.drain(TIMING.CAPTURE_SETTLE, TIMING.CAPTURE_PENDING_MAX);
       capture.stop();
+      for (const se of capture.getServerErrors()) {
+        const r = results.find((x) => x.stepIndex === se.stepIndex);
+        if (r) (r.serverErrors ??= []).push(se);
+      }
       return capture.getResults();
     };
 
@@ -155,10 +199,11 @@ export class PipelineRunner {
         }
         // StaleStateError or other wrapper errors
         const asError = err instanceof Error ? err : new Error(String(err));
-        const errorType = classifyError(asError, step);
+        const refined = await refineError(tracker.active(), step, this.ctx, classifyError(asError, step), asError.message);
+        const errorType = refined.errorType;
         const pageState = await capturePageState(tracker.active(), this.ctx, { screenshot: true });
 
-        stepResult = failedStepResult(step, asError.message, Date.now() - startTime, i);
+        stepResult = failedStepResult(step, refined.message, Date.now() - startTime, i);
 
         results.push(stepResult);
         recordAnchor(step, false); // self-heal: a failing @a: anchor is likely stale
@@ -174,7 +219,7 @@ export class PipelineRunner {
             failedAtStep: i,
             failedStep: step,
             errorType,
-            message: asError.message,
+            message: refined.message,
             pageState,
             suggestion: getSuggestion(errorType, step),
             retryable: isRetryable(errorType),
@@ -221,8 +266,14 @@ export class PipelineRunner {
 
       // If step failed and not continueOnError, build error context and return
       if (!stepResult.ok && !continueOnError) {
+        const refined = await refineError(
+          tracker.active(), step, this.ctx,
+          classifyError(new Error(stepResult.error || ""), step),
+          stepResult.error || "Step failed",
+        );
+        stepResult.error = refined.message;
+        const errorType = refined.errorType;
         const pageState = await capturePageState(tracker.active(), this.ctx, { screenshot: true });
-        const errorType = classifyError(new Error(stepResult.error || ""), step);
 
         return {
           ok: false,

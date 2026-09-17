@@ -660,7 +660,7 @@ var import_zod2 = require("zod");
 var stepSchema = import_zod2.z.discriminatedUnion("type", [
   import_zod2.z.object({ type: import_zod2.z.literal("navigate"), url: import_zod2.z.string(), waitUntil: import_zod2.z.string().optional() }),
   import_zod2.z.object({ type: import_zod2.z.literal("click"), selector: import_zod2.z.string() }),
-  import_zod2.z.object({ type: import_zod2.z.literal("fill"), selector: import_zod2.z.string(), value: import_zod2.z.string().describe("Sets an input/textarea's value. Framework-aware: fires the React-safe native setter + input/change/blur, so controlled forms (React, react-hook-form, Formik, Vue) register the value AND mark the field touched. This is the fix for 'I filled the field but submit says it's still empty' \u2014 always use fill for form fields, not evaluate.") }),
+  import_zod2.z.object({ type: import_zod2.z.literal("fill"), selector: import_zod2.z.string(), value: import_zod2.z.string().describe("Sets an input/textarea's value. Framework-aware: fires the React-safe native setter + input/change/blur, so controlled forms (React, react-hook-form, Formik, Vue) register the value AND mark the field touched. This is the fix for 'I filled the field but submit says it's still empty' \u2014 always use fill for form fields, not evaluate."), force: import_zod2.z.boolean().optional().describe("Bypass the honeypot guard. fill refuses fields no human can reach (offscreen/clipped/transparent) \u2014 only set this when you are certain the field is real.") }),
   import_zod2.z.object({ type: import_zod2.z.literal("human-click"), selector: import_zod2.z.string().optional(), x: import_zod2.z.number().optional(), y: import_zod2.z.number().optional() }),
   import_zod2.z.object({ type: import_zod2.z.literal("right-click"), selector: import_zod2.z.string().optional(), x: import_zod2.z.number().optional(), y: import_zod2.z.number().optional() }),
   import_zod2.z.object({ type: import_zod2.z.literal("human-type"), selector: import_zod2.z.string(), value: import_zod2.z.string(), skipClick: import_zod2.z.boolean().optional().describe("Skip the click-to-focus and type into the already-focused element. Use for editors that blur on a synthetic click (e.g. Draft.js). Either way, typing aborts safely if the target isn't actually focused."), speed: import_zod2.z.enum(["slow", "normal", "fast"]).optional().describe("Typing speed. 'normal' (~130ms/char, realistic, default), 'fast' (~45ms/char) for long non-sensitive text, 'slow' for extra realism.") }),
@@ -783,6 +783,13 @@ ${api.domain} (${api.baseUrl})`);
       }
     }
   }
+  const serverErrors = (data.results || []).flatMap((r) => r.serverErrors || []);
+  if (serverErrors.length > 0) {
+    lines.push("\n--- Server errors (HTTP >= 400) ---");
+    for (const se of serverErrors) {
+      lines.push(`  [step ${se.stepIndex}] ${se.method} ${se.url} \u2192 ${se.status}${se.body ? `: ${se.body}` : ""}`);
+    }
+  }
   if (data.error) {
     lines.push("\n--- Failure ---");
     if (typeof data.error === "string") {
@@ -793,6 +800,10 @@ ${api.domain} (${api.baseUrl})`);
       lines.push(`Message: ${data.error.message}`);
       lines.push(`Retryable: ${data.error.retryable}`);
       if (data.error.suggestion) lines.push(`Suggestion: ${data.error.suggestion}`);
+      const atFailure = serverErrors.filter((se) => se.stepIndex === data.error?.failedAtStep);
+      for (const se of atFailure) {
+        lines.push(`Server responded: ${se.method} ${se.url} \u2192 ${se.status}${se.body ? `: ${se.body}` : ""}`);
+      }
       if (data.error.pageState?.url) lines.push(`URL at failure: ${data.error.pageState.url}`);
     }
   }
@@ -828,7 +839,7 @@ Returns: ok, completedSteps, output for snapshot/find/read/extract steps, obstac
         screenshotAfterEach: import_zod3.z.boolean().optional().describe("Take a screenshot after every step (expensive)"),
         continueOnObstacle: import_zod3.z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
         continueOnError: import_zod3.z.boolean().optional().describe("Continue past failing steps (default: false)"),
-        captureApi: import_zod3.z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes."),
+        captureApi: import_zod3.z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes. Also surfaces every HTTP >= 400 response per step \u2014 turn it on when a form submit fails with only a vague on-page message, to read the server's real answer."),
         mode: import_zod3.z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("DO NOT SET unless the user explicitly requests a mode \u2014 iframer auto-selects and auto-escalates. 'extension' drives a real-Chrome tab (requires options.tabId from the `tabs` tool)."),
         autoEscalate: import_zod3.z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)"),
         instanceId: import_zod3.z.string().optional().describe("Named parallel browser (default 'default') \u2014 distinct ids drive several browsers at once, each with its own session state."),

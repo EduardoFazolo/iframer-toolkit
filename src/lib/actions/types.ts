@@ -1,5 +1,5 @@
 import type { Page } from "patchright";
-import type { PipelineStep, ExecutionContext } from "../types";
+import type { PipelineStep, ExecutionContext, ServerError } from "../types";
 import type { StaleStateMonitor } from "../stale-monitor";
 import type {
   clickRecaptchaCheckbox,
@@ -116,6 +116,9 @@ export type StepResult = {
     /** Set when this step opened a new tab that the pipeline followed —
      *  the URL the active page switched to. */
     tabSwitchedTo?: string;
+    /** HTTP >= 400 responses the page received during this step. Only
+     *  populated when captureApi is on. */
+    serverErrors?: ServerError[];
   };
 }[PipelineStep["type"]];
 
