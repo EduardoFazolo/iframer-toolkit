@@ -902,9 +902,53 @@ function findChromeExecutable() {
   if (import_fs3.default.existsSync("/usr/bin/google-chrome-stable")) return "/usr/bin/google-chrome-stable";
   return void 0;
 }
+function armHeadedIdleTimer() {
+  if (headedIdleTimer) clearTimeout(headedIdleTimer);
+  headedIdleTimer = setTimeout(() => {
+    if (!headedBrowser) return;
+    const pages = headedBrowser.contexts().reduce((n, c) => n + c.pages().length, 0);
+    if (pages > 0) {
+      armHeadedIdleTimer();
+      return;
+    }
+    log2.info("idle timeout for the pivot headed browser, closing");
+    void closeHeadedBrowser();
+  }, HEADED_IDLE_MS);
+}
 async function getHeadedBrowser() {
-  if (!headedBrowser?.isConnected()) headedBrowser = await import_patchright.chromium.launch({ headless: false, args: STEALTH_ARGS });
+  if (!headedBrowser?.isConnected()) {
+    const marker = `--iframer-key=pivot-headed-${process.pid}-${Date.now()}`;
+    headedBrowser = await import_patchright.chromium.launch({ headless: false, args: [...STEALTH_ARGS, marker] });
+    headedPid = findChromePidByMarker(marker);
+    if (headedPid) {
+      registerBrowser({
+        key: "pivot::headed",
+        chromePid: headedPid,
+        ownerPid: process.pid,
+        marker,
+        launchedAt: (/* @__PURE__ */ new Date()).toISOString()
+      });
+    } else {
+      log2.warn("could not resolve Chrome PID for the pivot headed browser \u2014 force-kill unavailable");
+    }
+  }
+  armHeadedIdleTimer();
   return headedBrowser;
+}
+async function closeHeadedBrowser() {
+  if (headedIdleTimer) {
+    clearTimeout(headedIdleTimer);
+    headedIdleTimer = null;
+  }
+  if (headedBrowser) {
+    await headedBrowser.close().catch(() => {
+    });
+    headedBrowser = null;
+  }
+  if (headedPid !== null) {
+    unregisterBrowser(headedPid);
+    headedPid = null;
+  }
 }
 async function getBrowser(_name = "chromium") {
   if (cachedBrowser) {
@@ -923,11 +967,7 @@ async function getBrowser(_name = "chromium") {
   return cachedBrowser;
 }
 async function closeBrowser() {
-  if (headedBrowser) {
-    await headedBrowser.close().catch(() => {
-    });
-    headedBrowser = null;
-  }
+  await closeHeadedBrowser();
   if (!cachedBrowser) return;
   try {
     await cachedBrowser.close();
@@ -964,7 +1004,7 @@ async function launchHeadful(displayNum) {
   log2.debug(`headful: ${executablePath || "patchright chromium"}, extensions: ${hasExtensions}`);
   return import_patchright.chromium.launch(launchOpts);
 }
-var import_fs3, import_patchright, log2, UBLOCK_PATH, cachedBrowser, headedBrowser;
+var import_fs3, import_patchright, log2, UBLOCK_PATH, cachedBrowser, headedBrowser, headedPid, headedIdleTimer, HEADED_IDLE_MS;
 var init_launcher = __esm({
   "src/lib/browser/launcher.ts"() {
     "use strict";
@@ -972,10 +1012,14 @@ var init_launcher = __esm({
     import_patchright = require("patchright");
     init_stealth();
     init_logger();
+    init_registry();
     log2 = createLogger("launcher");
     UBLOCK_PATH = "/extensions/uBlock0.chromium";
     cachedBrowser = null;
     headedBrowser = null;
+    headedPid = null;
+    headedIdleTimer = null;
+    HEADED_IDLE_MS = 5 * 60 * 1e3;
   }
 });
 
@@ -1833,7 +1877,7 @@ var init_cloak_browser = __esm({
 function keyOf(mode, instanceId) {
   return `${mode}::${instanceId}`;
 }
-var import_patchright2, import_crypto2, log7, DEFAULT_IDLE_TIMEOUT, CLOSE_GRACE_MS, DEFAULT_INSTANCE, sleep3, BrowserDaemon;
+var import_patchright2, import_crypto2, log7, DEFAULT_IDLE_TIMEOUT, CLOSE_GRACE_MS, BUSY_MAX_MS, BLANK_IDLE_MS, DEFAULT_INSTANCE, sleep3, BrowserDaemon;
 var init_daemon = __esm({
   "src/lib/browser/daemon.ts"() {
     "use strict";
@@ -1846,6 +1890,8 @@ var init_daemon = __esm({
     log7 = createLogger("daemon");
     DEFAULT_IDLE_TIMEOUT = 5 * 60 * 1e3;
     CLOSE_GRACE_MS = 5e3;
+    BUSY_MAX_MS = 30 * 60 * 1e3;
+    BLANK_IDLE_MS = 2 * 60 * 1e3;
     DEFAULT_INSTANCE = "default";
     sleep3 = (ms) => new Promise((r) => setTimeout(r, ms));
     BrowserDaemon = class {
@@ -1934,7 +1980,8 @@ var init_daemon = __esm({
           createdAt: /* @__PURE__ */ new Date(),
           chromePid,
           marker,
-          active: 0
+          active: 0,
+          busySince: null
         };
         this.instances.set(key, instance);
         this.resetIdleTimer(key);
@@ -1946,14 +1993,19 @@ var init_daemon = __esm({
        *  Always pair with release() in a finally block. */
       acquire(mode, instanceId = DEFAULT_INSTANCE) {
         const instance = this.instances.get(keyOf(mode, instanceId));
-        if (instance) instance.active++;
+        if (!instance) return;
+        if (instance.active === 0) instance.busySince = Date.now();
+        instance.active++;
       }
       release(mode, instanceId = DEFAULT_INSTANCE) {
         const key = keyOf(mode, instanceId);
         const instance = this.instances.get(key);
         if (!instance) return;
         instance.active = Math.max(0, instance.active - 1);
-        if (instance.active === 0) this.resetIdleTimer(key);
+        if (instance.active === 0) {
+          instance.busySince = null;
+          this.resetIdleTimer(key);
+        }
       }
       isRunning(mode, instanceId = DEFAULT_INSTANCE) {
         const instance = this.instances.get(keyOf(mode, instanceId));
@@ -1963,6 +2015,35 @@ var init_daemon = __esm({
         } catch {
           return false;
         }
+      }
+      /** Close instances that never left about:blank and have been idle a while.
+       *  Those are accidents — a pipeline that failed before its first navigate, or
+       *  a mode picked for a call that never needed a browser — and in headful mode
+       *  each one is an empty window sitting on the user's desktop. Called on the
+       *  server's reap tick, so it also catches instances whose idle timer was lost
+       *  (e.g. the daemon was restarted under them). */
+      sweepBlankInstances() {
+        const stopped = [];
+        const now = Date.now();
+        for (const [key, inst] of this.instances.entries()) {
+          if (inst.active > 0) continue;
+          if (now - inst.createdAt.getTime() < BLANK_IDLE_MS) continue;
+          let blank = false;
+          try {
+            const pages = inst.context.pages();
+            blank = pages.length === 0 || pages.every((p) => {
+              const u = p.url();
+              return u === "about:blank" || u === "" || u === "chrome://newtab/";
+            });
+          } catch {
+            continue;
+          }
+          if (!blank) continue;
+          log7.info(`blank-orphan sweep: ${key} never left about:blank, stopping`);
+          stopped.push(key);
+          this.stopKey(key).catch((err) => log7.warn(`blank sweep stop failed for ${key}: ${err}`));
+        }
+        return stopped;
       }
       /** Distinct modes that currently have at least one live instance. */
       runningModes() {
@@ -2082,8 +2163,14 @@ var init_daemon = __esm({
           setTimeout(() => {
             const instance = this.instances.get(key);
             if (instance && instance.active > 0) {
-              this.resetIdleTimer(key);
-              return;
+              const busyMs = instance.busySince ? Date.now() - instance.busySince : 0;
+              if (busyMs < BUSY_MAX_MS) {
+                this.resetIdleTimer(key);
+                return;
+              }
+              log7.warn(`${key} reported busy for ${Math.round(busyMs / 6e4)}m \u2014 treating active=${instance.active} as leaked, stopping`);
+              instance.active = 0;
+              instance.busySince = null;
             }
             log7.info(`Idle timeout for ${key}, stopping...`);
             this.stopKey(key).catch((err) => log7.warn(`idle stop failed for ${key}: ${err}`));
@@ -10537,6 +10624,24 @@ var init_cdp_relay = __esm({
 });
 
 // src/lib/execution/pipeline-executor.ts
+function blankPipelineResult(pipeline, modeUsed, error) {
+  return {
+    ok: false,
+    completedSteps: 0,
+    totalSteps: pipeline.steps.length,
+    results: [],
+    obstacles: [],
+    error: {
+      failedAtStep: 0,
+      failedStep: pipeline.steps[0],
+      pageState: { url: "", title: "" },
+      ...error
+    },
+    durationMs: 0,
+    modeUsed,
+    finalState: { url: "", title: "" }
+  };
+}
 var import_playwright_core, log18, PipelineExecutor;
 var init_pipeline_executor = __esm({
   "src/lib/execution/pipeline-executor.ts"() {
@@ -10593,8 +10698,24 @@ var init_pipeline_executor = __esm({
         const forcedMode = opts.mode;
         const autoEscalate = opts.autoEscalate !== false;
         const instanceId = opts.instanceId || DEFAULT_INSTANCE;
+        if (forcedMode === "extension") {
+          return blankPipelineResult(pipeline, "extension", {
+            errorType: "action-failed",
+            message: 'mode="extension" requires options.tabId (the real-Chrome tab to drive).',
+            suggestion: "Call the `tabs` tool (or GET /extension/tabs) to list open tabs, then pass that tab id. Nothing was launched.",
+            retryable: false
+          });
+        }
         const firstNav = pipeline.steps.find((s) => s.type === "navigate");
         const domain = firstNav ? new URL(firstNav.url).hostname : null;
+        if (!firstNav && !this.deps.daemon.findLiveMode(instanceId)) {
+          return blankPipelineResult(pipeline, forcedMode || "headless", {
+            errorType: "action-failed",
+            message: `No navigate step and no live browser for instanceId "${instanceId}" to act on.`,
+            suggestion: "Add a navigate step, or reattach to a live window (check `status` / `iframer instances` for instanceId). To drive a real Chrome tab, pass options.tabId from the `tabs` tool. Nothing was launched.",
+            retryable: false
+          });
+        }
         const availableModes = this.deps.availableModes();
         const liveMode = forcedMode ? null : this.deps.daemon.findLiveMode(instanceId);
         let mode;
@@ -11347,6 +11468,11 @@ var init_iframer = __esm({
       listInstances() {
         return this.daemon.instancesInfo();
       }
+      /** Close browsers that never navigated anywhere. See
+       *  BrowserDaemon.sweepBlankInstances — called from the server's reap tick. */
+      sweepBlankBrowsers() {
+        return this.daemon.sweepBlankInstances();
+      }
       /** Kill all browser instances and reset state. Next execute call will
        *  launch a fresh browser automatically — no manual restart needed. */
       async restartBrowser() {
@@ -11923,6 +12049,21 @@ function parseFlag(args2, flag, hasValue = true) {
 function hasFlag(args2, flag) {
   return args2.includes(flag);
 }
+var LAUNCH_MODES = ["headless", "binary-headful", "docker-headful"];
+function parseModeFlag(args2) {
+  const mode = parseFlag(args2, "--mode");
+  if (!mode) return void 0;
+  if (LAUNCH_MODES.includes(mode)) return mode;
+  if (mode === "extension") {
+    console.error("\n  --mode extension is not available from the CLI: it needs a tab id.");
+    console.error("  Use the `tabs` tool from your agent, or POST /extension/execute with a tabId.\n");
+    process.exit(1);
+  }
+  console.error(`
+  Unknown --mode "${mode}". Use one of: ${LAUNCH_MODES.join(", ")}.
+`);
+  process.exit(1);
+}
 function handleResponse(data, screenshotPath) {
   const { screenshot: screenshot2, tileScreenshots, ...rest } = data;
   if (screenshot2 && screenshotPath) {
@@ -12397,7 +12538,7 @@ async function main() {
         process.exit(1);
       }
       const options = { ...inputOptions };
-      const mode = parseFlag(args, "--mode");
+      const mode = parseModeFlag(args);
       if (mode) options.mode = mode;
       if (hasFlag(args, "--capture-api")) options.captureApi = true;
       if (hasFlag(args, "--continue-on-error")) options.continueOnError = true;
@@ -12482,7 +12623,7 @@ Screenshot: ${shot}`);
       const url = args[0];
       const outPath = parseFlag(args, "--output") || parseFlag(args, "-o") || "/tmp/iframer-screenshot.jpg";
       if (url && url.startsWith("http")) {
-        const mode = parseFlag(args, "--mode") || "headless";
+        const mode = parseModeFlag(args) || "headless";
         const annotate = hasFlag(args, "--annotate");
         const docker = await isDockerRunning();
         const steps = [
@@ -12713,7 +12854,7 @@ Screenshot: ${shot}`);
         process.exit(1);
       }
       const options = { captureApi: true };
-      const mode = parseFlag(args, "--mode");
+      const mode = parseModeFlag(args);
       if (mode) options.mode = mode;
       const docker = await isDockerRunning();
       let result;

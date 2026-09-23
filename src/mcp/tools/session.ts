@@ -3,7 +3,7 @@ import { z } from "zod";
 import path from "path";
 import fs from "fs";
 import type { CapturedApi } from "../../lib/types";
-import { localApiPost, localApiDelete, apiPost, isDockerRunning, err, getErrorMessage, localServer } from "../helpers";
+import { localApiPost, localApiGet, localApiDelete, apiPost, isDockerRunning, err, getErrorMessage, localServer } from "../helpers";
 import { formatCapturedApi } from "./reverse-engineer";
 import { getDataDir } from "../../lib/paths";
 
@@ -33,6 +33,33 @@ stop: save cookies/localStorage and close the browser — ALWAYS call when brows
     },
     async ({ action, mode, urls, instanceId, outputDir }) => {
       try {
+        // These actions need a browser, and their historical default was
+        // binary-headful — which pops a fresh visible window on about:blank.
+        // When the agent is driving the user's real Chrome, that window is
+        // always a mistake, so refuse instead of spawning one. An explicit
+        // mode still wins: the caller asked for it on purpose.
+        const SPAWNS_BROWSER = ["capture-start", "capture-stop", "get-cookies", "get-auth"];
+        let resolvedMode = mode;
+        if (SPAWNS_BROWSER.includes(action) && !mode) {
+          const live = await localApiGet<{ instances?: { mode: string; instanceId: string }[] }>("/instances")
+            .catch(() => ({ instances: [] as { mode: string; instanceId: string }[] }));
+          const match = (live.instances || []).find((i) => i.instanceId === (instanceId || "default"));
+          if (match) {
+            // Reuse the window that is already open rather than opening another.
+            if (match.mode === "headless" || match.mode === "binary-headful") resolvedMode = match.mode;
+          } else {
+            const ext = await localApiGet<{ connected?: boolean }>("/extension/status").catch(() => ({ connected: false }));
+            if (ext.connected) {
+              return err(
+                `'${action}' would launch a new browser window, but the iframer extension is connected — ` +
+                `you are probably driving a real Chrome tab. Read that tab instead: execute with options.mode="extension" ` +
+                `and options.tabId (from the \`tabs\` tool). If you really want a separate browser, pass mode explicitly. ` +
+                `Nothing was launched.`,
+              );
+            }
+          }
+        }
+        mode = resolvedMode;
         if (action === "stop") {
           const result = await localApiPost<{ ok: boolean; sessionSaved?: boolean }>("/interactive/stop").catch(() => ({ ok: true, sessionSaved: false }));
           return { content: [{ type: "text" as const, text: `Session stopped. State saved: ${result.sessionSaved ?? false}` }] };

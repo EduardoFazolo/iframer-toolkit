@@ -1,0 +1,316 @@
+<title>Camoufox vs iframer, Blind</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #f7f6f3; --panel: #ffffff; --ink: #1e2126; --ink-2: #4b5159; --mute: #7d848d; --line: #e2e0da; --line-2: #cfccc4;
+    --pass: #1f9d55; --pass-bg: #dff3e7; --fail: #d64545; --fail-bg: #fbe3e3; --part: #d29a12; --part-bg: #fbeed0; --unk: #a3a8ae; --unk-bg: #ececea;
+    --iframer: #e8590c; --camoufox: #2f6fd6; --hermes: #7a5cd6;
+    --sans: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif; --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #151719; --panel: #1d2023; --ink: #e8e9ea; --ink-2: #b4b8bd; --mute: #7f858c; --line: #2c3035; --line-2: #3a3f45;
+      --pass: #3ec47a; --pass-bg: #163524; --fail: #f0656a; --fail-bg: #3a1e20; --part: #e6b23c; --part-bg: #3a2f14; --unk: #767b81; --unk-bg: #2a2d31;
+      --iframer: #ff7a2b; --camoufox: #5f93ee; --hermes: #a48cf0;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #151719; --panel: #1d2023; --ink: #e8e9ea; --ink-2: #b4b8bd; --mute: #7f858c; --line: #2c3035; --line-2: #3a3f45;
+    --pass: #3ec47a; --pass-bg: #163524; --fail: #f0656a; --fail-bg: #3a1e20; --part: #e6b23c; --part-bg: #3a2f14; --unk: #767b81; --unk-bg: #2a2d31;
+    --iframer: #ff7a2b; --camoufox: #5f93ee; --hermes: #a48cf0;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 15px; line-height: 1.5; margin: 0; padding-block: 40px 80px; padding-inline: 20px; }
+  main { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 30px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 6px; text-wrap: balance; }
+  h2 { font-size: 13px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; color: var(--mute); margin: 48px 0 14px; font-family: var(--mono); }
+  h3 { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
+  p { margin: 0 0 10px; max-width: 70ch; }
+  .sub { color: var(--ink-2); font-family: var(--mono); font-size: 13px; }
+  .sub b { color: var(--ink); font-weight: 500; }
+  code { font-family: var(--mono); font-size: 0.9em; background: var(--unk-bg); padding: 1px 5px; border-radius: 3px; }
+  a { color: inherit; }
+
+  .verdict { border-left: 3px solid var(--ink); padding-left: 18px; margin-top: 28px; display: grid; gap: 10px; }
+  .verdict p { font-size: 18px; margin: 0; max-width: 62ch; }
+  .verdict p b { font-weight: 600; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 14px 20px; font-family: var(--mono); font-size: 12px; color: var(--ink-2); margin-bottom: 14px; }
+  .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; background: var(--c); }
+
+  /* scoreboard */
+  .board { display: grid; gap: 22px; }
+  .board .grp { display: grid; gap: 6px; }
+  .board .grp h3 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+  .board .grp h3 small { color: var(--mute); font-weight: 400; font-family: var(--mono); font-size: 12px; margin-left: 8px; }
+  .brow { display: grid; grid-template-columns: 178px 1fr 96px 56px; gap: 12px; align-items: center; font-family: var(--mono); font-size: 12.5px; }
+  .brow .nm { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .brow .nm::before { content: ""; display: inline-block; width: 6px; height: 12px; border-radius: 2px; margin-right: 8px; vertical-align: -2px; background: var(--fam); }
+  .bar { display: flex; height: 18px; border-radius: 3px; overflow: hidden; background: var(--unk-bg); }
+  .bar i { display: block; height: 100%; }
+  .bar .p { background: var(--pass); } .bar .q { background: var(--part); } .bar .f { background: var(--fail); }
+  .brow .pct { font-variant-numeric: tabular-nums; text-align: right; color: var(--ink); white-space: nowrap; }
+  .brow .t { font-variant-numeric: tabular-nums; text-align: right; color: var(--mute); }
+  @media (max-width: 560px) { .brow { grid-template-columns: 110px 1fr 56px; } .brow .t { display: none; } }
+
+  /* grid */
+  .wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+  table { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 13px; }
+  th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { font-family: var(--mono); font-weight: 500; font-size: 11.5px; color: var(--ink-2); white-space: nowrap; background: var(--panel); position: sticky; top: 0; }
+  th.cfg { text-align: center; border-bottom: 2px solid var(--fam); }
+  td.tg { white-space: nowrap; }
+  td.tg small { display: block; color: var(--mute); font-family: var(--mono); font-size: 11px; white-space: normal; max-width: 220px; }
+  tr.gh td { background: var(--bg); font-family: var(--mono); font-size: 11.5px; color: var(--mute); text-transform: uppercase; letter-spacing: 0.06em; padding: 6px 10px; }
+  td.cell { text-align: center; cursor: pointer; }
+  td.cell:hover { background: var(--bg); }
+  td.cell.open { background: var(--bg); box-shadow: inset 0 -2px 0 var(--ink); }
+  .dots { display: inline-flex; gap: 4px; }
+  .dots i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+  .d-pass { background: var(--pass); } .d-fail { background: var(--fail); } .d-partial { background: var(--part); } .d-unknown { background: var(--unk); }
+  tr.det td { background: var(--bg); padding: 12px 14px 14px; }
+  .det-head { font-family: var(--mono); font-size: 12px; color: var(--ink-2); margin-bottom: 8px; }
+  .runs { display: grid; gap: 6px; }
+  .runs div { display: grid; grid-template-columns: 24px 70px 1fr; gap: 10px; font-family: var(--mono); font-size: 12.5px; align-items: start; }
+  .runs .v { font-weight: 500; }
+  .runs .v.pass { color: var(--pass); } .runs .v.fail { color: var(--fail); } .runs .v.partial { color: var(--part); } .runs .v.unknown { color: var(--unk); }
+  .runs .dtl { color: var(--ink-2); word-break: break-word; }
+  .runs .dtl em { color: var(--mute); font-style: normal; }
+
+  /* two columns */
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  @media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+  .col { border-top: 3px solid var(--fam); padding-top: 12px; }
+  .col h3 { color: var(--fam); }
+  .col ul { padding-left: 18px; margin: 0; display: grid; gap: 8px; }
+  .col li { max-width: 60ch; }
+
+  /* probe table */
+  .probe td { font-family: var(--mono); font-size: 12px; vertical-align: top; }
+  .probe td.k { color: var(--mute); white-space: nowrap; }
+  .flag { color: var(--fail); }
+  .warn { color: var(--part); }
+  .ok { color: var(--pass); }
+
+  ul.plain { padding-left: 18px; margin: 0; display: grid; gap: 6px; max-width: 72ch; }
+  ul.plain li { color: var(--ink-2); }
+  .foot { margin-top: 48px; font-family: var(--mono); font-size: 12px; color: var(--mute); }
+  :focus-visible { outline: 2px solid var(--camoufox); outline-offset: 2px; }
+  @media (prefers-reduced-motion: no-preference) { td.cell { transition: background 120ms; } }
+</style>
+
+<main>
+  <h1>Camoufox vs iframer, blind</h1>
+  <div class="sub" id="sub"></div>
+
+  <div class="verdict" id="verdict"></div>
+
+  <h2>Scoreboard</h2>
+  <div class="legend">
+    <span style="--c:var(--pass)">pass: site says human, or the real page loaded</span>
+    <span style="--c:var(--part)">partial: flagged something, didn't call it a bot</span>
+    <span style="--c:var(--fail)">fail: called a bot, or hit a wall</span>
+    <span style="--c:var(--unk)">unknown: page never produced a verdict (not counted)</span>
+  </div>
+  <div class="board" id="board"></div>
+
+  <h2>Every page, every engine, every run</h2>
+  <p class="sub">Click a cell to see what each run actually said. Dots are runs 1, 2, 3 in order.</p>
+  <div class="wrap"><table id="grid"></table></div>
+
+  <div id="vpn" hidden>
+    <h2>Same six sites, VPN on</h2>
+    <div class="verdict" id="vpn-verdict"></div>
+    <p class="sub" id="vpn-sub" style="margin-top:14px"></p>
+    <p class="sub">Bars are in the scoreboard above. Dots are runs 1, 2, 3. Click a cell for what each run said.</p>
+    <div class="wrap"><table id="vpn-grid"></table></div>
+  </div>
+
+  <div id="docker" hidden>
+    <h2>Everything again, inside a Linux container</h2>
+    <div class="verdict" id="docker-verdict"></div>
+    <p class="sub" id="docker-sub" style="margin-top:14px"></p>
+    <p class="sub">Bars are in the scoreboard above. Dots are runs 1, 2, 3. Click a cell for what each run said.</p>
+    <div class="wrap"><table id="docker-grid"></table></div>
+  </div>
+
+  <h2>What each one is better at</h2>
+  <div class="cols" id="cols"></div>
+
+  <h2>What the browser admits about itself</h2>
+  <p class="sub">One JS probe on example.com, run 1. This is the raw material every detector reads.</p>
+  <div class="wrap"><table class="probe" id="probe"></table></div>
+
+  <h2>Method</h2>
+  <ul class="plain" id="method"></ul>
+
+  <h2>Not tested (the blank part of the map)</h2>
+  <ul class="plain" id="blank"></ul>
+
+  <h2>Outside reading, for calibration</h2>
+  <ul class="plain" id="sources"></ul>
+
+  <div class="foot" id="foot"></div>
+</main>
+
+<script>
+const D = /*__DATA__*/null;
+const fam = c => c.startsWith('iframer') ? 'var(--iframer)' : c.startsWith('camoufox') ? 'var(--camoufox)' : 'var(--hermes)';
+const esc = s => String(s ?? '').replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+const N = D.narrative || {};
+
+document.getElementById('sub').innerHTML = `${D.runs} runs per cell · ${D.targets.length} pages · ${D.configs.length} engine configs · <b>${esc(N.machine || '')}</b> · ${esc(D.generated).slice(0,10)}`;
+document.getElementById('verdict').innerHTML = (N.verdict || []).map(l => `<p>${l}</p>`).join('');
+
+// scoreboard
+const board = document.getElementById('board');
+const barBlock = (title, small, configs, score, g, twinOf) => {
+  const el = document.createElement('div'); el.className = 'grp';
+  el.innerHTML = `<h3>${title}<small>${small}</small></h3>` + configs.map(c => {
+    const s = score[`${c}|${g}`]; if (!s) return '';
+    const k = s.pass + s.partial + s.fail || 1; const pct = Math.round(100 * s.pass / k);
+    const tw = twinOf ? twinOf(c) : null; const h = tw ? D.score[`${tw}|${g}`] : null;
+    const hp = h ? Math.round(100 * h.pass / (h.pass + h.partial + h.fail || 1)) : null;
+    const d = hp === null ? '' : ` <span style="color:${pct - hp < 0 ? 'var(--fail)' : pct - hp > 0 ? 'var(--pass)' : 'var(--mute)'}">${pct - hp >= 0 ? '+' : ''}${pct - hp}</span>`;
+    return `<div class="brow" style="--fam:${fam(c)}"><span class="nm">${esc(D.labels[c])}</span>
+      <span class="bar" title="${s.pass} pass, ${s.partial} partial, ${s.fail} fail, ${s.unknown} unknown"><i class="p" style="width:${100*s.pass/k}%"></i><i class="q" style="width:${100*s.partial/k}%"></i><i class="f" style="width:${100*s.fail/k}%"></i></span>
+      <span class="pct">${pct}%${d}${s.unknown ? ` <span style="color:var(--mute)">·${s.unknown}?</span>` : ''}</span><span class="t">${s.wall ?? '–'}s</span></div>`;
+  }).join('');
+  return el;
+};
+for (const g of D.groupOrder.filter(g => g !== 'probe')) {
+  const n = D.targets.filter(t => t.group === g).length;
+  const el = document.createElement('div'); el.className = 'grp';
+  el.innerHTML = `<h3>${esc(D.groups[g])}<small>${n} page${n>1?'s':''} × ${D.runs} runs</small></h3>` + D.configs.map(c => {
+    const s = D.score[`${c}|${g}`]; const k = s.pass + s.partial + s.fail || 1;
+    const pct = Math.round(100 * s.pass / k);
+    return `<div class="brow" style="--fam:${fam(c)}"><span class="nm">${esc(D.labels[c])}</span>
+      <span class="bar" title="${s.pass} pass, ${s.partial} partial, ${s.fail} fail, ${s.unknown} unknown"><i class="p" style="width:${100*s.pass/k}%"></i><i class="q" style="width:${100*s.partial/k}%"></i><i class="f" style="width:${100*s.fail/k}%"></i></span>
+      <span class="pct">${pct}%${s.unknown ? ` <span style="color:var(--mute)">·${s.unknown}?</span>` : ''}</span><span class="t">${s.wall ?? '–'}s</span></div>`;
+  }).join('');
+  board.appendChild(el);
+  if (g === 'real' && D.vpn) {
+    const V = D.vpn;
+    const ev = document.createElement('div'); ev.className = 'grp';
+    ev.innerHTML = `<h3>Production sites behind a WAF, VPN on<small>${n} pages × ${V.runs} runs · datacenter exit · delta vs home IP</small></h3>` + V.configs.map(c => {
+      const s = V.score[`${c}|real`]; const k = s.pass + s.partial + s.fail || 1; const pct = Math.round(100 * s.pass / k);
+      const h = D.score[`${c}|real`]; const hk = h ? (h.pass + h.partial + h.fail || 1) : null; const hp = h ? Math.round(100 * h.pass / hk) : null;
+      const d = hp === null ? '' : ` <span style="color:${pct - hp < 0 ? 'var(--fail)' : pct - hp > 0 ? 'var(--pass)' : 'var(--mute)'}">${pct - hp >= 0 ? '+' : ''}${pct - hp}</span>`;
+      return `<div class="brow" style="--fam:${fam(c)}"><span class="nm">${esc(D.labels[c])}</span>
+        <span class="bar" title="${s.pass} pass, ${s.partial} partial, ${s.fail} fail, ${s.unknown} unknown"><i class="p" style="width:${100*s.pass/k}%"></i><i class="q" style="width:${100*s.partial/k}%"></i><i class="f" style="width:${100*s.fail/k}%"></i></span>
+        <span class="pct">${pct}%${d}${s.unknown ? ` <span style="color:var(--mute)">·${s.unknown}?</span>` : ''}</span><span class="t">${s.wall ?? '–'}s</span></div>`;
+    }).join('');
+    board.appendChild(ev);
+  }
+  if (D.docker) {
+    board.appendChild(barBlock(`${esc(D.groups[g])}, in Docker`, `${n} page${n>1?'s':''} × ${D.docker.runs} runs · Linux container, home IP · delta vs the same engine on the Mac`, D.docker.configs, D.docker.score, g, c => D.dockerTwin[c]));
+  }
+}
+
+// grid
+const grid = document.getElementById('grid');
+let html = `<thead><tr><th>page</th>${D.configs.map(c => `<th class="cfg" style="--fam:${fam(c)}">${esc(D.labels[c])}</th>`).join('')}</tr></thead><tbody>`;
+for (const g of D.groupOrder) {
+  html += `<tr class="gh"><td colspan="${D.configs.length+1}">${esc(D.groups[g])}</td></tr>`;
+  for (const t of D.targets.filter(t => t.group === g)) {
+    html += `<tr data-t="${t.id}"><td class="tg">${esc(t.label)}<small>${esc(t.what)}</small></td>` + D.configs.map(c => {
+      const runs = D.cells[`${t.id}|${c}`] || [];
+      return `<td class="cell" data-t="${t.id}" data-c="${c}" tabindex="0"><span class="dots">${runs.map(r => `<i class="d-${r.verdict}" title="run ${r.run}: ${esc(r.verdict)}"></i>`).join('') || '<i class="d-unknown" style="opacity:.3"></i>'}</span></td>`;
+    }).join('') + `</tr>`;
+  }
+}
+grid.innerHTML = html + '</tbody>';
+let openDet = null;
+grid.addEventListener('click', e => { const td = e.target.closest('td.cell'); if (td) toggle(td); });
+grid.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { const td = e.target.closest('td.cell'); if (td) { e.preventDefault(); toggle(td); } } });
+function toggle(td) {
+  const was = td.classList.contains('open');
+  if (openDet) { openDet.remove(); openDet = null; }
+  grid.querySelectorAll('td.open').forEach(x => x.classList.remove('open'));
+  if (was) return;
+  td.classList.add('open');
+  const runs = D.cells[`${td.dataset.t}|${td.dataset.c}`] || [];
+  const t = D.targets.find(x => x.id === td.dataset.t);
+  const tr = document.createElement('tr'); tr.className = 'det';
+  tr.innerHTML = `<td colspan="${D.configs.length+1}"><div class="det-head">${esc(D.labels[td.dataset.c])} on ${esc(t.label)} · <a href="${esc(t.url)}" target="_blank" rel="noopener">${esc(t.url)}</a></div><div class="runs">${
+    runs.map(r => `<div><span>r${r.run}</span><span class="v ${r.verdict}">${r.verdict}</span><span class="dtl">${esc(r.detail)}${r.mode ? ` <em>· mode ${esc(r.mode)}</em>` : ''} <em>· ${r.wall}s</em></span></div>`).join('') || '<div><span></span><span class="v unknown">–</span><span class="dtl">not run</span></div>'
+  }</div></td>`;
+  td.closest('tr').after(tr); openDet = tr;
+}
+
+const renderSitting = (S, gridId, groups, headNote) => {
+  const g = document.getElementById(gridId);
+  let h = `<thead><tr><th>page</th>${S.configs.map(c => `<th class="cfg" style="--fam:${fam(c)}">${esc(D.labels[c])}</th>`).join('')}</tr></thead><tbody>`;
+  for (const grp of groups) {
+    if (groups.length > 1) h += `<tr class="gh"><td colspan="${S.configs.length+1}">${esc(D.groups[grp])}</td></tr>`;
+    for (const t of D.targets.filter(t => t.group === grp)) {
+      h += `<tr><td class="tg">${esc(t.label)}<small>${esc(t.what)}</small></td>` + S.configs.map(c => {
+        const runs = S.cells[`${t.id}|${c}`] || [];
+        return `<td class="cell" data-t="${t.id}" data-c="${c}" tabindex="0"><span class="dots">${runs.map(r => `<i class="d-${r.verdict}" title="run ${r.run}: ${esc(r.verdict)}"></i>`).join('') || '<i class="d-unknown" style="opacity:.3"></i>'}</span></td>`;
+      }).join('') + `</tr>`;
+    }
+  }
+  g.innerHTML = h + '</tbody>';
+  let open = null;
+  const tog = td => {
+    const was = td.classList.contains('open');
+    if (open) { open.remove(); open = null; }
+    g.querySelectorAll('td.open').forEach(x => x.classList.remove('open'));
+    if (was) return;
+    td.classList.add('open');
+    const runs = S.cells[`${td.dataset.t}|${td.dataset.c}`] || [];
+    const t = D.targets.find(x => x.id === td.dataset.t);
+    const tr = document.createElement('tr'); tr.className = 'det';
+    tr.innerHTML = `<td colspan="${S.configs.length+1}"><div class="det-head">${esc(D.labels[td.dataset.c])} on ${esc(t.label)}, ${headNote}</div><div class="runs">${
+      runs.map(r => `<div><span>r${r.run}</span><span class="v ${r.verdict}">${r.verdict}</span><span class="dtl">${esc(r.detail)}${r.mode ? ` <em>· mode ${esc(r.mode)}</em>` : ''} <em>· ${r.wall}s</em></span></div>`).join('')
+    }</div></td>`;
+    td.closest('tr').after(tr); open = tr;
+  };
+  g.addEventListener('click', e => { const td = e.target.closest('td.cell'); if (td) tog(td); });
+  g.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { const td = e.target.closest('td.cell'); if (td) { e.preventDefault(); tog(td); } } });
+};
+
+// Docker sitting
+if (D.docker) {
+  const K = D.docker, KN = K.narrative || {};
+  document.getElementById('docker').hidden = false;
+  document.getElementById('docker-verdict').innerHTML = (KN.verdict || []).map(l => `<p>${l}</p>`).join('');
+  document.getElementById('docker-sub').innerHTML = `${K.runs} runs per cell · <b>${esc(KN.machine || '')}</b> · ${esc(K.generated).slice(0,10)}`;
+  renderSitting(K, 'docker-grid', D.groupOrder, 'in Docker');
+}
+
+// VPN sitting
+if (D.vpn) {
+  const V = D.vpn, VN = V.narrative || {};
+  document.getElementById('vpn').hidden = false;
+  document.getElementById('vpn-verdict').innerHTML = (VN.verdict || []).map(l => `<p>${l}</p>`).join('');
+  document.getElementById('vpn-sub').innerHTML = `${V.runs} runs per cell · 6 pages · <b>${esc(VN.machine || '')}</b> · ${esc(V.generated).slice(0,10)} `;
+  renderSitting(V, 'vpn-grid', ['real'], 'VPN on');
+}
+
+// columns
+document.getElementById('cols').innerHTML = (N.better || []).map(b => `<div class="col" style="--fam:${b.fam === 'iframer' ? 'var(--iframer)' : 'var(--camoufox)'}"><h3>${esc(b.title)}</h3><ul>${(b.items||[]).map(i => `<li>${i}</li>`).join('')}</ul></div>`).join('');
+
+// probe
+const P = document.getElementById('probe');
+const probes = D.configs.map(c => ({ c, r: (D.cells[`probe|${c}`] || [])[0] })).filter(x => x.r && x.r.probe);
+const rowsP = [
+  ['user agent', p => p.ua],
+  ['navigator.platform', p => p.platform],
+  ['client hints platform', p => p.uaData ? p.uaData.platform : 'n/a (Firefox)'],
+  ['GPU (WebGL)', p => (p.gl && p.gl.renderer) || '–'],
+  ['screen / viewport', p => `${p.screen[0]}×${p.screen[1]} / ${p.inner[0]}×${p.inner[1]}`],
+  ['cores / memory', p => `${p.hw} / ${p.mem ?? 'n/a'}`],
+  ['webdriver', p => String(p.webdriver)],
+  ['window.chrome', p => p.chromeObj],
+  ['timezone', p => p.tz],
+];
+P.innerHTML = `<thead><tr><th></th>${probes.map(x => `<th class="cfg" style="--fam:${fam(x.c)}">${esc(D.labels[x.c])}</th>`).join('')}</tr></thead><tbody>` +
+  rowsP.map(([k, f]) => `<tr><td class="k">${k}</td>${probes.map(x => `<td>${esc(f(x.r.probe))}</td>`).join('')}</tr>`).join('') +
+  `<tr><td class="k">verdict</td>${probes.map(x => `<td class="${x.r.verdict === 'pass' ? 'ok' : x.r.verdict === 'partial' ? 'warn' : 'flag'}">${esc(x.r.detail)}</td>`).join('')}</tr></tbody>`;
+
+document.getElementById('method').innerHTML = (N.method || []).map(l => `<li>${l}</li>`).join('');
+document.getElementById('blank').innerHTML = (N.blank || []).map(l => `<li>${l}</li>`).join('');
+document.getElementById('sources').innerHTML = (N.sources || []).map(s => `<li><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)}</a>${s.note ? `: ${esc(s.note)}` : ''}</li>`).join('');
+document.getElementById('foot').textContent = `Harness: tests/blind-tests in iframer-toolkit. Raw rows with full page text: results/results.jsonl. ${N.versions || ''}`;
+</script>

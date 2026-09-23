@@ -1,0 +1,1570 @@
+{
+ "probe": {
+  "iframer-docker-auto": {
+   "pass": 2,
+   "fail": 1,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    3.2,
+    3.8,
+    4.7
+   ],
+   "details": [
+    "UA says HeadlessChrome; UA os=linux but navigator.platform=Win32",
+    "consistent",
+    "consistent"
+   ]
+  },
+  "iframer-docker-headless": {
+   "pass": 0,
+   "fail": 3,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    2.5,
+    2.5,
+    4.1
+   ],
+   "details": [
+    "UA says HeadlessChrome; UA os=linux but navigator.platform=Win32",
+    "UA says HeadlessChrome; UA os=linux but navigator.platform=Win32",
+    "UA says HeadlessChrome; UA os=linux but navigator.platform=Win32"
+   ]
+  },
+  "iframer-docker-headful": {
+   "pass": 2,
+   "fail": 0,
+   "partial": 1,
+   "unknown": 0,
+   "wall": [
+    3.5,
+    3.5,
+    5.2
+   ],
+   "details": [
+    "default automation screen 1280x720, viewport == screen",
+    "consistent",
+    "consistent"
+   ]
+  },
+  "camoufox-docker-headless": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    4.2,
+    3.7,
+    4.8
+   ],
+   "details": [
+    "consistent",
+    "consistent",
+    "consistent"
+   ]
+  },
+  "camoufox-docker-virtual": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    3.9,
+    3.8,
+    9.1
+   ],
+   "details": [
+    "consistent",
+    "consistent",
+    "consistent"
+   ]
+  },
+  "camofox-docker": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    2.4,
+    2.3,
+    2.4
+   ],
+   "details": [
+    "consistent",
+    "consistent",
+    "consistent"
+   ]
+  }
+ },
+ "sannysoft": {
+  "iframer-docker-auto": {
+   "pass": 2,
+   "fail": 1,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    5.5,
+    8.2,
+    9.8
+   ],
+   "details": [
+    "HEADCHR_UA: HEADCHR_UA\tFAIL; CHR_MEMORY: CHR_MEMORY\tFAIL",
+    "0 fails",
+    "0 fails"
+   ]
+  },
+  "camoufox-docker-headless": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    6.7,
+    6.8,
+    7.2
+   ],
+   "details": [
+    "0 fails",
+    "0 fails",
+    "0 fails"
+   ]
+  },
+  "camoufox-docker-virtual": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    8.4,
+    6.6,
+    8.6
+   ],
+   "details": [
+    "0 fails",
+    "0 fails",
+    "0 fails"
+   ]
+  },
+  "camofox-docker": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    5.3,
+    5.4,
+    5.9
+   ],
+   "details": [
+    "0 fails",
+    "0 fails",
+    "0 fails"
+   ]
+  },
+  "iframer-docker-headless": {
+   "pass": 0,
+   "fail": 3,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    5.4,
+    5.5,
+    6.1
+   ],
+   "details": [
+    "HEADCHR_UA: HEADCHR_UA\tFAIL; CHR_MEMORY: CHR_MEMORY\tFAIL",
+    "HEADCHR_UA: HEADCHR_UA\tFAIL; CHR_MEMORY: CHR_MEMORY\tFAIL",
+    "HEADCHR_UA: HEADCHR_UA\tFAIL; CHR_MEMORY: CHR_MEMORY\tFAIL"
+   ]
+  },
+  "iframer-docker-headful": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    7.7,
+    8.0,
+    8.6
+   ],
+   "details": [
+    "0 fails",
+    "0 fails",
+    "0 fails"
+   ]
+  }
+ },
+ "rebrowser": {
+  "iframer-docker-headless": {
+   "pass": 0,
+   "fail": 3,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    6.6,
+    6.7,
+    7.0
+   ],
+   "details": [
+    "🔴 viewport\t23.9 ms\tViewport has default Playwright values. U; 🔴 useragent\t30.2 ms",
+    "🔴 viewport\t16.8 ms\tViewport has default Playwright values. U; 🔴 useragent\t22.2 ms",
+    "🔴 viewport\t21.9 ms\tViewport has default Playwright values. U; 🔴 useragent\t31.1 ms"
+   ]
+  },
+  "iframer-docker-headful": {
+   "pass": 0,
+   "fail": 3,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    8.1,
+    8.2,
+    8.4
+   ],
+   "details": [
+    "🔴 useragent\t9.2 ms",
+    "🔴 useragent\t9 ms",
+    "🔴 useragent\t15.5 ms"
+   ]
+  },
+  "camoufox-docker-headless": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    8.1,
+    8.1,
+    8.8
+   ],
+   "details": [
+    "5 green, 0 red",
+    "5 green, 0 red",
+    "5 green, 0 red"
+   ]
+  },
+  "camoufox-docker-virtual": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    8.4,
+    7.9,
+    8.3
+   ],
+   "details": [
+    "5 green, 0 red",
+    "5 green, 0 red",
+    "5 green, 0 red"
+   ]
+  },
+  "camofox-docker": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    7.3,
+    6.4,
+    6.7
+   ],
+   "details": [
+    "5 green, 0 red",
+    "5 green, 0 red",
+    "5 green, 0 red"
+   ]
+  },
+  "iframer-docker-auto": {
+   "pass": 0,
+   "fail": 3,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    9.3,
+    8.2,
+    9.5
+   ],
+   "details": [
+    "🔴 useragent\t11.6 ms",
+    "🔴 useragent\t12.7 ms",
+    "🔴 useragent\t13.3 ms"
+   ]
+  }
+ },
+ "creepjs": {
+  "iframer-docker-headless": {
+   "pass": 0,
+   "fail": 3,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    18.9,
+    19.0,
+    19.8
+   ],
+   "details": [
+    "like-headless 56%, headless 67%, stealth 0%, chromium=true, lies=None",
+    "like-headless 56%, headless 67%, stealth 0%, chromium=true, lies=None",
+    "like-headless 56%, headless 67%, stealth 0%, chromium=true, lies=None"
+   ]
+  },
+  "iframer-docker-headful": {
+   "pass": 0,
+   "fail": 0,
+   "partial": 3,
+   "unknown": 0,
+   "wall": [
+    26.2,
+    25.9,
+    30.1
+   ],
+   "details": [
+    "like-headless 50%, headless 0%, stealth 0%, chromium=true, lies=None",
+    "like-headless 50%, headless 0%, stealth 0%, chromium=true, lies=None",
+    "like-headless 50%, headless 0%, stealth 0%, chromium=true, lies=None"
+   ]
+  },
+  "camoufox-docker-headless": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    20.3,
+    20.3,
+    20.2
+   ],
+   "details": [
+    "like-headless 6%, headless 0%, stealth 0%, chromium=false, lies=None",
+    "like-headless 6%, headless 0%, stealth 0%, chromium=false, lies=None",
+    "like-headless 6%, headless 0%, stealth 0%, chromium=false, lies=None"
+   ]
+  },
+  "camoufox-docker-virtual": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    20.3,
+    20.5,
+    20.2
+   ],
+   "details": [
+    "like-headless 6%, headless 0%, stealth 0%, chromium=false, lies=None",
+    "like-headless 6%, headless 0%, stealth 0%, chromium=false, lies=None",
+    "like-headless 6%, headless 0%, stealth 0%, chromium=false, lies=None"
+   ]
+  },
+  "camofox-docker": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    18.6,
+    18.6,
+    18.7
+   ],
+   "details": [
+    "like-headless 13%, headless 0%, stealth 0%, chromium=false, lies=None",
+    "like-headless 13%, headless 0%, stealth 0%, chromium=false, lies=None",
+    "like-headless 13%, headless 0%, stealth 0%, chromium=false, lies=None"
+   ]
+  },
+  "iframer-docker-auto": {
+   "pass": 0,
+   "fail": 0,
+   "partial": 3,
+   "unknown": 0,
+   "wall": [
+    24.2,
+    23.5,
+    28.3
+   ],
+   "details": [
+    "like-headless 50%, headless 0%, stealth 0%, chromium=true, lies=None",
+    "like-headless 50%, headless 0%, stealth 0%, chromium=true, lies=None",
+    "like-headless 50%, headless 0%, stealth 0%, chromium=true, lies=None"
+   ]
+  }
+ },
+ "browserscan": {
+  "iframer-docker-auto": {
+   "pass": 2,
+   "fail": 1,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    8.9,
+    10.4,
+    10.7
+   ],
+   "details": [
+    "Robot; flagged: none",
+    "Normal; flagged: none",
+    "Normal; flagged: none"
+   ]
+  },
+  "iframer-docker-headful": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    10.7,
+    12.7,
+    11.2
+   ],
+   "details": [
+    "Normal; flagged: none",
+    "Normal; flagged: none",
+    "Normal; flagged: none"
+   ]
+  },
+  "camoufox-docker-headless": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    10.4,
+    11.6,
+    10.7
+   ],
+   "details": [
+    "Normal; flagged: none",
+    "Normal; flagged: none",
+    "Normal; flagged: none"
+   ]
+  },
+  "camoufox-docker-virtual": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    11.0,
+    11.0,
+    11.3
+   ],
+   "details": [
+    "Normal; flagged: none",
+    "Normal; flagged: none",
+    "Normal; flagged: none"
+   ]
+  },
+  "camofox-docker": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    9.0,
+    9.1,
+    9.6
+   ],
+   "details": [
+    "Normal; flagged: none",
+    "Normal; flagged: none",
+    "Normal; flagged: none"
+   ]
+  },
+  "iframer-docker-headless": {
+   "pass": 0,
+   "fail": 2,
+   "partial": 0,
+   "unknown": 1,
+   "wall": [
+    158.5,
+    8.8,
+    8.8
+   ],
+   "details": [
+    "engine error: CLI timeout 150s",
+    "Robot; flagged: none",
+    "Robot; flagged: none"
+   ]
+  }
+ },
+ "dbi": {
+  "iframer-docker-auto": {
+   "pass": 0,
+   "fail": 2,
+   "partial": 0,
+   "unknown": 1,
+   "wall": [
+    11.5,
+    19.2,
+    10.0
+   ],
+   "details": [
+    "no JSON",
+    "hasBotUserAgent, hasSuspiciousWeakSignals",
+    "hasBotUserAgent, hasSuspiciousWeakSignals"
+   ]
+  },
+  "iframer-docker-headful": {
+   "pass": 2,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 1,
+   "wall": [
+    16.8,
+    168.5,
+    13.7
+   ],
+   "details": [
+    "no signals",
+    "engine error: CLI timeout 150s",
+    "no signals"
+   ]
+  },
+  "camoufox-docker-headless": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    13.8,
+    12.5,
+    11.6
+   ],
+   "details": [
+    "no signals",
+    "no signals",
+    "no signals"
+   ]
+  },
+  "camoufox-docker-virtual": {
+   "pass": 0,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 3,
+   "wall": [
+    12.0,
+    11.9,
+    12.5
+   ],
+   "details": [
+    "no JSON",
+    "no JSON",
+    "no JSON"
+   ]
+  },
+  "camofox-docker": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    9.6,
+    9.5,
+    9.5
+   ],
+   "details": [
+    "no signals",
+    "no signals",
+    "no signals"
+   ]
+  },
+  "iframer-docker-headless": {
+   "pass": 0,
+   "fail": 2,
+   "partial": 0,
+   "unknown": 1,
+   "wall": [
+    19.5,
+    10.0,
+    163.7
+   ],
+   "details": [
+    "hasBotUserAgent, hasSuspiciousWeakSignals",
+    "hasBotUserAgent, hasSuspiciousWeakSignals",
+    "engine error: CLI timeout 150s"
+   ]
+  }
+ },
+ "fingerprintcom": {
+  "iframer-docker-headless": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    9.8,
+    9.8,
+    9.9
+   ],
+   "details": [
+    "bot=not_detected",
+    "bot=not_detected",
+    "bot=not_detected"
+   ]
+  },
+  "camoufox-docker-headless": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    11.8,
+    11.3,
+    11.1
+   ],
+   "details": [
+    "bot=not_detected",
+    "bot=not_detected",
+    "bot=not_detected"
+   ]
+  },
+  "camoufox-docker-virtual": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    11.6,
+    11.2,
+    11.4
+   ],
+   "details": [
+    "bot=not_detected",
+    "bot=not_detected",
+    "bot=not_detected"
+   ]
+  },
+  "camofox-docker": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    9.9,
+    10.1,
+    9.9
+   ],
+   "details": [
+    "bot=not_detected",
+    "bot=not_detected",
+    "bot=not_detected"
+   ]
+  },
+  "iframer-docker-auto": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    9.7,
+    11.2,
+    11.2
+   ],
+   "details": [
+    "bot=not_detected",
+    "bot=not_detected",
+    "bot=not_detected"
+   ]
+  },
+  "iframer-docker-headful": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    11.0,
+    11.1,
+    10.9
+   ],
+   "details": [
+    "bot=not_detected",
+    "bot=not_detected",
+    "bot=not_detected"
+   ]
+  }
+ },
+ "incolumitas": {
+  "iframer-docker-auto": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    11.2,
+    13.6,
+    14.1
+   ],
+   "details": [
+    "all clear",
+    "all clear",
+    "all clear"
+   ]
+  },
+  "iframer-docker-headless": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    10.2,
+    10.2,
+    10.6
+   ],
+   "details": [
+    "all clear",
+    "all clear",
+    "all clear"
+   ]
+  },
+  "iframer-docker-headful": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    13.6,
+    13.9,
+    14.0
+   ],
+   "details": [
+    "all clear",
+    "all clear",
+    "all clear"
+   ]
+  },
+  "camoufox-docker-headless": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    13.1,
+    12.8,
+    12.8
+   ],
+   "details": [
+    "all clear",
+    "all clear",
+    "all clear"
+   ]
+  },
+  "camoufox-docker-virtual": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    13.7,
+    13.8,
+    12.6
+   ],
+   "details": [
+    "all clear",
+    "all clear",
+    "all clear"
+   ]
+  },
+  "camofox-docker": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    10.4,
+    10.5,
+    11.1
+   ],
+   "details": [
+    "all clear",
+    "all clear",
+    "all clear"
+   ]
+  }
+ },
+ "sc-cloudflare": {
+  "iframer-docker-auto": {
+   "pass": 0,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 3,
+   "wall": [
+    33.7,
+    33.3,
+    34.3
+   ],
+   "details": [
+    "engine error: {'failedAtStep': 2, 'failedStep': {'type': 'evaluate', 'expression': 'JSON.stringify({title: document.title, url: location.href, text: document.body.innerText.slice(0, 30000)})'}, 'errorType': 'bot-bl",
+    "engine error: {'failedAtStep': 2, 'failedStep': {'type': 'evaluate', 'expression': 'JSON.stringify({title: document.title, url: location.href, text: document.body.innerText.slice(0, 30000)})'}, 'errorType': 'bot-bl",
+    "engine error: {'failedAtStep': 2, 'failedStep': {'type': 'evaluate', 'expression': 'JSON.stringify({title: document.title, url: location.href, text: document.body.innerText.slice(0, 30000)})'}, 'errorType': 'bot-bl"
+   ]
+  },
+  "iframer-docker-headful": {
+   "pass": 0,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 3,
+   "wall": [
+    17.5,
+    17.8,
+    17.5
+   ],
+   "details": [
+    "engine error: {'failedAtStep': 2, 'failedStep': {'type': 'evaluate', 'expression': 'JSON.stringify({title: document.title, url: location.href, text: document.body.innerText.slice(0, 30000)})'}, 'errorType': 'bot-bl",
+    "engine error: {'failedAtStep': 2, 'failedStep': {'type': 'evaluate', 'expression': 'JSON.stringify({title: document.title, url: location.href, text: document.body.innerText.slice(0, 30000)})'}, 'errorType': 'bot-bl",
+    "engine error: {'failedAtStep': 2, 'failedStep': {'type': 'evaluate', 'expression': 'JSON.stringify({title: document.title, url: location.href, text: document.body.innerText.slice(0, 30000)})'}, 'errorType': 'bot-bl"
+   ]
+  },
+  "camoufox-docker-headless": {
+   "pass": 0,
+   "fail": 3,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    17.0,
+    16.9,
+    17.4
+   ],
+   "details": [
+    "stuck on challenge",
+    "stuck on challenge",
+    "stuck on challenge"
+   ]
+  },
+  "camoufox-docker-virtual": {
+   "pass": 0,
+   "fail": 3,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    16.9,
+    17.2,
+    17.0
+   ],
+   "details": [
+    "stuck on challenge",
+    "stuck on challenge",
+    "stuck on challenge"
+   ]
+  },
+  "camofox-docker": {
+   "pass": 0,
+   "fail": 3,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    15.6,
+    15.5,
+    15.6
+   ],
+   "details": [
+    "stuck on challenge",
+    "stuck on challenge",
+    "stuck on challenge"
+   ]
+  },
+  "iframer-docker-headless": {
+   "pass": 0,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 3,
+   "wall": [
+    33.6,
+    33.3,
+    33.2
+   ],
+   "details": [
+    "engine error: {'failedAtStep': 2, 'failedStep': {'type': 'evaluate', 'expression': 'JSON.stringify({title: document.title, url: location.href, text: document.body.innerText.slice(0, 30000)})'}, 'errorType': 'bot-bl",
+    "engine error: {'failedAtStep': 2, 'failedStep': {'type': 'evaluate', 'expression': 'JSON.stringify({title: document.title, url: location.href, text: document.body.innerText.slice(0, 30000)})'}, 'errorType': 'bot-bl",
+    "engine error: {'failedAtStep': 2, 'failedStep': {'type': 'evaluate', 'expression': 'JSON.stringify({title: document.title, url: location.href, text: document.body.innerText.slice(0, 30000)})'}, 'errorType': 'bot-bl"
+   ]
+  }
+ },
+ "sc-antibot": {
+  "iframer-docker-auto": {
+   "pass": 0,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 3,
+   "wall": [
+    33.4,
+    33.0,
+    33.7
+   ],
+   "details": [
+    "engine error: {'failedAtStep': 2, 'failedStep': {'type': 'evaluate', 'expression': 'JSON.stringify({title: document.title, url: location.href, text: document.body.innerText.slice(0, 30000)})'}, 'errorType': 'bot-bl",
+    "engine error: {'failedAtStep': 2, 'failedStep': {'type': 'evaluate', 'expression': 'JSON.stringify({title: document.title, url: location.href, text: document.body.innerText.slice(0, 30000)})'}, 'errorType': 'bot-bl",
+    "engine error: {'failedAtStep': 2, 'failedStep': {'type': 'evaluate', 'expression': 'JSON.stringify({title: document.title, url: location.href, text: document.body.innerText.slice(0, 30000)})'}, 'errorType': 'bot-bl"
+   ]
+  },
+  "iframer-docker-headless": {
+   "pass": 0,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 3,
+   "wall": [
+    33.0,
+    33.9,
+    33.4
+   ],
+   "details": [
+    "engine error: {'failedAtStep': 2, 'failedStep': {'type': 'evaluate', 'expression': 'JSON.stringify({title: document.title, url: location.href, text: document.body.innerText.slice(0, 30000)})'}, 'errorType': 'bot-bl",
+    "engine error: {'failedAtStep': 2, 'failedStep': {'type': 'evaluate', 'expression': 'JSON.stringify({title: document.title, url: location.href, text: document.body.innerText.slice(0, 30000)})'}, 'errorType': 'bot-bl",
+    "engine error: {'failedAtStep': 2, 'failedStep': {'type': 'evaluate', 'expression': 'JSON.stringify({title: document.title, url: location.href, text: document.body.innerText.slice(0, 30000)})'}, 'errorType': 'bot-bl"
+   ]
+  },
+  "iframer-docker-headful": {
+   "pass": 0,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 3,
+   "wall": [
+    20.0,
+    17.3,
+    17.5
+   ],
+   "details": [
+    "engine error: {'failedAtStep': 2, 'failedStep': {'type': 'evaluate', 'expression': 'JSON.stringify({title: document.title, url: location.href, text: document.body.innerText.slice(0, 30000)})'}, 'errorType': 'bot-bl",
+    "engine error: {'failedAtStep': 2, 'failedStep': {'type': 'evaluate', 'expression': 'JSON.stringify({title: document.title, url: location.href, text: document.body.innerText.slice(0, 30000)})'}, 'errorType': 'bot-bl",
+    "engine error: {'failedAtStep': 2, 'failedStep': {'type': 'evaluate', 'expression': 'JSON.stringify({title: document.title, url: location.href, text: document.body.innerText.slice(0, 30000)})'}, 'errorType': 'bot-bl"
+   ]
+  },
+  "camoufox-docker-headless": {
+   "pass": 0,
+   "fail": 3,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    16.6,
+    16.9,
+    16.9
+   ],
+   "details": [
+    "stuck on challenge",
+    "stuck on challenge",
+    "stuck on challenge"
+   ]
+  },
+  "camoufox-docker-virtual": {
+   "pass": 0,
+   "fail": 3,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    16.8,
+    17.5,
+    17.3
+   ],
+   "details": [
+    "stuck on challenge",
+    "stuck on challenge",
+    "stuck on challenge"
+   ]
+  },
+  "camofox-docker": {
+   "pass": 0,
+   "fail": 3,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    16.0,
+    15.6,
+    15.6
+   ],
+   "details": [
+    "stuck on challenge",
+    "stuck on challenge",
+    "stuck on challenge"
+   ]
+  }
+ },
+ "nike": {
+  "iframer-docker-auto": {
+   "pass": 1,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 2,
+   "wall": [
+    163.5,
+    14.5,
+    168.6
+   ],
+   "details": [
+    "engine error: CLI timeout 150s",
+    "content loaded (3361 chars), title='Nike. Just Do It. Nike.com'",
+    "engine error: CLI timeout 150s"
+   ]
+  },
+  "iframer-docker-headless": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    19.4,
+    18.5,
+    17.7
+   ],
+   "details": [
+    "content loaded (3361 chars), title='Nike. Just Do It. Nike.com'",
+    "content loaded (3495 chars), title='Nike. Just Do It. Nike.com'",
+    "content loaded (2991 chars), title='Nike. Just Do It. Nike.com'"
+   ]
+  },
+  "iframer-docker-headful": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    13.4,
+    15.7,
+    14.0
+   ],
+   "details": [
+    "content loaded (3361 chars), title='Nike. Just Do It. Nike.com'",
+    "content loaded (3361 chars), title='Nike. Just Do It. Nike.com'",
+    "content loaded (3361 chars), title='Nike. Just Do It. Nike.com'"
+   ]
+  },
+  "camoufox-docker-headless": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    11.1,
+    10.8,
+    11.7
+   ],
+   "details": [
+    "content loaded (3361 chars), title='Nike. Just Do It. Nike.com'",
+    "content loaded (3361 chars), title='Nike. Just Do It. Nike.com'",
+    "content loaded (3361 chars), title='Nike. Just Do It. Nike.com'"
+   ]
+  },
+  "camoufox-docker-virtual": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    10.8,
+    10.9,
+    10.7
+   ],
+   "details": [
+    "content loaded (3361 chars), title='Nike. Just Do It. Nike.com'",
+    "content loaded (3361 chars), title='Nike. Just Do It. Nike.com'",
+    "content loaded (3361 chars), title='Nike. Just Do It. Nike.com'"
+   ]
+  },
+  "camofox-docker": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    9.7,
+    9.6,
+    9.9
+   ],
+   "details": [
+    "content loaded (3361 chars), title='Nike. Just Do It. Nike.com'",
+    "content loaded (3361 chars), title='Nike. Just Do It. Nike.com'",
+    "content loaded (3361 chars), title='Nike. Just Do It. Nike.com'"
+   ]
+  }
+ },
+ "zillow": {
+  "iframer-docker-auto": {
+   "pass": 2,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 1,
+   "wall": [
+    20.8,
+    168.6,
+    12.2
+   ],
+   "details": [
+    "content loaded (3094 chars), title='Zillow: Real Estate, Apartments, Mortgages & Home Values'",
+    "engine error: CLI timeout 150s",
+    "content loaded (3094 chars), title='Zillow: Real Estate, Apartments, Mortgages & Home Values'"
+   ]
+  },
+  "iframer-docker-headless": {
+   "pass": 1,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 2,
+   "wall": [
+    158.5,
+    20.0,
+    21.7
+   ],
+   "details": [
+    "engine error: CLI timeout 150s",
+    "engine error: {'failedAtStep': 2, 'failedStep': {'type': 'evaluate', 'expression': 'JSON.stringify({title: document.title, url: location.href, text: document.body.innerText.slice(0, 30000)})'}, 'errorType': 'bot-bl",
+    "content loaded (3094 chars), title='Zillow: Real Estate, Apartments, Mortgages & Home Values'"
+   ]
+  },
+  "iframer-docker-headful": {
+   "pass": 1,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 2,
+   "wall": [
+    12.3,
+    10.7,
+    11.0
+   ],
+   "details": [
+    "content loaded (3094 chars), title='Zillow: Real Estate, Apartments, Mortgages & Home Values'",
+    "engine error: {'failedAtStep': 2, 'failedStep': {'type': 'evaluate', 'expression': 'JSON.stringify({title: document.title, url: location.href, text: document.body.innerText.slice(0, 30000)})'}, 'errorType': 'bot-bl",
+    "engine error: {'failedAtStep': 2, 'failedStep': {'type': 'evaluate', 'expression': 'JSON.stringify({title: document.title, url: location.href, text: document.body.innerText.slice(0, 30000)})'}, 'errorType': 'bot-bl"
+   ]
+  },
+  "camoufox-docker-headless": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    11.8,
+    11.6,
+    11.8
+   ],
+   "details": [
+    "content loaded (3206 chars), title='Zillow: Real Estate, Apartments, Mortgages & Home Values'",
+    "content loaded (3206 chars), title='Zillow: Real Estate, Apartments, Mortgages & Home Values'",
+    "content loaded (3206 chars), title='Zillow: Real Estate, Apartments, Mortgages & Home Values'"
+   ]
+  },
+  "camoufox-docker-virtual": {
+   "pass": 0,
+   "fail": 3,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    10.0,
+    10.2,
+    10.3
+   ],
+   "details": [
+    "wall: 'press & hold', title='Access to this page has been denied'",
+    "wall: 'press & hold', title='Access to this page has been denied'",
+    "wall: 'press & hold', title='Access to this page has been denied'"
+   ]
+  },
+  "camofox-docker": {
+   "pass": 0,
+   "fail": 3,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    8.9,
+    9.1,
+    9.2
+   ],
+   "details": [
+    "wall: 'press & hold', title='Access to this page has been denied'",
+    "wall: 'press & hold', title='Access to this page has been denied'",
+    "wall: 'press & hold', title='Access to this page has been denied'"
+   ]
+  }
+ },
+ "walmart": {
+  "iframer-docker-auto": {
+   "pass": 1,
+   "fail": 2,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    10.0,
+    14.8,
+    9.6
+   ],
+   "details": [
+    "wall: 'robot or human', title='Walmart | Save Money. Live better.'",
+    "content loaded (2614 chars), title='Walmart | Save Money. Live better.'",
+    "wall: 'robot or human', title='Walmart | Save Money. Live better.'"
+   ]
+  },
+  "iframer-docker-headless": {
+   "pass": 0,
+   "fail": 1,
+   "partial": 0,
+   "unknown": 2,
+   "wall": [
+    163.5,
+    9.9,
+    163.7
+   ],
+   "details": [
+    "engine error: CLI timeout 150s",
+    "wall: 'robot or human', title='Walmart | Save Money. Live better.'",
+    "engine error: CLI timeout 150s"
+   ]
+  },
+  "iframer-docker-headful": {
+   "pass": 0,
+   "fail": 2,
+   "partial": 0,
+   "unknown": 1,
+   "wall": [
+    15.1,
+    168.5,
+    14.0
+   ],
+   "details": [
+    "wall: 'robot or human', title='Walmart | Save Money. Live better.'",
+    "engine error: CLI timeout 150s",
+    "wall: 'robot or human', title='Walmart | Save Money. Live better.'"
+   ]
+  },
+  "camoufox-docker-headless": {
+   "pass": 1,
+   "fail": 2,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    10.3,
+    10.5,
+    11.8
+   ],
+   "details": [
+    "content loaded (1361 chars), title='Walmart | Save Money. Live better.'",
+    "wall: 'robot or human', title='Walmart | Save Money. Live better.'",
+    "wall: 'robot or human', title='Walmart | Save Money. Live better.'"
+   ]
+  },
+  "camoufox-docker-virtual": {
+   "pass": 0,
+   "fail": 3,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    11.2,
+    10.4,
+    11.3
+   ],
+   "details": [
+    "wall: 'robot or human', title='Walmart | Save Money. Live better.'",
+    "wall: 'robot or human', title='Walmart | Save Money. Live better.'",
+    "wall: 'robot or human', title='Walmart | Save Money. Live better.'"
+   ]
+  },
+  "camofox-docker": {
+   "pass": 1,
+   "fail": 2,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    9.1,
+    9.3,
+    9.7
+   ],
+   "details": [
+    "wall: 'robot or human', title='Walmart | Save Money. Live better.'",
+    "wall: 'robot or human', title='Walmart | Save Money. Live better.'",
+    "content loaded (2301 chars), title='Walmart | Save Money. Live better.'"
+   ]
+  }
+ },
+ "g2": {
+  "iframer-docker-auto": {
+   "pass": 0,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 3,
+   "wall": [
+    13.2,
+    14.5,
+    14.7
+   ],
+   "details": [
+    "near-empty page (0 chars), title='g2.com'",
+    "near-empty page (0 chars), title='g2.com'",
+    "near-empty page (0 chars), title='g2.com'"
+   ]
+  },
+  "iframer-docker-headless": {
+   "pass": 0,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 3,
+   "wall": [
+    12.9,
+    13.1,
+    13.6
+   ],
+   "details": [
+    "near-empty page (0 chars), title='g2.com'",
+    "near-empty page (0 chars), title='g2.com'",
+    "near-empty page (0 chars), title='g2.com'"
+   ]
+  },
+  "iframer-docker-headful": {
+   "pass": 0,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 3,
+   "wall": [
+    14.2,
+    14.2,
+    14.4
+   ],
+   "details": [
+    "near-empty page (0 chars), title='g2.com'",
+    "near-empty page (0 chars), title='g2.com'",
+    "near-empty page (0 chars), title='g2.com'"
+   ]
+  },
+  "camoufox-docker-headless": {
+   "pass": 0,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 3,
+   "wall": [
+    14.2,
+    14.0,
+    16.6
+   ],
+   "details": [
+    "near-empty page (0 chars), title='g2.com'",
+    "near-empty page (0 chars), title='g2.com'",
+    "near-empty page (0 chars), title='g2.com'"
+   ]
+  },
+  "camoufox-docker-virtual": {
+   "pass": 0,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 3,
+   "wall": [
+    14.5,
+    14.2,
+    14.6
+   ],
+   "details": [
+    "near-empty page (0 chars), title='g2.com'",
+    "near-empty page (0 chars), title='g2.com'",
+    "near-empty page (0 chars), title='g2.com'"
+   ]
+  },
+  "camofox-docker": {
+   "pass": 0,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 3,
+   "wall": [
+    13.2,
+    12.9,
+    13.1
+   ],
+   "details": [
+    "near-empty page (0 chars), title='g2.com'",
+    "near-empty page (0 chars), title='g2.com'",
+    "near-empty page (0 chars), title='g2.com'"
+   ]
+  }
+ },
+ "ticketmaster": {
+  "iframer-docker-auto": {
+   "pass": 2,
+   "fail": 1,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    11.2,
+    15.3,
+    16.3
+   ],
+   "details": [
+    "wall: 'browsing activity has been paused', title='Your Browsing Activity Has Been Paused'",
+    "content loaded (8480 chars), title='Ticketmaster: Buy Verified Tickets for Concerts, Sports, The'",
+    "content loaded (8491 chars), title='Ticketmaster: Buy Verified Tickets for Concerts, Sports, The'"
+   ]
+  },
+  "iframer-docker-headless": {
+   "pass": 0,
+   "fail": 3,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    10.7,
+    10.8,
+    11.6
+   ],
+   "details": [
+    "wall: 'browsing activity has been paused', title='Your Browsing Activity Has Been Paused'",
+    "wall: 'browsing activity has been paused', title='Your Browsing Activity Has Been Paused'",
+    "wall: 'browsing activity has been paused', title='Your Browsing Activity Has Been Paused'"
+   ]
+  },
+  "iframer-docker-headful": {
+   "pass": 2,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 1,
+   "wall": [
+    14.8,
+    13.8,
+    168.8
+   ],
+   "details": [
+    "content loaded (8325 chars), title='Ticketmaster: Buy Verified Tickets for Concerts, Sports, The'",
+    "content loaded (8505 chars), title='Ticketmaster: Buy Verified Tickets for Concerts, Sports, The'",
+    "engine error: CLI timeout 150s"
+   ]
+  },
+  "camoufox-docker-headless": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    12.9,
+    13.1,
+    12.8
+   ],
+   "details": [
+    "content loaded (8516 chars), title='Ticketmaster: Buy Verified Tickets for Concerts, Sports, The'",
+    "content loaded (8516 chars), title='Ticketmaster: Buy Verified Tickets for Concerts, Sports, The'",
+    "content loaded (8516 chars), title='Ticketmaster: Buy Verified Tickets for Concerts, Sports, The'"
+   ]
+  },
+  "camoufox-docker-virtual": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    13.1,
+    13.0,
+    13.0
+   ],
+   "details": [
+    "content loaded (8516 chars), title='Ticketmaster: Buy Verified Tickets for Concerts, Sports, The'",
+    "content loaded (8516 chars), title='Ticketmaster: Buy Verified Tickets for Concerts, Sports, The'",
+    "content loaded (8516 chars), title='Ticketmaster: Buy Verified Tickets for Concerts, Sports, The'"
+   ]
+  },
+  "camofox-docker": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    11.5,
+    11.4,
+    11.5
+   ],
+   "details": [
+    "content loaded (8480 chars), title='Ticketmaster: Buy Verified Tickets for Concerts, Sports, The'",
+    "content loaded (8516 chars), title='Ticketmaster: Buy Verified Tickets for Concerts, Sports, The'",
+    "content loaded (8516 chars), title='Ticketmaster: Buy Verified Tickets for Concerts, Sports, The'"
+   ]
+  }
+ },
+ "indeed": {
+  "iframer-docker-auto": {
+   "pass": 0,
+   "fail": 3,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    10.7,
+    11.0,
+    11.3
+   ],
+   "details": [
+    "wall: 'title: Blocked - Indeed.com', title='Blocked - Indeed.com'",
+    "wall: 'title: Blocked - Indeed.com', title='Blocked - Indeed.com'",
+    "wall: 'title: Blocked - Indeed.com', title='Blocked - Indeed.com'"
+   ]
+  },
+  "iframer-docker-headless": {
+   "pass": 0,
+   "fail": 3,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    10.7,
+    13.4,
+    11.0
+   ],
+   "details": [
+    "wall: 'title: Blocked - Indeed.com', title='Blocked - Indeed.com'",
+    "wall: 'title: Blocked - Indeed.com', title='Blocked - Indeed.com'",
+    "wall: 'title: Blocked - Indeed.com', title='Blocked - Indeed.com'"
+   ]
+  },
+  "iframer-docker-headful": {
+   "pass": 1,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 2,
+   "wall": [
+    168.5,
+    168.7,
+    15.3
+   ],
+   "details": [
+    "engine error: CLI timeout 150s",
+    "engine error: CLI timeout 150s",
+    "content loaded (1212 chars), title='Busca grátis de vagas de emprego | Indeed'"
+   ]
+  },
+  "camoufox-docker-headless": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    13.5,
+    15.3,
+    12.6
+   ],
+   "details": [
+    "content loaded (1212 chars), title='Busca grátis de vagas de emprego | Indeed'",
+    "content loaded (1212 chars), title='Busca grátis de vagas de emprego | Indeed'",
+    "content loaded (1212 chars), title='Busca grátis de vagas de emprego | Indeed'"
+   ]
+  },
+  "camoufox-docker-virtual": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    13.2,
+    13.7,
+    13.6
+   ],
+   "details": [
+    "content loaded (1212 chars), title='Busca grátis de vagas de emprego | Indeed'",
+    "content loaded (1212 chars), title='Busca grátis de vagas de emprego | Indeed'",
+    "content loaded (1212 chars), title='Busca grátis de vagas de emprego | Indeed'"
+   ]
+  },
+  "camofox-docker": {
+   "pass": 3,
+   "fail": 0,
+   "partial": 0,
+   "unknown": 0,
+   "wall": [
+    11.7,
+    14.0,
+    11.6
+   ],
+   "details": [
+    "content loaded (1212 chars), title='Busca grátis de vagas de emprego | Indeed'",
+    "content loaded (1212 chars), title='Busca grátis de vagas de emprego | Indeed'",
+    "content loaded (1212 chars), title='Busca grátis de vagas de emprego | Indeed'"
+   ]
+  }
+ }
+}

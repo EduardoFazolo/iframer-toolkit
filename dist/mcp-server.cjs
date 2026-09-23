@@ -1214,6 +1214,23 @@ stop: save cookies/localStorage and close the browser \u2014 ALWAYS call when br
     },
     async ({ action, mode, urls, instanceId, outputDir }) => {
       try {
+        const SPAWNS_BROWSER = ["capture-start", "capture-stop", "get-cookies", "get-auth"];
+        let resolvedMode = mode;
+        if (SPAWNS_BROWSER.includes(action) && !mode) {
+          const live = await localApiGet("/instances").catch(() => ({ instances: [] }));
+          const match = (live.instances || []).find((i) => i.instanceId === (instanceId || "default"));
+          if (match) {
+            if (match.mode === "headless" || match.mode === "binary-headful") resolvedMode = match.mode;
+          } else {
+            const ext = await localApiGet("/extension/status").catch(() => ({ connected: false }));
+            if (ext.connected) {
+              return err(
+                `'${action}' would launch a new browser window, but the iframer extension is connected \u2014 you are probably driving a real Chrome tab. Read that tab instead: execute with options.mode="extension" and options.tabId (from the \`tabs\` tool). If you really want a separate browser, pass mode explicitly. Nothing was launched.`
+              );
+            }
+          }
+        }
+        mode = resolvedMode;
         if (action === "stop") {
           const result = await localApiPost("/interactive/stop").catch(() => ({ ok: true, sessionSaved: false }));
           return { content: [{ type: "text", text: `Session stopped. State saved: ${result.sessionSaved ?? false}` }] };

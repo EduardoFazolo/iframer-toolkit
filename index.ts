@@ -120,6 +120,14 @@ const reapTimer = setInterval(async () => {
     await reapOrphanBrowsers();
   } catch {}
 
+  // Blank-orphan sweep. The registry reaper above only fires when the OWNING
+  // server is dead, and a connected extension keeps this server alive forever —
+  // exactly the case where a stray headful window is most likely and least
+  // wanted. This catches windows that never left about:blank while we're up.
+  try {
+    iframer.sweepBlankBrowsers();
+  } catch {}
+
   // Idle retirement: exit cleanly only when nothing needs us — no browsers,
   // no recent HTTP traffic, AND no extension connected. A connected extension
   // MUST keep us alive: it is a live client that expects to drive tabs on

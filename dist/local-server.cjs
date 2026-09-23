@@ -35,6 +35,23 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
+// src/lib/paths.ts
+var paths_exports = {};
+__export(paths_exports, {
+  getDataDir: () => getDataDir
+});
+function getDataDir() {
+  return process.env.IFRAMER_DATA_DIR || import_path.default.join(import_os.default.homedir(), ".iframer");
+}
+var import_path, import_os;
+var init_paths = __esm({
+  "src/lib/paths.ts"() {
+    "use strict";
+    import_path = __toESM(require("path"));
+    import_os = __toESM(require("os"));
+  }
+});
+
 // src/lib/session/persistence.ts
 var persistence_exports = {};
 __export(persistence_exports, {
@@ -96,23 +113,6 @@ var init_persistence = __esm({
   }
 });
 
-// src/lib/paths.ts
-var paths_exports = {};
-__export(paths_exports, {
-  getDataDir: () => getDataDir
-});
-function getDataDir() {
-  return process.env.IFRAMER_DATA_DIR || import_path.default.join(import_os.default.homedir(), ".iframer");
-}
-var import_path, import_os;
-var init_paths = __esm({
-  "src/lib/paths.ts"() {
-    "use strict";
-    import_path = __toESM(require("path"));
-    import_os = __toESM(require("os"));
-  }
-});
-
 // index.ts
 var import_express = __toESM(require("express"));
 var import_path12 = __toESM(require("path"));
@@ -127,11 +127,11 @@ var import_path11 = __toESM(require("path"));
 var import_url = require("url");
 
 // src/lib/browser/session-manager.ts
-var import_child_process = require("child_process");
-var import_fs2 = __toESM(require("fs"));
+var import_child_process2 = require("child_process");
+var import_fs3 = __toESM(require("fs"));
 
 // src/lib/browser/launcher.ts
-var import_fs = __toESM(require("fs"));
+var import_fs2 = __toESM(require("fs"));
 var import_patchright = require("patchright");
 
 // src/lib/browser/stealth.ts
@@ -542,19 +542,205 @@ function createLogger(tag) {
   };
 }
 
+// src/lib/browser/registry.ts
+var import_fs = __toESM(require("fs"));
+var import_path2 = __toESM(require("path"));
+var import_child_process = require("child_process");
+init_paths();
+var log = createLogger("registry");
+function browsersDir() {
+  const dir = import_path2.default.join(getDataDir(), "browsers");
+  import_fs.default.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+function serverInfoPath() {
+  return import_path2.default.join(getDataDir(), "server.json");
+}
+function isPidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 1) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function pidMatchesMarker(pid, marker) {
+  if (!isPidAlive(pid)) return false;
+  try {
+    const cmd = (0, import_child_process.execSync)(`ps -o command= -p ${pid}`, { encoding: "utf8" });
+    return cmd.includes(marker);
+  } catch {
+    return false;
+  }
+}
+function findChromePidByMarker(marker) {
+  try {
+    const out = (0, import_child_process.execSync)(`pgrep -f -- "${marker}"`, { encoding: "utf8" }).trim();
+    const pids = out.split("\n").map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n !== process.pid);
+    if (pids.length === 0) return null;
+    return Math.min(...pids);
+  } catch {
+    return null;
+  }
+}
+function registerBrowser(rec) {
+  try {
+    import_fs.default.writeFileSync(import_path2.default.join(browsersDir(), `${rec.chromePid}.json`), JSON.stringify(rec, null, 2));
+  } catch (err) {
+    log.warn(`failed to write browser record for pid ${rec.chromePid}: ${err}`);
+  }
+}
+function unregisterBrowser(chromePid) {
+  try {
+    import_fs.default.unlinkSync(import_path2.default.join(browsersDir(), `${chromePid}.json`));
+  } catch {
+  }
+}
+var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function forceKillBrowser(rec) {
+  if (!isPidAlive(rec.chromePid)) return true;
+  if (!pidMatchesMarker(rec.chromePid, rec.marker)) {
+    return true;
+  }
+  try {
+    process.kill(rec.chromePid, "SIGKILL");
+  } catch {
+  }
+  const deadline = Date.now() + 2e3;
+  while (Date.now() < deadline) {
+    if (!isPidAlive(rec.chromePid)) return true;
+    await sleep(100);
+  }
+  return !isPidAlive(rec.chromePid);
+}
+async function reapOrphanBrowsers() {
+  let reaped = 0;
+  let skipped = 0;
+  let files = [];
+  try {
+    files = import_fs.default.readdirSync(browsersDir()).filter((f) => f.endsWith(".json"));
+  } catch {
+    return { reaped, skipped };
+  }
+  for (const file of files) {
+    const full = import_path2.default.join(browsersDir(), file);
+    let rec;
+    try {
+      rec = JSON.parse(import_fs.default.readFileSync(full, "utf8"));
+    } catch {
+      try {
+        import_fs.default.unlinkSync(full);
+      } catch {
+      }
+      continue;
+    }
+    if (!isPidAlive(rec.chromePid) || !pidMatchesMarker(rec.chromePid, rec.marker)) {
+      try {
+        import_fs.default.unlinkSync(full);
+      } catch {
+      }
+      continue;
+    }
+    if (isPidAlive(rec.ownerPid)) {
+      skipped++;
+      continue;
+    }
+    log.info(`reaping orphan Chrome pid=${rec.chromePid} (${rec.key}), owner ${rec.ownerPid} is dead`);
+    if (await forceKillBrowser(rec)) {
+      try {
+        import_fs.default.unlinkSync(full);
+      } catch {
+      }
+      reaped++;
+    } else {
+      log.warn(`failed to kill orphan Chrome pid=${rec.chromePid} \u2014 leaving record for next sweep`);
+    }
+  }
+  return { reaped, skipped };
+}
+function writeServerInfo(info) {
+  import_fs.default.writeFileSync(serverInfoPath(), JSON.stringify(info, null, 2));
+}
+function readServerInfo() {
+  try {
+    const info = JSON.parse(import_fs.default.readFileSync(serverInfoPath(), "utf8"));
+    if (!Number.isInteger(info.pid) || !Number.isInteger(info.port)) return null;
+    return info;
+  } catch {
+    return null;
+  }
+}
+function clearServerInfo(pid) {
+  const info = readServerInfo();
+  if (info && info.pid === pid) {
+    try {
+      import_fs.default.unlinkSync(serverInfoPath());
+    } catch {
+    }
+  }
+}
+
 // src/lib/browser/launcher.ts
-var log = createLogger("launcher");
+var log2 = createLogger("launcher");
 var UBLOCK_PATH = "/extensions/uBlock0.chromium";
 function findChromeExecutable() {
   if (process.env.CHROME_EXECUTABLE) return process.env.CHROME_EXECUTABLE;
-  if (import_fs.default.existsSync("/usr/bin/google-chrome-stable")) return "/usr/bin/google-chrome-stable";
+  if (import_fs2.default.existsSync("/usr/bin/google-chrome-stable")) return "/usr/bin/google-chrome-stable";
   return void 0;
 }
 var cachedBrowser = null;
 var headedBrowser = null;
+var headedPid = null;
+var headedIdleTimer = null;
+var HEADED_IDLE_MS = 5 * 60 * 1e3;
+function armHeadedIdleTimer() {
+  if (headedIdleTimer) clearTimeout(headedIdleTimer);
+  headedIdleTimer = setTimeout(() => {
+    if (!headedBrowser) return;
+    const pages = headedBrowser.contexts().reduce((n, c) => n + c.pages().length, 0);
+    if (pages > 0) {
+      armHeadedIdleTimer();
+      return;
+    }
+    log2.info("idle timeout for the pivot headed browser, closing");
+    void closeHeadedBrowser();
+  }, HEADED_IDLE_MS);
+}
 async function getHeadedBrowser() {
-  if (!headedBrowser?.isConnected()) headedBrowser = await import_patchright.chromium.launch({ headless: false, args: STEALTH_ARGS });
+  if (!headedBrowser?.isConnected()) {
+    const marker = `--iframer-key=pivot-headed-${process.pid}-${Date.now()}`;
+    headedBrowser = await import_patchright.chromium.launch({ headless: false, args: [...STEALTH_ARGS, marker] });
+    headedPid = findChromePidByMarker(marker);
+    if (headedPid) {
+      registerBrowser({
+        key: "pivot::headed",
+        chromePid: headedPid,
+        ownerPid: process.pid,
+        marker,
+        launchedAt: (/* @__PURE__ */ new Date()).toISOString()
+      });
+    } else {
+      log2.warn("could not resolve Chrome PID for the pivot headed browser \u2014 force-kill unavailable");
+    }
+  }
+  armHeadedIdleTimer();
   return headedBrowser;
+}
+async function closeHeadedBrowser() {
+  if (headedIdleTimer) {
+    clearTimeout(headedIdleTimer);
+    headedIdleTimer = null;
+  }
+  if (headedBrowser) {
+    await headedBrowser.close().catch(() => {
+    });
+    headedBrowser = null;
+  }
+  if (headedPid !== null) {
+    unregisterBrowser(headedPid);
+    headedPid = null;
+  }
 }
 async function getBrowser(_name = "chromium") {
   if (cachedBrowser) {
@@ -562,7 +748,7 @@ async function getBrowser(_name = "chromium") {
     try {
       await cachedBrowser.close();
     } catch (e) {
-      log.warn(`stale browser close failed: ${e}`);
+      log2.warn(`stale browser close failed: ${e}`);
     }
     cachedBrowser = null;
   }
@@ -573,16 +759,12 @@ async function getBrowser(_name = "chromium") {
   return cachedBrowser;
 }
 async function closeBrowser() {
-  if (headedBrowser) {
-    await headedBrowser.close().catch(() => {
-    });
-    headedBrowser = null;
-  }
+  await closeHeadedBrowser();
   if (!cachedBrowser) return;
   try {
     await cachedBrowser.close();
   } catch (e) {
-    log.warn(`closeBrowser failed: ${e}`);
+    log2.warn(`closeBrowser failed: ${e}`);
   }
   cachedBrowser = null;
 }
@@ -591,7 +773,7 @@ async function getBrowserWithFallback(_preferred) {
 }
 async function launchHeadful(displayNum) {
   const executablePath = findChromeExecutable();
-  const hasExtensions = import_fs.default.existsSync(UBLOCK_PATH);
+  const hasExtensions = import_fs2.default.existsSync(UBLOCK_PATH);
   const args = [
     "--no-sandbox",
     "--disable-setuid-sandbox",
@@ -611,7 +793,7 @@ async function launchHeadful(displayNum) {
     env: { ...process.env, DISPLAY: `:${displayNum}` }
   };
   if (executablePath) launchOpts.executablePath = executablePath;
-  log.debug(`headful: ${executablePath || "patchright chromium"}, extensions: ${hasExtensions}`);
+  log2.debug(`headful: ${executablePath || "patchright chromium"}, extensions: ${hasExtensions}`);
   return import_patchright.chromium.launch(launchOpts);
 }
 
@@ -758,7 +940,7 @@ function generateWindowsFingerprint() {
 }
 
 // src/lib/browser/session-manager.ts
-var log2 = createLogger("session");
+var log3 = createLogger("session");
 var BASE_DISPLAY = parseInt(process.env.VNC_BASE_DISPLAY || "99", 10);
 var MAX_SESSIONS = parseInt(process.env.VNC_MAX_SESSIONS || "20", 10);
 var SESSION_TIMEOUT = parseInt(process.env.VNC_SESSION_TIMEOUT_MS || "300000", 10);
@@ -782,7 +964,7 @@ function waitForSocket(displayNum, timeoutMs = 5e3) {
   return new Promise((resolve, reject) => {
     const start = Date.now();
     const check = () => {
-      if (import_fs2.default.existsSync(socketPath)) return resolve();
+      if (import_fs3.default.existsSync(socketPath)) return resolve();
       if (Date.now() - start > timeoutMs) return reject(new Error(`Xvfb socket not ready after ${timeoutMs}ms`));
       setTimeout(check, 100);
     };
@@ -804,17 +986,17 @@ async function startSession(userId) {
   const displayNum = allocateDisplay();
   const vncPort = 5900 + displayNum;
   const wsPort = 6080 + (displayNum - BASE_DISPLAY);
-  const xvfb = (0, import_child_process.spawn)("Xvfb", [`:${displayNum}`, "-screen", "0", "1920x1080x24", "-ac"], {
+  const xvfb = (0, import_child_process2.spawn)("Xvfb", [`:${displayNum}`, "-screen", "0", "1920x1080x24", "-ac"], {
     stdio: "ignore"
   });
   await waitForSocket(displayNum);
-  const x11vnc = (0, import_child_process.spawn)(
+  const x11vnc = (0, import_child_process2.spawn)(
     "x11vnc",
     ["-display", `:${displayNum}`, "-nopw", "-listen", "localhost", "-rfbport", String(vncPort), "-shared", "-forever"],
     { stdio: "ignore" }
   );
-  const noVncPath = import_fs2.default.existsSync("/usr/share/novnc") ? "/usr/share/novnc" : "/usr/share/noVNC";
-  const websockify = (0, import_child_process.spawn)("websockify", ["--web", noVncPath, String(wsPort), `localhost:${vncPort}`], {
+  const noVncPath = import_fs3.default.existsSync("/usr/share/novnc") ? "/usr/share/novnc" : "/usr/share/noVNC";
+  const websockify = (0, import_child_process2.spawn)("websockify", ["--web", noVncPath, String(wsPort), `localhost:${vncPort}`], {
     stdio: "ignore"
   });
   await new Promise((r) => setTimeout(r, 500));
@@ -825,7 +1007,7 @@ async function startSession(userId) {
   const stealthScript = buildStealthScript(fingerprint);
   contextStealthScripts.set(context, stealthScript);
   const page = await context.newPage();
-  log2.debug(`fingerprint: ${fingerprint.userAgent.slice(0, 60)}... DPR=${fingerprint.deviceScaleFactor} screen=${fingerprint.screenWidth}x${fingerprint.screenHeight}`);
+  log3.debug(`fingerprint: ${fingerprint.userAgent.slice(0, 60)}... DPR=${fingerprint.deviceScaleFactor} screen=${fingerprint.screenWidth}x${fingerprint.screenHeight}`);
   const session = {
     displayNum,
     vncPort,
@@ -877,7 +1059,7 @@ async function stopSession(userId) {
   killProcess(session.xvfb);
   await new Promise((r) => setTimeout(r, 1e3));
   try {
-    import_fs2.default.unlinkSync(`/tmp/.X11-unix/X${session.displayNum}`);
+    import_fs3.default.unlinkSync(`/tmp/.X11-unix/X${session.displayNum}`);
   } catch {
   }
   freeDisplay(session.displayNum);
@@ -891,9 +1073,9 @@ async function cleanupAllSessions() {
 
 // src/lib/auth/crypto.ts
 var import_crypto = __toESM(require("crypto"));
-var import_fs3 = __toESM(require("fs"));
+var import_fs4 = __toESM(require("fs"));
 var import_os2 = __toESM(require("os"));
-var import_path2 = __toESM(require("path"));
+var import_path3 = __toESM(require("path"));
 init_paths();
 var SALT = "iframer-session";
 var INFO = "encryption";
@@ -903,21 +1085,21 @@ var TAG_LENGTH = 16;
 function getLocalToken() {
   if (process.env.IFRAMER_SECRET) return process.env.IFRAMER_SECRET;
   const candidates = [
-    import_path2.default.join(getDataDir(), "secret"),
-    import_path2.default.join(process.env.XDG_RUNTIME_DIR || import_os2.default.tmpdir(), "iframer-secret")
+    import_path3.default.join(getDataDir(), "secret"),
+    import_path3.default.join(process.env.XDG_RUNTIME_DIR || import_os2.default.tmpdir(), "iframer-secret")
   ];
   for (const file of candidates) {
     try {
-      const existing = import_fs3.default.readFileSync(file, "utf8").trim();
+      const existing = import_fs4.default.readFileSync(file, "utf8").trim();
       if (existing) return existing;
     } catch {
     }
   }
   for (const file of candidates) {
     try {
-      import_fs3.default.mkdirSync(import_path2.default.dirname(file), { recursive: true });
+      import_fs4.default.mkdirSync(import_path3.default.dirname(file), { recursive: true });
       const secret = import_crypto.default.randomBytes(32).toString("hex");
-      import_fs3.default.writeFileSync(file, secret, { mode: 384 });
+      import_fs4.default.writeFileSync(file, secret, { mode: 384 });
       return secret;
     } catch {
     }
@@ -977,17 +1159,17 @@ function generateTOTP(secret, period = 30, digits = 6) {
 init_persistence();
 
 // src/lib/screenshot.ts
-var import_fs4 = __toESM(require("fs"));
-var import_path3 = __toESM(require("path"));
-var log3 = createLogger("screenshot");
+var import_fs5 = __toESM(require("fs"));
+var import_path4 = __toESM(require("path"));
+var log4 = createLogger("screenshot");
 var MAX_AGE_MS = parseInt(process.env.IFRAMER_SCREENSHOT_MAX_AGE_MS || String(24 * 60 * 60 * 1e3), 10);
 var MAX_FILES = parseInt(process.env.IFRAMER_SCREENSHOT_MAX_FILES || "500", 10);
 var PRUNE_THROTTLE_MS = 5 * 60 * 1e3;
 var lastPruneAt = 0;
 function saveScreenshot(buffer, filename, screenshotDir, publicUrl) {
-  import_fs4.default.mkdirSync(screenshotDir, { recursive: true });
-  const filePath = import_path3.default.join(screenshotDir, filename);
-  import_fs4.default.writeFileSync(filePath, buffer);
+  import_fs5.default.mkdirSync(screenshotDir, { recursive: true });
+  const filePath = import_path4.default.join(screenshotDir, filename);
+  import_fs5.default.writeFileSync(filePath, buffer);
   maybePrune(screenshotDir);
   return `${publicUrl}/screenshots/${filename}`;
 }
@@ -1002,10 +1184,10 @@ function pruneScreenshots(dir, opts = {}) {
   const maxFiles = opts.maxFiles ?? MAX_FILES;
   const now = opts.now ?? Date.now();
   try {
-    const entries = import_fs4.default.readdirSync(dir).filter((f) => f.endsWith(".jpg") || f.endsWith(".jpeg") || f.endsWith(".png")).map((f) => {
-      const full = import_path3.default.join(dir, f);
+    const entries = import_fs5.default.readdirSync(dir).filter((f) => f.endsWith(".jpg") || f.endsWith(".jpeg") || f.endsWith(".png")).map((f) => {
+      const full = import_path4.default.join(dir, f);
       try {
-        return { full, mtimeMs: import_fs4.default.statSync(full).mtimeMs };
+        return { full, mtimeMs: import_fs5.default.statSync(full).mtimeMs };
       } catch {
         return null;
       }
@@ -1015,7 +1197,7 @@ function pruneScreenshots(dir, opts = {}) {
     for (const e of entries) {
       if (now - e.mtimeMs > maxAgeMs) {
         try {
-          import_fs4.default.unlinkSync(e.full);
+          import_fs5.default.unlinkSync(e.full);
           removed++;
         } catch {
         }
@@ -1027,23 +1209,23 @@ function pruneScreenshots(dir, opts = {}) {
       survivors.sort((a, b) => a.mtimeMs - b.mtimeMs);
       for (const e of survivors.slice(0, survivors.length - maxFiles)) {
         try {
-          import_fs4.default.unlinkSync(e.full);
+          import_fs5.default.unlinkSync(e.full);
           removed++;
         } catch {
         }
       }
     }
-    if (removed > 0) log3.debug(`pruned ${removed} old screenshot(s) from ${dir}`);
+    if (removed > 0) log4.debug(`pruned ${removed} old screenshot(s) from ${dir}`);
     return removed;
   } catch (err) {
-    log3.warn(`screenshot prune failed: ${err instanceof Error ? err.message : String(err)}`);
+    log4.warn(`screenshot prune failed: ${err instanceof Error ? err.message : String(err)}`);
     return 0;
   }
 }
 
 // src/lib/session/sqlite-store.ts
-var import_path4 = __toESM(require("path"));
-var import_fs5 = __toESM(require("fs"));
+var import_path5 = __toESM(require("path"));
+var import_fs6 = __toESM(require("fs"));
 var IS_BUN = typeof globalThis.Bun !== "undefined";
 function createBunDb(dbPath) {
   const { Database } = require("bun:sqlite");
@@ -1082,8 +1264,8 @@ function createNodeDb(dbPath) {
 var SqliteStore = class {
   db;
   constructor(dataDir) {
-    import_fs5.default.mkdirSync(dataDir, { recursive: true });
-    const dbPath = import_path4.default.join(dataDir, "iframer.db");
+    import_fs6.default.mkdirSync(dataDir, { recursive: true });
+    const dbPath = import_path5.default.join(dataDir, "iframer.db");
     this.db = IS_BUN ? createBunDb(dbPath) : createNodeDb(dbPath);
     this.db.run(`
       CREATE TABLE IF NOT EXISTS sessions (
@@ -1163,13 +1345,13 @@ var import_patchright2 = require("patchright");
 var import_crypto2 = require("crypto");
 
 // src/lib/browser/chrome-downloader.ts
-var import_fs6 = __toESM(require("fs"));
-var import_path5 = __toESM(require("path"));
+var import_fs7 = __toESM(require("fs"));
+var import_path6 = __toESM(require("path"));
 var import_os3 = __toESM(require("os"));
-var import_child_process2 = require("child_process");
-var log4 = createLogger("chrome");
+var import_child_process3 = require("child_process");
+var log5 = createLogger("chrome");
 var CHROME_VERSIONS_URL = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json";
-var DEFAULT_INSTALL_DIR = import_path5.default.join(import_os3.default.homedir(), ".iframer", "chrome");
+var DEFAULT_INSTALL_DIR = import_path6.default.join(import_os3.default.homedir(), ".iframer", "chrome");
 function getPlatform() {
   const arch = process.arch;
   const platform = process.platform;
@@ -1181,24 +1363,24 @@ function getPlatform() {
 function getChromeExecutablePath(installDir) {
   const platform = process.platform;
   if (platform === "darwin") {
-    const entries = import_fs6.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
+    const entries = import_fs7.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
     const dir = entries[0] || "chrome-mac-arm64";
-    return import_path5.default.join(installDir, dir, "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing");
+    return import_path6.default.join(installDir, dir, "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing");
   }
   if (platform === "linux") {
-    const entries = import_fs6.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
+    const entries = import_fs7.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
     const dir = entries[0] || "chrome-linux64";
-    return import_path5.default.join(installDir, dir, "chrome");
+    return import_path6.default.join(installDir, dir, "chrome");
   }
   if (platform === "win32") {
-    const entries = import_fs6.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
+    const entries = import_fs7.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
     const dir = entries[0] || "chrome-win64";
-    return import_path5.default.join(installDir, dir, "chrome.exe");
+    return import_path6.default.join(installDir, dir, "chrome.exe");
   }
   throw new Error(`Unsupported platform: ${platform}`);
 }
 async function downloadChrome(installDir = DEFAULT_INSTALL_DIR) {
-  log4.info("Downloading Chrome for Testing (first time only)...");
+  log5.info("Downloading Chrome for Testing (first time only)...");
   const res = await fetch(CHROME_VERSIONS_URL);
   if (!res.ok) throw new Error(`Failed to fetch Chrome versions: ${res.status}`);
   const data = await res.json();
@@ -1209,35 +1391,35 @@ async function downloadChrome(installDir = DEFAULT_INSTALL_DIR) {
   if (!download2) throw new Error(`No Chrome for Testing download for platform: ${platform}`);
   const url = download2.url;
   const version = channel.version;
-  log4.debug(`Version ${version} for ${platform}`);
-  log4.debug(`URL: ${url}`);
-  import_fs6.default.mkdirSync(installDir, { recursive: true });
-  const zipPath = import_path5.default.join(installDir, "chrome.zip");
+  log5.debug(`Version ${version} for ${platform}`);
+  log5.debug(`URL: ${url}`);
+  import_fs7.default.mkdirSync(installDir, { recursive: true });
+  const zipPath = import_path6.default.join(installDir, "chrome.zip");
   const dlRes = await fetch(url);
   if (!dlRes.ok) throw new Error(`Download failed: ${dlRes.status}`);
   const buf = Buffer.from(await dlRes.arrayBuffer());
-  import_fs6.default.writeFileSync(zipPath, buf);
-  log4.info(`Downloaded ${(buf.length / 1024 / 1024).toFixed(1)}MB`);
-  (0, import_child_process2.execSync)(`unzip -o -q "${zipPath}" -d "${installDir}"`, { stdio: "inherit" });
-  import_fs6.default.unlinkSync(zipPath);
+  import_fs7.default.writeFileSync(zipPath, buf);
+  log5.info(`Downloaded ${(buf.length / 1024 / 1024).toFixed(1)}MB`);
+  (0, import_child_process3.execSync)(`unzip -o -q "${zipPath}" -d "${installDir}"`, { stdio: "inherit" });
+  import_fs7.default.unlinkSync(zipPath);
   const execPath = getChromeExecutablePath(installDir);
-  if (!import_fs6.default.existsSync(execPath)) {
+  if (!import_fs7.default.existsSync(execPath)) {
     throw new Error(`Chrome executable not found after extraction: ${execPath}`);
   }
   if (process.platform !== "win32") {
-    import_fs6.default.chmodSync(execPath, 493);
+    import_fs7.default.chmodSync(execPath, 493);
   }
-  import_fs6.default.writeFileSync(import_path5.default.join(installDir, "version.json"), JSON.stringify({ version, platform, downloadedAt: (/* @__PURE__ */ new Date()).toISOString() }));
-  log4.info(`Installed at: ${execPath}`);
+  import_fs7.default.writeFileSync(import_path6.default.join(installDir, "version.json"), JSON.stringify({ version, platform, downloadedAt: (/* @__PURE__ */ new Date()).toISOString() }));
+  log5.info(`Installed at: ${execPath}`);
   return execPath;
 }
 function findChromeForTesting() {
   if (process.env.CHROME_EXECUTABLE) {
-    if (import_fs6.default.existsSync(process.env.CHROME_EXECUTABLE)) return process.env.CHROME_EXECUTABLE;
+    if (import_fs7.default.existsSync(process.env.CHROME_EXECUTABLE)) return process.env.CHROME_EXECUTABLE;
   }
   try {
     const execPath = getChromeExecutablePath(DEFAULT_INSTALL_DIR);
-    if (import_fs6.default.existsSync(execPath)) return execPath;
+    if (import_fs7.default.existsSync(execPath)) return execPath;
   } catch {
   }
   return null;
@@ -1257,8 +1439,8 @@ function findChrome() {
     // Playwright/Patchright installed browsers (Docker containers)
     ...(() => {
       try {
-        const dirs = import_fs6.default.readdirSync("/ms-playwright").filter((d) => d.startsWith("chromium-")).sort().reverse();
-        return dirs.map((d) => import_path5.default.join("/ms-playwright", d, "chrome-linux", "chrome"));
+        const dirs = import_fs7.default.readdirSync("/ms-playwright").filter((d) => d.startsWith("chromium-")).sort().reverse();
+        return dirs.map((d) => import_path6.default.join("/ms-playwright", d, "chrome-linux", "chrome"));
       } catch {
         return [];
       }
@@ -1268,7 +1450,7 @@ function findChrome() {
     "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
   ];
   for (const p of systemPaths) {
-    if (import_fs6.default.existsSync(p)) return p;
+    if (import_fs7.default.existsSync(p)) return p;
   }
   return null;
 }
@@ -1278,10 +1460,10 @@ async function ensureChrome() {
   try {
     return await downloadChrome();
   } catch (err) {
-    log4.error(`Failed to download Chrome for Testing: ${err instanceof Error ? err.message : String(err)}`);
+    log5.error(`Failed to download Chrome for Testing: ${err instanceof Error ? err.message : String(err)}`);
     const system = findChrome();
     if (system) {
-      log4.warn(`Falling back to system Chrome: ${system}`);
+      log5.warn(`Falling back to system Chrome: ${system}`);
       return system;
     }
     throw new Error("No Chrome found. Download failed and no system Chrome available.");
@@ -1289,7 +1471,7 @@ async function ensureChrome() {
 }
 
 // src/lib/browser/cloak-browser.ts
-var log5 = createLogger("cloak");
+var log6 = createLogger("cloak");
 var _available = null;
 function cloakEnabled() {
   return process.env.IFRAMER_USE_CLOAKBROWSER === "1" || process.env.IFRAMER_USE_CLOAKBROWSER === "true";
@@ -1308,14 +1490,14 @@ async function ensureBinary() {
   try {
     const info = cloak.binaryInfo();
     if (!info.installed) {
-      log5.info("Downloading CloakBrowser binary...");
+      log6.info("Downloading CloakBrowser binary...");
       await cloak.ensureBinary();
-      log5.info("CloakBrowser ready");
+      log6.info("CloakBrowser ready");
     }
     _available = true;
     return true;
   } catch (err) {
-    log5.warn(`CloakBrowser setup failed: ${err instanceof Error ? err.message : String(err)}`);
+    log6.warn(`CloakBrowser setup failed: ${err instanceof Error ? err.message : String(err)}`);
     _available = false;
     return false;
   }
@@ -1330,150 +1512,11 @@ async function launchCloakBrowser(options) {
       headless: options.headless,
       args: options.args
     });
-    log5.info(`CloakBrowser launched (headless=${options.headless})`);
+    log6.info(`CloakBrowser launched (headless=${options.headless})`);
     return browser;
   } catch (err) {
-    log5.warn(`CloakBrowser launch failed: ${err instanceof Error ? err.message : String(err)}`);
+    log6.warn(`CloakBrowser launch failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;
-  }
-}
-
-// src/lib/browser/registry.ts
-var import_fs7 = __toESM(require("fs"));
-var import_path6 = __toESM(require("path"));
-var import_child_process3 = require("child_process");
-init_paths();
-var log6 = createLogger("registry");
-function browsersDir() {
-  const dir = import_path6.default.join(getDataDir(), "browsers");
-  import_fs7.default.mkdirSync(dir, { recursive: true });
-  return dir;
-}
-function serverInfoPath() {
-  return import_path6.default.join(getDataDir(), "server.json");
-}
-function isPidAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 1) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-function pidMatchesMarker(pid, marker) {
-  if (!isPidAlive(pid)) return false;
-  try {
-    const cmd = (0, import_child_process3.execSync)(`ps -o command= -p ${pid}`, { encoding: "utf8" });
-    return cmd.includes(marker);
-  } catch {
-    return false;
-  }
-}
-function findChromePidByMarker(marker) {
-  try {
-    const out = (0, import_child_process3.execSync)(`pgrep -f -- "${marker}"`, { encoding: "utf8" }).trim();
-    const pids = out.split("\n").map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n !== process.pid);
-    if (pids.length === 0) return null;
-    return Math.min(...pids);
-  } catch {
-    return null;
-  }
-}
-function registerBrowser(rec) {
-  try {
-    import_fs7.default.writeFileSync(import_path6.default.join(browsersDir(), `${rec.chromePid}.json`), JSON.stringify(rec, null, 2));
-  } catch (err) {
-    log6.warn(`failed to write browser record for pid ${rec.chromePid}: ${err}`);
-  }
-}
-function unregisterBrowser(chromePid) {
-  try {
-    import_fs7.default.unlinkSync(import_path6.default.join(browsersDir(), `${chromePid}.json`));
-  } catch {
-  }
-}
-var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-async function forceKillBrowser(rec) {
-  if (!isPidAlive(rec.chromePid)) return true;
-  if (!pidMatchesMarker(rec.chromePid, rec.marker)) {
-    return true;
-  }
-  try {
-    process.kill(rec.chromePid, "SIGKILL");
-  } catch {
-  }
-  const deadline = Date.now() + 2e3;
-  while (Date.now() < deadline) {
-    if (!isPidAlive(rec.chromePid)) return true;
-    await sleep(100);
-  }
-  return !isPidAlive(rec.chromePid);
-}
-async function reapOrphanBrowsers() {
-  let reaped = 0;
-  let skipped = 0;
-  let files = [];
-  try {
-    files = import_fs7.default.readdirSync(browsersDir()).filter((f) => f.endsWith(".json"));
-  } catch {
-    return { reaped, skipped };
-  }
-  for (const file of files) {
-    const full = import_path6.default.join(browsersDir(), file);
-    let rec;
-    try {
-      rec = JSON.parse(import_fs7.default.readFileSync(full, "utf8"));
-    } catch {
-      try {
-        import_fs7.default.unlinkSync(full);
-      } catch {
-      }
-      continue;
-    }
-    if (!isPidAlive(rec.chromePid) || !pidMatchesMarker(rec.chromePid, rec.marker)) {
-      try {
-        import_fs7.default.unlinkSync(full);
-      } catch {
-      }
-      continue;
-    }
-    if (isPidAlive(rec.ownerPid)) {
-      skipped++;
-      continue;
-    }
-    log6.info(`reaping orphan Chrome pid=${rec.chromePid} (${rec.key}), owner ${rec.ownerPid} is dead`);
-    if (await forceKillBrowser(rec)) {
-      try {
-        import_fs7.default.unlinkSync(full);
-      } catch {
-      }
-      reaped++;
-    } else {
-      log6.warn(`failed to kill orphan Chrome pid=${rec.chromePid} \u2014 leaving record for next sweep`);
-    }
-  }
-  return { reaped, skipped };
-}
-function writeServerInfo(info) {
-  import_fs7.default.writeFileSync(serverInfoPath(), JSON.stringify(info, null, 2));
-}
-function readServerInfo() {
-  try {
-    const info = JSON.parse(import_fs7.default.readFileSync(serverInfoPath(), "utf8"));
-    if (!Number.isInteger(info.pid) || !Number.isInteger(info.port)) return null;
-    return info;
-  } catch {
-    return null;
-  }
-}
-function clearServerInfo(pid) {
-  const info = readServerInfo();
-  if (info && info.pid === pid) {
-    try {
-      import_fs7.default.unlinkSync(serverInfoPath());
-    } catch {
-    }
   }
 }
 
@@ -1481,6 +1524,8 @@ function clearServerInfo(pid) {
 var log7 = createLogger("daemon");
 var DEFAULT_IDLE_TIMEOUT = 5 * 60 * 1e3;
 var CLOSE_GRACE_MS = 5e3;
+var BUSY_MAX_MS = 30 * 60 * 1e3;
+var BLANK_IDLE_MS = 2 * 60 * 1e3;
 var DEFAULT_INSTANCE = "default";
 function keyOf(mode, instanceId) {
   return `${mode}::${instanceId}`;
@@ -1572,7 +1617,8 @@ var BrowserDaemon = class {
       createdAt: /* @__PURE__ */ new Date(),
       chromePid,
       marker,
-      active: 0
+      active: 0,
+      busySince: null
     };
     this.instances.set(key, instance);
     this.resetIdleTimer(key);
@@ -1584,14 +1630,19 @@ var BrowserDaemon = class {
    *  Always pair with release() in a finally block. */
   acquire(mode, instanceId = DEFAULT_INSTANCE) {
     const instance = this.instances.get(keyOf(mode, instanceId));
-    if (instance) instance.active++;
+    if (!instance) return;
+    if (instance.active === 0) instance.busySince = Date.now();
+    instance.active++;
   }
   release(mode, instanceId = DEFAULT_INSTANCE) {
     const key = keyOf(mode, instanceId);
     const instance = this.instances.get(key);
     if (!instance) return;
     instance.active = Math.max(0, instance.active - 1);
-    if (instance.active === 0) this.resetIdleTimer(key);
+    if (instance.active === 0) {
+      instance.busySince = null;
+      this.resetIdleTimer(key);
+    }
   }
   isRunning(mode, instanceId = DEFAULT_INSTANCE) {
     const instance = this.instances.get(keyOf(mode, instanceId));
@@ -1601,6 +1652,35 @@ var BrowserDaemon = class {
     } catch {
       return false;
     }
+  }
+  /** Close instances that never left about:blank and have been idle a while.
+   *  Those are accidents — a pipeline that failed before its first navigate, or
+   *  a mode picked for a call that never needed a browser — and in headful mode
+   *  each one is an empty window sitting on the user's desktop. Called on the
+   *  server's reap tick, so it also catches instances whose idle timer was lost
+   *  (e.g. the daemon was restarted under them). */
+  sweepBlankInstances() {
+    const stopped = [];
+    const now = Date.now();
+    for (const [key, inst] of this.instances.entries()) {
+      if (inst.active > 0) continue;
+      if (now - inst.createdAt.getTime() < BLANK_IDLE_MS) continue;
+      let blank = false;
+      try {
+        const pages = inst.context.pages();
+        blank = pages.length === 0 || pages.every((p) => {
+          const u = p.url();
+          return u === "about:blank" || u === "" || u === "chrome://newtab/";
+        });
+      } catch {
+        continue;
+      }
+      if (!blank) continue;
+      log7.info(`blank-orphan sweep: ${key} never left about:blank, stopping`);
+      stopped.push(key);
+      this.stopKey(key).catch((err) => log7.warn(`blank sweep stop failed for ${key}: ${err}`));
+    }
+    return stopped;
   }
   /** Distinct modes that currently have at least one live instance. */
   runningModes() {
@@ -1720,8 +1800,14 @@ var BrowserDaemon = class {
       setTimeout(() => {
         const instance = this.instances.get(key);
         if (instance && instance.active > 0) {
-          this.resetIdleTimer(key);
-          return;
+          const busyMs = instance.busySince ? Date.now() - instance.busySince : 0;
+          if (busyMs < BUSY_MAX_MS) {
+            this.resetIdleTimer(key);
+            return;
+          }
+          log7.warn(`${key} reported busy for ${Math.round(busyMs / 6e4)}m \u2014 treating active=${instance.active} as leaked, stopping`);
+          instance.active = 0;
+          instance.busySince = null;
         }
         log7.info(`Idle timeout for ${key}, stopping...`);
         this.stopKey(key).catch((err) => log7.warn(`idle stop failed for ${key}: ${err}`));
@@ -6145,6 +6231,24 @@ var CdpRelay = class {
 
 // src/lib/execution/pipeline-executor.ts
 var log18 = createLogger("iframer");
+function blankPipelineResult(pipeline, modeUsed, error) {
+  return {
+    ok: false,
+    completedSteps: 0,
+    totalSteps: pipeline.steps.length,
+    results: [],
+    obstacles: [],
+    error: {
+      failedAtStep: 0,
+      failedStep: pipeline.steps[0],
+      pageState: { url: "", title: "" },
+      ...error
+    },
+    durationMs: 0,
+    modeUsed,
+    finalState: { url: "", title: "" }
+  };
+}
 var PipelineExecutor = class {
   constructor(deps) {
     this.deps = deps;
@@ -6182,8 +6286,24 @@ var PipelineExecutor = class {
     const forcedMode = opts.mode;
     const autoEscalate = opts.autoEscalate !== false;
     const instanceId = opts.instanceId || DEFAULT_INSTANCE;
+    if (forcedMode === "extension") {
+      return blankPipelineResult(pipeline, "extension", {
+        errorType: "action-failed",
+        message: 'mode="extension" requires options.tabId (the real-Chrome tab to drive).',
+        suggestion: "Call the `tabs` tool (or GET /extension/tabs) to list open tabs, then pass that tab id. Nothing was launched.",
+        retryable: false
+      });
+    }
     const firstNav = pipeline.steps.find((s) => s.type === "navigate");
     const domain = firstNav ? new URL(firstNav.url).hostname : null;
+    if (!firstNav && !this.deps.daemon.findLiveMode(instanceId)) {
+      return blankPipelineResult(pipeline, forcedMode || "headless", {
+        errorType: "action-failed",
+        message: `No navigate step and no live browser for instanceId "${instanceId}" to act on.`,
+        suggestion: "Add a navigate step, or reattach to a live window (check `status` / `iframer instances` for instanceId). To drive a real Chrome tab, pass options.tabId from the `tabs` tool. Nothing was launched.",
+        retryable: false
+      });
+    }
     const availableModes = this.deps.availableModes();
     const liveMode = forcedMode ? null : this.deps.daemon.findLiveMode(instanceId);
     let mode;
@@ -6871,6 +6991,11 @@ var Iframer = class {
   listInstances() {
     return this.daemon.instancesInfo();
   }
+  /** Close browsers that never navigated anywhere. See
+   *  BrowserDaemon.sweepBlankInstances — called from the server's reap tick. */
+  sweepBlankBrowsers() {
+    return this.daemon.sweepBlankInstances();
+  }
   /** Kill all browser instances and reset state. Next execute call will
    *  launch a fresh browser automatically — no manual restart needed. */
   async restartBrowser() {
@@ -7285,6 +7410,10 @@ for (const signal of ["SIGTERM", "SIGINT"]) {
 var reapTimer = setInterval(async () => {
   try {
     await reapOrphanBrowsers();
+  } catch {
+  }
+  try {
+    iframer.sweepBlankBrowsers();
   } catch {
   }
   const idleMs = Date.now() - lastActivity;

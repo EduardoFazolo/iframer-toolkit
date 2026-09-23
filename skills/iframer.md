@@ -13,6 +13,7 @@ You are an expert at using the iframer browser automation toolkit. The user want
 - `iframer.session` — stop (save state) or clear session data
 - `iframer.status` — system health, modes, stored credentials
 - `iframer.reverse-engineer` — capture API calls a site makes
+- `iframer.tabs` — list/open tabs in the user's REAL Chrome (needs the extension)
 
 ## Core rules
 
@@ -22,6 +23,8 @@ You are an expert at using the iframer browser automation toolkit. The user want
 4. **NEVER pass explicit selectors to the login step** unless the auto-detect failed AND you took a snapshot to find the right ones. The login step auto-detects email, password, submit, and OTP fields.
 5. If headless detects Imperva or Akamai, immediately stop headless and pivot to headed in the same run; do not wait for a block, retry headless, or defer the switch to a future request. Use headed from the outset when the provider is already known in the current task. On detection, switch to headed and use respectful pacing (at least 3 seconds between top-level actions; no parallel bursts or repeated blocked retries). Do not announce the provider or explain the switch unless the user asks why. Only when asked, explain that the site is covered by Imperva or Akamai and iframer adjusts its browser mode and pacing to respect it.
 6. **Let iframer handle mode escalation.** Don't hardcode modes. If you must pick one, prefer no mode (auto-select) or `binary-headful` for sites known to block headless.
+7. **"My browser" / "my tabs" / "I'm already logged in there" means extension mode, never a launched browser.** See the section below. A launched browser has none of the user's logins and opening one is a visible, unwanted window on their desktop.
+8. **Every browser you open is yours to close.** Call `session stop` when the work is done, and if a call opened a browser by mistake, close it immediately instead of leaving it. `status` lists live windows.
 
 ## How to build pipelines
 
@@ -314,6 +317,40 @@ If the MCP disconnects repeatedly on the same operation, the site is probably to
 | Not passing `mode` consistently across execute calls in the same flow | Always pass the same `options.mode` for all steps in a multi-call flow |
 | Panicking when MCP disconnects (running `claude mcp`, inspecting source, giving up) | Just wait 2-3 seconds, call `status` to verify reconnect, then `session restart` and retry |
 
+## Driving the user's real Chrome (extension mode)
+
+Use this whenever the user says "my browser", "my tabs", "the page I have open", or the task
+needs accounts they are already signed into. A launched browser has a fresh, logged-out profile.
+
+1. `tabs` with `action: "list"` — returns open tabs as `[id <n>] title / url`. If it reports the
+   extension is not connected, tell the user to open Chrome / check the extension; do NOT fall
+   back to launching a browser.
+2. `execute` with `options.mode: "extension"` AND `options.tabId: <n>` from that list. Both are
+   required: `mode` alone is refused and launches nothing.
+3. Need a different page? `tabs` with `action: "open"` returns the new tab id. Do NOT use a
+   navigate-only pipeline in a launched browser to "get there".
+
+Rules while in extension mode:
+
+- **Do not call `session get-cookies` / `get-auth` / `capture-start` without a mode.** They default
+  to launching a separate window. The tab you are driving already has the auth; read it there.
+- **Do not call `session stop`.** There is nothing to stop, and it is the user's own browser.
+- `execute` never escalates in extension mode. If it fails, report why (extension disconnected,
+  tab closed) instead of retrying in a launched mode, which would silently use a logged-out profile.
+
+## Cleaning up after yourself
+
+A browser opened by mistake is a real, visible window sitting on the user's desktop. It is your
+job to close it, not theirs.
+
+- Any pipeline that opens a browser must end with `session stop` once the task is done.
+- If you opened a browser you did not need (wrong mode, wrong call, task turned out not to need
+  one), call `session stop` right away, in the same turn you noticed.
+- `status` lists live windows with their `instanceId`. If you see one you do not recognise from
+  your own work in this conversation, say so rather than silently leaving it.
+- A pipeline with no `navigate` step is refused unless a live browser already holds that
+  `instanceId`. If you get that error, you probably meant extension mode — go get a `tabId`.
+
 ## Mode selection guide
 
 | Scenario | Recommended mode |
@@ -326,6 +363,7 @@ If the MCP disconnects repeatedly on the same operation, the site is probably to
 | Need automated captcha solving | `docker-headful` (uses vision AI to solve) |
 | Need to watch the browser remotely / headless server | `docker-headful` |
 | Reverse-engineering after login | Same mode that login succeeded in |
+| "Use my browser" / user's own logins / their open tab | `extension` + `tabId` from the `tabs` tool |
 
 **Prefer `binary-headful` over `docker-headful` for most tasks.** Binary-headful runs Chrome directly on the user's machine — it's faster, more stable for long sessions, and the user can solve captchas manually. Docker-headful adds overhead (Xvfb, VNC, container networking) and heavy SPAs frequently stall or timeout inside the container.
 

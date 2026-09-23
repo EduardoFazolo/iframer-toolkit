@@ -1,0 +1,1136 @@
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from camoufox.Dockerfile
+#1 transferring dockerfile: 860B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/python:3.13-slim
+#2 DONE 2.5s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [internal] load build context
+#4 transferring context: 17.12kB done
+#4 DONE 0.0s
+
+#5 [1/5] FROM docker.io/library/python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285
+#5 resolve docker.io/library/python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285 0.0s done
+#5 DONE 0.1s
+
+#5 [1/5] FROM docker.io/library/python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285
+#5 sha256:9a411e1c6e4eec508aa00aab132ad2640840e8fffb4e8f28afeb8ab2c38ec9d8 0B / 4.61MB 0.2s
+#5 sha256:752a664f20c2933f25c48e9528eb7f3f6b0a46a2523ca4050296ef863c902483 0B / 11.83MB 0.2s
+#5 sha256:e0381d47aae69de79a20ef971e41df25e10f1637c261b28304aa29d4a019dd61 0B / 248B 0.2s
+#5 sha256:bf7af0229701decd1b9f42143504fc8f69e5664c37e57001d198e731e4f86c2e 0B / 30.16MB 0.2s
+#5 sha256:9a411e1c6e4eec508aa00aab132ad2640840e8fffb4e8f28afeb8ab2c38ec9d8 4.61MB / 4.61MB 0.4s done
+#5 sha256:752a664f20c2933f25c48e9528eb7f3f6b0a46a2523ca4050296ef863c902483 1.05MB / 11.83MB 0.6s
+#5 sha256:e0381d47aae69de79a20ef971e41df25e10f1637c261b28304aa29d4a019dd61 248B / 248B 0.5s done
+#5 sha256:752a664f20c2933f25c48e9528eb7f3f6b0a46a2523ca4050296ef863c902483 5.24MB / 11.83MB 0.8s
+#5 sha256:bf7af0229701decd1b9f42143504fc8f69e5664c37e57001d198e731e4f86c2e 4.19MB / 30.16MB 0.6s
+#5 sha256:752a664f20c2933f25c48e9528eb7f3f6b0a46a2523ca4050296ef863c902483 10.49MB / 11.83MB 0.9s
+#5 sha256:bf7af0229701decd1b9f42143504fc8f69e5664c37e57001d198e731e4f86c2e 13.68MB / 30.16MB 0.8s
+#5 sha256:752a664f20c2933f25c48e9528eb7f3f6b0a46a2523ca4050296ef863c902483 11.83MB / 11.83MB 0.9s done
+#5 sha256:bf7af0229701decd1b9f42143504fc8f69e5664c37e57001d198e731e4f86c2e 30.16MB / 30.16MB 1.0s done
+#5 extracting sha256:bf7af0229701decd1b9f42143504fc8f69e5664c37e57001d198e731e4f86c2e
+#5 extracting sha256:bf7af0229701decd1b9f42143504fc8f69e5664c37e57001d198e731e4f86c2e 1.3s done
+#5 DONE 2.4s
+
+#5 [1/5] FROM docker.io/library/python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285
+#5 extracting sha256:9a411e1c6e4eec508aa00aab132ad2640840e8fffb4e8f28afeb8ab2c38ec9d8 0.1s done
+#5 DONE 2.6s
+
+#5 [1/5] FROM docker.io/library/python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285
+#5 extracting sha256:752a664f20c2933f25c48e9528eb7f3f6b0a46a2523ca4050296ef863c902483
+#5 extracting sha256:752a664f20c2933f25c48e9528eb7f3f6b0a46a2523ca4050296ef863c902483 0.5s done
+#5 DONE 3.1s
+
+#5 [1/5] FROM docker.io/library/python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285
+#5 extracting sha256:e0381d47aae69de79a20ef971e41df25e10f1637c261b28304aa29d4a019dd61 0.0s done
+#5 DONE 3.1s
+
+#6 [2/5] RUN apt-get update && apt-get install -y --no-install-recommends     xvfb libgtk-3-0 libdbus-glib-1-2 libxt6 libasound2 libx11-xcb1 libpci3 libegl1     libxcomposite1 libxdamage1 libxrandr2 libxcursor1 libxi6 libxtst6 libnss3 libgbm1     fonts-liberation fonts-dejavu-core fonts-noto-core fonts-noto-color-emoji ca-certificates     && rm -rf /var/lib/apt/lists/*
+#6 0.797 Get:1 http://deb.debian.org/debian trixie InRelease [140 kB]
+#6 0.843 Get:2 http://deb.debian.org/debian trixie-updates InRelease [47.3 kB]
+#6 0.865 Get:3 http://deb.debian.org/debian-security trixie-security InRelease [43.4 kB]
+#6 0.881 Get:4 http://deb.debian.org/debian trixie/main arm64 Packages [9614 kB]
+#6 1.031 Get:5 http://deb.debian.org/debian trixie-updates/main arm64 Packages [4424 B]
+#6 1.049 Get:6 http://deb.debian.org/debian-security trixie-security/main arm64 Packages [263 kB]
+#6 2.014 Fetched 10.1 MB in 2s (6388 kB/s)
+#6 2.014 Reading package lists...
+#6 2.511 Reading package lists...
+#6 2.936 Building dependency tree...
+#6 3.079 Reading state information...
+#6 3.289 ca-certificates is already the newest version (20250419).
+#6 3.289 The following additional packages will be installed:
+#6 3.289   adwaita-icon-theme at-spi2-common dbus dbus-bin dbus-daemon
+#6 3.289   dbus-session-bus-common dbus-system-bus-common dbus-user-session
+#6 3.289   dconf-gsettings-backend dconf-service fontconfig fontconfig-config
+#6 3.289   fonts-dejavu-mono fonts-noto-mono gtk-update-icon-cache hicolor-icon-theme
+#6 3.289   libapparmor1 libasound2-data libatk-bridge2.0-0t64 libatk1.0-0t64 libatomic1
+#6 3.289   libatspi2.0-0t64 libavahi-client3 libavahi-common-data libavahi-common3
+#6 3.289   libbrotli1 libcairo-gobject2 libcairo2 libcloudproviders0 libcolord2
+#6 3.289   libcom-err2 libcups2t64 libdatrie1 libdbus-1-3 libdconf1 libdeflate0
+#6 3.289   libdrm-amdgpu1 libdrm-common libdrm2 libedit2 libegl-mesa0 libelf1t64
+#6 3.289   libepoxy0 libexpat1 libfontconfig1 libfontenc1 libfreetype6 libfribidi0
+#6 3.289   libgdk-pixbuf-2.0-0 libgdk-pixbuf2.0-common libgl1 libgl1-mesa-dri
+#6 3.289   libglib2.0-0t64 libglvnd0 libglx-mesa0 libglx0 libgnutls30t64 libgraphite2-3
+#6 3.289   libgssapi-krb5-2 libgtk-3-common libharfbuzz0b libice6 libidn2-0 libjbig0
+#6 3.289   libjpeg62-turbo libk5crypto3 libkeyutils1 libkrb5-3 libkrb5support0
+#6 3.289   liblcms2-2 liblerc4 libllvm19 libnspr4 libp11-kit0 libpam-systemd
+#6 3.289   libpango-1.0-0 libpangocairo-1.0-0 libpangoft2-1.0-0 libpixman-1-0
+#6 3.289   libpng16-16t64 libproc2-0 libsensors-config libsensors5 libsharpyuv0 libsm6
+#6 3.289   libsystemd-shared libtasn1-6 libthai-data libthai0 libtiff6 libunistring5
+#6 3.289   libunwind8 libvulkan1 libwayland-client0 libwayland-cursor0 libwayland-egl1
+#6 3.289   libwayland-server0 libwebp7 libx11-6 libx11-data libxau6 libxaw7
+#6 3.289   libxcb-dri3-0 libxcb-glx0 libxcb-present0 libxcb-randr0 libxcb-render0
+#6 3.289   libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxcb1 libxdmcp6 libxext6
+#6 3.289   libxfixes3 libxfont2 libxinerama1 libxkbcommon0 libxkbfile1 libxml2 libxmu6
+#6 3.289   libxpm4 libxrender1 libxshmfence1 libxxf86vm1 libz3-4 mesa-libgallium
+#6 3.289   pci.ids procps shared-mime-info systemd systemd-sysv x11-common
+#6 3.289   x11-xkb-utils xkb-data xserver-common
+#6 3.290 Suggested packages:
+#6 3.290   adwaita-icon-theme-legacy alsa-utils libasound2-plugins colord cups-common
+#6 3.290   low-memory-monitor gnutls-bin krb5-doc krb5-user gvfs liblcms2-utils
+#6 3.290   libcryptsetup12 libtss2-rc0t64 lm-sensors libarchive13t64 libbpf1 libdw1t64
+#6 3.290   libfido2-1 libgcrypt20 libip4tc2 libpwquality1 libqrencode4
+#6 3.290   systemd-container systemd-homed systemd-userdbd systemd-boot
+#6 3.290   systemd-resolved systemd-repart libtss2-tcti-device0 polkitd
+#6 3.290 Recommended packages:
+#6 3.290   librsvg2-common fonts-liberation-sans-narrow alsa-ucm-conf
+#6 3.290   alsa-topology-conf at-spi2-core libgdk-pixbuf2.0-bin libglib2.0-data
+#6 3.290   xdg-user-dirs libgtk-3-bin krb5-locales libkmod2 mesa-vulkan-drivers
+#6 3.290   | vulkan-icd psmisc linux-sysctl-defaults systemd-timesyncd | time-daemon
+#6 3.290   systemd-cryptsetup libnss-systemd xfonts-base xauth
+#6 3.780 The following NEW packages will be installed:
+#6 3.780   adwaita-icon-theme at-spi2-common dbus dbus-bin dbus-daemon
+#6 3.780   dbus-session-bus-common dbus-system-bus-common dbus-user-session
+#6 3.780   dconf-gsettings-backend dconf-service fontconfig fontconfig-config
+#6 3.780   fonts-dejavu-core fonts-dejavu-mono fonts-liberation fonts-noto-color-emoji
+#6 3.780   fonts-noto-core fonts-noto-mono gtk-update-icon-cache hicolor-icon-theme
+#6 3.780   libapparmor1 libasound2-data libasound2t64 libatk-bridge2.0-0t64
+#6 3.780   libatk1.0-0t64 libatomic1 libatspi2.0-0t64 libavahi-client3
+#6 3.780   libavahi-common-data libavahi-common3 libbrotli1 libcairo-gobject2 libcairo2
+#6 3.780   libcloudproviders0 libcolord2 libcom-err2 libcups2t64 libdatrie1 libdbus-1-3
+#6 3.780   libdbus-glib-1-2 libdconf1 libdeflate0 libdrm-amdgpu1 libdrm-common libdrm2
+#6 3.780   libedit2 libegl-mesa0 libegl1 libelf1t64 libepoxy0 libexpat1 libfontconfig1
+#6 3.780   libfontenc1 libfreetype6 libfribidi0 libgbm1 libgdk-pixbuf-2.0-0
+#6 3.781   libgdk-pixbuf2.0-common libgl1 libgl1-mesa-dri libglib2.0-0t64 libglvnd0
+#6 3.781   libglx-mesa0 libglx0 libgnutls30t64 libgraphite2-3 libgssapi-krb5-2
+#6 3.781   libgtk-3-0t64 libgtk-3-common libharfbuzz0b libice6 libidn2-0 libjbig0
+#6 3.781   libjpeg62-turbo libk5crypto3 libkeyutils1 libkrb5-3 libkrb5support0
+#6 3.781   liblcms2-2 liblerc4 libllvm19 libnspr4 libnss3 libp11-kit0 libpam-systemd
+#6 3.781   libpango-1.0-0 libpangocairo-1.0-0 libpangoft2-1.0-0 libpci3 libpixman-1-0
+#6 3.781   libpng16-16t64 libproc2-0 libsensors-config libsensors5 libsharpyuv0 libsm6
+#6 3.781   libsystemd-shared libtasn1-6 libthai-data libthai0 libtiff6 libunistring5
+#6 3.781   libunwind8 libvulkan1 libwayland-client0 libwayland-cursor0 libwayland-egl1
+#6 3.781   libwayland-server0 libwebp7 libx11-6 libx11-data libx11-xcb1 libxau6 libxaw7
+#6 3.781   libxcb-dri3-0 libxcb-glx0 libxcb-present0 libxcb-randr0 libxcb-render0
+#6 3.781   libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxcb1 libxcomposite1 libxcursor1
+#6 3.781   libxdamage1 libxdmcp6 libxext6 libxfixes3 libxfont2 libxi6 libxinerama1
+#6 3.781   libxkbcommon0 libxkbfile1 libxml2 libxmu6 libxpm4 libxrandr2 libxrender1
+#6 3.781   libxshmfence1 libxt6t64 libxtst6 libxxf86vm1 libz3-4 mesa-libgallium pci.ids
+#6 3.781   procps shared-mime-info systemd systemd-sysv x11-common x11-xkb-utils
+#6 3.781   xkb-data xserver-common xvfb
+#6 3.830 0 upgraded, 155 newly installed, 0 to remove and 12 not upgraded.
+#6 3.830 Need to get 106 MB of archives.
+#6 3.830 After this operation, 424 MB of additional disk space will be used.
+#6 3.830 Get:1 http://deb.debian.org/debian trixie/main arm64 libsystemd-shared arm64 257.13-1~deb13u1 [1922 kB]
+#6 3.946 Get:2 http://deb.debian.org/debian trixie/main arm64 libapparmor1 arm64 4.1.0-1 [42.9 kB]
+#6 3.959 Get:3 http://deb.debian.org/debian trixie/main arm64 systemd arm64 257.13-1~deb13u1 [2921 kB]
+#6 3.986 Get:4 http://deb.debian.org/debian trixie/main arm64 systemd-sysv arm64 257.13-1~deb13u1 [64.9 kB]
+#6 3.987 Get:5 http://deb.debian.org/debian trixie/main arm64 libdbus-1-3 arm64 1.16.2-2 [169 kB]
+#6 3.987 Get:6 http://deb.debian.org/debian trixie/main arm64 dbus-bin arm64 1.16.2-2 [78.8 kB]
+#6 3.988 Get:7 http://deb.debian.org/debian trixie/main arm64 dbus-session-bus-common all 1.16.2-2 [52.3 kB]
+#6 3.988 Get:8 http://deb.debian.org/debian trixie/main arm64 libexpat1 arm64 2.8.3-1~deb13u1 [109 kB]
+#6 3.992 Get:9 http://deb.debian.org/debian trixie/main arm64 dbus-daemon arm64 1.16.2-2 [152 kB]
+#6 3.993 Get:10 http://deb.debian.org/debian trixie/main arm64 dbus-system-bus-common all 1.16.2-2 [53.5 kB]
+#6 3.993 Get:11 http://deb.debian.org/debian trixie/main arm64 dbus arm64 1.16.2-2 [70.7 kB]
+#6 3.994 Get:12 http://deb.debian.org/debian trixie/main arm64 libproc2-0 arm64 2:4.0.4-9 [62.8 kB]
+#6 4.005 Get:13 http://deb.debian.org/debian trixie/main arm64 procps arm64 2:4.0.4-9 [871 kB]
+#6 4.032 Get:14 http://deb.debian.org/debian trixie/main arm64 libpam-systemd arm64 257.13-1~deb13u1 [276 kB]
+#6 4.043 Get:15 http://deb.debian.org/debian trixie/main arm64 libgdk-pixbuf2.0-common all 2.42.12+dfsg-4+deb13u1 [312 kB]
+#6 4.051 Get:16 http://deb.debian.org/debian trixie/main arm64 libatomic1 arm64 14.2.0-19 [10.1 kB]
+#6 4.062 Get:17 http://deb.debian.org/debian trixie/main arm64 libglib2.0-0t64 arm64 2.84.4-3~deb13u5 [1429 kB]
+#6 4.095 Get:18 http://deb.debian.org/debian trixie/main arm64 libxml2 arm64 2.12.7+dfsg+really2.9.14-2.1+deb13u3 [631 kB]
+#6 4.124 Get:19 http://deb.debian.org/debian trixie/main arm64 shared-mime-info arm64 2.4-5+b2 [756 kB]
+#6 4.153 Get:20 http://deb.debian.org/debian trixie/main arm64 libjpeg62-turbo arm64 1:2.1.5-4 [173 kB]
+#6 4.164 Get:21 http://deb.debian.org/debian trixie/main arm64 libpng16-16t64 arm64 1.6.48-1+deb13u5 [275 kB]
+#6 4.170 Get:22 http://deb.debian.org/debian trixie/main arm64 libdeflate0 arm64 1.23-2 [42.4 kB]
+#6 4.170 Get:23 http://deb.debian.org/debian trixie/main arm64 libjbig0 arm64 2.1-6.1+b2 [30.4 kB]
+#6 4.176 Get:24 http://deb.debian.org/debian trixie/main arm64 liblerc4 arm64 4.0.0+ds-5 [146 kB]
+#6 4.182 Get:25 http://deb.debian.org/debian trixie/main arm64 libsharpyuv0 arm64 1.5.0-0.1 [114 kB]
+#6 4.193 Get:26 http://deb.debian.org/debian trixie/main arm64 libwebp7 arm64 1.5.0-0.1 [271 kB]
+#6 4.217 Get:27 http://deb.debian.org/debian trixie/main arm64 libtiff6 arm64 4.7.0-3+deb13u3 [325 kB]
+#6 4.241 Get:28 http://deb.debian.org/debian trixie/main arm64 libgdk-pixbuf-2.0-0 arm64 2.42.12+dfsg-4+deb13u1 [131 kB]
+#6 4.245 Get:29 http://deb.debian.org/debian trixie/main arm64 gtk-update-icon-cache arm64 4.18.6+ds-2 [52.3 kB]
+#6 4.245 Get:30 http://deb.debian.org/debian trixie/main arm64 hicolor-icon-theme all 0.18-2 [11.8 kB]
+#6 4.261 Get:31 http://deb.debian.org/debian trixie/main arm64 adwaita-icon-theme all 48.1-1 [504 kB]
+#6 4.269 Get:32 http://deb.debian.org/debian trixie/main arm64 at-spi2-common all 2.56.2-1+deb13u2 [171 kB]
+#6 4.270 Get:33 http://deb.debian.org/debian trixie/main arm64 dbus-user-session arm64 1.16.2-2 [52.1 kB]
+#6 4.270 Get:34 http://deb.debian.org/debian trixie/main arm64 libdconf1 arm64 0.40.0-5 [40.4 kB]
+#6 4.270 Get:35 http://deb.debian.org/debian trixie/main arm64 dconf-service arm64 0.40.0-5 [30.9 kB]
+#6 4.271 Get:36 http://deb.debian.org/debian trixie/main arm64 dconf-gsettings-backend arm64 0.40.0-5 [27.3 kB]
+#6 4.289 Get:37 http://deb.debian.org/debian trixie/main arm64 libbrotli1 arm64 1.1.0-2+b7 [308 kB]
+#6 4.306 Get:38 http://deb.debian.org/debian trixie/main arm64 libfreetype6 arm64 2.13.3+dfsg-1+deb13u1 [422 kB]
+#6 4.312 Get:39 http://deb.debian.org/debian trixie/main arm64 fonts-dejavu-mono all 2.37-8 [489 kB]
+#6 4.316 Get:40 http://deb.debian.org/debian trixie/main arm64 fonts-dejavu-core all 2.37-8 [840 kB]
+#6 4.331 Get:41 http://deb.debian.org/debian trixie/main arm64 fonts-liberation all 1:2.1.5-3 [1475 kB]
+#6 4.359 Get:42 http://deb.debian.org/debian trixie/main arm64 fonts-noto-mono all 20201225-2 [398 kB]
+#6 4.372 Get:43 http://deb.debian.org/debian trixie/main arm64 fonts-noto-core all 20201225-2 [12.2 MB]
+#6 4.515 Get:44 http://deb.debian.org/debian trixie/main arm64 fontconfig-config arm64 2.15.0-2.3 [318 kB]
+#6 4.521 Get:45 http://deb.debian.org/debian trixie/main arm64 libfontconfig1 arm64 2.15.0-2.3 [387 kB]
+#6 4.534 Get:46 http://deb.debian.org/debian trixie/main arm64 fontconfig arm64 2.15.0-2.3 [463 kB]
+#6 4.554 Get:47 http://deb.debian.org/debian trixie/main arm64 fonts-noto-color-emoji all 2.051-0+deb13u1 [10.1 MB]
+#6 4.649 Get:48 http://deb.debian.org/debian trixie/main arm64 libasound2-data all 1.2.14-1+deb13u1 [21.2 kB]
+#6 4.650 Get:49 http://deb.debian.org/debian trixie/main arm64 libasound2t64 arm64 1.2.14-1+deb13u1 [342 kB]
+#6 4.652 Get:50 http://deb.debian.org/debian trixie/main arm64 libatk1.0-0t64 arm64 2.56.2-1+deb13u2 [50.4 kB]
+#6 4.652 Get:51 http://deb.debian.org/debian trixie/main arm64 libxau6 arm64 1:1.0.11-1 [20.6 kB]
+#6 4.652 Get:52 http://deb.debian.org/debian trixie/main arm64 libxdmcp6 arm64 1:1.1.5-1 [27.8 kB]
+#6 4.670 Get:53 http://deb.debian.org/debian trixie/main arm64 libxcb1 arm64 1.17.0-2+b1 [143 kB]
+#6 4.684 Get:54 http://deb.debian.org/debian trixie/main arm64 libx11-data all 2:1.8.12-1 [343 kB]
+#6 4.879 Get:55 http://deb.debian.org/debian trixie/main arm64 libx11-6 arm64 2:1.8.12-1 [795 kB]
+#6 4.891 Get:56 http://deb.debian.org/debian trixie/main arm64 libxext6 arm64 2:1.3.4-1+b3 [49.2 kB]
+#6 4.891 Get:57 http://deb.debian.org/debian trixie/main arm64 libxi6 arm64 2:1.8.2-1 [77.8 kB]
+#6 4.892 Get:58 http://deb.debian.org/debian trixie/main arm64 libatspi2.0-0t64 arm64 2.56.2-1+deb13u2 [76.7 kB]
+#6 4.893 Get:59 http://deb.debian.org/debian trixie/main arm64 libatk-bridge2.0-0t64 arm64 2.56.2-1+deb13u2 [65.0 kB]
+#6 4.903 Get:60 http://deb.debian.org/debian trixie/main arm64 libavahi-common-data arm64 0.8-16 [112 kB]
+#6 4.907 Get:61 http://deb.debian.org/debian trixie/main arm64 libavahi-common3 arm64 0.8-16 [43.3 kB]
+#6 4.909 Get:62 http://deb.debian.org/debian trixie/main arm64 libavahi-client3 arm64 0.8-16 [46.7 kB]
+#6 4.923 Get:63 http://deb.debian.org/debian trixie/main arm64 libpixman-1-0 arm64 0.44.0-3 [168 kB]
+#6 4.947 Get:64 http://deb.debian.org/debian trixie/main arm64 libxcb-render0 arm64 1.17.0-2+b1 [115 kB]
+#6 4.957 Get:65 http://deb.debian.org/debian trixie/main arm64 libxcb-shm0 arm64 1.17.0-2+b1 [105 kB]
+#6 5.274 Get:66 http://deb.debian.org/debian trixie/main arm64 libxrender1 arm64 1:0.9.12-1 [27.0 kB]
+#6 5.290 Get:67 http://deb.debian.org/debian trixie/main arm64 libcairo2 arm64 1.18.4-1+b1 [483 kB]
+#6 5.295 Get:68 http://deb.debian.org/debian trixie/main arm64 libcairo-gobject2 arm64 1.18.4-1+b1 [130 kB]
+#6 5.295 Get:69 http://deb.debian.org/debian trixie/main arm64 libcloudproviders0 arm64 0.3.6-2 [27.4 kB]
+#6 5.311 Get:70 http://deb.debian.org/debian trixie/main arm64 liblcms2-2 arm64 2.16-2+deb13u2 [152 kB]
+#6 5.331 Get:71 http://deb.debian.org/debian trixie/main arm64 libcolord2 arm64 1.4.7-3 [130 kB]
+#6 5.334 Get:72 http://deb.debian.org/debian trixie/main arm64 libcom-err2 arm64 1.47.2-3+b12 [24.9 kB]
+#6 5.355 Get:73 http://deb.debian.org/debian trixie/main arm64 libunistring5 arm64 1.3-2 [453 kB]
+#6 5.358 Get:74 http://deb.debian.org/debian trixie/main arm64 libidn2-0 arm64 2.3.8-2 [107 kB]
+#6 5.367 Get:75 http://deb.debian.org/debian trixie/main arm64 libp11-kit0 arm64 0.25.5-3 [409 kB]
+#6 5.371 Get:76 http://deb.debian.org/debian trixie/main arm64 libtasn1-6 arm64 4.20.0-2+deb13u1 [47.3 kB]
+#6 5.373 Get:77 http://deb.debian.org/debian trixie/main arm64 libgnutls30t64 arm64 3.8.9-3+deb13u4 [1379 kB]
+#6 5.386 Get:78 http://deb.debian.org/debian trixie/main arm64 libkrb5support0 arm64 1.21.3-5+deb13u1 [32.5 kB]
+#6 5.386 Get:79 http://deb.debian.org/debian trixie/main arm64 libk5crypto3 arm64 1.21.3-5+deb13u1 [81.4 kB]
+#6 5.387 Get:80 http://deb.debian.org/debian trixie/main arm64 libkeyutils1 arm64 1.6.3-6 [9716 B]
+#6 5.388 Get:81 http://deb.debian.org/debian trixie/main arm64 libkrb5-3 arm64 1.21.3-5+deb13u1 [308 kB]
+#6 5.403 Get:82 http://deb.debian.org/debian trixie/main arm64 libgssapi-krb5-2 arm64 1.21.3-5+deb13u1 [128 kB]
+#6 5.419 Get:83 http://deb.debian.org/debian trixie/main arm64 libcups2t64 arm64 2.4.10-3+deb13u2 [236 kB]
+#6 5.422 Get:84 http://deb.debian.org/debian trixie/main arm64 libdatrie1 arm64 0.2.13-3+b1 [37.6 kB]
+#6 5.422 Get:85 http://deb.debian.org/debian trixie/main arm64 libdbus-glib-1-2 arm64 0.114-1 [58.0 kB]
+#6 5.423 Get:86 http://deb.debian.org/debian trixie/main arm64 libdrm-common all 2.4.124-2 [8288 B]
+#6 5.423 Get:87 http://deb.debian.org/debian trixie/main arm64 libdrm2 arm64 2.4.124-2 [38.3 kB]
+#6 5.423 Get:88 http://deb.debian.org/debian trixie/main arm64 libdrm-amdgpu1 arm64 2.4.124-2 [21.8 kB]
+#6 5.435 Get:89 http://deb.debian.org/debian trixie/main arm64 libedit2 arm64 3.1-20250104-1 [89.3 kB]
+#6 5.438 Get:90 http://deb.debian.org/debian trixie/main arm64 libwayland-server0 arm64 1.23.1-3 [33.7 kB]
+#6 5.753 Get:91 http://deb.debian.org/debian trixie/main arm64 libelf1t64 arm64 0.192-4 [189 kB]
+#6 5.777 Get:92 http://deb.debian.org/debian trixie/main arm64 libz3-4 arm64 4.13.3-1 [7507 kB]
+#6 5.879 Get:93 http://deb.debian.org/debian trixie/main arm64 libllvm19 arm64 1:19.1.7-3+b1 [23.3 MB]
+#6 6.294 Get:94 http://deb.debian.org/debian trixie/main arm64 libsensors-config all 1:3.6.2-2 [16.2 kB]
+#6 6.294 Get:95 http://deb.debian.org/debian trixie/main arm64 libsensors5 arm64 1:3.6.2-2 [36.4 kB]
+#6 6.346 Get:96 http://deb.debian.org/debian trixie/main arm64 libx11-xcb1 arm64 2:1.8.12-1 [247 kB]
+#6 6.350 Get:97 http://deb.debian.org/debian trixie/main arm64 libxcb-dri3-0 arm64 1.17.0-2+b1 [107 kB]
+#6 6.411 Get:98 http://deb.debian.org/debian trixie/main arm64 libxcb-present0 arm64 1.17.0-2+b1 [106 kB]
+#6 6.437 Get:99 http://deb.debian.org/debian trixie/main arm64 libxcb-randr0 arm64 1.17.0-2+b1 [117 kB]
+#6 6.452 Get:100 http://deb.debian.org/debian trixie/main arm64 libxcb-sync1 arm64 1.17.0-2+b1 [109 kB]
+#6 6.469 Get:101 http://deb.debian.org/debian trixie/main arm64 libxcb-xfixes0 arm64 1.17.0-2+b1 [110 kB]
+#6 6.471 Get:102 http://deb.debian.org/debian trixie/main arm64 libxshmfence1 arm64 1.3.3-1 [11.1 kB]
+#6 6.489 Get:103 http://deb.debian.org/debian trixie/main arm64 mesa-libgallium arm64 25.0.7-2+deb13u1 [8033 kB]
+#6 6.588 Get:104 http://deb.debian.org/debian trixie/main arm64 libgbm1 arm64 25.0.7-2+deb13u1 [44.1 kB]
+#6 6.588 Get:105 http://deb.debian.org/debian trixie/main arm64 libwayland-client0 arm64 1.23.1-3 [26.1 kB]
+#6 6.610 Get:106 http://deb.debian.org/debian trixie/main arm64 libegl-mesa0 arm64 25.0.7-2+deb13u1 [121 kB]
+#6 6.612 Get:107 http://deb.debian.org/debian trixie/main arm64 libepoxy0 arm64 1.5.10-2 [200 kB]
+#6 6.620 Get:108 http://deb.debian.org/debian trixie/main arm64 libfontenc1 arm64 1:1.1.8-1+b2 [22.5 kB]
+#6 6.620 Get:109 http://deb.debian.org/debian trixie/main arm64 libfribidi0 arm64 1.0.16-1 [26.5 kB]
+#6 6.620 Get:110 http://deb.debian.org/debian trixie/main arm64 libglvnd0 arm64 1.7.0-1+b2 [41.6 kB]
+#6 6.645 Get:111 http://deb.debian.org/debian trixie/main arm64 libxcb-glx0 arm64 1.17.0-2+b1 [123 kB]
+#6 6.646 Get:112 http://deb.debian.org/debian trixie/main arm64 libxxf86vm1 arm64 1:1.1.4-1+b4 [19.2 kB]
+#6 6.664 Get:113 http://deb.debian.org/debian trixie/main arm64 libvulkan1 arm64 1.4.309.0-1 [127 kB]
+#6 6.666 Get:114 http://deb.debian.org/debian trixie/main arm64 libgl1-mesa-dri arm64 25.0.7-2+deb13u1 [45.9 kB]
+#6 6.686 Get:115 http://deb.debian.org/debian trixie/main arm64 libglx-mesa0 arm64 25.0.7-2+deb13u1 [142 kB]
+#6 6.688 Get:116 http://deb.debian.org/debian trixie/main arm64 libglx0 arm64 1.7.0-1+b2 [31.1 kB]
+#6 6.689 Get:117 http://deb.debian.org/debian trixie/main arm64 libgl1 arm64 1.7.0-1+b2 [90.9 kB]
+#6 6.691 Get:118 http://deb.debian.org/debian trixie/main arm64 libgraphite2-3 arm64 1.3.14-2+deb13u1 [70.3 kB]
+#6 6.703 Get:119 http://deb.debian.org/debian trixie/main arm64 libharfbuzz0b arm64 10.2.0-1+deb13u1 [442 kB]
+#6 6.734 Get:120 http://deb.debian.org/debian trixie/main arm64 libthai-data all 0.1.29-2 [168 kB]
+#6 6.738 Get:121 http://deb.debian.org/debian trixie/main arm64 libthai0 arm64 0.1.29-2+b1 [48.4 kB]
+#6 6.750 Get:122 http://deb.debian.org/debian trixie/main arm64 libpango-1.0-0 arm64 1.56.3-1 [213 kB]
+#6 6.753 Get:123 http://deb.debian.org/debian trixie/main arm64 libpangoft2-1.0-0 arm64 1.56.3-1 [52.9 kB]
+#6 7.057 Get:124 http://deb.debian.org/debian trixie/main arm64 libpangocairo-1.0-0 arm64 1.56.3-1 [33.7 kB]
+#6 7.059 Get:125 http://deb.debian.org/debian trixie/main arm64 libwayland-cursor0 arm64 1.23.1-3 [11.7 kB]
+#6 7.059 Get:126 http://deb.debian.org/debian trixie/main arm64 libwayland-egl1 arm64 1.23.1-3 [5952 B]
+#6 7.059 Get:127 http://deb.debian.org/debian trixie/main arm64 libxcomposite1 arm64 1:0.4.6-1 [16.4 kB]
+#6 7.060 Get:128 http://deb.debian.org/debian trixie/main arm64 libxfixes3 arm64 1:6.0.0-2+b4 [20.5 kB]
+#6 7.060 Get:129 http://deb.debian.org/debian trixie/main arm64 libxcursor1 arm64 1:1.2.3-1 [39.3 kB]
+#6 7.063 Get:130 http://deb.debian.org/debian trixie/main arm64 libxdamage1 arm64 1:1.1.6-1+b2 [15.6 kB]
+#6 7.063 Get:131 http://deb.debian.org/debian trixie/main arm64 libxinerama1 arm64 2:1.1.4-3+b4 [16.0 kB]
+#6 7.079 Get:132 http://deb.debian.org/debian trixie/main arm64 xkb-data all 2.42-1 [790 kB]
+#6 7.101 Get:133 http://deb.debian.org/debian trixie/main arm64 libxkbcommon0 arm64 1.7.0-2 [106 kB]
+#6 7.105 Get:134 http://deb.debian.org/debian trixie/main arm64 libxrandr2 arm64 2:1.5.4-1+b3 [35.9 kB]
+#6 7.124 Get:135 http://deb.debian.org/debian trixie/main arm64 libgtk-3-common all 3.24.49-3 [4908 kB]
+#6 7.283 Get:136 http://deb.debian.org/debian trixie/main arm64 libgtk-3-0t64 arm64 3.24.49-3 [2565 kB]
+#6 7.372 Get:137 http://deb.debian.org/debian trixie/main arm64 x11-common all 1:7.7+24+deb13u1 [217 kB]
+#6 7.375 Get:138 http://deb.debian.org/debian trixie/main arm64 libice6 arm64 2:1.1.1-1 [62.1 kB]
+#6 7.377 Get:139 http://deb.debian.org/debian trixie/main arm64 libnspr4 arm64 2:4.36-1 [102 kB]
+#6 7.379 Get:140 http://deb.debian.org/debian trixie/main arm64 libnss3 arm64 2:3.110-1+deb13u4 [1293 kB]
+#6 7.595 Get:141 http://deb.debian.org/debian trixie/main arm64 pci.ids all 0.0~2025.06.09-1 [269 kB]
+#6 7.599 Get:142 http://deb.debian.org/debian trixie/main arm64 libpci3 arm64 1:3.13.0-2 [71.8 kB]
+#6 7.600 Get:143 http://deb.debian.org/debian trixie/main arm64 libsm6 arm64 2:1.2.6-1 [36.4 kB]
+#6 7.602 Get:144 http://deb.debian.org/debian trixie/main arm64 libunwind8 arm64 1.8.1-0.1 [55.2 kB]
+#6 7.635 Get:145 http://deb.debian.org/debian trixie/main arm64 libxt6t64 arm64 1:1.2.1-1.2+b2 [173 kB]
+#6 7.639 Get:146 http://deb.debian.org/debian trixie/main arm64 libxmu6 arm64 2:1.1.3-3+b4 [55.7 kB]
+#6 7.640 Get:147 http://deb.debian.org/debian trixie/main arm64 libxpm4 arm64 1:3.5.17-1+deb13u1 [52.9 kB]
+#6 7.658 Get:148 http://deb.debian.org/debian trixie/main arm64 libxaw7 arm64 2:1.0.16-1 [195 kB]
+#6 7.678 Get:149 http://deb.debian.org/debian trixie/main arm64 libxfont2 arm64 1:2.0.6-1+deb13u1 [125 kB]
+#6 7.679 Get:150 http://deb.debian.org/debian trixie/main arm64 libxkbfile1 arm64 1:1.1.0-1+b4 [72.4 kB]
+#6 7.680 Get:151 http://deb.debian.org/debian trixie/main arm64 libxtst6 arm64 2:1.2.5-1 [25.7 kB]
+#6 8.103 Get:152 http://deb.debian.org/debian trixie/main arm64 x11-xkb-utils arm64 7.7+9 [149 kB]
+#6 8.126 Get:153 http://deb.debian.org/debian-security trixie-security/main arm64 xserver-common all 2:21.1.16-1.3+deb13u4 [2410 kB]
+#6 8.174 Get:154 http://deb.debian.org/debian-security trixie-security/main arm64 xvfb arm64 2:21.1.16-1.3+deb13u4 [3123 kB]
+#6 8.204 Get:155 http://deb.debian.org/debian trixie/main arm64 libegl1 arm64 1.7.0-1+b2 [34.0 kB]
+#6 11.18 Preconfiguring packages ...
+#6 11.22 Fetched 106 MB in 4s (24.0 MB/s)
+#6 11.23 Selecting previously unselected package libsystemd-shared:arm64.
+#6 11.23 (Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 5649 files and directories currently installed.)
+#6 11.24 Preparing to unpack .../libsystemd-shared_257.13-1~deb13u1_arm64.deb ...
+#6 11.24 Unpacking libsystemd-shared:arm64 (257.13-1~deb13u1) ...
+#6 11.37 Selecting previously unselected package libapparmor1:arm64.
+#6 11.37 Preparing to unpack .../libapparmor1_4.1.0-1_arm64.deb ...
+#6 11.37 Unpacking libapparmor1:arm64 (4.1.0-1) ...
+#6 11.40 Setting up libsystemd-shared:arm64 (257.13-1~deb13u1) ...
+#6 11.42 Selecting previously unselected package systemd.
+#6 11.42 (Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 5662 files and directories currently installed.)
+#6 11.42 Preparing to unpack .../systemd_257.13-1~deb13u1_arm64.deb ...
+#6 11.43 Unpacking systemd (257.13-1~deb13u1) ...
+#6 11.60 Setting up libapparmor1:arm64 (4.1.0-1) ...
+#6 11.61 Setting up systemd (257.13-1~deb13u1) ...
+#6 11.64 Created symlink '/etc/systemd/system/getty.target.wants/getty@tty1.service' → '/usr/lib/systemd/system/getty@.service'.
+#6 11.65 Created symlink '/etc/systemd/system/multi-user.target.wants/remote-fs.target' → '/usr/lib/systemd/system/remote-fs.target'.
+#6 11.65 Created symlink '/etc/systemd/system/sysinit.target.wants/systemd-pstore.service' → '/usr/lib/systemd/system/systemd-pstore.service'.
+#6 11.65 Initializing machine ID from random generator.
+#6 11.67 Creating group 'systemd-journal' with GID 999.
+#6 11.67 Creating group 'systemd-network' with GID 998.
+#6 11.67 Creating user 'systemd-network' (systemd Network Management) with UID 998 and GID 998.
+#6 11.69 /usr/lib/tmpfiles.d/legacy.conf:14: Duplicate line for path "/run/lock", ignoring.
+#6 11.73 Selecting previously unselected package systemd-sysv.
+#6 11.73 (Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 6599 files and directories currently installed.)
+#6 11.73 Preparing to unpack .../000-systemd-sysv_257.13-1~deb13u1_arm64.deb ...
+#6 11.73 Unpacking systemd-sysv (257.13-1~deb13u1) ...
+#6 11.76 Selecting previously unselected package libdbus-1-3:arm64.
+#6 11.76 Preparing to unpack .../001-libdbus-1-3_1.16.2-2_arm64.deb ...
+#6 11.76 Unpacking libdbus-1-3:arm64 (1.16.2-2) ...
+#6 11.79 Selecting previously unselected package dbus-bin.
+#6 11.79 Preparing to unpack .../002-dbus-bin_1.16.2-2_arm64.deb ...
+#6 11.79 Unpacking dbus-bin (1.16.2-2) ...
+#6 11.81 Selecting previously unselected package dbus-session-bus-common.
+#6 11.81 Preparing to unpack .../003-dbus-session-bus-common_1.16.2-2_all.deb ...
+#6 11.81 Unpacking dbus-session-bus-common (1.16.2-2) ...
+#6 11.84 Selecting previously unselected package libexpat1:arm64.
+#6 11.84 Preparing to unpack .../004-libexpat1_2.8.3-1~deb13u1_arm64.deb ...
+#6 11.84 Unpacking libexpat1:arm64 (2.8.3-1~deb13u1) ...
+#6 11.86 Selecting previously unselected package dbus-daemon.
+#6 11.86 Preparing to unpack .../005-dbus-daemon_1.16.2-2_arm64.deb ...
+#6 11.87 Unpacking dbus-daemon (1.16.2-2) ...
+#6 11.89 Selecting previously unselected package dbus-system-bus-common.
+#6 11.89 Preparing to unpack .../006-dbus-system-bus-common_1.16.2-2_all.deb ...
+#6 11.90 Unpacking dbus-system-bus-common (1.16.2-2) ...
+#6 11.92 Selecting previously unselected package dbus.
+#6 11.92 Preparing to unpack .../007-dbus_1.16.2-2_arm64.deb ...
+#6 11.92 Unpacking dbus (1.16.2-2) ...
+#6 11.95 Selecting previously unselected package libproc2-0:arm64.
+#6 11.95 Preparing to unpack .../008-libproc2-0_2%3a4.0.4-9_arm64.deb ...
+#6 11.95 Unpacking libproc2-0:arm64 (2:4.0.4-9) ...
+#6 11.97 Selecting previously unselected package procps.
+#6 11.97 Preparing to unpack .../009-procps_2%3a4.0.4-9_arm64.deb ...
+#6 11.98 Unpacking procps (2:4.0.4-9) ...
+#6 12.04 Selecting previously unselected package libpam-systemd:arm64.
+#6 12.04 Preparing to unpack .../010-libpam-systemd_257.13-1~deb13u1_arm64.deb ...
+#6 12.04 Unpacking libpam-systemd:arm64 (257.13-1~deb13u1) ...
+#6 12.07 Selecting previously unselected package libgdk-pixbuf2.0-common.
+#6 12.07 Preparing to unpack .../011-libgdk-pixbuf2.0-common_2.42.12+dfsg-4+deb13u1_all.deb ...
+#6 12.07 Unpacking libgdk-pixbuf2.0-common (2.42.12+dfsg-4+deb13u1) ...
+#6 12.12 Selecting previously unselected package libatomic1:arm64.
+#6 12.12 Preparing to unpack .../012-libatomic1_14.2.0-19_arm64.deb ...
+#6 12.12 Unpacking libatomic1:arm64 (14.2.0-19) ...
+#6 12.14 Selecting previously unselected package libglib2.0-0t64:arm64.
+#6 12.15 Preparing to unpack .../013-libglib2.0-0t64_2.84.4-3~deb13u5_arm64.deb ...
+#6 12.15 Unpacking libglib2.0-0t64:arm64 (2.84.4-3~deb13u5) ...
+#6 12.23 Selecting previously unselected package libxml2:arm64.
+#6 12.23 Preparing to unpack .../014-libxml2_2.12.7+dfsg+really2.9.14-2.1+deb13u3_arm64.deb ...
+#6 12.24 Unpacking libxml2:arm64 (2.12.7+dfsg+really2.9.14-2.1+deb13u3) ...
+#6 12.28 Selecting previously unselected package shared-mime-info.
+#6 12.28 Preparing to unpack .../015-shared-mime-info_2.4-5+b2_arm64.deb ...
+#6 12.28 Unpacking shared-mime-info (2.4-5+b2) ...
+#6 12.34 Selecting previously unselected package libjpeg62-turbo:arm64.
+#6 12.34 Preparing to unpack .../016-libjpeg62-turbo_1%3a2.1.5-4_arm64.deb ...
+#6 12.34 Unpacking libjpeg62-turbo:arm64 (1:2.1.5-4) ...
+#6 12.36 Selecting previously unselected package libpng16-16t64:arm64.
+#6 12.37 Preparing to unpack .../017-libpng16-16t64_1.6.48-1+deb13u5_arm64.deb ...
+#6 12.37 Unpacking libpng16-16t64:arm64 (1.6.48-1+deb13u5) ...
+#6 12.40 Selecting previously unselected package libdeflate0:arm64.
+#6 12.40 Preparing to unpack .../018-libdeflate0_1.23-2_arm64.deb ...
+#6 12.40 Unpacking libdeflate0:arm64 (1.23-2) ...
+#6 12.42 Selecting previously unselected package libjbig0:arm64.
+#6 12.42 Preparing to unpack .../019-libjbig0_2.1-6.1+b2_arm64.deb ...
+#6 12.42 Unpacking libjbig0:arm64 (2.1-6.1+b2) ...
+#6 12.44 Selecting previously unselected package liblerc4:arm64.
+#6 12.44 Preparing to unpack .../020-liblerc4_4.0.0+ds-5_arm64.deb ...
+#6 12.45 Unpacking liblerc4:arm64 (4.0.0+ds-5) ...
+#6 12.47 Selecting previously unselected package libsharpyuv0:arm64.
+#6 12.47 Preparing to unpack .../021-libsharpyuv0_1.5.0-0.1_arm64.deb ...
+#6 12.47 Unpacking libsharpyuv0:arm64 (1.5.0-0.1) ...
+#6 12.49 Selecting previously unselected package libwebp7:arm64.
+#6 12.49 Preparing to unpack .../022-libwebp7_1.5.0-0.1_arm64.deb ...
+#6 12.50 Unpacking libwebp7:arm64 (1.5.0-0.1) ...
+#6 12.52 Selecting previously unselected package libtiff6:arm64.
+#6 12.52 Preparing to unpack .../023-libtiff6_4.7.0-3+deb13u3_arm64.deb ...
+#6 12.53 Unpacking libtiff6:arm64 (4.7.0-3+deb13u3) ...
+#6 12.56 Selecting previously unselected package libgdk-pixbuf-2.0-0:arm64.
+#6 12.56 Preparing to unpack .../024-libgdk-pixbuf-2.0-0_2.42.12+dfsg-4+deb13u1_arm64.deb ...
+#6 12.56 Unpacking libgdk-pixbuf-2.0-0:arm64 (2.42.12+dfsg-4+deb13u1) ...
+#6 12.58 Selecting previously unselected package gtk-update-icon-cache.
+#6 12.58 Preparing to unpack .../025-gtk-update-icon-cache_4.18.6+ds-2_arm64.deb ...
+#6 12.59 No diversion 'diversion of /usr/sbin/update-icon-caches to /usr/sbin/update-icon-caches.gtk2 by libgtk-3-bin', none removed.
+#6 12.59 No diversion 'diversion of /usr/share/man/man8/update-icon-caches.8.gz to /usr/share/man/man8/update-icon-caches.gtk2.8.gz by libgtk-3-bin', none removed.
+#6 12.59 Unpacking gtk-update-icon-cache (4.18.6+ds-2) ...
+#6 12.61 Selecting previously unselected package hicolor-icon-theme.
+#6 12.61 Preparing to unpack .../026-hicolor-icon-theme_0.18-2_all.deb ...
+#6 12.61 Unpacking hicolor-icon-theme (0.18-2) ...
+#6 12.72 Selecting previously unselected package adwaita-icon-theme.
+#6 12.72 Preparing to unpack .../027-adwaita-icon-theme_48.1-1_all.deb ...
+#6 12.72 Unpacking adwaita-icon-theme (48.1-1) ...
+#6 12.83 Selecting previously unselected package at-spi2-common.
+#6 12.83 Preparing to unpack .../028-at-spi2-common_2.56.2-1+deb13u2_all.deb ...
+#6 12.84 Unpacking at-spi2-common (2.56.2-1+deb13u2) ...
+#6 12.86 Selecting previously unselected package dbus-user-session.
+#6 12.87 Preparing to unpack .../029-dbus-user-session_1.16.2-2_arm64.deb ...
+#6 12.87 Unpacking dbus-user-session (1.16.2-2) ...
+#6 12.89 Selecting previously unselected package libdconf1:arm64.
+#6 12.90 Preparing to unpack .../030-libdconf1_0.40.0-5_arm64.deb ...
+#6 12.90 Unpacking libdconf1:arm64 (0.40.0-5) ...
+#6 12.91 Selecting previously unselected package dconf-service.
+#6 12.92 Preparing to unpack .../031-dconf-service_0.40.0-5_arm64.deb ...
+#6 12.92 Unpacking dconf-service (0.40.0-5) ...
+#6 13.03 Selecting previously unselected package dconf-gsettings-backend:arm64.
+#6 13.03 Preparing to unpack .../032-dconf-gsettings-backend_0.40.0-5_arm64.deb ...
+#6 13.05 Unpacking dconf-gsettings-backend:arm64 (0.40.0-5) ...
+#6 13.09 Selecting previously unselected package libbrotli1:arm64.
+#6 13.09 Preparing to unpack .../033-libbrotli1_1.1.0-2+b7_arm64.deb ...
+#6 13.09 Unpacking libbrotli1:arm64 (1.1.0-2+b7) ...
+#6 13.13 Selecting previously unselected package libfreetype6:arm64.
+#6 13.13 Preparing to unpack .../034-libfreetype6_2.13.3+dfsg-1+deb13u1_arm64.deb ...
+#6 13.13 Unpacking libfreetype6:arm64 (2.13.3+dfsg-1+deb13u1) ...
+#6 13.17 Selecting previously unselected package fonts-dejavu-mono.
+#6 13.17 Preparing to unpack .../035-fonts-dejavu-mono_2.37-8_all.deb ...
+#6 13.17 Unpacking fonts-dejavu-mono (2.37-8) ...
+#6 13.21 Selecting previously unselected package fonts-dejavu-core.
+#6 13.22 Preparing to unpack .../036-fonts-dejavu-core_2.37-8_all.deb ...
+#6 13.22 Unpacking fonts-dejavu-core (2.37-8) ...
+#6 13.30 Selecting previously unselected package fonts-liberation.
+#6 13.30 Preparing to unpack .../037-fonts-liberation_1%3a2.1.5-3_all.deb ...
+#6 13.31 Unpacking fonts-liberation (1:2.1.5-3) ...
+#6 13.42 Selecting previously unselected package fonts-noto-mono.
+#6 13.42 Preparing to unpack .../038-fonts-noto-mono_20201225-2_all.deb ...
+#6 13.42 Unpacking fonts-noto-mono (20201225-2) ...
+#6 13.46 Selecting previously unselected package fonts-noto-core.
+#6 13.46 Preparing to unpack .../039-fonts-noto-core_20201225-2_all.deb ...
+#6 13.46 Unpacking fonts-noto-core (20201225-2) ...
+#6 14.00 Selecting previously unselected package fontconfig-config.
+#6 14.01 Preparing to unpack .../040-fontconfig-config_2.15.0-2.3_arm64.deb ...
+#6 14.01 Unpacking fontconfig-config (2.15.0-2.3) ...
+#6 14.04 Selecting previously unselected package libfontconfig1:arm64.
+#6 14.04 Preparing to unpack .../041-libfontconfig1_2.15.0-2.3_arm64.deb ...
+#6 14.04 Unpacking libfontconfig1:arm64 (2.15.0-2.3) ...
+#6 14.06 Selecting previously unselected package fontconfig.
+#6 14.06 Preparing to unpack .../042-fontconfig_2.15.0-2.3_arm64.deb ...
+#6 14.07 Unpacking fontconfig (2.15.0-2.3) ...
+#6 14.10 Selecting previously unselected package fonts-noto-color-emoji.
+#6 14.10 Preparing to unpack .../043-fonts-noto-color-emoji_2.051-0+deb13u1_all.deb ...
+#6 14.10 Unpacking fonts-noto-color-emoji (2.051-0+deb13u1) ...
+#6 14.68 Selecting previously unselected package libasound2-data.
+#6 14.68 Preparing to unpack .../044-libasound2-data_1.2.14-1+deb13u1_all.deb ...
+#6 14.69 Unpacking libasound2-data (1.2.14-1+deb13u1) ...
+#6 14.72 Selecting previously unselected package libasound2t64:arm64.
+#6 14.72 Preparing to unpack .../045-libasound2t64_1.2.14-1+deb13u1_arm64.deb ...
+#6 14.72 Unpacking libasound2t64:arm64 (1.2.14-1+deb13u1) ...
+#6 14.76 Selecting previously unselected package libatk1.0-0t64:arm64.
+#6 14.76 Preparing to unpack .../046-libatk1.0-0t64_2.56.2-1+deb13u2_arm64.deb ...
+#6 14.76 Unpacking libatk1.0-0t64:arm64 (2.56.2-1+deb13u2) ...
+#6 14.79 Selecting previously unselected package libxau6:arm64.
+#6 14.79 Preparing to unpack .../047-libxau6_1%3a1.0.11-1_arm64.deb ...
+#6 14.79 Unpacking libxau6:arm64 (1:1.0.11-1) ...
+#6 14.81 Selecting previously unselected package libxdmcp6:arm64.
+#6 14.82 Preparing to unpack .../048-libxdmcp6_1%3a1.1.5-1_arm64.deb ...
+#6 14.82 Unpacking libxdmcp6:arm64 (1:1.1.5-1) ...
+#6 14.84 Selecting previously unselected package libxcb1:arm64.
+#6 14.84 Preparing to unpack .../049-libxcb1_1.17.0-2+b1_arm64.deb ...
+#6 14.85 Unpacking libxcb1:arm64 (1.17.0-2+b1) ...
+#6 14.87 Selecting previously unselected package libx11-data.
+#6 14.87 Preparing to unpack .../050-libx11-data_2%3a1.8.12-1_all.deb ...
+#6 14.87 Unpacking libx11-data (2:1.8.12-1) ...
+#6 14.92 Selecting previously unselected package libx11-6:arm64.
+#6 14.93 Preparing to unpack .../051-libx11-6_2%3a1.8.12-1_arm64.deb ...
+#6 15.07 Unpacking libx11-6:arm64 (2:1.8.12-1) ...
+#6 15.14 Selecting previously unselected package libxext6:arm64.
+#6 15.15 Preparing to unpack .../052-libxext6_2%3a1.3.4-1+b3_arm64.deb ...
+#6 15.15 Unpacking libxext6:arm64 (2:1.3.4-1+b3) ...
+#6 15.17 Selecting previously unselected package libxi6:arm64.
+#6 15.17 Preparing to unpack .../053-libxi6_2%3a1.8.2-1_arm64.deb ...
+#6 15.17 Unpacking libxi6:arm64 (2:1.8.2-1) ...
+#6 15.21 Selecting previously unselected package libatspi2.0-0t64:arm64.
+#6 15.21 Preparing to unpack .../054-libatspi2.0-0t64_2.56.2-1+deb13u2_arm64.deb ...
+#6 15.21 Unpacking libatspi2.0-0t64:arm64 (2.56.2-1+deb13u2) ...
+#6 15.24 Selecting previously unselected package libatk-bridge2.0-0t64:arm64.
+#6 15.24 Preparing to unpack .../055-libatk-bridge2.0-0t64_2.56.2-1+deb13u2_arm64.deb ...
+#6 15.24 Unpacking libatk-bridge2.0-0t64:arm64 (2.56.2-1+deb13u2) ...
+#6 15.27 Selecting previously unselected package libavahi-common-data:arm64.
+#6 15.27 Preparing to unpack .../056-libavahi-common-data_0.8-16_arm64.deb ...
+#6 15.27 Unpacking libavahi-common-data:arm64 (0.8-16) ...
+#6 15.37 Selecting previously unselected package libavahi-common3:arm64.
+#6 15.37 Preparing to unpack .../057-libavahi-common3_0.8-16_arm64.deb ...
+#6 15.38 Unpacking libavahi-common3:arm64 (0.8-16) ...
+#6 15.41 Selecting previously unselected package libavahi-client3:arm64.
+#6 15.41 Preparing to unpack .../058-libavahi-client3_0.8-16_arm64.deb ...
+#6 15.42 Unpacking libavahi-client3:arm64 (0.8-16) ...
+#6 15.45 Selecting previously unselected package libpixman-1-0:arm64.
+#6 15.45 Preparing to unpack .../059-libpixman-1-0_0.44.0-3_arm64.deb ...
+#6 15.45 Unpacking libpixman-1-0:arm64 (0.44.0-3) ...
+#6 15.49 Selecting previously unselected package libxcb-render0:arm64.
+#6 15.49 Preparing to unpack .../060-libxcb-render0_1.17.0-2+b1_arm64.deb ...
+#6 15.49 Unpacking libxcb-render0:arm64 (1.17.0-2+b1) ...
+#6 15.53 Selecting previously unselected package libxcb-shm0:arm64.
+#6 15.53 Preparing to unpack .../061-libxcb-shm0_1.17.0-2+b1_arm64.deb ...
+#6 15.54 Unpacking libxcb-shm0:arm64 (1.17.0-2+b1) ...
+#6 15.56 Selecting previously unselected package libxrender1:arm64.
+#6 15.56 Preparing to unpack .../062-libxrender1_1%3a0.9.12-1_arm64.deb ...
+#6 15.57 Unpacking libxrender1:arm64 (1:0.9.12-1) ...
+#6 15.59 Selecting previously unselected package libcairo2:arm64.
+#6 15.59 Preparing to unpack .../063-libcairo2_1.18.4-1+b1_arm64.deb ...
+#6 15.60 Unpacking libcairo2:arm64 (1.18.4-1+b1) ...
+#6 15.66 Selecting previously unselected package libcairo-gobject2:arm64.
+#6 15.66 Preparing to unpack .../064-libcairo-gobject2_1.18.4-1+b1_arm64.deb ...
+#6 15.66 Unpacking libcairo-gobject2:arm64 (1.18.4-1+b1) ...
+#6 15.70 Selecting previously unselected package libcloudproviders0:arm64.
+#6 15.70 Preparing to unpack .../065-libcloudproviders0_0.3.6-2_arm64.deb ...
+#6 15.70 Unpacking libcloudproviders0:arm64 (0.3.6-2) ...
+#6 15.74 Selecting previously unselected package liblcms2-2:arm64.
+#6 15.74 Preparing to unpack .../066-liblcms2-2_2.16-2+deb13u2_arm64.deb ...
+#6 15.75 Unpacking liblcms2-2:arm64 (2.16-2+deb13u2) ...
+#6 15.78 Selecting previously unselected package libcolord2:arm64.
+#6 15.79 Preparing to unpack .../067-libcolord2_1.4.7-3_arm64.deb ...
+#6 15.79 Unpacking libcolord2:arm64 (1.4.7-3) ...
+#6 15.83 Selecting previously unselected package libcom-err2:arm64.
+#6 15.83 Preparing to unpack .../068-libcom-err2_1.47.2-3+b12_arm64.deb ...
+#6 15.83 Unpacking libcom-err2:arm64 (1.47.2-3+b12) ...
+#6 15.86 Selecting previously unselected package libunistring5:arm64.
+#6 15.86 Preparing to unpack .../069-libunistring5_1.3-2_arm64.deb ...
+#6 15.86 Unpacking libunistring5:arm64 (1.3-2) ...
+#6 15.93 Selecting previously unselected package libidn2-0:arm64.
+#6 15.93 Preparing to unpack .../070-libidn2-0_2.3.8-2_arm64.deb ...
+#6 15.94 Unpacking libidn2-0:arm64 (2.3.8-2) ...
+#6 15.98 Selecting previously unselected package libp11-kit0:arm64.
+#6 15.98 Preparing to unpack .../071-libp11-kit0_0.25.5-3_arm64.deb ...
+#6 15.98 Unpacking libp11-kit0:arm64 (0.25.5-3) ...
+#6 16.03 Selecting previously unselected package libtasn1-6:arm64.
+#6 16.03 Preparing to unpack .../072-libtasn1-6_4.20.0-2+deb13u1_arm64.deb ...
+#6 16.04 Unpacking libtasn1-6:arm64 (4.20.0-2+deb13u1) ...
+#6 16.06 Selecting previously unselected package libgnutls30t64:arm64.
+#6 16.06 Preparing to unpack .../073-libgnutls30t64_3.8.9-3+deb13u4_arm64.deb ...
+#6 16.07 Unpacking libgnutls30t64:arm64 (3.8.9-3+deb13u4) ...
+#6 16.16 Selecting previously unselected package libkrb5support0:arm64.
+#6 16.17 Preparing to unpack .../074-libkrb5support0_1.21.3-5+deb13u1_arm64.deb ...
+#6 16.17 Unpacking libkrb5support0:arm64 (1.21.3-5+deb13u1) ...
+#6 16.19 Selecting previously unselected package libk5crypto3:arm64.
+#6 16.19 Preparing to unpack .../075-libk5crypto3_1.21.3-5+deb13u1_arm64.deb ...
+#6 16.19 Unpacking libk5crypto3:arm64 (1.21.3-5+deb13u1) ...
+#6 16.22 Selecting previously unselected package libkeyutils1:arm64.
+#6 16.22 Preparing to unpack .../076-libkeyutils1_1.6.3-6_arm64.deb ...
+#6 16.23 Unpacking libkeyutils1:arm64 (1.6.3-6) ...
+#6 16.25 Selecting previously unselected package libkrb5-3:arm64.
+#6 16.25 Preparing to unpack .../077-libkrb5-3_1.21.3-5+deb13u1_arm64.deb ...
+#6 16.25 Unpacking libkrb5-3:arm64 (1.21.3-5+deb13u1) ...
+#6 16.30 Selecting previously unselected package libgssapi-krb5-2:arm64.
+#6 16.30 Preparing to unpack .../078-libgssapi-krb5-2_1.21.3-5+deb13u1_arm64.deb ...
+#6 16.30 Unpacking libgssapi-krb5-2:arm64 (1.21.3-5+deb13u1) ...
+#6 16.33 Selecting previously unselected package libcups2t64:arm64.
+#6 16.34 Preparing to unpack .../079-libcups2t64_2.4.10-3+deb13u2_arm64.deb ...
+#6 16.34 Unpacking libcups2t64:arm64 (2.4.10-3+deb13u2) ...
+#6 16.37 Selecting previously unselected package libdatrie1:arm64.
+#6 16.37 Preparing to unpack .../080-libdatrie1_0.2.13-3+b1_arm64.deb ...
+#6 16.37 Unpacking libdatrie1:arm64 (0.2.13-3+b1) ...
+#6 16.40 Selecting previously unselected package libdbus-glib-1-2:arm64.
+#6 16.40 Preparing to unpack .../081-libdbus-glib-1-2_0.114-1_arm64.deb ...
+#6 16.40 Unpacking libdbus-glib-1-2:arm64 (0.114-1) ...
+#6 16.42 Selecting previously unselected package libdrm-common.
+#6 16.42 Preparing to unpack .../082-libdrm-common_2.4.124-2_all.deb ...
+#6 16.42 Unpacking libdrm-common (2.4.124-2) ...
+#6 16.44 Selecting previously unselected package libdrm2:arm64.
+#6 16.44 Preparing to unpack .../083-libdrm2_2.4.124-2_arm64.deb ...
+#6 16.44 Unpacking libdrm2:arm64 (2.4.124-2) ...
+#6 16.47 Selecting previously unselected package libdrm-amdgpu1:arm64.
+#6 16.47 Preparing to unpack .../084-libdrm-amdgpu1_2.4.124-2_arm64.deb ...
+#6 16.47 Unpacking libdrm-amdgpu1:arm64 (2.4.124-2) ...
+#6 16.50 Selecting previously unselected package libedit2:arm64.
+#6 16.50 Preparing to unpack .../085-libedit2_3.1-20250104-1_arm64.deb ...
+#6 16.50 Unpacking libedit2:arm64 (3.1-20250104-1) ...
+#6 16.53 Selecting previously unselected package libwayland-server0:arm64.
+#6 16.53 Preparing to unpack .../086-libwayland-server0_1.23.1-3_arm64.deb ...
+#6 16.54 Unpacking libwayland-server0:arm64 (1.23.1-3) ...
+#6 16.55 Selecting previously unselected package libelf1t64:arm64.
+#6 16.56 Preparing to unpack .../087-libelf1t64_0.192-4_arm64.deb ...
+#6 16.56 Unpacking libelf1t64:arm64 (0.192-4) ...
+#6 16.60 Selecting previously unselected package libz3-4:arm64.
+#6 16.60 Preparing to unpack .../088-libz3-4_4.13.3-1_arm64.deb ...
+#6 16.61 Unpacking libz3-4:arm64 (4.13.3-1) ...
+#6 17.06 Selecting previously unselected package libllvm19:arm64.
+#6 17.06 Preparing to unpack .../089-libllvm19_1%3a19.1.7-3+b1_arm64.deb ...
+#6 17.07 Unpacking libllvm19:arm64 (1:19.1.7-3+b1) ...
+#6 18.16 Selecting previously unselected package libsensors-config.
+#6 18.16 Preparing to unpack .../090-libsensors-config_1%3a3.6.2-2_all.deb ...
+#6 18.17 Unpacking libsensors-config (1:3.6.2-2) ...
+#6 18.19 Selecting previously unselected package libsensors5:arm64.
+#6 18.19 Preparing to unpack .../091-libsensors5_1%3a3.6.2-2_arm64.deb ...
+#6 18.19 Unpacking libsensors5:arm64 (1:3.6.2-2) ...
+#6 18.21 Selecting previously unselected package libx11-xcb1:arm64.
+#6 18.21 Preparing to unpack .../092-libx11-xcb1_2%3a1.8.12-1_arm64.deb ...
+#6 18.21 Unpacking libx11-xcb1:arm64 (2:1.8.12-1) ...
+#6 18.24 Selecting previously unselected package libxcb-dri3-0:arm64.
+#6 18.24 Preparing to unpack .../093-libxcb-dri3-0_1.17.0-2+b1_arm64.deb ...
+#6 18.24 Unpacking libxcb-dri3-0:arm64 (1.17.0-2+b1) ...
+#6 18.27 Selecting previously unselected package libxcb-present0:arm64.
+#6 18.27 Preparing to unpack .../094-libxcb-present0_1.17.0-2+b1_arm64.deb ...
+#6 18.27 Unpacking libxcb-present0:arm64 (1.17.0-2+b1) ...
+#6 18.29 Selecting previously unselected package libxcb-randr0:arm64.
+#6 18.29 Preparing to unpack .../095-libxcb-randr0_1.17.0-2+b1_arm64.deb ...
+#6 18.29 Unpacking libxcb-randr0:arm64 (1.17.0-2+b1) ...
+#6 18.32 Selecting previously unselected package libxcb-sync1:arm64.
+#6 18.32 Preparing to unpack .../096-libxcb-sync1_1.17.0-2+b1_arm64.deb ...
+#6 18.32 Unpacking libxcb-sync1:arm64 (1.17.0-2+b1) ...
+#6 18.34 Selecting previously unselected package libxcb-xfixes0:arm64.
+#6 18.35 Preparing to unpack .../097-libxcb-xfixes0_1.17.0-2+b1_arm64.deb ...
+#6 18.35 Unpacking libxcb-xfixes0:arm64 (1.17.0-2+b1) ...
+#6 18.36 Selecting previously unselected package libxshmfence1:arm64.
+#6 18.36 Preparing to unpack .../098-libxshmfence1_1.3.3-1_arm64.deb ...
+#6 18.37 Unpacking libxshmfence1:arm64 (1.3.3-1) ...
+#6 18.38 Selecting previously unselected package mesa-libgallium:arm64.
+#6 18.38 Preparing to unpack .../099-mesa-libgallium_25.0.7-2+deb13u1_arm64.deb ...
+#6 18.38 Unpacking mesa-libgallium:arm64 (25.0.7-2+deb13u1) ...
+#6 18.82 Selecting previously unselected package libgbm1:arm64.
+#6 18.82 Preparing to unpack .../100-libgbm1_25.0.7-2+deb13u1_arm64.deb ...
+#6 18.82 Unpacking libgbm1:arm64 (25.0.7-2+deb13u1) ...
+#6 18.83 Selecting previously unselected package libwayland-client0:arm64.
+#6 18.83 Preparing to unpack .../101-libwayland-client0_1.23.1-3_arm64.deb ...
+#6 18.84 Unpacking libwayland-client0:arm64 (1.23.1-3) ...
+#6 18.85 Selecting previously unselected package libegl-mesa0:arm64.
+#6 18.85 Preparing to unpack .../102-libegl-mesa0_25.0.7-2+deb13u1_arm64.deb ...
+#6 18.86 Unpacking libegl-mesa0:arm64 (25.0.7-2+deb13u1) ...
+#6 18.88 Selecting previously unselected package libepoxy0:arm64.
+#6 18.88 Preparing to unpack .../103-libepoxy0_1.5.10-2_arm64.deb ...
+#6 18.89 Unpacking libepoxy0:arm64 (1.5.10-2) ...
+#6 18.91 Selecting previously unselected package libfontenc1:arm64.
+#6 18.92 Preparing to unpack .../104-libfontenc1_1%3a1.1.8-1+b2_arm64.deb ...
+#6 18.92 Unpacking libfontenc1:arm64 (1:1.1.8-1+b2) ...
+#6 18.94 Selecting previously unselected package libfribidi0:arm64.
+#6 18.94 Preparing to unpack .../105-libfribidi0_1.0.16-1_arm64.deb ...
+#6 18.94 Unpacking libfribidi0:arm64 (1.0.16-1) ...
+#6 18.96 Selecting previously unselected package libglvnd0:arm64.
+#6 18.96 Preparing to unpack .../106-libglvnd0_1.7.0-1+b2_arm64.deb ...
+#6 18.97 Unpacking libglvnd0:arm64 (1.7.0-1+b2) ...
+#6 18.99 Selecting previously unselected package libxcb-glx0:arm64.
+#6 18.99 Preparing to unpack .../107-libxcb-glx0_1.17.0-2+b1_arm64.deb ...
+#6 18.99 Unpacking libxcb-glx0:arm64 (1.17.0-2+b1) ...
+#6 19.04 Selecting previously unselected package libxxf86vm1:arm64.
+#6 19.04 Preparing to unpack .../108-libxxf86vm1_1%3a1.1.4-1+b4_arm64.deb ...
+#6 19.04 Unpacking libxxf86vm1:arm64 (1:1.1.4-1+b4) ...
+#6 19.11 Selecting previously unselected package libvulkan1:arm64.
+#6 19.11 Preparing to unpack .../109-libvulkan1_1.4.309.0-1_arm64.deb ...
+#6 19.11 Unpacking libvulkan1:arm64 (1.4.309.0-1) ...
+#6 19.15 Selecting previously unselected package libgl1-mesa-dri:arm64.
+#6 19.15 Preparing to unpack .../110-libgl1-mesa-dri_25.0.7-2+deb13u1_arm64.deb ...
+#6 19.16 Unpacking libgl1-mesa-dri:arm64 (25.0.7-2+deb13u1) ...
+#6 19.18 Selecting previously unselected package libglx-mesa0:arm64.
+#6 19.18 Preparing to unpack .../111-libglx-mesa0_25.0.7-2+deb13u1_arm64.deb ...
+#6 19.19 Unpacking libglx-mesa0:arm64 (25.0.7-2+deb13u1) ...
+#6 19.21 Selecting previously unselected package libglx0:arm64.
+#6 19.22 Preparing to unpack .../112-libglx0_1.7.0-1+b2_arm64.deb ...
+#6 19.22 Unpacking libglx0:arm64 (1.7.0-1+b2) ...
+#6 19.24 Selecting previously unselected package libgl1:arm64.
+#6 19.24 Preparing to unpack .../113-libgl1_1.7.0-1+b2_arm64.deb ...
+#6 19.25 Unpacking libgl1:arm64 (1.7.0-1+b2) ...
+#6 19.27 Selecting previously unselected package libgraphite2-3:arm64.
+#6 19.27 Preparing to unpack .../114-libgraphite2-3_1.3.14-2+deb13u1_arm64.deb ...
+#6 19.27 Unpacking libgraphite2-3:arm64 (1.3.14-2+deb13u1) ...
+#6 19.29 Selecting previously unselected package libharfbuzz0b:arm64.
+#6 19.29 Preparing to unpack .../115-libharfbuzz0b_10.2.0-1+deb13u1_arm64.deb ...
+#6 19.30 Unpacking libharfbuzz0b:arm64 (10.2.0-1+deb13u1) ...
+#6 19.35 Selecting previously unselected package libthai-data.
+#6 19.35 Preparing to unpack .../116-libthai-data_0.1.29-2_all.deb ...
+#6 19.35 Unpacking libthai-data (0.1.29-2) ...
+#6 19.38 Selecting previously unselected package libthai0:arm64.
+#6 19.38 Preparing to unpack .../117-libthai0_0.1.29-2+b1_arm64.deb ...
+#6 19.38 Unpacking libthai0:arm64 (0.1.29-2+b1) ...
+#6 19.41 Selecting previously unselected package libpango-1.0-0:arm64.
+#6 19.41 Preparing to unpack .../118-libpango-1.0-0_1.56.3-1_arm64.deb ...
+#6 19.41 Unpacking libpango-1.0-0:arm64 (1.56.3-1) ...
+#6 19.45 Selecting previously unselected package libpangoft2-1.0-0:arm64.
+#6 19.46 Preparing to unpack .../119-libpangoft2-1.0-0_1.56.3-1_arm64.deb ...
+#6 19.46 Unpacking libpangoft2-1.0-0:arm64 (1.56.3-1) ...
+#6 19.48 Selecting previously unselected package libpangocairo-1.0-0:arm64.
+#6 19.48 Preparing to unpack .../120-libpangocairo-1.0-0_1.56.3-1_arm64.deb ...
+#6 19.48 Unpacking libpangocairo-1.0-0:arm64 (1.56.3-1) ...
+#6 19.50 Selecting previously unselected package libwayland-cursor0:arm64.
+#6 19.50 Preparing to unpack .../121-libwayland-cursor0_1.23.1-3_arm64.deb ...
+#6 19.50 Unpacking libwayland-cursor0:arm64 (1.23.1-3) ...
+#6 19.52 Selecting previously unselected package libwayland-egl1:arm64.
+#6 19.53 Preparing to unpack .../122-libwayland-egl1_1.23.1-3_arm64.deb ...
+#6 19.53 Unpacking libwayland-egl1:arm64 (1.23.1-3) ...
+#6 19.55 Selecting previously unselected package libxcomposite1:arm64.
+#6 19.55 Preparing to unpack .../123-libxcomposite1_1%3a0.4.6-1_arm64.deb ...
+#6 19.55 Unpacking libxcomposite1:arm64 (1:0.4.6-1) ...
+#6 19.58 Selecting previously unselected package libxfixes3:arm64.
+#6 19.58 Preparing to unpack .../124-libxfixes3_1%3a6.0.0-2+b4_arm64.deb ...
+#6 19.58 Unpacking libxfixes3:arm64 (1:6.0.0-2+b4) ...
+#6 19.60 Selecting previously unselected package libxcursor1:arm64.
+#6 19.60 Preparing to unpack .../125-libxcursor1_1%3a1.2.3-1_arm64.deb ...
+#6 19.61 Unpacking libxcursor1:arm64 (1:1.2.3-1) ...
+#6 19.63 Selecting previously unselected package libxdamage1:arm64.
+#6 19.63 Preparing to unpack .../126-libxdamage1_1%3a1.1.6-1+b2_arm64.deb ...
+#6 19.63 Unpacking libxdamage1:arm64 (1:1.1.6-1+b2) ...
+#6 19.65 Selecting previously unselected package libxinerama1:arm64.
+#6 19.66 Preparing to unpack .../127-libxinerama1_2%3a1.1.4-3+b4_arm64.deb ...
+#6 19.66 Unpacking libxinerama1:arm64 (2:1.1.4-3+b4) ...
+#6 19.69 Selecting previously unselected package xkb-data.
+#6 19.70 Preparing to unpack .../128-xkb-data_2.42-1_all.deb ...
+#6 19.70 Unpacking xkb-data (2.42-1) ...
+#6 19.78 Selecting previously unselected package libxkbcommon0:arm64.
+#6 19.78 Preparing to unpack .../129-libxkbcommon0_1.7.0-2_arm64.deb ...
+#6 19.78 Unpacking libxkbcommon0:arm64 (1.7.0-2) ...
+#6 19.80 Selecting previously unselected package libxrandr2:arm64.
+#6 19.81 Preparing to unpack .../130-libxrandr2_2%3a1.5.4-1+b3_arm64.deb ...
+#6 19.81 Unpacking libxrandr2:arm64 (2:1.5.4-1+b3) ...
+#6 19.83 Selecting previously unselected package libgtk-3-common.
+#6 19.83 Preparing to unpack .../131-libgtk-3-common_3.24.49-3_all.deb ...
+#6 19.84 Unpacking libgtk-3-common (3.24.49-3) ...
+#6 20.11 Selecting previously unselected package libgtk-3-0t64:arm64.
+#6 20.12 Preparing to unpack .../132-libgtk-3-0t64_3.24.49-3_arm64.deb ...
+#6 20.12 Unpacking libgtk-3-0t64:arm64 (3.24.49-3) ...
+#6 20.27 Selecting previously unselected package x11-common.
+#6 20.27 Preparing to unpack .../133-x11-common_1%3a7.7+24+deb13u1_all.deb ...
+#6 20.27 Unpacking x11-common (1:7.7+24+deb13u1) ...
+#6 20.29 Selecting previously unselected package libice6:arm64.
+#6 20.29 Preparing to unpack .../134-libice6_2%3a1.1.1-1_arm64.deb ...
+#6 20.29 Unpacking libice6:arm64 (2:1.1.1-1) ...
+#6 20.31 Selecting previously unselected package libnspr4:arm64.
+#6 20.32 Preparing to unpack .../135-libnspr4_2%3a4.36-1_arm64.deb ...
+#6 20.32 Unpacking libnspr4:arm64 (2:4.36-1) ...
+#6 20.34 Selecting previously unselected package libnss3:arm64.
+#6 20.34 Preparing to unpack .../136-libnss3_2%3a3.110-1+deb13u4_arm64.deb ...
+#6 20.34 Unpacking libnss3:arm64 (2:3.110-1+deb13u4) ...
+#6 20.41 Selecting previously unselected package pci.ids.
+#6 20.41 Preparing to unpack .../137-pci.ids_0.0~2025.06.09-1_all.deb ...
+#6 20.41 Unpacking pci.ids (0.0~2025.06.09-1) ...
+#6 20.44 Selecting previously unselected package libpci3:arm64.
+#6 20.44 Preparing to unpack .../138-libpci3_1%3a3.13.0-2_arm64.deb ...
+#6 20.45 Unpacking libpci3:arm64 (1:3.13.0-2) ...
+#6 20.47 Selecting previously unselected package libsm6:arm64.
+#6 20.47 Preparing to unpack .../139-libsm6_2%3a1.2.6-1_arm64.deb ...
+#6 20.47 Unpacking libsm6:arm64 (2:1.2.6-1) ...
+#6 20.48 Selecting previously unselected package libunwind8:arm64.
+#6 20.48 Preparing to unpack .../140-libunwind8_1.8.1-0.1_arm64.deb ...
+#6 20.48 Unpacking libunwind8:arm64 (1.8.1-0.1) ...
+#6 20.50 Selecting previously unselected package libxt6t64:arm64.
+#6 20.50 Preparing to unpack .../141-libxt6t64_1%3a1.2.1-1.2+b2_arm64.deb ...
+#6 20.50 Unpacking libxt6t64:arm64 (1:1.2.1-1.2+b2) ...
+#6 20.52 Selecting previously unselected package libxmu6:arm64.
+#6 20.52 Preparing to unpack .../142-libxmu6_2%3a1.1.3-3+b4_arm64.deb ...
+#6 20.52 Unpacking libxmu6:arm64 (2:1.1.3-3+b4) ...
+#6 20.54 Selecting previously unselected package libxpm4:arm64.
+#6 20.54 Preparing to unpack .../143-libxpm4_1%3a3.5.17-1+deb13u1_arm64.deb ...
+#6 20.54 Unpacking libxpm4:arm64 (1:3.5.17-1+deb13u1) ...
+#6 20.56 Selecting previously unselected package libxaw7:arm64.
+#6 20.56 Preparing to unpack .../144-libxaw7_2%3a1.0.16-1_arm64.deb ...
+#6 20.56 Unpacking libxaw7:arm64 (2:1.0.16-1) ...
+#6 20.58 Selecting previously unselected package libxfont2:arm64.
+#6 20.58 Preparing to unpack .../145-libxfont2_1%3a2.0.6-1+deb13u1_arm64.deb ...
+#6 20.58 Unpacking libxfont2:arm64 (1:2.0.6-1+deb13u1) ...
+#6 20.60 Selecting previously unselected package libxkbfile1:arm64.
+#6 20.60 Preparing to unpack .../146-libxkbfile1_1%3a1.1.0-1+b4_arm64.deb ...
+#6 20.60 Unpacking libxkbfile1:arm64 (1:1.1.0-1+b4) ...
+#6 20.62 Selecting previously unselected package libxtst6:arm64.
+#6 20.62 Preparing to unpack .../147-libxtst6_2%3a1.2.5-1_arm64.deb ...
+#6 20.62 Unpacking libxtst6:arm64 (2:1.2.5-1) ...
+#6 20.64 Selecting previously unselected package x11-xkb-utils.
+#6 20.64 Preparing to unpack .../148-x11-xkb-utils_7.7+9_arm64.deb ...
+#6 20.64 Unpacking x11-xkb-utils (7.7+9) ...
+#6 20.66 Selecting previously unselected package xserver-common.
+#6 20.66 Preparing to unpack .../149-xserver-common_2%3a21.1.16-1.3+deb13u4_all.deb ...
+#6 20.66 Unpacking xserver-common (2:21.1.16-1.3+deb13u4) ...
+#6 20.68 Selecting previously unselected package xvfb.
+#6 20.68 Preparing to unpack .../150-xvfb_2%3a21.1.16-1.3+deb13u4_arm64.deb ...
+#6 20.69 Unpacking xvfb (2:21.1.16-1.3+deb13u4) ...
+#6 20.74 Selecting previously unselected package libegl1:arm64.
+#6 20.74 Preparing to unpack .../151-libegl1_1.7.0-1+b2_arm64.deb ...
+#6 20.74 Unpacking libegl1:arm64 (1.7.0-1+b2) ...
+#6 20.76 Setting up libexpat1:arm64 (2.8.3-1~deb13u1) ...
+#6 20.76 Setting up libgraphite2-3:arm64 (1.3.14-2+deb13u1) ...
+#6 20.77 Setting up liblcms2-2:arm64 (2.16-2+deb13u2) ...
+#6 20.77 Setting up libpixman-1-0:arm64 (0.44.0-3) ...
+#6 20.77 Setting up libsharpyuv0:arm64 (1.5.0-0.1) ...
+#6 20.78 Setting up libwayland-server0:arm64 (1.23.1-3) ...
+#6 20.78 Setting up systemd-sysv (257.13-1~deb13u1) ...
+#6 20.79 Setting up libxau6:arm64 (1:1.0.11-1) ...
+#6 20.80 Setting up libxdmcp6:arm64 (1:1.1.5-1) ...
+#6 20.80 Setting up libkeyutils1:arm64 (1.6.3-6) ...
+#6 20.80 Setting up pci.ids (0.0~2025.06.09-1) ...
+#6 20.81 Setting up libxcb1:arm64 (1.17.0-2+b1) ...
+#6 20.81 Setting up libxcb-xfixes0:arm64 (1.17.0-2+b1) ...
+#6 20.82 Setting up liblerc4:arm64 (4.0.0+ds-5) ...
+#6 20.82 Setting up fonts-noto-mono (20201225-2) ...
+#6 20.83 Setting up hicolor-icon-theme (0.18-2) ...
+#6 20.84 Setting up libdatrie1:arm64 (0.2.13-3+b1) ...
+#6 20.85 Setting up fonts-noto-color-emoji (2.051-0+deb13u1) ...
+#6 20.85 Setting up libxcb-render0:arm64 (1.17.0-2+b1) ...
+#6 20.86 Setting up libglvnd0:arm64 (1.7.0-1+b2) ...
+#6 20.86 Setting up libxcb-glx0:arm64 (1.17.0-2+b1) ...
+#6 20.87 Setting up libbrotli1:arm64 (1.1.0-2+b7) ...
+#6 20.87 Setting up libedit2:arm64 (3.1-20250104-1) ...
+#6 20.88 Setting up libgdk-pixbuf2.0-common (2.42.12+dfsg-4+deb13u1) ...
+#6 20.88 Setting up x11-common (1:7.7+24+deb13u1) ...
+#6 20.95 invoke-rc.d: could not determine current runlevel
+#6 20.95 invoke-rc.d: policy-rc.d denied execution of start.
+#6 20.97 Setting up libsensors-config (1:3.6.2-2) ...
+#6 20.97 Setting up libdeflate0:arm64 (1.23-2) ...
+#6 20.98 Setting up xkb-data (2.42-1) ...
+#6 20.98 Setting up libxcb-shm0:arm64 (1.17.0-2+b1) ...
+#6 20.99 Setting up libcom-err2:arm64 (1.47.2-3+b12) ...
+#6 20.99 Setting up libunwind8:arm64 (1.8.1-0.1) ...
+#6 21.00 Setting up libjbig0:arm64 (2.1-6.1+b2) ...
+#6 21.00 Setting up libelf1t64:arm64 (0.192-4) ...
+#6 21.01 Setting up libkrb5support0:arm64 (1.21.3-5+deb13u1) ...
+#6 21.01 Setting up libxcb-present0:arm64 (1.17.0-2+b1) ...
+#6 21.02 Setting up libasound2-data (1.2.14-1+deb13u1) ...
+#6 21.02 Setting up libfontenc1:arm64 (1:1.1.8-1+b2) ...
+#6 21.03 Setting up libz3-4:arm64 (4.13.3-1) ...
+#6 21.03 Setting up libasound2t64:arm64 (1.2.14-1+deb13u1) ...
+#6 21.04 Setting up libjpeg62-turbo:arm64 (1:2.1.5-4) ...
+#6 21.04 Setting up libx11-data (2:1.8.12-1) ...
+#6 21.05 Setting up libepoxy0:arm64 (1.5.10-2) ...
+#6 21.05 Setting up libnspr4:arm64 (2:4.36-1) ...
+#6 21.06 Setting up libxcb-sync1:arm64 (1.17.0-2+b1) ...
+#6 21.06 Setting up libavahi-common-data:arm64 (0.8-16) ...
+#6 21.07 Setting up libdbus-1-3:arm64 (1.16.2-2) ...
+#6 21.07 Setting up libfribidi0:arm64 (1.0.16-1) ...
+#6 21.08 Setting up libp11-kit0:arm64 (0.25.5-3) ...
+#6 21.09 Setting up libproc2-0:arm64 (2:4.0.4-9) ...
+#6 21.09 Setting up libunistring5:arm64 (1.3-2) ...
+#6 21.10 Setting up fonts-dejavu-mono (2.37-8) ...
+#6 21.10 Setting up libpng16-16t64:arm64 (1.6.48-1+deb13u5) ...
+#6 21.11 Setting up libatomic1:arm64 (14.2.0-19) ...
+#6 21.11 Setting up fonts-dejavu-core (2.37-8) ...
+#6 21.14 Setting up libsensors5:arm64 (1:3.6.2-2) ...
+#6 21.14 Setting up libk5crypto3:arm64 (1.21.3-5+deb13u1) ...
+#6 21.15 Setting up libvulkan1:arm64 (1.4.309.0-1) ...
+#6 21.15 Setting up libwebp7:arm64 (1.5.0-0.1) ...
+#6 21.16 Setting up libpci3:arm64 (1:3.13.0-2) ...
+#6 21.17 Setting up libxshmfence1:arm64 (1.3.3-1) ...
+#6 21.17 Setting up at-spi2-common (2.56.2-1+deb13u2) ...
+#6 21.18 Setting up libtiff6:arm64 (4.7.0-3+deb13u3) ...
+#6 21.18 Setting up libxcb-randr0:arm64 (1.17.0-2+b1) ...
+#6 21.19 Setting up dbus-session-bus-common (1.16.2-2) ...
+#6 21.19 Setting up procps (2:4.0.4-9) ...
+#6 21.21 Setting up fonts-liberation (1:2.1.5-3) ...
+#6 21.21 Setting up libtasn1-6:arm64 (4.20.0-2+deb13u1) ...
+#6 21.22 Setting up libx11-6:arm64 (2:1.8.12-1) ...
+#6 21.22 Setting up libthai-data (0.1.29-2) ...
+#6 21.23 Setting up libkrb5-3:arm64 (1.21.3-5+deb13u1) ...
+#6 21.23 Setting up libwayland-egl1:arm64 (1.23.1-3) ...
+#6 21.23 Setting up libxkbfile1:arm64 (1:1.1.0-1+b4) ...
+#6 21.24 Setting up dbus-system-bus-common (1.16.2-2) ...
+#6 21.24 Creating group 'messagebus' with GID 997.
+#6 21.24 Creating user 'messagebus' (System Message Bus) with UID 997 and GID 997.
+#6 21.26 Setting up libdrm-common (2.4.124-2) ...
+#6 21.26 Setting up libxcomposite1:arm64 (1:0.4.6-1) ...
+#6 21.27 Setting up libxml2:arm64 (2.12.7+dfsg+really2.9.14-2.1+deb13u3) ...
+#6 21.28 Setting up fonts-noto-core (20201225-2) ...
+#6 21.28 Setting up dbus-bin (1.16.2-2) ...
+#6 21.29 Setting up libxkbcommon0:arm64 (1.7.0-2) ...
+#6 21.29 Setting up libwayland-client0:arm64 (1.23.1-3) ...
+#6 21.30 Setting up libxcb-dri3-0:arm64 (1.17.0-2+b1) ...
+#6 21.30 Setting up libllvm19:arm64 (1:19.1.7-3+b1) ...
+#6 21.31 Setting up libx11-xcb1:arm64 (2:1.8.12-1) ...
+#6 21.31 Setting up libice6:arm64 (2:1.1.1-1) ...
+#6 21.31 Setting up libxdamage1:arm64 (1:1.1.6-1+b2) ...
+#6 21.32 Setting up libxpm4:arm64 (1:3.5.17-1+deb13u1) ...
+#6 21.32 Setting up libxrender1:arm64 (1:0.9.12-1) ...
+#6 21.33 Setting up fontconfig-config (2.15.0-2.3) ...
+#6 21.37 Setting up libavahi-common3:arm64 (0.8-16) ...
+#6 21.38 Setting up libxext6:arm64 (2:1.3.4-1+b3) ...
+#6 21.38 Setting up libidn2-0:arm64 (2.3.8-2) ...
+#6 21.39 Setting up libnss3:arm64 (2:3.110-1+deb13u4) ...
+#6 21.39 Setting up dbus-daemon (1.16.2-2) ...
+#6 21.40 Setting up libxxf86vm1:arm64 (1:1.1.4-1+b4) ...
+#6 21.40 Setting up libthai0:arm64 (0.1.29-2+b1) ...
+#6 21.42 Setting up libglib2.0-0t64:arm64 (2.84.4-3~deb13u5) ...
+#6 21.44 Setting up libfreetype6:arm64 (2.13.3+dfsg-1+deb13u1) ...
+#6 21.45 Setting up libxfixes3:arm64 (1:6.0.0-2+b4) ...
+#6 21.46 Setting up libdbus-glib-1-2:arm64 (0.114-1) ...
+#6 21.46 Setting up dbus (1.16.2-2) ...
+#6 21.50 invoke-rc.d: could not determine current runlevel
+#6 21.50 invoke-rc.d: policy-rc.d denied execution of start.
+#6 21.51 Setting up shared-mime-info (2.4-5+b2) ...
+#6 22.47 Setting up libxinerama1:arm64 (2:1.1.4-3+b4) ...
+#6 22.48 Setting up libgssapi-krb5-2:arm64 (1.21.3-5+deb13u1) ...
+#6 22.49 Setting up libxrandr2:arm64 (2:1.5.4-1+b3) ...
+#6 22.50 Setting up libdrm2:arm64 (2.4.124-2) ...
+#6 22.51 Setting up libwayland-cursor0:arm64 (1.23.1-3) ...
+#6 22.52 Setting up libpam-systemd:arm64 (257.13-1~deb13u1) ...
+#6 22.59 Setting up libharfbuzz0b:arm64 (10.2.0-1+deb13u1) ...
+#6 22.60 Setting up libgdk-pixbuf-2.0-0:arm64 (2.42.12+dfsg-4+deb13u1) ...
+#6 22.61 Setting up libfontconfig1:arm64 (2.15.0-2.3) ...
+#6 22.62 Setting up libsm6:arm64 (2:1.2.6-1) ...
+#6 22.62 Setting up libxfont2:arm64 (1:2.0.6-1+deb13u1) ...
+#6 22.63 Setting up libavahi-client3:arm64 (0.8-16) ...
+#6 22.64 Setting up libdrm-amdgpu1:arm64 (2.4.124-2) ...
+#6 22.65 Setting up libgnutls30t64:arm64 (3.8.9-3+deb13u4) ...
+#6 22.66 Setting up gtk-update-icon-cache (4.18.6+ds-2) ...
+#6 22.66 Setting up mesa-libgallium:arm64 (25.0.7-2+deb13u1) ...
+#6 22.67 Setting up fontconfig (2.15.0-2.3) ...
+#6 22.67 Regenerating fonts cache... done.
+#6 24.74 Setting up libatk1.0-0t64:arm64 (2.56.2-1+deb13u2) ...
+#6 24.75 Setting up libxi6:arm64 (2:1.8.2-1) ...
+#6 24.75 Setting up libgbm1:arm64 (25.0.7-2+deb13u1) ...
+#6 24.76 Setting up libxtst6:arm64 (2:1.2.5-1) ...
+#6 24.77 Setting up libxcursor1:arm64 (1:1.2.3-1) ...
+#6 24.77 Setting up libpango-1.0-0:arm64 (1.56.3-1) ...
+#6 24.78 Setting up libgl1-mesa-dri:arm64 (25.0.7-2+deb13u1) ...
+#6 24.79 Setting up libcloudproviders0:arm64 (0.3.6-2) ...
+#6 24.80 Setting up libcairo2:arm64 (1.18.4-1+b1) ...
+#6 24.80 Setting up libcolord2:arm64 (1.4.7-3) ...
+#6 24.81 Setting up libdconf1:arm64 (0.40.0-5) ...
+#6 24.82 Setting up dbus-user-session (1.16.2-2) ...
+#6 24.82 Setting up libegl-mesa0:arm64 (25.0.7-2+deb13u1) ...
+#6 24.83 Setting up adwaita-icon-theme (48.1-1) ...
+#6 24.84 update-alternatives: using /usr/share/icons/Adwaita/cursor.theme to provide /usr/share/icons/default/index.theme (x-cursor-theme) in auto mode
+#6 24.84 Setting up libatspi2.0-0t64:arm64 (2.56.2-1+deb13u2) ...
+#6 24.85 Setting up libxt6t64:arm64 (1:1.2.1-1.2+b2) ...
+#6 24.85 Setting up libegl1:arm64 (1.7.0-1+b2) ...
+#6 24.86 Setting up libcairo-gobject2:arm64 (1.18.4-1+b1) ...
+#6 24.86 Setting up libpangoft2-1.0-0:arm64 (1.56.3-1) ...
+#6 24.87 Setting up libcups2t64:arm64 (2.4.10-3+deb13u2) ...
+#6 24.87 Setting up libpangocairo-1.0-0:arm64 (1.56.3-1) ...
+#6 24.88 Setting up libatk-bridge2.0-0t64:arm64 (2.56.2-1+deb13u2) ...
+#6 24.89 Setting up libxmu6:arm64 (2:1.1.3-3+b4) ...
+#6 24.89 Setting up libglx-mesa0:arm64 (25.0.7-2+deb13u1) ...
+#6 24.90 Setting up libglx0:arm64 (1.7.0-1+b2) ...
+#6 24.90 Setting up dconf-service (0.40.0-5) ...
+#6 24.91 Setting up libxaw7:arm64 (2:1.0.16-1) ...
+#6 24.91 Setting up libgl1:arm64 (1.7.0-1+b2) ...
+#6 24.92 Setting up dconf-gsettings-backend:arm64 (0.40.0-5) ...
+#6 24.93 Setting up x11-xkb-utils (7.7+9) ...
+#6 24.93 Setting up xserver-common (2:21.1.16-1.3+deb13u4) ...
+#6 24.94 Setting up libgtk-3-common (3.24.49-3) ...
+#6 24.94 Setting up xvfb (2:21.1.16-1.3+deb13u4) ...
+#6 24.95 Setting up libgtk-3-0t64:arm64 (3.24.49-3) ...
+#6 24.96 Processing triggers for libc-bin (2.41-12+deb13u3) ...
+#6 DONE 25.1s
+
+#7 [3/5] RUN pip install --no-cache-dir "camoufox[geoip]" playwright     && python -m camoufox fetch
+#7 1.398 Collecting playwright
+#7 1.512   Downloading playwright-1.63.0-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl.metadata (3.3 kB)
+#7 1.655 Collecting camoufox[geoip]
+#7 1.674   Downloading camoufox-0.5.6-py3-none-any.whl.metadata (10 kB)
+#7 1.693 Collecting browserforge<2.0.0,>=1.2.4 (from camoufox[geoip])
+#7 1.711   Downloading browserforge-1.2.4-py3-none-any.whl.metadata (28 kB)
+#7 1.858 Collecting geoip2 (from camoufox[geoip])
+#7 1.872   Downloading geoip2-5.3.0-py3-none-any.whl.metadata (19 kB)
+#7 1.895 Collecting inquirer (from camoufox[geoip])
+#7 1.915   Downloading inquirer-3.4.1-py3-none-any.whl.metadata (6.8 kB)
+#7 2.058 Collecting language-tags (from camoufox[geoip])
+#7 2.076   Downloading language_tags-1.3.1-py3-none-any.whl.metadata (6.5 kB)
+#7 2.246 Collecting lxml (from camoufox[geoip])
+#7 2.268   Downloading lxml-6.1.3-cp313-cp313-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl.metadata (3.3 kB)
+#7 2.427 Collecting numpy (from camoufox[geoip])
+#7 2.443   Downloading numpy-2.5.3-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl.metadata (6.6 kB)
+#7 2.603 Collecting orjson (from camoufox[geoip])
+#7 2.755   Downloading orjson-3.12.0-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl.metadata (41 kB)
+#7 2.802 Collecting platformdirs (from camoufox[geoip])
+#7 2.823   Downloading platformdirs-4.11.10-py3-none-any.whl.metadata (5.5 kB)
+#7 2.827 Collecting playwright
+#7 2.849   Downloading playwright-1.62.0-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl.metadata (3.3 kB)
+#7 2.878 Collecting pysocks (from camoufox[geoip])
+#7 2.898   Downloading PySocks-1.7.1-py3-none-any.whl.metadata (13 kB)
+#7 2.938 Collecting pyyaml (from camoufox[geoip])
+#7 2.969   Downloading pyyaml-6.0.3-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl.metadata (2.4 kB)
+#7 2.997 Collecting requests (from camoufox[geoip])
+#7 3.016   Downloading requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
+#7 3.048 Collecting rich (from camoufox[geoip])
+#7 3.078   Downloading rich-15.0.0-py3-none-any.whl.metadata (18 kB)
+#7 3.105 Collecting rich-click (from camoufox[geoip])
+#7 3.125   Downloading rich_click-1.9.9-py3-none-any.whl.metadata (7.4 kB)
+#7 3.161 Collecting screeninfo (from camoufox[geoip])
+#7 3.187   Downloading screeninfo-0.8.1-py3-none-any.whl.metadata (2.9 kB)
+#7 3.205 Collecting typing_extensions (from camoufox[geoip])
+#7 3.230   Downloading typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+#7 3.255 Collecting ua_parser (from camoufox[geoip])
+#7 3.275   Downloading ua_parser-1.0.2-py3-none-any.whl.metadata (5.5 kB)
+#7 3.306 Collecting pyee<14,>=13 (from playwright)
+#7 3.325   Downloading pyee-13.0.1-py3-none-any.whl.metadata (3.0 kB)
+#7 3.427 Collecting greenlet<4.0.0,>=3.1.1 (from playwright)
+#7 3.457   Downloading greenlet-3.5.6-cp313-cp313-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl.metadata (3.8 kB)
+#7 3.488 Collecting apify_fingerprint_datapoints (from browserforge<2.0.0,>=1.2.4->camoufox[geoip])
+#7 3.507   Downloading apify_fingerprint_datapoints-0.15.0-py3-none-any.whl.metadata (14 kB)
+#7 3.545 Collecting click (from browserforge<2.0.0,>=1.2.4->camoufox[geoip])
+#7 3.567   Downloading click-8.5.0-py3-none-any.whl.metadata (2.6 kB)
+#7 4.097 Collecting aiohttp<4.0.0,>=3.14.1 (from geoip2->camoufox[geoip])
+#7 4.113   Downloading aiohttp-3.14.3-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl.metadata (8.3 kB)
+#7 4.277 Collecting maxminddb<4.0.0,>=3.0.0 (from geoip2->camoufox[geoip])
+#7 4.413   Downloading maxminddb-3.2.0-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl.metadata (5.6 kB)
+#7 4.442 Collecting aiohappyeyeballs>=2.5.0 (from aiohttp<4.0.0,>=3.14.1->geoip2->camoufox[geoip])
+#7 4.455   Downloading aiohappyeyeballs-2.7.1-py3-none-any.whl.metadata (5.9 kB)
+#7 4.472 Collecting aiosignal>=1.4.0 (from aiohttp<4.0.0,>=3.14.1->geoip2->camoufox[geoip])
+#7 4.487   Downloading aiosignal-1.4.0-py3-none-any.whl.metadata (3.7 kB)
+#7 4.509 Collecting attrs>=17.3.0 (from aiohttp<4.0.0,>=3.14.1->geoip2->camoufox[geoip])
+#7 4.523   Downloading attrs-26.1.0-py3-none-any.whl.metadata (8.8 kB)
+#7 4.570 Collecting frozenlist>=1.1.1 (from aiohttp<4.0.0,>=3.14.1->geoip2->camoufox[geoip])
+#7 4.585   Downloading frozenlist-1.8.0-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl.metadata (20 kB)
+#7 4.718 Collecting multidict<7.0,>=4.5 (from aiohttp<4.0.0,>=3.14.1->geoip2->camoufox[geoip])
+#7 4.733   Downloading multidict-6.9.0-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl.metadata (5.3 kB)
+#7 4.781 Collecting propcache>=0.2.0 (from aiohttp<4.0.0,>=3.14.1->geoip2->camoufox[geoip])
+#7 4.796   Downloading propcache-0.5.4-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl.metadata (25 kB)
+#7 4.931 Collecting yarl<2.0,>=1.17.0 (from aiohttp<4.0.0,>=3.14.1->geoip2->camoufox[geoip])
+#7 4.951   Downloading yarl-1.25.1-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl.metadata (111 kB)
+#7 5.051 Collecting charset_normalizer<4,>=2 (from requests->camoufox[geoip])
+#7 5.073   Downloading charset_normalizer-3.5.1-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl.metadata (45 kB)
+#7 5.094 Collecting idna<4,>=2.5 (from requests->camoufox[geoip])
+#7 5.120   Downloading idna-3.20-py3-none-any.whl.metadata (7.2 kB)
+#7 5.144 Collecting urllib3<3,>=1.26 (from requests->camoufox[geoip])
+#7 5.162   Downloading urllib3-2.8.0-py3-none-any.whl.metadata (7.4 kB)
+#7 5.190 Collecting certifi>=2023.5.7 (from requests->camoufox[geoip])
+#7 5.207   Downloading certifi-2026.7.22-py3-none-any.whl.metadata (2.5 kB)
+#7 5.235 Collecting blessed>=1.19.0 (from inquirer->camoufox[geoip])
+#7 5.260   Downloading blessed-1.50.0-py3-none-any.whl.metadata (13 kB)
+#7 5.283 Collecting editor>=1.6.0 (from inquirer->camoufox[geoip])
+#7 5.300   Downloading editor-1.8.0-py3-none-any.whl.metadata (2.3 kB)
+#7 5.323 Collecting readchar>=4.2.0 (from inquirer->camoufox[geoip])
+#7 5.337   Downloading readchar-4.2.2-py3-none-any.whl.metadata (7.5 kB)
+#7 5.357 Collecting wcwidth>=0.8.3 (from blessed>=1.19.0->inquirer->camoufox[geoip])
+#7 5.372   Downloading wcwidth-0.8.4-py3-none-any.whl.metadata (23 kB)
+#7 5.398 Collecting jinxed<3,>=2.1 (from blessed>=1.19.0->inquirer->camoufox[geoip])
+#7 5.415   Downloading jinxed-2.1.0-py2.py3-none-any.whl.metadata (7.2 kB)
+#7 5.439 Collecting runs (from editor>=1.6.0->inquirer->camoufox[geoip])
+#7 5.453   Downloading runs-1.3.0-py3-none-any.whl.metadata (10 kB)
+#7 5.478 Collecting xmod (from editor>=1.6.0->inquirer->camoufox[geoip])
+#7 5.494   Downloading xmod-1.10.0-py3-none-any.whl.metadata (1.8 kB)
+#7 5.517 Collecting markdown-it-py>=2.2.0 (from rich->camoufox[geoip])
+#7 5.539   Downloading markdown_it_py-4.2.0-py3-none-any.whl.metadata (7.4 kB)
+#7 5.568 Collecting pygments<3.0.0,>=2.13.0 (from rich->camoufox[geoip])
+#7 5.588   Downloading pygments-2.21.0-py3-none-any.whl.metadata (2.5 kB)
+#7 5.608 Collecting mdurl~=0.1 (from markdown-it-py>=2.2.0->rich->camoufox[geoip])
+#7 5.626   Downloading mdurl-0.1.2-py3-none-any.whl.metadata (1.6 kB)
+#7 5.773 Collecting ua-parser-builtins (from ua_parser->camoufox[geoip])
+#7 5.789   Downloading ua_parser_builtins-202606-py3-none-any.whl.metadata (1.8 kB)
+#7 5.807 Downloading camoufox-0.5.6-py3-none-any.whl (1.4 MB)
+#7 5.855    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.4/1.4 MB 45.3 MB/s  0:00:00
+#7 5.873 Downloading playwright-1.62.0-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl (47.4 MB)
+#7 6.307    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 47.4/47.4 MB 109.7 MB/s  0:00:00
+#7 6.323 Downloading browserforge-1.2.4-py3-none-any.whl (37 kB)
+#7 6.345 Downloading greenlet-3.5.6-cp313-cp313-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl (614 kB)
+#7 6.353    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 614.4/614.4 kB 163.9 MB/s  0:00:00
+#7 6.369 Downloading pyee-13.0.1-py3-none-any.whl (15 kB)
+#7 6.389 Downloading apify_fingerprint_datapoints-0.15.0-py3-none-any.whl (761 kB)
+#7 6.400    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 761.8/761.8 kB 69.7 MB/s  0:00:00
+#7 6.421 Downloading click-8.5.0-py3-none-any.whl (125 kB)
+#7 6.444 Downloading geoip2-5.3.0-py3-none-any.whl (29 kB)
+#7 6.465 Downloading aiohttp-3.14.3-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl (1.8 MB)
+#7 6.481    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.8/1.8 MB 134.5 MB/s  0:00:00
+#7 6.621 Downloading maxminddb-3.2.0-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl (106 kB)
+#7 6.646 Downloading multidict-6.9.0-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl (312 kB)
+#7 6.664 Downloading requests-2.34.2-py3-none-any.whl (73 kB)
+#7 6.682 Downloading charset_normalizer-3.5.1-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl (240 kB)
+#7 6.705 Downloading idna-3.20-py3-none-any.whl (69 kB)
+#7 6.730 Downloading urllib3-2.8.0-py3-none-any.whl (135 kB)
+#7 6.759 Downloading yarl-1.25.1-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl (115 kB)
+#7 6.785 Downloading aiohappyeyeballs-2.7.1-py3-none-any.whl (15 kB)
+#7 6.806 Downloading aiosignal-1.4.0-py3-none-any.whl (7.5 kB)
+#7 6.826 Downloading attrs-26.1.0-py3-none-any.whl (67 kB)
+#7 6.844 Downloading certifi-2026.7.22-py3-none-any.whl (136 kB)
+#7 6.867 Downloading frozenlist-1.8.0-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl (233 kB)
+#7 6.893 Downloading propcache-0.5.4-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl (233 kB)
+#7 6.917 Downloading inquirer-3.4.1-py3-none-any.whl (18 kB)
+#7 6.935 Downloading blessed-1.50.0-py3-none-any.whl (140 kB)
+#7 6.959 Downloading jinxed-2.1.0-py2.py3-none-any.whl (104 kB)
+#7 6.991 Downloading editor-1.8.0-py3-none-any.whl (4.0 kB)
+#7 7.005 Downloading readchar-4.2.2-py3-none-any.whl (9.4 kB)
+#7 7.023 Downloading wcwidth-0.8.4-py3-none-any.whl (299 kB)
+#7 7.045 Downloading language_tags-1.3.1-py3-none-any.whl (216 kB)
+#7 7.070 Downloading lxml-6.1.3-cp313-cp313-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl (5.0 MB)
+#7 7.113    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5.0/5.0 MB 135.3 MB/s  0:00:00
+#7 7.259 Downloading numpy-2.5.3-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl (15.7 MB)
+#7 7.397    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 15.7/15.7 MB 115.8 MB/s  0:00:00
+#7 7.415 Downloading orjson-3.12.0-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl (130 kB)
+#7 7.435 Downloading platformdirs-4.11.10-py3-none-any.whl (24 kB)
+#7 7.462 Downloading PySocks-1.7.1-py3-none-any.whl (16 kB)
+#7 7.479 Downloading pyyaml-6.0.3-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl (767 kB)
+#7 7.490    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 767.1/767.1 kB 100.9 MB/s  0:00:00
+#7 7.511 Downloading rich-15.0.0-py3-none-any.whl (310 kB)
+#7 7.529 Downloading pygments-2.21.0-py3-none-any.whl (1.3 MB)
+#7 7.545    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 82.5 MB/s  0:00:00
+#7 7.562 Downloading markdown_it_py-4.2.0-py3-none-any.whl (91 kB)
+#7 7.581 Downloading mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+#7 7.599 Downloading rich_click-1.9.9-py3-none-any.whl (71 kB)
+#7 7.622 Downloading runs-1.3.0-py3-none-any.whl (6.4 kB)
+#7 7.640 Downloading screeninfo-0.8.1-py3-none-any.whl (12 kB)
+#7 7.660 Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+#7 7.679 Downloading ua_parser-1.0.2-py3-none-any.whl (31 kB)
+#7 7.698 Downloading ua_parser_builtins-202606-py3-none-any.whl (90 kB)
+#7 7.720 Downloading xmod-1.10.0-py3-none-any.whl (4.7 kB)
+#7 8.113 Installing collected packages: jinxed, xmod, wcwidth, urllib3, ua-parser-builtins, typing_extensions, screeninfo, readchar, pyyaml, pysocks, pygments, propcache, platformdirs, orjson, numpy, multidict, mdurl, maxminddb, lxml, language-tags, idna, greenlet, frozenlist, click, charset_normalizer, certifi, attrs, apify_fingerprint_datapoints, aiohappyeyeballs, yarl, ua_parser, runs, requests, pyee, markdown-it-py, browserforge, blessed, aiosignal, rich, playwright, editor, aiohttp, rich-click, inquirer, geoip2, camoufox
+#7 13.19 
+#7 13.19 Successfully installed aiohappyeyeballs-2.7.1 aiohttp-3.14.3 aiosignal-1.4.0 apify_fingerprint_datapoints-0.15.0 attrs-26.1.0 blessed-1.50.0 browserforge-1.2.4 camoufox-0.5.6 certifi-2026.7.22 charset_normalizer-3.5.1 click-8.5.0 editor-1.8.0 frozenlist-1.8.0 geoip2-5.3.0 greenlet-3.5.6 idna-3.20 inquirer-3.4.1 jinxed-2.1.0 language-tags-1.3.1 lxml-6.1.3 markdown-it-py-4.2.0 maxminddb-3.2.0 mdurl-0.1.2 multidict-6.9.0 numpy-2.5.3 orjson-3.12.0 platformdirs-4.11.10 playwright-1.62.0 propcache-0.5.4 pyee-13.0.1 pygments-2.21.0 pysocks-1.7.1 pyyaml-6.0.3 readchar-4.2.2 requests-2.34.2 rich-15.0.0 rich-click-1.9.9 runs-1.3.0 screeninfo-0.8.1 typing_extensions-4.16.0 ua-parser-builtins-202606 ua_parser-1.0.2 urllib3-2.8.0 wcwidth-0.8.4 xmod-1.10.0 yarl-1.25.1
+#7 13.19 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+#7 13.97 Syncing repositories...
+#7 13.98   Official... 14 versions
+#7 14.50   CoryKing... 2 versions
+#7 14.84   JWriter20... 1 versions
+#7 15.25 
+#7 15.25 Synced 17 versions from 3 repos.
+#7 15.25 Fetching Camoufox v152.0.4-beta.30...
+#7 15.26 Downloading package: 
+#7 15.26 https://github.com/daijro/camoufox/releases/download/v152.0.4-beta.30/camoufox-1
+#7 15.26 52.0.4-beta.30-lin.arm64.zip
+#7 26.30   Downloading ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 653.9/653.9 MB 71.9 MB/s 0:00:00
+#7 26.86 Extracting Camoufox: 
+#7 26.86 /root/.cache/camoufox/browsers/official/152.0.4-beta.30-60447260
+#7 34.46   Extracting ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100%
+#7 34.51 
+#7 34.51 Camoufox v152.0.4-beta.30 installed.
+#7 34.51 Path: /root/.cache/camoufox/browsers/official/152.0.4-beta.30-60447260
+#7 35.11   Downloading MaxMind GeoLite2 (ipv4) ━━━━━━━━━━━ 28.2/16.4   109.0 MB/s 0:00:00
+#7 35.11                                                   MB                            
+#7 35.55   Downloading MaxMind GeoLite2 (ipv6) ━━━━━━━━━━━ 17.3/8.4 MB 125.8 MB/s 0:00:00
+#7 35.91 Downloading addon (UBO): 0%Downloading addon (UBO): 0%Downloading addon (UBO): 1%Downloading addon (UBO): 1%Downloading addon (UBO): 1%Downloading addon (UBO): 1%Downloading addon (UBO): 1%Downloading addon (UBO): 1%Downloading addon (UBO): 2%Downloading addon (UBO): 2%Downloading addon (UBO): 2%Downloading addon (UBO): 2%Downloading addon (UBO): 2%Downloading addon (UBO): 2%Downloading addon (UBO): 3%Downloading addon (UBO): 3%Downloading addon (UBO): 3%Downloading addon (UBO): 3%Downloading addon (UBO): 3%Downloading addon (UBO): 4%Downloading addon (UBO): 4%Downloading addon (UBO): 4%Downloading addon (UBO): 4%Downloading addon (UBO): 4%Downloading addon (UBO): 4%Downloading addon (UBO): 5%Downloading addon (UBO): 5%Downloading addon (UBO): 5%Downloading addon (UBO): 5%Downloading addon (UBO): 5%Downloading addon (UBO): 5%Downloading addon (UBO): 6%Downloading addon (UBO): 6%Downloading addon (UBO): 6%Downloading addon (UBO): 6%Downloading addon (UBO): 6%Downloading addon (UBO): 7%Downloading addon (UBO): 7%Downloading addon (UBO): 7%Downloading addon (UBO): 7%Downloading addon (UBO): 7%Downloading addon (UBO): 7%Downloading addon (UBO): 8%Downloading addon (UBO): 8%Downloading addon (UBO): 8%Downloading addon (UBO): 8%Downloading addon (UBO): 8%Downloading addon (UBO): 8%Downloading addon (UBO): 9%Downloading addon (UBO): 9%Downloading addon (UBO): 9%Downloading addon (UBO): 9%Downloading addon (UBO): 9%Downloading addon (UBO): 10%Downloading addon (UBO): 10%Downloading addon (UBO): 10%Downloading addon (UBO): 10%Downloading addon (UBO): 10%Downloading addon (UBO): 10%Downloading addon (UBO): 11%Downloading addon (UBO): 11%Downloading addon (UBO): 11%Downloading addon (UBO): 11%Downloading addon (UBO): 11%Downloading addon (UBO): 11%Downloading addon (UBO): 12%Downloading addon (UBO): 12%Downloading addon (UBO): 12%Downloading addon (UBO): 12%Downloading addon (UBO): 12%Downloading addon (UBO): 13%Downloading addon (UBO): 13%Downloading addon (UBO): 13%Downloading addon (UBO): 13%Downloading addon (UBO): 13%Downloading addon (UBO): 13%Downloading addon (UBO): 14%Downloading addon (UBO): 14%Downloading addon (UBO): 14%Downloading addon (UBO): 14%Downloading addon (UBO): 14%Downloading addon (UBO): 14%Downloading addon (UBO): 15%Downloading addon (UBO): 15%Downloading addon (UBO): 15%Downloading addon (UBO): 15%Downloading addon (UBO): 15%Downloading addon (UBO): 16%Downloading addon (UBO): 16%Downloading addon (UBO): 16%Downloading addon (UBO): 16%Downloading addon (UBO): 16%Downloading addon (UBO): 16%Downloading addon (UBO): 17%Downloading addon (UBO): 17%Downloading addon (UBO): 17%Downloading addon (UBO): 17%Downloading addon (UBO): 17%Downloading addon (UBO): 17%Downloading addon (UBO): 18%Downloading addon (UBO): 18%Downloading addon (UBO): 18%Downloading addon (UBO): 18%Downloading addon (UBO): 18%Downloading addon (UBO): 18%Downloading addon (UBO): 19%Downloading addon (UBO): 19%Downloading addon (UBO): 19%Downloading addon (UBO): 19%Downloading addon (UBO): 19%Downloading addon (UBO): 20%Downloading addon (UBO): 20%Downloading addon (UBO): 20%Downloading addon (UBO): 20%Downloading addon (UBO): 20%Downloading addon (UBO): 20%Downloading addon (UBO): 21%Downloading addon (UBO): 21%Downloading addon (UBO): 21%Downloading addon (UBO): 21%Downloading addon (UBO): 21%Downloading addon (UBO): 21%Downloading addon (UBO): 22%Downloading addon (UBO): 22%Downloading addon (UBO): 22%Downloading addon (UBO): 22%Downloading addon (UBO): 22%Downloading addon (UBO): 23%Downloading addon (UBO): 23%Downloading addon (UBO): 23%Downloading addon (UBO): 23%Downloading addon (UBO): 23%Downloading addon (UBO): 23%Downloading addon (UBO): 24%Downloading addon (UBO): 24%Downloading addon (UBO): 24%Downloading addon (UBO): 24%Downloading addon (UBO): 24%Downloading addon (UBO): 24%Downloading addon (UBO): 25%Downloading addon (UBO): 25%Downloading addon (UBO): 25%Downloading addon (UBO): 25%Downloading addon (UBO): 25%Downloading addon (UBO): 26%Downloading addon (UBO): 26%Downloading addon (UBO): 26%Downloading addon (UBO): 26%Downloading addon (UBO): 26%Downloading addon (UBO): 26%Downloading addon (UBO): 27%Downloading addon (UBO): 27%Downloading addon (UBO): 27%Downloading addon (UBO): 27%Downloading addon (UBO): 27%Downloading addon (UBO): 27%Downloading addon (UBO): 28%Downloading addon (UBO): 28%Downloading addon (UBO): 28%Downloading addon (UBO): 28%Downloading addon (UBO): 28%Downloading addon (UBO): 29%Downloading addon (UBO): 29%Downloading addon (UBO): 29%Downloading addon (UBO): 29%Downloading addon (UBO): 29%Downloading addon (UBO): 29%Downloading addon (UBO): 30%Downloading addon (UBO): 30%Downloading addon (UBO): 30%Downloading addon (UBO): 30%Downloading addon (UBO): 30%Downloading addon (UBO): 30%Downloading addon (UBO): 31%Downloading addon (UBO): 31%Downloading addon (UBO): 31%Downloading addon (UBO): 31%Downloading addon (UBO): 31%Downloading addon (UBO): 32%Downloading addon (UBO): 32%Downloading addon (UBO): 32%Downloading addon (UBO): 32%Downloading addon (UBO): 32%Downloading addon (UBO): 32%Downloading addon (UBO): 33%Downloading addon (UBO): 33%Downloading addon (UBO): 33%Downloading addon (UBO): 33%Downloading addon (UBO): 33%Downloading addon (UBO): 33%Downloading addon (UBO): 34%Downloading addon (UBO): 34%Downloading addon (UBO): 34%Downloading addon (UBO): 34%Downloading addon (UBO): 34%Downloading addon (UBO): 35%Downloading addon (UBO): 35%Downloading addon (UBO): 35%Downloading addon (UBO): 35%Downloading addon (UBO): 35%Downloading addon (UBO): 35%Downloading addon (UBO): 36%Downloading addon (UBO): 36%Downloading addon (UBO): 36%Downloading addon (UBO): 36%Downloading addon (UBO): 36%Downloading addon (UBO): 36%Downloading addon (UBO): 37%Downloading addon (UBO): 37%Downloading addon (UBO): 37%Downloading addon (UBO): 37%Downloading addon (UBO): 37%Downloading addon (UBO): 38%Downloading addon (UBO): 38%Downloading addon (UBO): 38%Downloading addon (UBO): 38%Downloading addon (UBO): 38%Downloading addon (UBO): 38%Downloading addon (UBO): 39%Downloading addon (UBO): 39%Downloading addon (UBO): 39%Downloading addon (UBO): 39%Downloading addon (UBO): 39%Downloading addon (UBO): 39%Downloading addon (UBO): 40%Downloading addon (UBO): 40%Downloading addon (UBO): 40%Downloading addon (UBO): 40%Downloading addon (UBO): 40%Downloading addon (UBO): 41%Downloading addon (UBO): 41%Downloading addon (UBO): 41%Downloading addon (UBO): 41%Downloading addon (UBO): 41%Downloading addon (UBO): 41%Downloading addon (UBO): 42%Downloading addon (UBO): 42%Downloading addon (UBO): 42%Downloading addon (UBO): 42%Downloading addon (UBO): 42%Downloading addon (UBO): 42%Downloading addon (UBO): 43%Downloading addon (UBO): 43%Downloading addon (UBO): 43%Downloading addon (UBO): 43%Downloading addon (UBO): 43%Downloading addon (UBO): 44%Downloading addon (UBO): 44%Downloading addon (UBO): 44%Downloading addon (UBO): 44%Downloading addon (UBO): 44%Downloading addon (UBO): 44%Downloading addon (UBO): 45%Downloading addon (UBO): 45%Downloading addon (UBO): 45%Downloading addon (UBO): 45%Downloading addon (UBO): 45%Downloading addon (UBO): 45%Downloading addon (UBO): 46%Downloading addon (UBO): 46%Downloading addon (UBO): 46%Downloading addon (UBO): 46%Downloading addon (UBO): 46%Downloading addon (UBO): 47%Downloading addon (UBO): 47%Downloading addon (UBO): 47%Downloading addon (UBO): 47%Downloading addon (UBO): 47%Downloading addon (UBO): 47%Downloading addon (UBO): 48%Downloading addon (UBO): 48%Downloading addon (UBO): 48%Downloading addon (UBO): 48%Downloading addon (UBO): 48%Downloading addon (UBO): 48%Downloading addon (UBO): 49%Downloading addon (UBO): 49%Downloading addon (UBO): 49%Downloading addon (UBO): 49%Downloading addon (UBO): 49%Downloading addon (UBO): 50%Downloading addon (UBO): 50%Downloading addon (UBO): 50%Downloading addon (UBO): 50%Downloading addon (UBO): 50%Downloading addon (UBO): 50%Downloading addon (UBO): 51%Downloading addon (UBO): 51%Downloading addon (UBO): 51%Downloading addon (UBO): 51%Downloading addon (UBO): 51%Downloading addon (UBO): 51%Downloading addon (UBO): 52%Downloading addon (UBO): 52%Downloading addon (UBO): 52%Downloading addon (UBO): 52%Downloading addon (UBO): 52%Downloading addon (UBO): 52%Downloading addon (UBO): 53%Downloading addon (UBO): 53%Downloading addon (UBO): 53%Downloading addon (UBO): 53%Downloading addon (UBO): 53%Downloading addon (UBO): 54%Downloading addon (UBO): 54%Downloading addon (UBO): 54%Downloading addon (UBO): 54%Downloading addon (UBO): 54%Downloading addon (UBO): 54%Downloading addon (UBO): 55%Downloading addon (UBO): 55%Downloading addon (UBO): 55%Downloading addon (UBO): 55%Downloading addon (UBO): 55%Downloading addon (UBO): 55%Downloading addon (UBO): 56%Downloading addon (UBO): 56%Downloading addon (UBO): 56%Downloading addon (UBO): 56%Downloading addon (UBO): 56%Downloading addon (UBO): 57%Downloading addon (UBO): 57%Downloading addon (UBO): 57%Downloading addon (UBO): 57%Downloading addon (UBO): 57%Downloading addon (UBO): 57%Downloading addon (UBO): 58%Downloading addon (UBO): 58%Downloading addon (UBO): 58%Downloading addon (UBO): 58%Downloading addon (UBO): 58%Downloading addon (UBO): 58%Downloading addon (UBO): 59%Downloading addon (UBO): 59%Downloading addon (UBO): 59%Downloading addon (UBO): 59%Downloading addon (UBO): 59%Downloading addon (UBO): 60%Downloading addon (UBO): 60%Downloading addon (UBO): 60%Downloading addon (UBO): 60%Downloading addon (UBO): 60%Downloading addon (UBO): 60%Downloading addon (UBO): 61%Downloading addon (UBO): 61%Downloading addon (UBO): 61%Downloading addon (UBO): 61%Downloading addon (UBO): 61%Downloading addon (UBO): 61%Downloading addon (UBO): 62%Downloading addon (UBO): 62%Downloading addon (UBO): 62%Downloading addon (UBO): 62%Downloading addon (UBO): 62%Downloading addon (UBO): 63%Downloading addon (UBO): 63%Downloading addon (UBO): 63%Downloading addon (UBO): 63%Downloading addon (UBO): 63%Downloading addon (UBO): 63%Downloading addon (UBO): 64%Downloading addon (UBO): 64%Downloading addon (UBO): 64%Downloading addon (UBO): 64%Downloading addon (UBO): 64%Downloading addon (UBO): 64%Downloading addon (UBO): 65%Downloading addon (UBO): 65%Downloading addon (UBO): 65%Downloading addon (UBO): 65%Downloading addon (UBO): 65%Downloading addon (UBO): 66%Downloading addon (UBO): 66%Downloading addon (UBO): 66%Downloading addon (UBO): 66%Downloading addon (UBO): 66%Downloading addon (UBO): 66%Downloading addon (UBO): 67%Downloading addon (UBO): 67%Downloading addon (UBO): 67%Downloading addon (UBO): 67%Downloading addon (UBO): 67%Downloading addon (UBO): 67%Downloading addon (UBO): 68%Downloading addon (UBO): 68%Downloading addon (UBO): 68%Downloading addon (UBO): 68%Downloading addon (UBO): 68%Downloading addon (UBO): 69%Downloading addon (UBO): 69%Downloading addon (UBO): 69%Downloading addon (UBO): 69%Downloading addon (UBO): 69%Downloading addon (UBO): 69%Downloading addon (UBO): 70%Downloading addon (UBO): 70%Downloading addon (UBO): 70%Downloading addon (UBO): 70%Downloading addon (UBO): 70%Downloading addon (UBO): 70%Downloading addon (UBO): 71%Downloading addon (UBO): 71%Downloading addon (UBO): 71%Downloading addon (UBO): 71%Downloading addon (UBO): 71%Downloading addon (UBO): 72%Downloading addon (UBO): 72%Downloading addon (UBO): 72%Downloading addon (UBO): 72%Downloading addon (UBO): 72%Downloading addon (UBO): 72%Downloading addon (UBO): 73%Downloading addon (UBO): 73%Downloading addon (UBO): 73%Downloading addon (UBO): 73%Downloading addon (UBO): 73%Downloading addon (UBO): 73%Downloading addon (UBO): 74%Downloading addon (UBO): 74%Downloading addon (UBO): 74%Downloading addon (UBO): 74%Downloading addon (UBO): 74%Downloading addon (UBO): 75%Downloading addon (UBO): 75%Downloading addon (UBO): 75%Downloading addon (UBO): 75%Downloading addon (UBO): 75%Downloading addon (UBO): 75%Downloading addon (UBO): 76%Downloading addon (UBO): 76%Downloading addon (UBO): 76%Downloading addon (UBO): 76%Downloading addon (UBO): 76%Downloading addon (UBO): 76%Downloading addon (UBO): 77%Downloading addon (UBO): 77%Downloading addon (UBO): 77%Downloading addon (UBO): 77%Downloading addon (UBO): 77%Downloading addon (UBO): 78%Downloading addon (UBO): 78%Downloading addon (UBO): 78%Downloading addon (UBO): 78%Downloading addon (UBO): 78%Downloading addon (UBO): 78%Downloading addon (UBO): 79%Downloading addon (UBO): 79%Downloading addon (UBO): 79%Downloading addon (UBO): 79%Downloading addon (UBO): 79%Downloading addon (UBO): 79%Downloading addon (UBO): 80%Downloading addon (UBO): 80%Downloading addon (UBO): 80%Downloading addon (UBO): 80%Downloading addon (UBO): 80%Downloading addon (UBO): 81%Downloading addon (UBO): 81%Downloading addon (UBO): 81%Downloading addon (UBO): 81%Downloading addon (UBO): 81%Downloading addon (UBO): 81%Downloading addon (UBO): 82%Downloading addon (UBO): 82%Downloading addon (UBO): 82%Downloading addon (UBO): 82%Downloading addon (UBO): 82%Downloading addon (UBO): 82%Downloading addon (UBO): 83%Downloading addon (UBO): 83%Downloading addon (UBO): 83%Downloading addon (UBO): 83%Downloading addon (UBO): 83%Downloading addon (UBO): 84%Downloading addon (UBO): 84%Downloading addon (UBO): 84%Downloading addon (UBO): 84%Downloading addon (UBO): 84%Downloading addon (UBO): 84%Downloading addon (UBO): 85%Downloading addon (UBO): 85%Downloading addon (UBO): 85%Downloading addon (UBO): 85%Downloading addon (UBO): 85%Downloading addon (UBO): 85%Downloading addon (UBO): 86%Downloading addon (UBO): 86%Downloading addon (UBO): 86%Downloading addon (UBO): 86%Downloading addon (UBO): 86%Downloading addon (UBO): 86%Downloading addon (UBO): 87%Downloading addon (UBO): 87%Downloading addon (UBO): 87%Downloading addon (UBO): 87%Downloading addon (UBO): 87%Downloading addon (UBO): 88%Downloading addon (UBO): 88%Downloading addon (UBO): 88%Downloading addon (UBO): 88%Downloading addon (UBO): 88%Downloading addon (UBO): 88%Downloading addon (UBO): 89%Downloading addon (UBO): 89%Downloading addon (UBO): 89%Downloading addon (UBO): 89%Downloading addon (UBO): 89%Downloading addon (UBO): 89%Downloading addon (UBO): 90%Downloading addon (UBO): 90%Downloading addon (UBO): 90%Downloading addon (UBO): 90%Downloading addon (UBO): 90%Downloading addon (UBO): 91%Downloading addon (UBO): 91%Downloading addon (UBO): 91%Downloading addon (UBO): 91%Downloading addon (UBO): 91%Downloading addon (UBO): 91%Downloading addon (UBO): 92%Downloading addon (UBO): 92%Downloading addon (UBO): 92%Downloading addon (UBO): 92%Downloading addon (UBO): 92%Downloading addon (UBO): 92%Downloading addon (UBO): 93%Downloading addon (UBO): 93%Downloading addon (UBO): 93%Downloading addon (UBO): 93%Downloading addon (UBO): 93%Downloading addon (UBO): 94%Downloading addon (UBO): 94%Downloading addon (UBO): 94%Downloading addon (UBO): 94%Downloading addon (UBO): 94%Downloading addon (UBO): 94%Downloading addon (UBO): 95%Downloading addon (UBO): 95%Downloading addon (UBO): 95%Downloading addon (UBO): 95%Downloading addon (UBO): 95%Downloading addon (UBO): 95%Downloading addon (UBO): 96%Downloading addon (UBO): 96%Downloading addon (UBO): 96%Downloading addon (UBO): 96%Downloading addon (UBO): 96%Downloading addon (UBO): 97%Downloading addon (UBO): 97%Downloading addon (UBO): 97%Downloading addon (UBO): 97%Downloading addon (UBO): 97%Downloading addon (UBO): 97%Downloading addon (UBO): 98%Downloading addon (UBO): 98%Downloading addon (UBO): 98%Downloading addon (UBO): 98%Downloading addon (UBO): 98%Downloading addon (UBO): 98%Downloading addon (UBO): 99%Downloading addon (UBO): 99%Downloading addon (UBO): 99%Downloading addon (UBO): 99%Downloading addon (UBO): 99%Downloading addon (UBO): 100%Downloading addon (UBO): 100%Downloading addon (UBO): 100%Downloading addon (UBO): 100%Downloading addon (UBO): Complete
+#7 36.22 Extracting addon (UBO): 0%Extracting addon (UBO): 0%Extracting addon (UBO): 0%Extracting addon (UBO): 1%Extracting addon (UBO): 1%Extracting addon (UBO): 1%Extracting addon (UBO): 1%Extracting addon (UBO): 1%Extracting addon (UBO): 1%Extracting addon (UBO): 2%Extracting addon (UBO): 2%Extracting addon (UBO): 2%Extracting addon (UBO): 2%Extracting addon (UBO): 2%Extracting addon (UBO): 2%Extracting addon (UBO): 2%Extracting addon (UBO): 3%Extracting addon (UBO): 3%Extracting addon (UBO): 3%Extracting addon (UBO): 3%Extracting addon (UBO): 3%Extracting addon (UBO): 3%Extracting addon (UBO): 3%Extracting addon (UBO): 4%Extracting addon (UBO): 4%Extracting addon (UBO): 4%Extracting addon (UBO): 4%Extracting addon (UBO): 4%Extracting addon (UBO): 4%Extracting addon (UBO): 5%Extracting addon (UBO): 5%Extracting addon (UBO): 5%Extracting addon (UBO): 5%Extracting addon (UBO): 5%Extracting addon (UBO): 5%Extracting addon (UBO): 5%Extracting addon (UBO): 6%Extracting addon (UBO): 6%Extracting addon (UBO): 6%Extracting addon (UBO): 6%Extracting addon (UBO): 6%Extracting addon (UBO): 6%Extracting addon (UBO): 7%Extracting addon (UBO): 7%Extracting addon (UBO): 7%Extracting addon (UBO): 7%Extracting addon (UBO): 7%Extracting addon (UBO): 7%Extracting addon (UBO): 7%Extracting addon (UBO): 8%Extracting addon (UBO): 8%Extracting addon (UBO): 8%Extracting addon (UBO): 8%Extracting addon (UBO): 8%Extracting addon (UBO): 8%Extracting addon (UBO): 8%Extracting addon (UBO): 9%Extracting addon (UBO): 9%Extracting addon (UBO): 9%Extracting addon (UBO): 9%Extracting addon (UBO): 9%Extracting addon (UBO): 9%Extracting addon (UBO): 10%Extracting addon (UBO): 10%Extracting addon (UBO): 10%Extracting addon (UBO): 10%Extracting addon (UBO): 10%Extracting addon (UBO): 10%Extracting addon (UBO): 10%Extracting addon (UBO): 11%Extracting addon (UBO): 11%Extracting addon (UBO): 11%Extracting addon (UBO): 11%Extracting addon (UBO): 11%Extracting addon (UBO): 11%Extracting addon (UBO): 11%Extracting addon (UBO): 12%Extracting addon (UBO): 12%Extracting addon (UBO): 12%Extracting addon (UBO): 12%Extracting addon (UBO): 12%Extracting addon (UBO): 12%Extracting addon (UBO): 13%Extracting addon (UBO): 13%Extracting addon (UBO): 13%Extracting addon (UBO): 13%Extracting addon (UBO): 13%Extracting addon (UBO): 13%Extracting addon (UBO): 13%Extracting addon (UBO): 14%Extracting addon (UBO): 14%Extracting addon (UBO): 14%Extracting addon (UBO): 14%Extracting addon (UBO): 14%Extracting addon (UBO): 14%Extracting addon (UBO): 15%Extracting addon (UBO): 15%Extracting addon (UBO): 15%Extracting addon (UBO): 15%Extracting addon (UBO): 15%Extracting addon (UBO): 15%Extracting addon (UBO): 15%Extracting addon (UBO): 16%Extracting addon (UBO): 16%Extracting addon (UBO): 16%Extracting addon (UBO): 16%Extracting addon (UBO): 16%Extracting addon (UBO): 16%Extracting addon (UBO): 16%Extracting addon (UBO): 17%Extracting addon (UBO): 17%Extracting addon (UBO): 17%Extracting addon (UBO): 17%Extracting addon (UBO): 17%Extracting addon (UBO): 17%Extracting addon (UBO): 18%Extracting addon (UBO): 18%Extracting addon (UBO): 18%Extracting addon (UBO): 18%Extracting addon (UBO): 18%Extracting addon (UBO): 18%Extracting addon (UBO): 18%Extracting addon (UBO): 19%Extracting addon (UBO): 19%Extracting addon (UBO): 19%Extracting addon (UBO): 19%Extracting addon (UBO): 19%Extracting addon (UBO): 19%Extracting addon (UBO): 20%Extracting addon (UBO): 20%Extracting addon (UBO): 20%Extracting addon (UBO): 20%Extracting addon (UBO): 20%Extracting addon (UBO): 20%Extracting addon (UBO): 20%Extracting addon (UBO): 21%Extracting addon (UBO): 21%Extracting addon (UBO): 21%Extracting addon (UBO): 21%Extracting addon (UBO): 21%Extracting addon (UBO): 21%Extracting addon (UBO): 21%Extracting addon (UBO): 22%Extracting addon (UBO): 22%Extracting addon (UBO): 22%Extracting addon (UBO): 22%Extracting addon (UBO): 22%Extracting addon (UBO): 22%Extracting addon (UBO): 23%Extracting addon (UBO): 23%Extracting addon (UBO): 23%Extracting addon (UBO): 23%Extracting addon (UBO): 23%Extracting addon (UBO): 23%Extracting addon (UBO): 23%Extracting addon (UBO): 24%Extracting addon (UBO): 24%Extracting addon (UBO): 24%Extracting addon (UBO): 24%Extracting addon (UBO): 24%Extracting addon (UBO): 24%Extracting addon (UBO): 25%Extracting addon (UBO): 25%Extracting addon (UBO): 25%Extracting addon (UBO): 25%Extracting addon (UBO): 25%Extracting addon (UBO): 25%Extracting addon (UBO): 25%Extracting addon (UBO): 26%Extracting addon (UBO): 26%Extracting addon (UBO): 26%Extracting addon (UBO): 26%Extracting addon (UBO): 26%Extracting addon (UBO): 26%Extracting addon (UBO): 26%Extracting addon (UBO): 27%Extracting addon (UBO): 27%Extracting addon (UBO): 27%Extracting addon (UBO): 27%Extracting addon (UBO): 27%Extracting addon (UBO): 27%Extracting addon (UBO): 28%Extracting addon (UBO): 28%Extracting addon (UBO): 28%Extracting addon (UBO): 28%Extracting addon (UBO): 28%Extracting addon (UBO): 28%Extracting addon (UBO): 28%Extracting addon (UBO): 29%Extracting addon (UBO): 29%Extracting addon (UBO): 29%Extracting addon (UBO): 29%Extracting addon (UBO): 29%Extracting addon (UBO): 29%Extracting addon (UBO): 30%Extracting addon (UBO): 30%Extracting addon (UBO): 30%Extracting addon (UBO): 30%Extracting addon (UBO): 30%Extracting addon (UBO): 30%Extracting addon (UBO): 30%Extracting addon (UBO): 31%Extracting addon (UBO): 31%Extracting addon (UBO): 31%Extracting addon (UBO): 31%Extracting addon (UBO): 31%Extracting addon (UBO): 31%Extracting addon (UBO): 31%Extracting addon (UBO): 32%Extracting addon (UBO): 32%Extracting addon (UBO): 32%Extracting addon (UBO): 32%Extracting addon (UBO): 32%Extracting addon (UBO): 32%Extracting addon (UBO): 33%Extracting addon (UBO): 33%Extracting addon (UBO): 33%Extracting addon (UBO): 33%Extracting addon (UBO): 33%Extracting addon (UBO): 33%Extracting addon (UBO): 33%Extracting addon (UBO): 34%Extracting addon (UBO): 34%Extracting addon (UBO): 34%Extracting addon (UBO): 34%Extracting addon (UBO): 34%Extracting addon (UBO): 34%Extracting addon (UBO): 34%Extracting addon (UBO): 35%Extracting addon (UBO): 35%Extracting addon (UBO): 35%Extracting addon (UBO): 35%Extracting addon (UBO): 35%Extracting addon (UBO): 35%Extracting addon (UBO): 36%Extracting addon (UBO): 36%Extracting addon (UBO): 36%Extracting addon (UBO): 36%Extracting addon (UBO): 36%Extracting addon (UBO): 36%Extracting addon (UBO): 36%Extracting addon (UBO): 37%Extracting addon (UBO): 37%Extracting addon (UBO): 37%Extracting addon (UBO): 37%Extracting addon (UBO): 37%Extracting addon (UBO): 37%Extracting addon (UBO): 38%Extracting addon (UBO): 38%Extracting addon (UBO): 38%Extracting addon (UBO): 38%Extracting addon (UBO): 38%Extracting addon (UBO): 38%Extracting addon (UBO): 38%Extracting addon (UBO): 39%Extracting addon (UBO): 39%Extracting addon (UBO): 39%Extracting addon (UBO): 39%Extracting addon (UBO): 39%Extracting addon (UBO): 39%Extracting addon (UBO): 39%Extracting addon (UBO): 40%Extracting addon (UBO): 40%Extracting addon (UBO): 40%Extracting addon (UBO): 40%Extracting addon (UBO): 40%Extracting addon (UBO): 40%Extracting addon (UBO): 41%Extracting addon (UBO): 41%Extracting addon (UBO): 41%Extracting addon (UBO): 41%Extracting addon (UBO): 41%Extracting addon (UBO): 41%Extracting addon (UBO): 41%Extracting addon (UBO): 42%Extracting addon (UBO): 42%Extracting addon (UBO): 42%Extracting addon (UBO): 42%Extracting addon (UBO): 42%Extracting addon (UBO): 42%Extracting addon (UBO): 43%Extracting addon (UBO): 43%Extracting addon (UBO): 43%Extracting addon (UBO): 43%Extracting addon (UBO): 43%Extracting addon (UBO): 43%Extracting addon (UBO): 43%Extracting addon (UBO): 44%Extracting addon (UBO): 44%Extracting addon (UBO): 44%Extracting addon (UBO): 44%Extracting addon (UBO): 44%Extracting addon (UBO): 44%Extracting addon (UBO): 44%Extracting addon (UBO): 45%Extracting addon (UBO): 45%Extracting addon (UBO): 45%Extracting addon (UBO): 45%Extracting addon (UBO): 45%Extracting addon (UBO): 45%Extracting addon (UBO): 46%Extracting addon (UBO): 46%Extracting addon (UBO): 46%Extracting addon (UBO): 46%Extracting addon (UBO): 46%Extracting addon (UBO): 46%Extracting addon (UBO): 46%Extracting addon (UBO): 47%Extracting addon (UBO): 47%Extracting addon (UBO): 47%Extracting addon (UBO): 47%Extracting addon (UBO): 47%Extracting addon (UBO): 47%Extracting addon (UBO): 48%Extracting addon (UBO): 48%Extracting addon (UBO): 48%Extracting addon (UBO): 48%Extracting addon (UBO): 48%Extracting addon (UBO): 48%Extracting addon (UBO): 48%Extracting addon (UBO): 49%Extracting addon (UBO): 49%Extracting addon (UBO): 49%Extracting addon (UBO): 49%Extracting addon (UBO): 49%Extracting addon (UBO): 49%Extracting addon (UBO): 49%Extracting addon (UBO): 50%Extracting addon (UBO): 50%Extracting addon (UBO): 50%Extracting addon (UBO): 50%Extracting addon (UBO): 50%Extracting addon (UBO): 50%Extracting addon (UBO): 51%Extracting addon (UBO): 51%Extracting addon (UBO): 51%Extracting addon (UBO): 51%Extracting addon (UBO): 51%Extracting addon (UBO): 51%Extracting addon (UBO): 51%Extracting addon (UBO): 52%Extracting addon (UBO): 52%Extracting addon (UBO): 52%Extracting addon (UBO): 52%Extracting addon (UBO): 52%Extracting addon (UBO): 52%Extracting addon (UBO): 52%Extracting addon (UBO): 53%Extracting addon (UBO): 53%Extracting addon (UBO): 53%Extracting addon (UBO): 53%Extracting addon (UBO): 53%Extracting addon (UBO): 53%Extracting addon (UBO): 54%Extracting addon (UBO): 54%Extracting addon (UBO): 54%Extracting addon (UBO): 54%Extracting addon (UBO): 54%Extracting addon (UBO): 54%Extracting addon (UBO): 54%Extracting addon (UBO): 55%Extracting addon (UBO): 55%Extracting addon (UBO): 55%Extracting addon (UBO): 55%Extracting addon (UBO): 55%Extracting addon (UBO): 55%Extracting addon (UBO): 56%Extracting addon (UBO): 56%Extracting addon (UBO): 56%Extracting addon (UBO): 56%Extracting addon (UBO): 56%Extracting addon (UBO): 56%Extracting addon (UBO): 56%Extracting addon (UBO): 57%Extracting addon (UBO): 57%Extracting addon (UBO): 57%Extracting addon (UBO): 57%Extracting addon (UBO): 57%Extracting addon (UBO): 57%Extracting addon (UBO): 57%Extracting addon (UBO): 58%Extracting addon (UBO): 58%Extracting addon (UBO): 58%Extracting addon (UBO): 58%Extracting addon (UBO): 58%Extracting addon (UBO): 58%Extracting addon (UBO): 59%Extracting addon (UBO): 59%Extracting addon (UBO): 59%Extracting addon (UBO): 59%Extracting addon (UBO): 59%Extracting addon (UBO): 59%Extracting addon (UBO): 59%Extracting addon (UBO): 60%Extracting addon (UBO): 60%Extracting addon (UBO): 60%Extracting addon (UBO): 60%Extracting addon (UBO): 60%Extracting addon (UBO): 60%Extracting addon (UBO): 61%Extracting addon (UBO): 61%Extracting addon (UBO): 61%Extracting addon (UBO): 61%Extracting addon (UBO): 61%Extracting addon (UBO): 61%Extracting addon (UBO): 61%Extracting addon (UBO): 62%Extracting addon (UBO): 62%Extracting addon (UBO): 62%Extracting addon (UBO): 62%Extracting addon (UBO): 62%Extracting addon (UBO): 62%Extracting addon (UBO): 62%Extracting addon (UBO): 63%Extracting addon (UBO): 63%Extracting addon (UBO): 63%Extracting addon (UBO): 63%Extracting addon (UBO): 63%Extracting addon (UBO): 63%Extracting addon (UBO): 64%Extracting addon (UBO): 64%Extracting addon (UBO): 64%Extracting addon (UBO): 64%Extracting addon (UBO): 64%Extracting addon (UBO): 64%Extracting addon (UBO): 64%Extracting addon (UBO): 65%Extracting addon (UBO): 65%Extracting addon (UBO): 65%Extracting addon (UBO): 65%Extracting addon (UBO): 65%Extracting addon (UBO): 65%Extracting addon (UBO): 66%Extracting addon (UBO): 66%Extracting addon (UBO): 66%Extracting addon (UBO): 66%Extracting addon (UBO): 66%Extracting addon (UBO): 66%Extracting addon (UBO): 66%Extracting addon (UBO): 67%Extracting addon (UBO): 67%Extracting addon (UBO): 67%Extracting addon (UBO): 67%Extracting addon (UBO): 67%Extracting addon (UBO): 67%Extracting addon (UBO): 67%Extracting addon (UBO): 68%Extracting addon (UBO): 68%Extracting addon (UBO): 68%Extracting addon (UBO): 68%Extracting addon (UBO): 68%Extracting addon (UBO): 68%Extracting addon (UBO): 69%Extracting addon (UBO): 69%Extracting addon (UBO): 69%Extracting addon (UBO): 69%Extracting addon (UBO): 69%Extracting addon (UBO): 69%Extracting addon (UBO): 69%Extracting addon (UBO): 70%Extracting addon (UBO): 70%Extracting addon (UBO): 70%Extracting addon (UBO): 70%Extracting addon (UBO): 70%Extracting addon (UBO): 70%Extracting addon (UBO): 70%Extracting addon (UBO): 71%Extracting addon (UBO): 71%Extracting addon (UBO): 71%Extracting addon (UBO): 71%Extracting addon (UBO): 71%Extracting addon (UBO): 71%Extracting addon (UBO): 72%Extracting addon (UBO): 72%Extracting addon (UBO): 72%Extracting addon (UBO): 72%Extracting addon (UBO): 72%Extracting addon (UBO): 72%Extracting addon (UBO): 72%Extracting addon (UBO): 73%Extracting addon (UBO): 73%Extracting addon (UBO): 73%Extracting addon (UBO): 73%Extracting addon (UBO): 73%Extracting addon (UBO): 73%Extracting addon (UBO): 74%Extracting addon (UBO): 74%Extracting addon (UBO): 74%Extracting addon (UBO): 74%Extracting addon (UBO): 74%Extracting addon (UBO): 74%Extracting addon (UBO): 74%Extracting addon (UBO): 75%Extracting addon (UBO): 75%Extracting addon (UBO): 75%Extracting addon (UBO): 75%Extracting addon (UBO): 75%Extracting addon (UBO): 75%Extracting addon (UBO): 75%Extracting addon (UBO): 76%Extracting addon (UBO): 76%Extracting addon (UBO): 76%Extracting addon (UBO): 76%Extracting addon (UBO): 76%Extracting addon (UBO): 76%Extracting addon (UBO): 77%Extracting addon (UBO): 77%Extracting addon (UBO): 77%Extracting addon (UBO): 77%Extracting addon (UBO): 77%Extracting addon (UBO): 77%Extracting addon (UBO): 77%Extracting addon (UBO): 78%Extracting addon (UBO): 78%Extracting addon (UBO): 78%Extracting addon (UBO): 78%Extracting addon (UBO): 78%Extracting addon (UBO): 78%Extracting addon (UBO): 79%Extracting addon (UBO): 79%Extracting addon (UBO): 79%Extracting addon (UBO): 79%Extracting addon (UBO): 79%Extracting addon (UBO): 79%Extracting addon (UBO): 79%Extracting addon (UBO): 80%Extracting addon (UBO): 80%Extracting addon (UBO): 80%Extracting addon (UBO): 80%Extracting addon (UBO): 80%Extracting addon (UBO): 80%Extracting addon (UBO): 80%Extracting addon (UBO): 81%Extracting addon (UBO): 81%Extracting addon (UBO): 81%Extracting addon (UBO): 81%Extracting addon (UBO): 81%Extracting addon (UBO): 81%Extracting addon (UBO): 82%Extracting addon (UBO): 82%Extracting addon (UBO): 82%Extracting addon (UBO): 82%Extracting addon (UBO): 82%Extracting addon (UBO): 82%Extracting addon (UBO): 82%Extracting addon (UBO): 83%Extracting addon (UBO): 83%Extracting addon (UBO): 83%Extracting addon (UBO): 83%Extracting addon (UBO): 83%Extracting addon (UBO): 83%Extracting addon (UBO): 84%Extracting addon (UBO): 84%Extracting addon (UBO): 84%Extracting addon (UBO): 84%Extracting addon (UBO): 84%Extracting addon (UBO): 84%Extracting addon (UBO): 84%Extracting addon (UBO): 85%Extracting addon (UBO): 85%Extracting addon (UBO): 85%Extracting addon (UBO): 85%Extracting addon (UBO): 85%Extracting addon (UBO): 85%Extracting addon (UBO): 85%Extracting addon (UBO): 86%Extracting addon (UBO): 86%Extracting addon (UBO): 86%Extracting addon (UBO): 86%Extracting addon (UBO): 86%Extracting addon (UBO): 86%Extracting addon (UBO): 87%Extracting addon (UBO): 87%Extracting addon (UBO): 87%Extracting addon (UBO): 87%Extracting addon (UBO): 87%Extracting addon (UBO): 87%Extracting addon (UBO): 87%Extracting addon (UBO): 88%Extracting addon (UBO): 88%Extracting addon (UBO): 88%Extracting addon (UBO): 88%Extracting addon (UBO): 88%Extracting addon (UBO): 88%Extracting addon (UBO): 89%Extracting addon (UBO): 89%Extracting addon (UBO): 89%Extracting addon (UBO): 89%Extracting addon (UBO): 89%Extracting addon (UBO): 89%Extracting addon (UBO): 89%Extracting addon (UBO): 90%Extracting addon (UBO): 90%Extracting addon (UBO): 90%Extracting addon (UBO): 90%Extracting addon (UBO): 90%Extracting addon (UBO): 90%Extracting addon (UBO): 90%Extracting addon (UBO): 91%Extracting addon (UBO): 91%Extracting addon (UBO): 91%Extracting addon (UBO): 91%Extracting addon (UBO): 91%Extracting addon (UBO): 91%Extracting addon (UBO): 92%Extracting addon (UBO): 92%Extracting addon (UBO): 92%Extracting addon (UBO): 92%Extracting addon (UBO): 92%Extracting addon (UBO): 92%Extracting addon (UBO): 92%Extracting addon (UBO): 93%Extracting addon (UBO): 93%Extracting addon (UBO): 93%Extracting addon (UBO): 93%Extracting addon (UBO): 93%Extracting addon (UBO): 93%Extracting addon (UBO): 93%Extracting addon (UBO): 94%Extracting addon (UBO): 94%Extracting addon (UBO): 94%Extracting addon (UBO): 94%Extracting addon (UBO): 94%Extracting addon (UBO): 94%Extracting addon (UBO): 95%Extracting addon (UBO): 95%Extracting addon (UBO): 95%Extracting addon (UBO): 95%Extracting addon (UBO): 95%Extracting addon (UBO): 95%Extracting addon (UBO): 95%Extracting addon (UBO): 96%Extracting addon (UBO): 96%Extracting addon (UBO): 96%Extracting addon (UBO): 96%Extracting addon (UBO): 96%Extracting addon (UBO): 96%Extracting addon (UBO): 97%Extracting addon (UBO): 97%Extracting addon (UBO): 97%Extracting addon (UBO): 97%Extracting addon (UBO): 97%Extracting addon (UBO): 97%Extracting addon (UBO): 97%Extracting addon (UBO): 98%Extracting addon (UBO): 98%Extracting addon (UBO): 98%Extracting addon (UBO): 98%Extracting addon (UBO): 98%Extracting addon (UBO): 98%Extracting addon (UBO): 98%Extracting addon (UBO): 99%Extracting addon (UBO): 99%Extracting addon (UBO): 99%Extracting addon (UBO): 99%Extracting addon (UBO): 99%Extracting addon (UBO): 99%Extracting addon (UBO): 100%Extracting addon (UBO): 100%Extracting addon (UBO): 100%Extracting addon (UBO): 100%Extracting addon (UBO): Complete
+#7 DONE 37.0s
+
+#8 [4/5] WORKDIR /bench
+#8 DONE 0.1s
+
+#9 [5/5] COPY camoufox_worker.py targets.py probe.py /bench/
+#9 DONE 0.0s
+
+#10 exporting to image
+#10 exporting layers
+#10 exporting layers 56.1s done
+#10 exporting manifest sha256:68c963f8c3877e73e9665b6506ea264d049fbe9d4b8c18a2c2ed13aa7c0be692 0.0s done
+#10 exporting config sha256:0054dbccd8bae98a23284f0a2880cd89386664d6766d16a0aeb001112e71ddd9 done
+#10 exporting attestation manifest sha256:e5908382aaa45f6748eb6b6f0ec18c7640871f84999af2562c337752e6c7667b 0.0s done
+#10 exporting manifest list sha256:18526004bb01c153fc552e14e4119033a9b37b794d96c01d5c195d295d490c1b done
+#10 naming to docker.io/library/benchmark-iframer-camoufox:latest done
+#10 unpacking to docker.io/library/benchmark-iframer-camoufox:latest
+#10 unpacking to docker.io/library/benchmark-iframer-camoufox:latest 12.1s done
+#10 DONE 68.3s
+
+View build details: docker-desktop://dashboard/build/desktop-linux/desktop-linux/iato5r84hulxa18qc6h02k4c5

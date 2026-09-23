@@ -1,0 +1,111 @@
+{
+  "machine": "MacBook M3 Pro, home IP (Brazil), no proxy",
+  "versions": "iframer-toolkit 0.10.6 (patchright, Chrome 152) · camoufox 0.5.6 / Firefox 152.0.4-beta.30 · @askjo/camofox-browser latest, same Firefox binary.",
+  "verdict": [
+    "<b>Camoufox's fingerprint claims are real.</b> 63 detector loads across its three configs, zero flagged. iframer's best mode (headful) was flagged or partial on 6 of 21; headless on 15 of 21.",
+    "<b>Clean fingerprint did not mean more doors open.</b> On real walls (Cloudflare, HUMAN, Akamai, Imperva) iframer headful was the best single config: 23 of 24. Raw camoufox: 17 of 24, headless or headed.",
+    "<b>The Hermes backend beats raw camoufox.</b> camofox-browser (warm shared Firefox, host-matched identity) passed 41 of 45. Its only misses: Walmart, 3 of 3, and one Turnstile hiccup.",
+    "<b>iframer headless as shipped is the weak spot: 23 of 45.</b> The UA literally says HeadlessChrome. Everything iframer wins, it wins by escalating to a real Chrome window. On a Linux box with no display, that ladder doesn't exist, and the Hermes advice (\"use camofox\") is correct."
+  ],
+  "better": [
+    {
+      "fam": "camoufox",
+      "title": "Where camoufox is better",
+      "items": [
+        "<b>Fingerprint consistency.</b> Every property agrees with every other: UA, platform, GPU, screen, fonts. CreepJS: 6% like-headless, 0% headless, 0% stealth, every run. iframer headful: 44% like-headless, every run.",
+        "<b>Headless that doesn't look headless.</b> camoufox headless: 21 of 21 clean on detectors. iframer headless: 6 of 21.",
+        "<b>No automation-protocol leaks.</b> rebrowser's Playwright/CDP tests: 5 green every run. iframer trips <code>viewport</code> (default 1280×720) and <code>useragent</code> (Chrome for Testing brand) in every mode.",
+        "<b>Works without a display.</b> The whole stealth story holds in headless. That is the Hermes-on-Linux case."
+      ]
+    },
+    {
+      "fam": "iframer",
+      "title": "Where iframer is better",
+      "items": [
+        "<b>Cloudflare challenge pages.</b> 6 of 6 in headless and in headful. camoufox headless got stuck 2 of 6; headed 1 of 6; Hermes backend 1 of 6.",
+        "<b>HUMAN / PerimeterX sites.</b> Zillow: iframer 9 of 9 across modes. camoufox headed: 0 of 3 (\"Press &amp; Hold\"). Walmart: iframer headful 3 of 3; camoufox headed 1 of 3, Hermes backend 0 of 3 (camoufox headless, oddly, 3 of 3).",
+        "<b>Escalation memory.</b> auto mode lost Ticketmaster on visit 1 (headless), remembered, and took headful on visits 2 and 3. Raw camoufox has no such ladder: a fail is a fail every time.",
+        "<b>Real Chrome, real TLS, real engine.</b> Some WAFs test for SpiderMonkey behaviour. camoufox's own README says it cannot hide that. iframer never has to."
+      ]
+    }
+  ],
+  "method": [
+    "Same machine, same network, same minute: configs interleaved per page so no engine got a quieter window.",
+    "Fresh browser and fresh cookies before every load (<code>iframer session stop</code> + <code>session clear</code>; new Camoufox() per run; new camofox userId per run).",
+    "Verdict = what the page itself said, read as text through the same JS in every engine. Parsers in <code>targets.py</code>, one per site, engine-blind.",
+    "iframer driven only via <code>iframer execute --json</code>. Camoufox only via its Python API with defaults. camofox-browser only via its REST API with defaults.",
+    "iframer <code>auto</code> is the product default: no <code>--mode</code>, so it picks, escalates, and remembers per domain (<code>~/.iframer/domain-modes.json</code>). Its run 2 and 3 results reflect that memory.",
+    "\"unknown\" = the page never rendered a verdict in the wait window. Not counted for or against anyone.",
+    "Wall time includes browser launch for raw camoufox and for iframer (browser stopped between runs); camofox-browser keeps one warm Firefox, like iframer's daemon normally does."
+  ],
+  "blank": [
+    "<b>No proxy, one IP.</b> Every WAF also scores IP reputation; a residential IP in Brazil is a fixed variable here, not a tested one.",
+    "<b>Behaviour.</b> Nothing clicked, scrolled, or typed. Sites that score mouse curves and timing (HUMAN's Press &amp; Hold, incolumitas behavioural score) were only tested on load.",
+    "<b>Login flows and sessions.</b> Not exercised. That is iframer's actual product surface and camoufox has nothing comparable; this benchmark is stealth-only.",
+    "<b>Linux.</b> Where Hermes usually runs, and where camoufox offers <code>headless=\"virtual\"</code> (Xvfb). Not tested; expect camoufox to look better there, not worse.",
+    "<b>pixelscan.net</b>: verdict isn't in the DOM text, dropped. <b>leboncoin.fr</b>: CloudFront 403 for everyone (geo-block), dropped. <b>areyouheadless</b>: 502, dropped.",
+    "<b>Kasada, Shape/F5, DataDome</b>: no gradeable target in this run. DataDome was leboncoin.",
+    "<b>Repeat visits.</b> 3 runs is enough to see \"always\" vs \"sometimes\", not enough for a rate."
+  ],
+  "sources": [
+    {
+      "title": "camoufox README (daijro)",
+      "url": "https://github.com/daijro/camoufox",
+      "note": "notes a year gap in maintenance, 'newly discovered fingerprint inconsistencies', and that SpiderMonkey behaviour can't be hidden"
+    },
+    {
+      "title": "Maintenance update, discussion #452",
+      "url": "https://github.com/daijro/camoufox/discussions/452",
+      "note": "daijro stepped down Jan 2026, Clover Labs maintains now"
+    },
+    {
+      "title": "jo-inc/camofox-browser",
+      "url": "https://github.com/jo-inc/camofox-browser",
+      "note": "the REST wrapper Hermes routes through when CAMOFOX_URL is set"
+    },
+    {
+      "title": "Hermes Agent PR #4008",
+      "url": "https://github.com/NousResearch/hermes-agent/pull/4008",
+      "note": "adds camofox as Hermes's local anti-detection browser backend"
+    },
+    {
+      "title": "Browsers stealth test gist (patchright, cloakbrowser, camoufox, lightpanda, obscura)",
+      "url": "https://gist.github.com/uinstinct/eb6608a6f42ea797526cc9acc2c38649",
+      "note": "20-task agent-run test; camoufox v135 scored 13/20 vs patchright 18/20, mostly on Chrome-expecting checks"
+    },
+    {
+      "title": "pim97 anti-detect tools comparison",
+      "url": "https://github.com/pim97/anti-detect-browser-tools-tech-comparison",
+      "note": "on Firefox-based stealth being a liability against Chrome-profiling WAFs"
+    },
+    {
+      "title": "Scrapfly: best stealth browsers 2026",
+      "url": "https://scrapfly.io/blog/posts/best-stealth-browsers",
+      "note": "camoufox 'strongest on hard fingerprinting, among the slowest'"
+    },
+    {
+      "title": "rebrowser bot-detector",
+      "url": "https://bot-detector.rebrowser.net/",
+      "note": "the CDP / Playwright leak tests used here"
+    }
+  ],
+  "vpn": {
+    "machine": "same Mac, VPN exit 146.70.168.224, New York, AS9009 M247 (datacenter VPN range), 2026-09-18",
+    "verdict": [
+      "<b>Three of six sites blocked everyone, every run.</b> g2 (Cloudflare), Ticketmaster, Indeed: 0 of 54 across all six configs. That is the IP, not the browser. No fingerprint work moves these.",
+      "<b>On the three that still judged the browser, iframer went 26 of 27.</b> Every mode, headless included. camoufox headless matched it, 9 of 9.",
+      "<b>Firefox headed configs collapsed.</b> camoufox headed 4 of 9, the Hermes backend 3 of 9. Zillow and Walmart pushed Press &amp; Hold / Robot-or-human on them every time, and only on them.",
+      "<b>Net: on a datacenter IP, engine choice decides 3 sites and the IP decides the other 3.</b> iframer and camoufox headless tie on the ones that are decidable; the Hermes setup as shipped is the worst row here."
+    ]
+  },
+  "docker": {
+    "machine": "Docker Desktop on the same Mac, home IP, arm64 Linux containers (a real VPS would be x86_64), no GPU, 2026-09-18",
+    "verdict": [
+      "<b>In a container, camoufox headless is the best config and it isn't close.</b> Detectors 21 of 21, real sites 13 of 18. iframer's best (headful over Xvfb): 14 of 21 and 7 of 14, with 4 more runs that never returned.",
+      "<b>Cloudflare's challenge pages blocked every container config, 0 of 36, on the same home IP where iframer on the Mac went 6 of 6.</b> Diagnosed after the run: egress IP identical, challenge script loads and posts its fingerprint fine, 60 s wait changes nothing, and an x86_64 container under Rosetta fails the same way, so it is not arm64. What's left is what every container here shares: no GPU (software canvas, no WebGL in headless) and Docker Desktop's user-space network stack, whose TCP fingerprint is the Mac's while the browser claims Linux or Windows. Treat this row as a Docker-Desktop-on-Mac finding until a real Linux host is tested.",
+      "<b>iframer's Docker mode has three bugs before stealth even matters.</b> The server binds 127.0.0.1 so the shipped compose file is unreachable from the host; the daemon reaps its own Chrome because the pid-1 liveness check fails in a container (worked around with <code>--init</code>); and 14 of 144 iframer runs hung until the container was restarted.",
+      "<b>The leaks are the same ones as on the Mac, plus one.</b> Headless: HeadlessChrome UA, Linux UA with Win32 platform. Headful: Windows UA on a Linux box with an Intel Iris GPU string and a 1280×720 screen. Same generator, same seams.",
+      "<b>Firefox with a window loses to HUMAN here too.</b> camoufox virtual (Xvfb) and the Hermes backend: Zillow 0 of 3 each, Walmart 0 to 1 of 3. camoufox plain headless: Zillow 3 of 3."
+    ]
+  }
+}

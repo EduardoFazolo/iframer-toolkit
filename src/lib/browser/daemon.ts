@@ -31,10 +31,20 @@ export interface DaemonInstance {
   /** Number of pipeline runs currently using this browser. The idle timer
    *  never fires while this is > 0, so long runs can't get killed mid-work. */
   active: number;
+  /** When active last went from 0 to >0. A pipeline that dies between
+   *  acquire() and release() would otherwise leave active stuck above zero and
+   *  the browser immortal, so BUSY_MAX_MS caps how long we trust this. */
+  busySince: number | null;
 }
 
 const DEFAULT_IDLE_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 const CLOSE_GRACE_MS = 5_000; // polite close deadline before SIGKILL
+/** Hard ceiling on a "busy" instance. No single pipeline runs this long; past
+ *  it, active>0 means a leaked counter, not real work, so stop anyway. */
+const BUSY_MAX_MS = 30 * 60 * 1000; // 30 minutes
+/** A browser that only ever sat on about:blank is an accident (a mis-shaped
+ *  pipeline, a refused run). Reclaim it faster than a real, used browser. */
+const BLANK_IDLE_MS = 2 * 60 * 1000; // 2 minutes
 export const DEFAULT_INSTANCE = "default";
 
 /** Composite map key: a session may hold several named browsers per mode
@@ -148,6 +158,7 @@ export class BrowserDaemon {
       chromePid,
       marker,
       active: 0,
+      busySince: null,
     };
 
     this.instances.set(key, instance);
@@ -162,7 +173,9 @@ export class BrowserDaemon {
    *  Always pair with release() in a finally block. */
   acquire(mode: BrowserMode, instanceId: string = DEFAULT_INSTANCE): void {
     const instance = this.instances.get(keyOf(mode, instanceId));
-    if (instance) instance.active++;
+    if (!instance) return;
+    if (instance.active === 0) instance.busySince = Date.now();
+    instance.active++;
   }
 
   release(mode: BrowserMode, instanceId: string = DEFAULT_INSTANCE): void {
@@ -170,7 +183,10 @@ export class BrowserDaemon {
     const instance = this.instances.get(key);
     if (!instance) return;
     instance.active = Math.max(0, instance.active - 1);
-    if (instance.active === 0) this.resetIdleTimer(key);
+    if (instance.active === 0) {
+      instance.busySince = null;
+      this.resetIdleTimer(key);
+    }
   }
 
   isRunning(mode: BrowserMode, instanceId: string = DEFAULT_INSTANCE): boolean {
@@ -181,6 +197,36 @@ export class BrowserDaemon {
     } catch {
       return false;
     }
+  }
+
+  /** Close instances that never left about:blank and have been idle a while.
+   *  Those are accidents — a pipeline that failed before its first navigate, or
+   *  a mode picked for a call that never needed a browser — and in headful mode
+   *  each one is an empty window sitting on the user's desktop. Called on the
+   *  server's reap tick, so it also catches instances whose idle timer was lost
+   *  (e.g. the daemon was restarted under them). */
+  sweepBlankInstances(): string[] {
+    const stopped: string[] = [];
+    const now = Date.now();
+    for (const [key, inst] of this.instances.entries()) {
+      if (inst.active > 0) continue;
+      if (now - inst.createdAt.getTime() < BLANK_IDLE_MS) continue;
+      let blank = false;
+      try {
+        const pages = inst.context.pages();
+        blank = pages.length === 0 || pages.every((p) => {
+          const u = p.url();
+          return u === "about:blank" || u === "" || u === "chrome://newtab/";
+        });
+      } catch {
+        continue; // browser already gone; the normal paths will clean it up
+      }
+      if (!blank) continue;
+      log.info(`blank-orphan sweep: ${key} never left about:blank, stopping`);
+      stopped.push(key);
+      this.stopKey(key).catch((err) => log.warn(`blank sweep stop failed for ${key}: ${err}`));
+    }
+    return stopped;
   }
 
   /** Distinct modes that currently have at least one live instance. */
@@ -305,10 +351,18 @@ export class BrowserDaemon {
       setTimeout(() => {
         const instance = this.instances.get(key);
         if (instance && instance.active > 0) {
-          // Busy — a pipeline is still running. Check again later instead of
-          // killing the browser out from under it.
-          this.resetIdleTimer(key);
-          return;
+          const busyMs = instance.busySince ? Date.now() - instance.busySince : 0;
+          if (busyMs < BUSY_MAX_MS) {
+            // Busy — a pipeline is still running. Check again later instead of
+            // killing the browser out from under it.
+            this.resetIdleTimer(key);
+            return;
+          }
+          // Past the ceiling: the counter leaked (a run died between acquire
+          // and release). Without this, the browser would re-arm forever.
+          log.warn(`${key} reported busy for ${Math.round(busyMs / 60000)}m — treating active=${instance.active} as leaked, stopping`);
+          instance.active = 0;
+          instance.busySince = null;
         }
         log.info(`Idle timeout for ${key}, stopping...`);
         this.stopKey(key).catch((err) => log.warn(`idle stop failed for ${key}: ${err}`));

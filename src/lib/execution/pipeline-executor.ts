@@ -25,6 +25,31 @@ import { CdpRelay } from "../extension/cdp-relay";
 
 const log = createLogger("iframer");
 
+/** A failed result for something we refuse to run. Nothing launched, so there is
+ *  no page state and no browser to clean up afterwards. */
+function blankPipelineResult(
+  pipeline: Pipeline,
+  modeUsed: BrowserMode,
+  error: { errorType: string; message: string; suggestion: string; retryable: boolean },
+): PipelineResult {
+  return {
+    ok: false,
+    completedSteps: 0,
+    totalSteps: pipeline.steps.length,
+    results: [],
+    obstacles: [],
+    error: {
+      failedAtStep: 0,
+      failedStep: pipeline.steps[0],
+      pageState: { url: "", title: "" },
+      ...error,
+    } as PipelineResult["error"],
+    durationMs: 0,
+    modeUsed,
+    finalState: { url: "", title: "" },
+  };
+}
+
 export interface PipelineExecutorDeps {
   daemon: BrowserDaemon;
   store: StorageBackend;
@@ -88,9 +113,37 @@ export class PipelineExecutor {
     const autoEscalate = opts.autoEscalate !== false;
     const instanceId = opts.instanceId || DEFAULT_INSTANCE;
 
+    // mode:"extension" only reaches here when the tab id is missing (the real
+    // extension path returns above). Never silently re-pick a launch mode for
+    // it: that opens a blank Chrome window the caller never asked for.
+    if (forcedMode === "extension") {
+      return blankPipelineResult(pipeline, "extension", {
+        errorType: "action-failed",
+        message: 'mode="extension" requires options.tabId (the real-Chrome tab to drive).',
+        suggestion:
+          "Call the `tabs` tool (or GET /extension/tabs) to list open tabs, then pass that tab id. Nothing was launched.",
+        retryable: false,
+      });
+    }
+
     // Extract domain from first navigate step for mode memory
     const firstNav = pipeline.steps.find((s) => s.type === "navigate");
     const domain = firstNav ? new URL(firstNav.url).hostname : null;
+
+    // A pipeline with no navigate step only makes sense against a page that
+    // already exists (reattach by instanceId, or extension mode above). With no
+    // live browser to reattach to, launching one just parks a blank window on
+    // about:blank and reports success — the classic orphan. Refuse instead.
+    if (!firstNav && !this.deps.daemon.findLiveMode(instanceId)) {
+      return blankPipelineResult(pipeline, forcedMode || "headless", {
+        errorType: "action-failed",
+        message: `No navigate step and no live browser for instanceId "${instanceId}" to act on.`,
+        suggestion:
+          "Add a navigate step, or reattach to a live window (check `status` / `iframer instances` for instanceId). " +
+          "To drive a real Chrome tab, pass options.tabId from the `tabs` tool. Nothing was launched.",
+        retryable: false,
+      });
+    }
 
     const availableModes = this.deps.availableModes();
 

@@ -495,6 +495,25 @@ function hasFlag(args, flag) {
   return args.includes(flag);
 }
 
+// Modes the CLI can launch. "extension" is deliberately absent: driving a real
+// Chrome tab needs a tab id, which only the `tabs` tool / extension API supply.
+// Without this gate a stray --mode extension used to fall through to the mode
+// heuristic and open a blank Chrome for Testing window.
+const LAUNCH_MODES = ["headless", "binary-headful", "docker-headful"];
+
+function parseModeFlag(args) {
+  const mode = parseFlag(args, "--mode");
+  if (!mode) return undefined;
+  if (LAUNCH_MODES.includes(mode)) return mode;
+  if (mode === "extension") {
+    console.error("\n  --mode extension is not available from the CLI: it needs a tab id.");
+    console.error("  Use the `tabs` tool from your agent, or POST /extension/execute with a tabId.\n");
+    process.exit(1);
+  }
+  console.error(`\n  Unknown --mode "${mode}". Use one of: ${LAUNCH_MODES.join(", ")}.\n`);
+  process.exit(1);
+}
+
 function handleResponse(data, screenshotPath) {
   const { screenshot, tileScreenshots, ...rest } = data;
   if (screenshot && screenshotPath) {
@@ -1025,7 +1044,7 @@ async function main() {
       }
 
       const options = { ...inputOptions };  // flags below override
-      const mode = parseFlag(args, "--mode");
+      const mode = parseModeFlag(args);
       if (mode) options.mode = mode;
       if (hasFlag(args, "--capture-api")) options.captureApi = true;
       if (hasFlag(args, "--continue-on-error")) options.continueOnError = true;
@@ -1130,7 +1149,7 @@ async function main() {
 
       if (url && url.startsWith("http")) {
         // One-shot: navigate + screenshot
-        const mode = parseFlag(args, "--mode") || "headless";
+        const mode = parseModeFlag(args) || "headless";
         const annotate = hasFlag(args, "--annotate");
         const docker = await isDockerRunning();
 
@@ -1367,7 +1386,7 @@ async function main() {
       }
 
       const options = { captureApi: true };
-      const mode = parseFlag(args, "--mode");
+      const mode = parseModeFlag(args);
       if (mode) options.mode = mode;
 
       const docker = await isDockerRunning();

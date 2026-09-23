@@ -235,6 +235,12 @@ export class Iframer {
     return this.daemon.instancesInfo();
   }
 
+  /** Close browsers that never navigated anywhere. See
+   *  BrowserDaemon.sweepBlankInstances — called from the server's reap tick. */
+  sweepBlankBrowsers(): string[] {
+    return this.daemon.sweepBlankInstances();
+  }
+
   /** Kill all browser instances and reset state. Next execute call will
    *  launch a fresh browser automatically — no manual restart needed. */
   async restartBrowser(): Promise<{ killed: string[]; message: string }> {
