@@ -5,7 +5,24 @@ import type { ExecutionContext } from "../types";
  *  - `@e<n>`  ephemeral ref from snapshot/find/annotated screenshot (this run).
  *  - `@a:<name>` durable per-domain ANCHOR from the component map (persisted).
  *  - anything else passes through unchanged (plain CSS).
+ *
+ *  Playwright-only selector syntax (text=, :has-text(), >> chains…) is rejected
+ *  up front: several steps resolve selectors with document.querySelector, so it
+ *  either failed there or, on click, hit a different element than intended.
  */
+const PLAYWRIGHT_ONLY =
+  /^\s*(text|xpath|role|id|data-testid|internal:[\w-]+)\s*=|:(has-text|text|text-is|text-matches|visible|nth-match|right-of|left-of|above|below|near)\b|\s>>\s/;
+
+export function assertCssSelector(selector: string): void {
+  if (PLAYWRIGHT_ONLY.test(selector)) {
+    throw new Error(
+      `Unsupported selector "${selector}": Playwright text/role selectors (text=, :has-text(), :text-is(), >>) aren't supported. ` +
+        `Locate the element by its text with a \`find\` step (e.g. { type: "find", text: "Texas" } or { role: "option", name: "Texas" }) ` +
+        `and act on the @e ref it returns, in the same execute call.`,
+    );
+  }
+}
+
 export function resolveSelector(selector: string, ctx: ExecutionContext): string {
   if (selector.startsWith("@a:")) {
     const name = selector.slice(3);
@@ -29,6 +46,7 @@ export function resolveSelector(selector: string, ctx: ExecutionContext): string
     }
     return ref.selector;
   }
+  assertCssSelector(selector);
   return selector;
 }
 

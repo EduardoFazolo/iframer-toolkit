@@ -213,7 +213,7 @@ export class CdpRelay {
       return await Promise.race([
         first,
         new Promise<never>((_, reject) => {
-          const t = setTimeout(() => reject(new Error("screenshot timed out (no compositor frame)")), 10_000);
+          const t = setTimeout(() => reject(new Error("screenshot timed out (no compositor frame)")), 5_000);
           t.unref?.();
         }),
       ]);

@@ -22,6 +22,7 @@ import { TIMEOUTS } from "./constants";
 import { loadAnchors, recordAnchorResult } from "./knowledge/component-map";
 import { anchorNameOf, resolveSelector } from "./actions/resolve-selector";
 import { TIMING } from "./constants";
+import { withBudget } from "./budget";
 
 const DEFAULT_STALE_TIMEOUT_MS = 20_000;
 
@@ -85,7 +86,13 @@ function isRetryable(errorType: ErrorContext["errorType"]): boolean {
   return errorType === "stale-state" || errorType === "timeout" || errorType === "element-not-found";
 }
 
-function getSuggestion(errorType: ErrorContext["errorType"], step: PipelineStep): string | undefined {
+const UNRESPONSIVE_SUGGESTION =
+  "The tab's JavaScript stopped answering during this step. Run a single `read` or `snapshot` on its own to see if it recovered " +
+  "(it usually does). If this step froze it, don't repeat it as-is: for a route change in a single-page app use " +
+  "`evaluate` with `location.assign(url)`; for a click, use a fresh `@e` ref from `find`; avoid `evaluate` calls that scroll or re-render.";
+
+function getSuggestion(errorType: ErrorContext["errorType"], step: PipelineStep, message = ""): string | undefined {
+  if (message.includes("tab stopped responding")) return UNRESPONSIVE_SUGGESTION;
   // A @e ref that no longer resolves usually means the SPA re-rendered between
   // the snapshot and this step, wiping the injected marker. Point at the durable fix.
   const usedEphemeralRef = typeof (step as { selector?: unknown }).selector === "string" && (step as { selector: string }).selector.startsWith("@e");
@@ -109,6 +116,10 @@ function getSuggestion(errorType: ErrorContext["errorType"], step: PipelineStep)
 }
 
 export class PipelineRunner {
+  /** Live progress, readable while run() is still pending — lets an outer
+   *  watchdog report WHICH step hung and what already finished. */
+  readonly progress: { stepIndex: number; results: StepResult[] } = { stepIndex: -1, results: [] };
+
   constructor(private ctx: ExecutionContext, private hooks?: {
     before: (page: Page, step: PipelineStep) => Promise<void>;
     after: (page: Page, requestedUrl?: string) => Promise<void>;
@@ -138,6 +149,7 @@ export class PipelineRunner {
 
     const results: StepResult[] = [];
     const obstacles: ObstacleEncounter[] = [];
+    this.progress.results = results;
 
     // Load this domain's persisted anchors (@a:<name>) so steps can reference
     // remembered elements instead of re-discovering them. Domain from the first
@@ -177,6 +189,7 @@ export class PipelineRunner {
     for (let i = 0; i < pipeline.steps.length; i++) {
       if (capture) capture.setStep(i);
       const step = pipeline.steps[i];
+      this.progress.stepIndex = i;
       const page = tracker.active();
       const urlBefore = safePageUrl(page);
       const monitor = new StaleStateMonitor(page, staleTimeoutMs);
@@ -221,7 +234,7 @@ export class PipelineRunner {
             errorType,
             message: refined.message,
             pageState,
-            suggestion: getSuggestion(errorType, step),
+            suggestion: getSuggestion(errorType, step, refined.message),
             retryable: isRetryable(errorType),
           },
           durationMs: Date.now() - startTime,
@@ -288,7 +301,7 @@ export class PipelineRunner {
             errorType,
             message: stepResult.error || "Step failed",
             pageState,
-            suggestion: getSuggestion(errorType, step),
+            suggestion: getSuggestion(errorType, step, refined.message),
             retryable: isRetryable(errorType),
           },
           durationMs: Date.now() - startTime,
@@ -300,7 +313,8 @@ export class PipelineRunner {
       if (step.type === "navigate" && continueOnObstacle) {
         const obstacleStart = Date.now();
         const obstaclePage = tracker.active();
-        const obstacle = await detectObstacles(obstaclePage);
+        // Budgeted: detectors evaluate in the page, which may not be answering.
+        const obstacle = await withBudget(detectObstacles(obstaclePage), 10_000, "obstacle check").catch(() => null);
 
         if (obstacle) {
           const resolution = await resolveObstacle(obstaclePage, obstacle, this.ctx, monitor);

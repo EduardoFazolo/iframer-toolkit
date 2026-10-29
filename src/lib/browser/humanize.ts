@@ -121,7 +121,7 @@ export async function humanType(
   page: Page,
   selector: string,
   text: string,
-  opts: { skipClick?: boolean; speed?: "slow" | "normal" | "fast" } = {},
+  opts: { skipClick?: boolean; speed?: "slow" | "normal" | "fast"; clear?: boolean } = {},
 ): Promise<void> {
   // Put focus in the field. skipClick trusts the caller focused it already —
   // needed for editors that BLUR on a synthetic click (e.g. Draft.js on X).
@@ -133,6 +133,27 @@ export async function humanType(
   // SAFETY: never type unless the target is genuinely focused. A missed click
   // otherwise turns each character into a global keyboard shortcut.
   await assertFocused(page, selector, !opts.skipClick);
+
+  // clear: select the field's current text from inside the page (no Cmd/Ctrl+A,
+  // which the extension relay drops), so the first keystroke replaces it.
+  if (opts.clear) {
+    const hadText = await page.evaluate(() => {
+      const el = document.activeElement as HTMLElement | null;
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        el.select();
+        return el.value.length > 0;
+      }
+      if (el?.isContentEditable) {
+        window.getSelection()?.selectAllChildren(el);
+        return (el.textContent || "").length > 0;
+      }
+      return false;
+    });
+    if (hadText) {
+      await page.keyboard.press("Backspace");
+      await sleep(randRange(TIMING.CHAR_DELAY));
+    }
+  }
 
   const factor = SPEED_FACTOR[opts.speed || "normal"] ?? 1;
   for (const char of text) {

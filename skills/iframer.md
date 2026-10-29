@@ -39,16 +39,16 @@ The `execute` tool takes a `steps` array. Each step is an object with a `type` f
 | `snapshot` | — | Get interactive elements as structured list with @e refs. **Do this BEFORE interacting.** Fields no human can reach (honeypots pushed offscreen/clipped/transparent by an ancestor) are omitted; bait-looking ones (`website`, `fax`, tabindex=-1) are marked `[honeypot?]` — leave those empty unless the task clearly needs them. |
 | `find` | `role?`, `name?`, `text?`, `placeholder?`, `label?` | Find a specific element, returns a ref |
 | `screenshot` | `annotate?` | Take a screenshot. `annotate: true` overlays numbered badges. |
-| `click` | `selector` | Click element (use @e refs from snapshot) |
+| `click` | `selector` | Click element (use @e refs from snapshot/find). Text selectors (`text=`, `:has-text()`, `:text-is()`) are rejected: `find` by text, then click the ref. |
 | `fill` | `selector`, `value`, `force?` | Fill input (use @e refs). Refuses honeypot fields (unreachable by a human) with an explanatory error — skip the field. `force: true` bypasses, only when you are certain it is real. |
 | `human-click` | `selector` or `x`, `y` | Human-like click with random offset |
-| `human-type` | `selector`, `value` | Human-like typing with variable delays |
+| `human-type` | `selector`, `value`, `clear?` | Human-like typing with variable delays. Appends by default; `clear: true` replaces the existing text. |
 | `scroll` | `deltaY?` | Scroll the page |
 | `wait` | `ms` | Wait N milliseconds |
 | `wait-for` | `selector`, `timeout?` | Wait for element to appear |
 | `evaluate` | `expression` | Run JS, return result |
 | `extract` | `expression` | Run JS, include result in response |
-| `keyboard` | `key` | Press a key (Enter, Escape, Tab, etc.) |
+| `keyboard` | `key`, `meta?`, `ctrl?` | Press a key (Enter, Escape, Tab, etc.). Cmd/Ctrl+A selects all everywhere; other Cmd/Ctrl shortcuts are refused in extension mode. |
 | `solve-captcha` | — | Auto-detect and solve reCAPTCHA or hCaptcha |
 
 ### Pipeline options
@@ -337,6 +337,22 @@ Rules while in extension mode:
 - **Do not call `session stop`.** There is nothing to stop, and it is the user's own browser.
 - `execute` never escalates in extension mode. If it fails, report why (extension disconnected,
   tab closed) instead of retrying in a launched mode, which would silently use a logged-out profile.
+
+Driving a live single-page app (most dashboards) in extension mode:
+
+- **Act only on `@e` refs** from a `find`/`snapshot` in the same execute call. Never CSS you
+  guessed, never text selectors.
+- **Give steps that can wedge the tab their own execute call:** `navigate`, anything that opens or
+  closes a modal, and `evaluate`. If one hangs, the steps around it are not lost.
+- **If a step reports the tab stopped responding,** run a lone `read` or `snapshot` to confirm it
+  recovered, then continue. Don't resend the same step unchanged.
+- **Route changes:** `navigate` first. If the page never leaves, use `evaluate` with
+  `location.assign("<url>")`, or click the site's own link.
+- **Custom dropdowns (MUI, react-select, comboboxes):** click the field or its arrow button, `find`
+  the option (`role: "option", name: "Texas"`), click that `@e` ref. To filter first, `fill` the
+  field (it stays focused so the list stays open), then `find` and click the option. Don't type
+  with Cmd+A/Backspace tricks.
+- **Don't scroll with `evaluate` (`scrollIntoView`).** `click` scrolls its target into view itself.
 
 ## Cleaning up after yourself
 

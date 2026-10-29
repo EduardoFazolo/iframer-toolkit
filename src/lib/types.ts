@@ -12,7 +12,7 @@ export type PipelineStep =
   | { type: "fill"; selector: string; value: string; force?: boolean }
   | { type: "human-click"; selector?: string; x?: number; y?: number }
   | { type: "right-click"; selector?: string; x?: number; y?: number }
-  | { type: "human-type"; selector: string; value: string; skipClick?: boolean; speed?: "slow" | "normal" | "fast" }
+  | { type: "human-type"; selector: string; value: string; skipClick?: boolean; speed?: "slow" | "normal" | "fast"; clear?: boolean }
   | { type: "evaluate"; expression: string }
   | { type: "extract"; expression: string }
   | { type: "wait"; ms: number }
@@ -230,6 +230,8 @@ export interface StateSnapshot {
   documentReadyState: string;
   bodyTextLength: number;
   elementCount: number;
+  /** The state probe timed out: the page's JS isn't answering. */
+  unresponsive?: boolean;
   timestamp: number;
 }
 
@@ -376,4 +378,7 @@ export interface ExecutionContext {
    *  user via the MCP client. Only wired up on the local execution path —
    *  Docker mode has no way to elicit back to the MCP client mid-pipeline. */
   elicitOtp?: (domain: string) => Promise<string | null>;
+  /** Set when driving the user's real Chrome through the extension relay,
+   *  which drops Cmd/Ctrl modifiers on synthetic key events. */
+  driver?: "extension";
 }

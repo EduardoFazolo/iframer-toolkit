@@ -6,6 +6,8 @@ import { humanClick, humanClickXY, humanType, humanScroll, humanMove } from "../
 import { injectStorage } from "../../session/persistence";
 import { createLogger } from "../../logger";
 import { TIMING, TIMEOUTS } from "../../constants";
+import { withBudget } from "../../budget";
+import type { StaleStateMonitor } from "../../stale-monitor";
 import { resolveSelector } from "../resolve-selector";
 import { probeField, isHoneypotReason, honeypotRefusalMessage, type FieldProbe } from "../../reachability";
 
@@ -13,11 +15,51 @@ const log = createLogger("actions");
 
 type Step<K extends PipelineStep["type"]> = Extract<PipelineStep, { type: K }>;
 
-export async function navigate(page: Page, step: Step<"navigate">, ctx: ExecutionContext): Promise<void> {
-  await page.goto(step.url, {
-    waitUntil: (step.waitUntil || "domcontentloaded") as "load" | "domcontentloaded" | "networkidle" | "commit",
-    timeout: TIMEOUTS.NAVIGATION,
-  });
+/** How long goto may go without committing before we suspect it was blocked. */
+const NAV_COMMIT_SUSPECT_MS = 12_000;
+
+export async function navigate(page: Page, step: Step<"navigate">, ctx: ExecutionContext, monitor?: StaleStateMonitor): Promise<void> {
+  const waitUntil = (step.waitUntil || "domcontentloaded") as "load" | "domcontentloaded" | "networkidle" | "commit";
+  const urlBefore = page.url();
+
+  // A navigate step is an explicit order to leave the page, so answer a
+  // "Leave site?" (beforeunload) prompt with yes; with no listener Playwright
+  // would dismiss it. Other dialogs keep the default dismiss.
+  const onDialog = (d: { type(): string; accept(): Promise<void>; dismiss(): Promise<void> }) => {
+    (d.type() === "beforeunload" ? d.accept() : d.dismiss()).catch(() => undefined);
+  };
+  page.on("dialog", onDialog);
+  try {
+    const nav = page.goto(step.url, { waitUntil, timeout: TIMEOUTS.NAVIGATION });
+    nav.catch(() => undefined);
+    let suspectTimer: ReturnType<typeof setTimeout> | undefined;
+    const outcome = await Promise.race([
+      nav.then(() => "done" as const),
+      new Promise<"slow">((r) => { suspectTimer = setTimeout(() => r("slow"), NAV_COMMIT_SUSPECT_MS); }),
+    ]).finally(() => clearTimeout(suspectTimer));
+
+    if (outcome === "slow") {
+      if (page.url() !== urlBefore) {
+        await nav; // committed, just a slow load — keep waiting normally
+      } else {
+        // Never even committed: some single-page apps swallow a CDP navigation
+        // (service worker, router guard). Ask the page itself to go there.
+        log.warn(`navigate: no commit after ${NAV_COMMIT_SUSPECT_MS}ms, falling back to location.assign`);
+        monitor?.reportActivity(); // the fallback is progress — don't let the stale timer eat it
+        await withBudget(page.evaluate((u) => { location.assign(u); }, step.url), 3_000, "location.assign").catch(() => undefined);
+        try {
+          await page.waitForURL((u) => u.toString() !== urlBefore, { timeout: 15_000, waitUntil });
+        } catch {
+          throw new Error(
+            `navigate: the page never left ${urlBefore} for ${step.url} (tried a normal navigation, then location.assign). ` +
+              `The site is blocking the route change. Use a click on the site's own link to get there.`,
+          );
+        }
+      }
+    }
+  } finally {
+    page.off("dialog", onDialog);
+  }
   const stealthScript = contextStealthScripts.get(page.context()) ?? STEALTH_SCRIPT;
   try {
     await page.evaluate(stealthScript);
@@ -36,7 +78,27 @@ export async function navigate(page: Page, step: Step<"navigate">, ctx: Executio
 }
 
 export async function click(page: Page, step: Step<"click">, ctx: ExecutionContext): Promise<void> {
-  await page.click(resolveSelector(step.selector, ctx));
+  await page.click(resolveSelector(step.selector, ctx), { timeout: TIMEOUTS.CLICK });
+}
+
+/** Comboboxes (MUI/Headless UI autocompletes, react-select…) restore their
+ *  selected option's label when they lose focus, undoing whatever was typed. */
+async function isCombobox(page: Page, selector: string): Promise<boolean> {
+  return withBudget(
+    page.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return false;
+      const role = el.getAttribute("role");
+      return (
+        role === "combobox" ||
+        el.hasAttribute("aria-autocomplete") ||
+        el.getAttribute("aria-haspopup") === "listbox" ||
+        el.hasAttribute("list") ||
+        !!el.closest('[role="combobox"]')
+      );
+    }, selector),
+    3_000,
+  ).catch(() => false);
 }
 
 export async function fill(page: Page, step: Step<"fill">, ctx: ExecutionContext): Promise<void> {
@@ -57,6 +119,11 @@ export async function fill(page: Page, step: Step<"fill">, ctx: ExecutionContext
     }
   }
 
+  // Don't blur a combobox: blur makes it put back the previous option's label,
+  // so the next keystrokes would append to it ("RandomUnite" + "United St").
+  // Left focused, it shows the filtered option list — click the option next.
+  const combobox = await isCombobox(page, selector);
+
   // 1) Playwright fill: focus + native value setter + input/change events.
   //    Works for most sites on its own.
   await page.fill(selector, value);
@@ -71,7 +138,7 @@ export async function fill(page: Page, step: Step<"fill">, ctx: ExecutionContext
   //      exact "filled fields still count as missing" bug. el.blur() fires the
   //      real blur + focusout that React's onBlur delegation listens for.
   const stuck = await page.evaluate(
-    ({ sel, val }) => {
+    ({ sel, val, keepFocus }) => {
       const el = document.querySelector(sel) as HTMLInputElement | HTMLTextAreaElement | null;
       if (!el) return false;
       const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -80,10 +147,10 @@ export async function fill(page: Page, step: Step<"fill">, ctx: ExecutionContext
       try { setter ? setter.call(el, val) : (el.value = val); } catch { (el as HTMLInputElement).value = val; }
       el.dispatchEvent(new Event("input", { bubbles: true }));
       el.dispatchEvent(new Event("change", { bubbles: true }));
-      try { el.blur(); } catch {}
+      if (!keepFocus) { try { el.blur(); } catch {} }
       return el.value === val;
     },
-    { sel: selector, val: value },
+    { sel: selector, val: value, keepFocus: combobox },
   );
 
   // 3) Last resort for frameworks that only trust real keystrokes: clear and
@@ -94,10 +161,12 @@ export async function fill(page: Page, step: Step<"fill">, ctx: ExecutionContext
       await loc.click();
       await loc.fill("");
       await loc.pressSequentially(value, { delay: 15 });
-      await page.evaluate((sel) => {
-        const el = document.querySelector(sel) as HTMLElement | null;
-        el?.blur?.();
-      }, selector);
+      if (!combobox) {
+        await page.evaluate((sel) => {
+          const el = document.querySelector(sel) as HTMLElement | null;
+          el?.blur?.();
+        }, selector);
+      }
     } catch {
       /* keep the value from steps 1-2 — better than throwing */
     }
@@ -125,7 +194,7 @@ export async function rightClick(page: Page, step: Step<"right-click">, ctx: Exe
 }
 
 export async function humanTypeStep(page: Page, step: Step<"human-type">, ctx: ExecutionContext): Promise<void> {
-  await humanType(page, resolveSelector(step.selector, ctx), step.value, { skipClick: step.skipClick, speed: step.speed });
+  await humanType(page, resolveSelector(step.selector, ctx), step.value, { skipClick: step.skipClick, speed: step.speed, clear: step.clear });
 }
 
 export async function selectOption(page: Page, step: Step<"select">, ctx: ExecutionContext): Promise<void> {
@@ -183,7 +252,34 @@ export async function scroll(page: Page, step: Step<"scroll">, ctx: ExecutionCon
   );
 }
 
-export async function keyboard(page: Page, step: Step<"keyboard">): Promise<void> {
+/** Select all text in the focused element, from inside the page. Works in every
+ *  mode, including the extension relay where a Cmd/Ctrl+A keystroke is dropped. */
+async function selectAllInFocused(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const el = document.activeElement as HTMLElement | null;
+    if (el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
+      el.select();
+    } else if (el && el.isContentEditable) {
+      const sel = window.getSelection();
+      sel?.selectAllChildren(el);
+    } else {
+      window.getSelection()?.selectAllChildren(document.body);
+    }
+  });
+}
+
+export async function keyboard(page: Page, step: Step<"keyboard">, ctx: ExecutionContext): Promise<void> {
+  if ((step.meta || step.ctrl) && step.key.toLowerCase() === "a" && !step.shift && !step.alt) {
+    await selectAllInFocused(page);
+    return;
+  }
+  if ((step.meta || step.ctrl) && ctx.driver === "extension") {
+    throw new Error(
+      `keyboard: ${step.meta ? "Cmd" : "Ctrl"}+${step.key} can't be sent in extension mode (the relay drops Cmd/Ctrl, so it would ` +
+        `arrive as a plain "${step.key}"). Nothing was pressed. Instead: select-all → keyboard {key:"a", meta:true} (handled in-page); ` +
+        `replace a field's text → fill, or human-type with clear:true; paste → the paste step.`,
+    );
+  }
   const mods = [
     step.meta ? "Meta" : null,
     step.ctrl ? "Control" : null,

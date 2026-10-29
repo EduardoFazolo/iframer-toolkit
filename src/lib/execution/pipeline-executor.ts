@@ -232,6 +232,7 @@ export class PipelineExecutor {
     const startTime = Date.now();
     const relay = new CdpRelay(tabId, clientId, pipeline.options?.focus);
     let browser: Awaited<ReturnType<typeof cdpChromium.connectOverCDP>> | undefined;
+    let runner: PipelineRunner | undefined;
     try {
       await relay.start();
       browser = await cdpChromium.connectOverCDP(relay.httpEndpoint(), { timeout: 30_000 });
@@ -247,7 +248,8 @@ export class PipelineExecutor {
 
       const ctx = this.deps.refStore.makeContext(userId, token);
       if (this.pendingElicitOtp) ctx.elicitOtp = this.pendingElicitOtp;
-      const runner = new PipelineRunner(ctx);
+      ctx.driver = "extension";
+      runner = new PipelineRunner(ctx);
       // Hard watchdog: a CDP call against a tab that stopped rendering (window
       // minimized, renderer wedged) can stall past every per-step timeout, and
       // a stalled run also blocks the per-tab queue behind it. Cap the whole
@@ -266,7 +268,7 @@ export class PipelineExecutor {
       let result: PipelineResult;
       try {
         // playwright-core Page ≡ patchright Page at runtime (same API).
-        const runPromise = runner.run(page as unknown as PatchrightPage, pipeline);
+        const runPromise = (runner as PipelineRunner).run(page as unknown as PatchrightPage, pipeline);
         // If the watchdog wins, this promise settles later (rejecting once the
         // relay teardown kills its CDP calls) — keep that from being unhandled.
         runPromise.catch(() => undefined);
@@ -277,9 +279,7 @@ export class PipelineExecutor {
               () =>
                 reject(
                   new Error(
-                    `pipeline exceeded ${Math.round(capMs / 1000)}s — the tab may have stopped ` +
-                      `rendering (minimized window?). Un-minimize the Chrome window or retry ` +
-                      `with options.focus=true.`,
+                    `pipeline exceeded ${Math.round(capMs / 1000)}s — a call into the tab never returned.`,
                   ),
                 ),
               capMs,
@@ -305,28 +305,36 @@ export class PipelineExecutor {
     } catch (err) {
       const msg = getErrorMessage(err);
       const stalled = msg.includes("pipeline exceeded");
+      // Report the step that hung and keep what already finished, instead of
+      // pinning every stall on step 0 with no results.
+      const done = runner ? runner.progress.results.filter((r) => r.ok) : [];
+      const hungAt = stalled && runner && runner.progress.stepIndex >= 0 ? runner.progress.stepIndex : 0;
+      const hungStep = pipeline.steps[hungAt];
       return {
         ok: false,
-        completedSteps: 0,
+        completedSteps: stalled ? done.length : 0,
         totalSteps: pipeline.steps.length,
-        results: [],
+        results: stalled ? done : [],
         finalState: { url: "", title: "" },
         obstacles: [],
         durationMs: Date.now() - startTime,
         modeUsed: "extension",
         error: {
-          failedAtStep: 0,
-          failedStep: pipeline.steps[0],
-          errorType: "action-failed",
-          message: `Extension mode failed: ${msg}`,
+          failedAtStep: hungAt,
+          failedStep: hungStep,
+          errorType: stalled ? "stale-state" : "action-failed",
+          message: stalled
+            ? `Extension mode: step ${hungAt} (${hungStep?.type}) never returned; ${msg}`
+            : `Extension mode failed: ${msg}`,
           pageState: { url: "", title: "" },
           suggestion: stalled
-            ? "STOP retrying and tell the user what happened: the Chrome tab being driven stopped " +
-              "responding — its window is likely minimized or the page is wedged. Ask them to " +
-              "un-minimize the Chrome window (leaving it behind other windows is fine), or ask " +
-              "permission to rerun with options.focus=true to bring it to the front."
+            ? `Step ${hungAt} (${hungStep?.type}) hung inside the tab. Steps before it completed. ` +
+              "Run a single `read` or `snapshot` on its own to check the tab recovered (it usually does), then continue " +
+              "from that step in its own execute call. Don't repeat the same step unchanged: for a route change use " +
+              "`evaluate` with `location.assign(url)`, for a click use a fresh `@e` ref from `find`. If the tab stays " +
+              "unresponsive, tell the user."
             : "Ensure the iframer extension is connected (green dot) and the tab is still open. See chrome://extensions.",
-          retryable: !stalled,
+          retryable: stalled,
         },
       };
     } finally {

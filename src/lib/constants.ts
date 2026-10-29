@@ -116,6 +116,10 @@ export const TIMEOUTS = {
   DEFAULT_STALE: 20_000,
   NAVIGATION: 60_000,
   SELECTOR_WAIT: 10_000,
+  // Actionability wait for click. Under the 20s stale timer on purpose, so
+  // Playwright's own reason (not visible, covered by another element…) reaches
+  // the agent instead of a generic "no state change".
+  CLICK: 8_000,
   TOTP_INPUT: 5_000,
   API_REQUEST: 180_000,
   HEALTH_CHECK: 3000,
