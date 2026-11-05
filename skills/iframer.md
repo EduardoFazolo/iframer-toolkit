@@ -10,10 +10,12 @@ You are an expert at using the iframer browser automation toolkit. The user want
 - `iframer.credentials` — list or store login credentials (NEVER re-store as recovery)
 - `iframer.execute` — run a browser pipeline (navigate, login, screenshot, snapshot, etc.)
 - `iframer.browse` — fast headless page fetch (no pipeline needed)
-- `iframer.session` — stop (save state) or clear session data
+- `iframer.session` — stop (save state, close the browser), clear (wipe session data), restart (recover from a freeze or crash), capture-start / capture-stop (record XHR/fetch), get-cookies, get-auth
 - `iframer.status` — system health, modes, stored credentials
 - `iframer.reverse-engineer` — capture API calls a site makes
 - `iframer.tabs` — list/open tabs in the user's REAL Chrome (needs the extension)
+- `iframer.remember` — per-domain element anchors, targeted as `@a:<name>` in any selector
+- `iframer.clipboard` — read/write the machine's clipboard (same one the user's Chrome uses)
 
 ## Core rules
 
@@ -39,7 +41,8 @@ The `execute` tool takes a `steps` array. Each step is an object with a `type` f
 | `snapshot` | — | Get interactive elements as structured list with @e refs. **Do this BEFORE interacting.** Fields no human can reach (honeypots pushed offscreen/clipped/transparent by an ancestor) are omitted; bait-looking ones (`website`, `fax`, tabindex=-1) are marked `[honeypot?]` — leave those empty unless the task clearly needs them. |
 | `find` | `role?`, `name?`, `text?`, `placeholder?`, `label?` | Find a specific element, returns a ref |
 | `screenshot` | `annotate?` | Take a screenshot. `annotate: true` overlays numbered badges. |
-| `click` | `selector` | Click element (use @e refs from snapshot/find). Text selectors (`text=`, `:has-text()`, `:text-is()`) are rejected: `find` by text, then click the ref. |
+| `click` | `selector` | Click element (use @e refs from snapshot/find). Text selectors (`text=`, `:has-text()`, `:text-is()`, `>>`) are rejected: `find` by text, then click the ref. |
+| `right-click` | `selector` or `x`, `y` | Right-click an element or coordinates |
 | `fill` | `selector`, `value`, `force?` | Fill input (use @e refs). Refuses honeypot fields (unreachable by a human) with an explanatory error — skip the field. `force: true` bypasses, only when you are certain it is real. |
 | `human-click` | `selector` or `x`, `y` | Human-like click with random offset |
 | `human-type` | `selector`, `value`, `clear?` | Human-like typing with variable delays. Appends by default; `clear: true` replaces the existing text. |
@@ -49,7 +52,13 @@ The `execute` tool takes a `steps` array. Each step is an object with a `type` f
 | `evaluate` | `expression` | Run JS, return result |
 | `extract` | `expression` | Run JS, include result in response |
 | `keyboard` | `key`, `meta?`, `ctrl?` | Press a key (Enter, Escape, Tab, etc.). Cmd/Ctrl+A selects all everywhere; other Cmd/Ctrl shortcuts are refused in extension mode. |
+| `select` | `selector`, `value` | Pick an option in a native `<select>`, with real change events. Never set `.value` via `evaluate`. |
+| `type-code` | `value`, `selector?` | Type a verification code digit by digit. Default target: `input[type="tel"]`. |
+| `upload` | `selector`, `files` | Set absolute local file paths on an `<input type=file>` |
+| `paste` | `selector?` | Paste the OS clipboard into a field, or the focused element if omitted. More reliable than a ⌘V `keyboard` step. |
+| `download` | `url`, `path?` | Fetch a file with the browser's cookies and save it server-side, no Save-As dialog. Default path: `~/.iframer/downloads/<name>`. |
 | `solve-captcha` | — | Auto-detect and solve reCAPTCHA or hCaptcha |
+| `recaptcha` | `action`, `tiles?` | Manual captcha control: `info`, `click`, `answer`, `select`, `verify`, `solve`. The full workflow arrives in the result when a captcha blocks a run. |
 
 ### Pipeline options
 

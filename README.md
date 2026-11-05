@@ -209,11 +209,13 @@ Quick actions:
     --wait-for <selector>          Wait for element before extracting
     --sessionless                  Skip session persistence
   screenshot <url>                 Take a screenshot of a URL
+    --mode <mode>                  Browser mode (default: headless)
     --annotate                     Overlay element badges with refs
     -o, --output <path>            Output file path
   reverse-engineer <url|file>      Capture API calls a site makes
     --output <dir>                 Save directory
     --typed                        Generate TypeScript
+    --mode <mode>                  Browser mode
 
 Browser windows:
   instances                        List live browser windows (instanceId → current page)
@@ -257,6 +259,13 @@ Setup:
 Browser:
   modes                            Show available browser modes
   status                            Show system status
+
+Docker (interactive):
+  interactive <url>                Open a live headful browser session (Docker only)
+  interactive stop                 Stop the Docker session
+  interactive status               Check the Docker session
+  watch                            Auto-open noVNC when a session starts
+  act <action> [args...]           Send an action to the Docker session
 ```
 
 The binary is available as either `iframer-toolkit` (full name) or `iframer` (short alias). `npx iframer-toolkit ...` also works without a global install.
@@ -267,14 +276,25 @@ Once the MCP is registered, the agent has access to:
 
 - **`status`**: system health, session state, stored credentials, available browser modes
 - **`knowledge`**: read/list/clear the per-domain knowledge cache. Agents are told to check this before every `execute` or `browse`; if the cache already has a direct-API path, the browser never launches.
-- **`execute`**: run a pipeline of browser steps (navigate, click, right-click, fill, select, human-click, human-type, type-code, read, evaluate, extract, wait, wait-for, scroll, keyboard, upload, paste, download, login, solve-captcha, recaptcha, screenshot, snapshot, find). Each step has a 20s stale-state timeout. On failure, it returns the exact step, error type, and a screenshot of the page at the point of failure. Auto-escalates browser modes on bot-block.
+- **`execute`**: run a pipeline of browser steps (navigate, click, right-click, fill, select, human-click, human-type, type-code, read, evaluate, extract, wait, wait-for, scroll, keyboard, upload, paste, download, login, solve-captcha, recaptcha, screenshot, snapshot, find). Each step has a 20s stale-state timeout, and `click` fails at 8s with Playwright's own reason (not visible, covered by another element). On failure, it returns the exact step, error type, and a screenshot of the page at the point of failure. Auto-escalates browser modes on bot-block. See [Pipeline guardrails](#pipeline-guardrails).
 - **`browse`**: fast headless fetch with session persistence for pages that don't need a full pipeline
 - **`reverse-engineer`**: capture the APIs a site calls (feeds the knowledge cache so future runs can skip the browser)
 - **`remember`**: per-domain element anchors. Save a selector once under a name, then target it as `@a:<name>` in any later pipeline, no re-finding the element on every visit. Anchors self-heal (a failed anchor triggers re-discovery, not blind retries) and the tool also records per-site quirks.
 - **`tabs`**: list and target tabs in your real Chrome (requires the [extension](#extension-mode-drive-your-real-chrome))
 - **`clipboard`**: read/write the machine's clipboard, the same one your Chrome uses: read a code a site just copied, or stage text to paste into a field via the `paste` step
-- **`session`**: `stop` (save state) or `clear` (wipe)
+- **`session`**: `stop` (save state, close the browser), `clear` (wipe stored session data), `restart` (kill browsers and reset after a freeze or crash; credentials and knowledge are kept), `capture-start` / `capture-stop` (record XHR/fetch outside a pipeline), `get-cookies` (all cookies, including HttpOnly), `get-auth` (cookies, localStorage and sessionStorage together)
 - **`credentials`**: `store` (secure form via MCP elicitation), `list`. `store` refuses to overwrite existing credentials unless told to (`force: true`), which blocks the common "login failed, re-ask for password" mistake when the real problem is browser mode or bot detection.
+
+## Pipeline guardrails
+
+Some calls are refused or cut short on purpose, so an agent gets a clear error instead of a hang, a stray window, or a tripped bot trap.
+
+- **Honeypots.** `snapshot` leaves out fields no human can reach (pushed offscreen, clipped, or made transparent by an ancestor) and marks bait-looking ones (`website`, `fax`, `tabindex=-1`) as `[honeypot?]`. `fill` refuses an unreachable field with an explanatory error; pass `force: true` only when you're certain the field is real.
+- **Selectors.** Use an `@e` ref from `snapshot`/`find`, an `@a:` anchor, or plain CSS. Playwright-only syntax (`text=`, `:has-text()`, `:text-is()`, `>>`) is rejected with a hint to `find` the element instead.
+- **Frozen tabs.** Every page probe has a time budget, so a tab whose JS stops answering fails in about 30s. In extension mode, the watchdog names the step that hung and keeps the results of the steps that finished.
+- **Stuck navigation.** If a page never commits to the new URL, `navigate` falls back to `location.assign`. `beforeunload` prompts are accepted.
+- **No stray windows.** A pipeline with no `navigate` step and no live browser to reattach to is refused, as is `mode: "extension"` without a `tabId`. While the extension is connected, `session` `capture-start`, `capture-stop`, `get-cookies` and `get-auth` also refuse to open a new window unless you pass a `mode` or a matching browser is already open.
+- **Keyboard in extension mode.** Cmd/Ctrl+A selects all in every mode. Other Cmd/Ctrl shortcuts are refused in extension mode.
 
 ## Session persistence
 
@@ -419,7 +439,7 @@ bun run src/mcp/server.ts
 # Run the Docker API server from source (no Docker)
 bun run start   # bun run index.ts
 
-# Rebuild the distributable bundles (dist/cli.cjs + dist/mcp-server.cjs)
+# Rebuild the distributable bundles (dist/cli.js, dist/mcp-server.cjs, dist/local-server.cjs)
 bun run build
 
 # Install the locally-built package globally for testing

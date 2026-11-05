@@ -13492,7 +13492,7 @@ Screenshot: ${shot}`);
       --mode <mode>                 Browser mode
 
   Session:
-    session stop                    Stop session and save cookies/localStorage
+    session stop                    Save state + close idle browsers on the shared daemon
     session clear                   Wipe all stored session data
     session status                  Check session state
 
