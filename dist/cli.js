@@ -1121,6 +1121,10 @@ var init_constants = __esm({
       DEFAULT_STALE: 2e4,
       NAVIGATION: 6e4,
       SELECTOR_WAIT: 1e4,
+      // Actionability wait for click. Under the 20s stale timer on purpose, so
+      // Playwright's own reason (not visible, covered by another element…) reaches
+      // the agent instead of a generic "no state change".
+      CLICK: 8e3,
       TOTP_INPUT: 5e3,
       API_REQUEST: 18e4,
       HEALTH_CHECK: 3e3,
@@ -2572,6 +2576,24 @@ async function humanType(page, selector, text, opts = {}) {
     await sleep4(randRange(TIMING.POST_CLICK));
   }
   await assertFocused(page, selector, !opts.skipClick);
+  if (opts.clear) {
+    const hadText = await page.evaluate(() => {
+      const el = document.activeElement;
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        el.select();
+        return el.value.length > 0;
+      }
+      if (el?.isContentEditable) {
+        window.getSelection()?.selectAllChildren(el);
+        return (el.textContent || "").length > 0;
+      }
+      return false;
+    });
+    if (hadText) {
+      await page.keyboard.press("Backspace");
+      await sleep4(randRange(TIMING.CHAR_DELAY));
+    }
+  }
   const factor = SPEED_FACTOR[opts.speed || "normal"] ?? 1;
   for (const char of text) {
     await page.keyboard.type(char);
@@ -2733,7 +2755,41 @@ var init_humanize = __esm({
   }
 });
 
+// src/lib/budget.ts
+function withBudget(p, ms, label = "page call") {
+  p.catch(() => void 0);
+  let timer;
+  return Promise.race([
+    p,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new BudgetExceededError(label, ms)), ms);
+      timer.unref?.();
+    })
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+var BudgetExceededError;
+var init_budget = __esm({
+  "src/lib/budget.ts"() {
+    "use strict";
+    BudgetExceededError = class extends Error {
+      constructor(label, ms) {
+        super(`${label} did not answer within ${ms}ms`);
+        this.name = "BudgetExceededError";
+      }
+    };
+  }
+});
+
 // src/lib/actions/resolve-selector.ts
+function assertCssSelector(selector) {
+  if (PLAYWRIGHT_ONLY.test(selector)) {
+    throw new Error(
+      `Unsupported selector "${selector}": Playwright text/role selectors (text=, :has-text(), :text-is(), >>) aren't supported. Locate the element by its text with a \`find\` step (e.g. { type: "find", text: "Texas" } or { role: "option", name: "Texas" }) and act on the @e ref it returns, in the same execute call.`
+    );
+  }
+}
 function resolveSelector(selector, ctx) {
   if (selector.startsWith("@a:")) {
     const name = selector.slice(3);
@@ -2754,14 +2810,17 @@ function resolveSelector(selector, ctx) {
     }
     return ref.selector;
   }
+  assertCssSelector(selector);
   return selector;
 }
 function anchorNameOf(selector) {
   return typeof selector === "string" && selector.startsWith("@a:") ? selector.slice(3) : null;
 }
+var PLAYWRIGHT_ONLY;
 var init_resolve_selector = __esm({
   "src/lib/actions/resolve-selector.ts"() {
     "use strict";
+    PLAYWRIGHT_ONLY = /^\s*(text|xpath|role|id|data-testid|internal:[\w-]+)\s*=|:(has-text|text|text-is|text-matches|visible|nth-match|right-of|left-of|above|below|near)\b|\s>>\s/;
   }
 });
 
@@ -2867,11 +2926,44 @@ var init_reachability = __esm({
 });
 
 // src/lib/actions/handlers/navigation.ts
-async function navigate(page, step, ctx) {
-  await page.goto(step.url, {
-    waitUntil: step.waitUntil || "domcontentloaded",
-    timeout: TIMEOUTS.NAVIGATION
-  });
+async function navigate(page, step, ctx, monitor) {
+  const waitUntil = step.waitUntil || "domcontentloaded";
+  const urlBefore = page.url();
+  const onDialog = (d) => {
+    (d.type() === "beforeunload" ? d.accept() : d.dismiss()).catch(() => void 0);
+  };
+  page.on("dialog", onDialog);
+  try {
+    const nav = page.goto(step.url, { waitUntil, timeout: TIMEOUTS.NAVIGATION });
+    nav.catch(() => void 0);
+    let suspectTimer;
+    const outcome = await Promise.race([
+      nav.then(() => "done"),
+      new Promise((r) => {
+        suspectTimer = setTimeout(() => r("slow"), NAV_COMMIT_SUSPECT_MS);
+      })
+    ]).finally(() => clearTimeout(suspectTimer));
+    if (outcome === "slow") {
+      if (page.url() !== urlBefore) {
+        await nav;
+      } else {
+        log9.warn(`navigate: no commit after ${NAV_COMMIT_SUSPECT_MS}ms, falling back to location.assign`);
+        monitor?.reportActivity();
+        await withBudget(page.evaluate((u) => {
+          location.assign(u);
+        }, step.url), 3e3, "location.assign").catch(() => void 0);
+        try {
+          await page.waitForURL((u) => u.toString() !== urlBefore, { timeout: 15e3, waitUntil });
+        } catch {
+          throw new Error(
+            `navigate: the page never left ${urlBefore} for ${step.url} (tried a normal navigation, then location.assign). The site is blocking the route change. Use a click on the site's own link to get there.`
+          );
+        }
+      }
+    }
+  } finally {
+    page.off("dialog", onDialog);
+  }
   const stealthScript = contextStealthScripts.get(page.context()) ?? STEALTH_SCRIPT;
   try {
     await page.evaluate(stealthScript);
@@ -2887,7 +2979,18 @@ async function navigate(page, step, ctx) {
   }
 }
 async function click(page, step, ctx) {
-  await page.click(resolveSelector(step.selector, ctx));
+  await page.click(resolveSelector(step.selector, ctx), { timeout: TIMEOUTS.CLICK });
+}
+async function isCombobox(page, selector) {
+  return withBudget(
+    page.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return false;
+      const role = el.getAttribute("role");
+      return role === "combobox" || el.hasAttribute("aria-autocomplete") || el.getAttribute("aria-haspopup") === "listbox" || el.hasAttribute("list") || !!el.closest('[role="combobox"]');
+    }, selector),
+    3e3
+  ).catch(() => false);
 }
 async function fill(page, step, ctx) {
   const selector = resolveSelector(step.selector, ctx);
@@ -2903,9 +3006,10 @@ async function fill(page, step, ctx) {
       throw new Error(honeypotRefusalMessage(step.selector, probe.hiddenReason, probe.name));
     }
   }
+  const combobox = await isCombobox(page, selector);
   await page.fill(selector, value);
   const stuck = await page.evaluate(
-    ({ sel, val }) => {
+    ({ sel, val, keepFocus }) => {
       const el = document.querySelector(sel);
       if (!el) return false;
       const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -2921,13 +3025,15 @@ async function fill(page, step, ctx) {
       }
       el.dispatchEvent(new Event("input", { bubbles: true }));
       el.dispatchEvent(new Event("change", { bubbles: true }));
-      try {
-        el.blur();
-      } catch {
+      if (!keepFocus) {
+        try {
+          el.blur();
+        } catch {
+        }
       }
       return el.value === val;
     },
-    { sel: selector, val: value }
+    { sel: selector, val: value, keepFocus: combobox }
   );
   if (!stuck) {
     const loc = page.locator(selector);
@@ -2935,10 +3041,12 @@ async function fill(page, step, ctx) {
       await loc.click();
       await loc.fill("");
       await loc.pressSequentially(value, { delay: 15 });
-      await page.evaluate((sel) => {
-        const el = document.querySelector(sel);
-        el?.blur?.();
-      }, selector);
+      if (!combobox) {
+        await page.evaluate((sel) => {
+          const el = document.querySelector(sel);
+          el?.blur?.();
+        }, selector);
+      }
     } catch {
     }
   }
@@ -2962,7 +3070,7 @@ async function rightClick(page, step, ctx) {
   }
 }
 async function humanTypeStep(page, step, ctx) {
-  await humanType(page, resolveSelector(step.selector, ctx), step.value, { skipClick: step.skipClick, speed: step.speed });
+  await humanType(page, resolveSelector(step.selector, ctx), step.value, { skipClick: step.skipClick, speed: step.speed, clear: step.clear });
 }
 async function selectOption(page, step, ctx) {
   const selector = resolveSelector(step.selector, ctx);
@@ -3005,7 +3113,29 @@ async function scroll(page, step, ctx) {
     { dy: step.deltaY ?? 0, sel: selector }
   );
 }
-async function keyboard(page, step) {
+async function selectAllInFocused(page) {
+  await page.evaluate(() => {
+    const el = document.activeElement;
+    if (el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
+      el.select();
+    } else if (el && el.isContentEditable) {
+      const sel = window.getSelection();
+      sel?.selectAllChildren(el);
+    } else {
+      window.getSelection()?.selectAllChildren(document.body);
+    }
+  });
+}
+async function keyboard(page, step, ctx) {
+  if ((step.meta || step.ctrl) && step.key.toLowerCase() === "a" && !step.shift && !step.alt) {
+    await selectAllInFocused(page);
+    return;
+  }
+  if ((step.meta || step.ctrl) && ctx.driver === "extension") {
+    throw new Error(
+      `keyboard: ${step.meta ? "Cmd" : "Ctrl"}+${step.key} can't be sent in extension mode (the relay drops Cmd/Ctrl, so it would arrive as a plain "${step.key}"). Nothing was pressed. Instead: select-all \u2192 keyboard {key:"a", meta:true} (handled in-page); replace a field's text \u2192 fill, or human-type with clear:true; paste \u2192 the paste step.`
+    );
+  }
   const mods = [
     step.meta ? "Meta" : null,
     step.ctrl ? "Control" : null,
@@ -3076,7 +3206,7 @@ async function typeCode(page, step, ctx) {
   }
   return { typed: code.length };
 }
-var log9;
+var log9, NAV_COMMIT_SUSPECT_MS;
 var init_navigation = __esm({
   "src/lib/actions/handlers/navigation.ts"() {
     "use strict";
@@ -3086,9 +3216,11 @@ var init_navigation = __esm({
     init_persistence();
     init_logger();
     init_constants();
+    init_budget();
     init_resolve_selector();
     init_reachability();
     log9 = createLogger("actions");
+    NAV_COMMIT_SUSPECT_MS = 12e3;
   }
 });
 
@@ -4859,12 +4991,15 @@ var init_registry2 = __esm({
 });
 
 // src/lib/stale-monitor.ts
-var DEFAULT_STALE_TIMEOUT_MS, StaleStateMonitor, StaleStateError;
+var DEFAULT_STALE_TIMEOUT_MS, PROBE_BUDGET_MS, UNRESPONSIVE_GRACE_MS, StaleStateMonitor, StaleStateError;
 var init_stale_monitor = __esm({
   "src/lib/stale-monitor.ts"() {
     "use strict";
     init_constants();
+    init_budget();
     DEFAULT_STALE_TIMEOUT_MS = 2e4;
+    PROBE_BUDGET_MS = 3e3;
+    UNRESPONSIVE_GRACE_MS = 8e3;
     StaleStateMonitor = class _StaleStateMonitor {
       page;
       timeoutMs;
@@ -4876,21 +5011,24 @@ var init_stale_monitor = __esm({
       }
       async snapshot() {
         try {
-          const [url, state] = await Promise.all([
-            Promise.resolve(this.page.url()),
+          const url = this.page.url();
+          let unresponsive = false;
+          const state = await withBudget(
             this.page.evaluate(() => ({
               documentReadyState: document.readyState,
               bodyTextLength: document.body?.innerText?.length || 0,
               elementCount: document.querySelectorAll("*").length
-            })).catch(() => ({
-              documentReadyState: "unknown",
-              bodyTextLength: 0,
-              elementCount: 0
-            }))
-          ]);
+            })),
+            PROBE_BUDGET_MS,
+            "state probe"
+          ).catch((e) => {
+            unresponsive = e instanceof BudgetExceededError;
+            return { documentReadyState: "unknown", bodyTextLength: 0, elementCount: 0 };
+          });
           return {
             url,
             ...state,
+            unresponsive,
             timestamp: Date.now()
           };
         } catch {
@@ -4934,6 +5072,8 @@ var init_stale_monitor = __esm({
         return new Promise((resolve, reject) => {
           let resolved = false;
           let checkInterval = null;
+          let probing = false;
+          let unresponsiveSince = null;
           const cleanup = () => {
             resolved = true;
             if (checkInterval) clearInterval(checkInterval);
@@ -4941,11 +5081,25 @@ var init_stale_monitor = __esm({
             this.timer = null;
           };
           checkInterval = setInterval(async () => {
-            if (resolved) return;
+            if (resolved || probing) return;
             const elapsed = Date.now() - this.lastActivity;
             if (elapsed < this.timeoutMs) return;
+            probing = true;
             try {
               const currentSnapshot = await this.snapshot();
+              if (resolved) return;
+              if (currentSnapshot.unresponsive) {
+                unresponsiveSince ??= Date.now();
+                if (Date.now() - unresponsiveSince < UNRESPONSIVE_GRACE_MS) return;
+                cleanup();
+                reject(new StaleStateError(
+                  `The tab stopped responding: its JavaScript did not answer for ${Math.round((Date.now() - unresponsiveSince) / 1e3)}s (a blocking dialog, a frozen re-render, or a navigation that never finished)`,
+                  this.timeoutMs,
+                  true
+                ));
+                return;
+              }
+              unresponsiveSince = null;
               if (_StaleStateMonitor.hasChanged(beforeSnapshot, currentSnapshot)) {
                 this.lastActivity = Date.now();
                 return;
@@ -4953,6 +5107,8 @@ var init_stale_monitor = __esm({
             } catch {
               this.lastActivity = Date.now();
               return;
+            } finally {
+              probing = false;
             }
             cleanup();
             reject(new StaleStateError(
@@ -4976,10 +5132,13 @@ var init_stale_monitor = __esm({
     };
     StaleStateError = class extends Error {
       timeoutMs;
-      constructor(message, timeoutMs) {
+      /** True when the page stopped answering at all (vs. answering but not changing). */
+      unresponsive;
+      constructor(message, timeoutMs, unresponsive = false) {
         super(message);
         this.name = "StaleStateError";
         this.timeoutMs = timeoutMs;
+        this.unresponsive = unresponsive;
       }
     };
   }
@@ -5208,10 +5367,14 @@ async function capturePageState(page, ctx, opts) {
     url = page.url();
   } catch {
   }
-  const title = await page.title().catch(() => "");
+  const title = await withBudget(page.title(), 2e3, "title").catch(() => "");
   if (!screenshot2) return { url, title };
   try {
-    const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
+    const buf = await withBudget(
+      page.screenshot({ type: "jpeg", quality: 50, fullPage: false, timeout: 12e3 }),
+      13e3,
+      "screenshot"
+    );
     const screenshotUrl = saveScreenshot(buf, `${namePrefix}-${Date.now()}.jpg`, ctx.screenshotDir, ctx.publicUrl);
     return { url, title, screenshotUrl };
   } catch {
@@ -5222,6 +5385,7 @@ var init_page_state = __esm({
   "src/lib/page-state.ts"() {
     "use strict";
     init_screenshot();
+    init_budget();
   }
 });
 
@@ -5914,7 +6078,8 @@ async function refineError(page, step, ctx, errorType, message) {
 function isRetryable(errorType) {
   return errorType === "stale-state" || errorType === "timeout" || errorType === "element-not-found";
 }
-function getSuggestion(errorType, step) {
+function getSuggestion(errorType, step, message = "") {
+  if (message.includes("tab stopped responding")) return UNRESPONSIVE_SUGGESTION;
   const usedEphemeralRef = typeof step.selector === "string" && step.selector.startsWith("@e");
   if (usedEphemeralRef && (errorType === "element-not-found" || errorType === "timeout" || errorType === "stale-state")) {
     return "The @e ref went stale \u2014 the page (likely a React/SPA) re-rendered and dropped it since the snapshot. Take a fresh `snapshot`/`find` right before acting, or save the element as a durable `@a:` anchor with the `remember` tool.";
@@ -5934,7 +6099,7 @@ function getSuggestion(errorType, step) {
       return void 0;
   }
 }
-var DEFAULT_STALE_TIMEOUT_MS2, PipelineRunner;
+var DEFAULT_STALE_TIMEOUT_MS2, UNRESPONSIVE_SUGGESTION, PipelineRunner;
 var init_pipeline = __esm({
   "src/lib/pipeline.ts"() {
     "use strict";
@@ -5951,7 +6116,9 @@ var init_pipeline = __esm({
     init_component_map();
     init_resolve_selector();
     init_constants();
+    init_budget();
     DEFAULT_STALE_TIMEOUT_MS2 = 2e4;
+    UNRESPONSIVE_SUGGESTION = "The tab's JavaScript stopped answering during this step. Run a single `read` or `snapshot` on its own to see if it recovered (it usually does). If this step froze it, don't repeat it as-is: for a route change in a single-page app use `evaluate` with `location.assign(url)`; for a click, use a fresh `@e` ref from `find`; avoid `evaluate` calls that scroll or re-render.";
     PipelineRunner = class {
       constructor(ctx, hooks) {
         this.ctx = ctx;
@@ -5959,6 +6126,9 @@ var init_pipeline = __esm({
       }
       ctx;
       hooks;
+      /** Live progress, readable while run() is still pending — lets an outer
+       *  watchdog report WHICH step hung and what already finished. */
+      progress = { stepIndex: -1, results: [] };
       async run(initialPage, pipeline) {
         const tracker = new TabTracker(initialPage.context(), initialPage);
         try {
@@ -5976,6 +6146,7 @@ var init_pipeline = __esm({
         const continueOnError = opts.continueOnError ?? false;
         const results = [];
         const obstacles = [];
+        this.progress.results = results;
         const navStep = pipeline.steps.find((s) => s.type === "navigate");
         try {
           const host = new URL(navStep?.url || safePageUrl(initialPage) || "http://x").hostname;
@@ -6004,6 +6175,7 @@ var init_pipeline = __esm({
         for (let i = 0; i < pipeline.steps.length; i++) {
           if (capture) capture.setStep(i);
           const step = pipeline.steps[i];
+          this.progress.stepIndex = i;
           const page = tracker.active();
           const urlBefore = safePageUrl(page);
           const monitor = new StaleStateMonitor(page, staleTimeoutMs);
@@ -6042,7 +6214,7 @@ var init_pipeline = __esm({
                 errorType,
                 message: refined.message,
                 pageState,
-                suggestion: getSuggestion(errorType, step),
+                suggestion: getSuggestion(errorType, step, refined.message),
                 retryable: isRetryable(errorType)
               },
               durationMs: Date.now() - startTime,
@@ -6099,7 +6271,7 @@ var init_pipeline = __esm({
                 errorType,
                 message: stepResult.error || "Step failed",
                 pageState,
-                suggestion: getSuggestion(errorType, step),
+                suggestion: getSuggestion(errorType, step, refined.message),
                 retryable: isRetryable(errorType)
               },
               durationMs: Date.now() - startTime,
@@ -6109,7 +6281,7 @@ var init_pipeline = __esm({
           if (step.type === "navigate" && continueOnObstacle) {
             const obstacleStart = Date.now();
             const obstaclePage = tracker.active();
-            const obstacle = await detectObstacles(obstaclePage);
+            const obstacle = await withBudget(detectObstacles(obstaclePage), 1e4, "obstacle check").catch(() => null);
             if (obstacle) {
               const resolution = await resolveObstacle(obstaclePage, obstacle, this.ctx, monitor);
               obstacles.push({
@@ -10564,7 +10736,7 @@ var init_cdp_relay = __esm({
           return await Promise.race([
             first,
             new Promise((_, reject) => {
-              const t = setTimeout(() => reject(new Error("screenshot timed out (no compositor frame)")), 1e4);
+              const t = setTimeout(() => reject(new Error("screenshot timed out (no compositor frame)")), 5e3);
               t.unref?.();
             })
           ]);
@@ -10779,6 +10951,7 @@ var init_pipeline_executor = __esm({
         const startTime = Date.now();
         const relay = new CdpRelay(tabId, clientId, pipeline.options?.focus);
         let browser;
+        let runner;
         try {
           await relay.start();
           browser = await import_playwright_core.chromium.connectOverCDP(relay.httpEndpoint(), { timeout: 3e4 });
@@ -10791,7 +10964,8 @@ var init_pipeline_executor = __esm({
           if (!page) throw new Error("no page available for the tab (is it still open?)");
           const ctx = this.deps.refStore.makeContext(userId, token);
           if (this.pendingElicitOtp) ctx.elicitOtp = this.pendingElicitOtp;
-          const runner = new PipelineRunner(ctx);
+          ctx.driver = "extension";
+          runner = new PipelineRunner(ctx);
           const typeChars = pipeline.steps.reduce((n, s) => {
             const v = s.value;
             return (s.type === "human-type" || s.type === "type-code") && typeof v === "string" ? n + v.length : n;
@@ -10808,7 +10982,7 @@ var init_pipeline_executor = __esm({
                 watchdog = setTimeout(
                   () => reject(
                     new Error(
-                      `pipeline exceeded ${Math.round(capMs / 1e3)}s \u2014 the tab may have stopped rendering (minimized window?). Un-minimize the Chrome window or retry with options.focus=true.`
+                      `pipeline exceeded ${Math.round(capMs / 1e3)}s \u2014 a call into the tab never returned.`
                     )
                   ),
                   capMs
@@ -10832,23 +11006,26 @@ var init_pipeline_executor = __esm({
         } catch (err) {
           const msg = getErrorMessage(err);
           const stalled = msg.includes("pipeline exceeded");
+          const done = runner ? runner.progress.results.filter((r) => r.ok) : [];
+          const hungAt = stalled && runner && runner.progress.stepIndex >= 0 ? runner.progress.stepIndex : 0;
+          const hungStep = pipeline.steps[hungAt];
           return {
             ok: false,
-            completedSteps: 0,
+            completedSteps: stalled ? done.length : 0,
             totalSteps: pipeline.steps.length,
-            results: [],
+            results: stalled ? done : [],
             finalState: { url: "", title: "" },
             obstacles: [],
             durationMs: Date.now() - startTime,
             modeUsed: "extension",
             error: {
-              failedAtStep: 0,
-              failedStep: pipeline.steps[0],
-              errorType: "action-failed",
-              message: `Extension mode failed: ${msg}`,
+              failedAtStep: hungAt,
+              failedStep: hungStep,
+              errorType: stalled ? "stale-state" : "action-failed",
+              message: stalled ? `Extension mode: step ${hungAt} (${hungStep?.type}) never returned; ${msg}` : `Extension mode failed: ${msg}`,
               pageState: { url: "", title: "" },
-              suggestion: stalled ? "STOP retrying and tell the user what happened: the Chrome tab being driven stopped responding \u2014 its window is likely minimized or the page is wedged. Ask them to un-minimize the Chrome window (leaving it behind other windows is fine), or ask permission to rerun with options.focus=true to bring it to the front." : "Ensure the iframer extension is connected (green dot) and the tab is still open. See chrome://extensions.",
-              retryable: !stalled
+              suggestion: stalled ? `Step ${hungAt} (${hungStep?.type}) hung inside the tab. Steps before it completed. Run a single \`read\` or \`snapshot\` on its own to check the tab recovered (it usually does), then continue from that step in its own execute call. Don't repeat the same step unchanged: for a route change use \`evaluate\` with \`location.assign(url)\`, for a click use a fresh \`@e\` ref from \`find\`. If the tab stays unresponsive, tell the user.` : "Ensure the iframer extension is connected (green dot) and the tab is still open. See chrome://extensions.",
+              retryable: stalled
             }
           };
         } finally {
