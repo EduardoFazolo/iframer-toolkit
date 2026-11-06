@@ -1,0 +1,271 @@
+// End-to-end test of the in-page capture kit in real Chrome, driven through
+// the same primitives T3 Code's preview tools use:
+//   preview_evaluate         -> CDP Runtime.evaluate {awaitPromise, returnByValue}
+//   preview_act upload       -> locator.setInputFiles(paths)
+//   preview_status.downloads -> page "download" event + saveAs
+// Local fixture only. Run: bun tests/integration/kit-bridge.mjs
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { chromium } from "playwright-core";
+import { startFixture, SECRETS } from "../fixtures/kit-fixture.mjs";
+import * as kit from "../../src/lib/kit/index.ts";
+import { findChrome } from "../../src/lib/browser/chrome-downloader.ts";
+
+const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ifk-test-"));
+// KIT_CLI=dist/cli.js tests the kit as the published bundle serializes it.
+function makeKit(file, extra = []) {
+  if (!process.env.KIT_CLI) return kit.writeKit(extra.includes("passive") ? { mode: "passive" } : {}, file);
+  fs.writeFileSync(file, execFileSync("node", [path.resolve(ROOT, process.env.KIT_CLI), "kit", "--print", ...(extra.length ? ["--mode", ...extra] : [])], { encoding: "utf8" }));
+  return file;
+}
+const KIT = makeKit(path.join(tmp, "iframer-kit.js"));
+const PASSIVE_KIT = makeKit(path.join(tmp, "iframer-kit-passive.js"), ["passive"]);
+
+let passed = 0, failed = 0;
+function check(name, ok, detail) {
+  if (ok) { passed++; console.log(`  ✓ ${name}`); }
+  else { failed++; console.log(`  ✗ ${name}${detail !== undefined ? `\n    ${typeof detail === "string" ? detail : JSON.stringify(detail)}` : ""}`); }
+}
+
+const { server, log, port } = await startFixture();
+const executablePath = findChrome() || undefined;
+const browser = await chromium.launch({ headless: true, executablePath });
+const base = `http://127.0.0.1:${port}`;
+
+async function openTab() {
+  const context = await browser.newContext({ acceptDownloads: true });
+  const page = await context.newPage();
+  const cdp = await context.newCDPSession(page);
+  const downloads = [];
+  page.on("download", (d) => {
+    const p = path.join(tmp, `${downloads.length}-${d.suggestedFilename()}`);
+    downloads.push({ p, ready: d.saveAs(p) });
+  });
+  const evaluate = async (expression) => {
+    const r = await cdp.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
+    if (r.exceptionDetails) throw new Error((r.exceptionDetails.exception?.description ?? r.exceptionDetails.text).split("\n")[0]);
+    return r.result.value ?? null;
+  };
+  return { context, page, downloads, evaluate };
+}
+
+// The exact expressions the T3 instructions print.
+const steps = kit.kitInstructions("t3", KIT).split("\n");
+const expr = (n) => steps.find((l) => l.startsWith(`${n}. preview_evaluate: `)).replace(`${n}. preview_evaluate: `, "").replace(/\s+->.*$/, "");
+const MAKE_INPUT = expr(1), STASH = expr(3), INSTALL = expr(4);
+
+async function bridgeInstall(tab, file = KIT) {
+  await tab.evaluate(MAKE_INPUT);
+  await tab.page.locator("#__ifk_in").setInputFiles([file]);
+  await tab.evaluate(STASH);
+  return tab.evaluate(INSTALL);
+}
+
+try {
+  // ── Install under strict CSP and Trusted Types, survive reload ────────
+  for (const csp of ["strict", "trustedTypes"]) {
+    const tab = await openTab();
+    await tab.page.goto(`${base}/page1?csp=${csp}`, { waitUntil: "load" });
+    const r = await bridgeInstall(tab);
+    check(`installs under ${csp} CSP`, r?.installed === true && r.again === false, r);
+    const again = await tab.evaluate(INSTALL);
+    check(`second install on the same page is a no-op (${csp})`, again?.again === true, again);
+    await tab.page.reload({ waitUntil: "load" });
+    const gone = await tab.evaluate(`window.__ifk?window.__ifk.summary():'NOT_INSTALLED'`);
+    check(`status says NOT_INSTALLED after reload (${csp})`, gone === "NOT_INSTALLED", gone);
+    const re = await tab.evaluate(INSTALL);
+    check(`reinstalls from sessionStorage after reload (${csp})`, re?.installed === true, re);
+    await tab.context.close();
+  }
+
+  // ── Full flow: capture, navigate, export, compare with the server ─────
+  log.length = 0;
+  const tab = await openTab();
+  await tab.page.goto(`${base}/page1?csp=strict`, { waitUntil: "load" });
+  await tab.page.waitForLoadState("networkidle");
+  await bridgeInstall(tab);
+  await tab.page.click("#flow");
+  await tab.page.waitForFunction(() => window.flowOk === true);
+  await tab.page.waitForTimeout(400);
+  await tab.page.click("#nav");
+  await tab.page.waitForURL(/page2/);
+  await tab.page.waitForLoadState("networkidle");
+  const afterNav = await tab.evaluate(INSTALL);
+  check("restores the capture after navigating", afterNav?.restored > 0, afterNav);
+  await tab.page.click("#go");
+  await tab.page.waitForURL(/page2/);
+  await tab.page.waitForLoadState("networkidle");
+  await tab.evaluate(INSTALL);
+  await tab.evaluate(`Promise.resolve(window.runMany()).then(()=>1)`);
+  await tab.page.waitForTimeout(400);
+
+  const dump = await tab.evaluate(`window.__ifk.dump()`);
+  await tab.page.waitForTimeout(400);
+  await Promise.all(tab.downloads.map((d) => d.ready));
+  check("dump() produces a download", tab.downloads.length === 1 && fs.existsSync(tab.downloads[0].p), dump);
+  const file = tab.downloads[0].p;
+  const raw = fs.readFileSync(file, "utf8");
+
+  const leaked = Object.entries(SECRETS).filter(([, v]) => raw.includes(v) || raw.includes(encodeURIComponent(v)) || raw.includes(v.replace(/^Bearer /, "")));
+  check("no seeded secret appears in the export", leaked.length === 0, leaked.map(([k]) => k).join(", "));
+  check("export has no other emails", !/other\.person@example\.com/.test(raw));
+
+  const report = kit.parseCapture(raw);
+  check("capture parses", report.kind === "iframer-capture");
+  const findings = kit.scanCapture(report);
+  check("privacy scan is clean", findings.length === 0, findings);
+
+  const seenByServer = [...new Set(log.filter((l) => l.path.startsWith("/api")).map((l) => `${l.method} ${l.path}`))];
+  const keys = Object.keys(report.endpoints).map((k) => k.replace(base, ""));
+  const tplPath = (p) => p.split("/").map((s) => (/^\d+$/.test(s) ? "{id}" : s)).join("/");
+  const missed = seenByServer.filter((s) => {
+    const [m, p] = s.split(" ");
+    return !keys.includes(`${m} ${tplPath(p)}`) && !keys.includes(`${m} ${p}`) && !keys.some((k) => k.startsWith(`${m} /api/people/`) && p.startsWith("/api/people/"));
+  });
+  // Known blind spots: the worker's fetch and the redirect target.
+  // Calls made before install show up as path only (no method, no payload).
+  const pathOnly = report.pathOnly.map((p) => p.replace(base, ""));
+  const unexpected = missed.filter((s) => !/worker-ping|redirect-target/.test(s) && !pathOnly.includes(tplPath(s.split(" ")[1])));
+  check("captures every page-made API call except known blind spots", unexpected.length === 0, { missed, pathOnly });
+  check("pre-install call reported as path only", pathOnly.includes("/api/boot"), pathOnly);
+  check("coverage never claims completeness", report.coverage.complete === false && report.coverage.blindSpots.length > 0);
+  check("POST body recorded as a shape", report.endpoints[`POST ${base}/api/orders`]?.req?.json?.contact?.email === "string", report.endpoints[`POST ${base}/api/orders`]);
+  check("auth headers kept as names only", report.endpoints[`GET ${base}/api/items/{id}`]?.auth?.includes("authorization"));
+  check("form submit recorded", Object.keys(report.endpoints).some((k) => k.startsWith(`POST ${base}/submit`)));
+  check("email + code in path become {id}", keys.includes("GET /api/people/{id}/{id}"), keys.filter((k) => k.includes("people")));
+  check("map keyed by emails collapses to {key}", JSON.stringify(report.endpoints[`GET ${base}/api/users-by-email`]?.res) === JSON.stringify({ "{key}": { id: "number", role: "string" } }), report.endpoints[`GET ${base}/api/users-by-email`]);
+
+  // ── Ingest through the real CLI ───────────────────────────────────────
+  const outDir = path.join(tmp, "out");
+  const dataDir = path.join(tmp, "data");
+  const cliOut = execFileSync("bun", [path.join(ROOT, "bin/cli.js"), "ingest", file, "--out", outDir, "--typed", "--json"], {
+    env: { ...process.env, IFRAMER_DATA_DIR: dataDir }, encoding: "utf8",
+  });
+  const summary = JSON.parse(cliOut.trim().split("\n").pop());
+  check("ingest succeeds", summary.ok === true && summary.endpoints > 30, summary);
+  check("ingest deletes the capture file", !fs.existsSync(file));
+  const knowledge = fs.readFileSync(path.join(dataDir, "knowledge", "127.0.0.1.md"), "utf8");
+  check("knowledge file written without values", knowledge.includes("/api/orders") && !Object.values(SECRETS).some((v) => knowledge.includes(v)));
+  for (const f of ["api.json", "client.js", "client.d.ts"]) {
+    const body = fs.readFileSync(path.join(outDir, f), "utf8");
+    check(`${f} has no seeded secret`, !Object.values(SECRETS).some((v) => body.includes(v)));
+  }
+  const tsc = path.join(ROOT, "node_modules/.bin/tsc");
+  if (fs.existsSync(tsc)) {
+    try {
+      execFileSync(tsc, ["--ignoreConfig", "--noEmit", "--strict", "--lib", "es2020,dom", path.join(outDir, "client.d.ts")], { encoding: "utf8" });
+      check("client.d.ts type-checks", true);
+    } catch (e) { check("client.d.ts type-checks", false, e.stdout || e.message); }
+  }
+
+  // ── Generated client runs in the page and replays with the cookie ─────
+  const clientPath = path.join(outDir, "client.js");
+  const clientSteps = kit.kitInstructions("t3", KIT, clientPath).split("\n");
+  const stashClient = clientSteps.find((l) => l.startsWith("c. preview_evaluate: ")).replace("c. preview_evaluate: ", "");
+  await tab.evaluate(MAKE_INPUT);
+  await tab.page.locator("#__ifk_in").setInputFiles([clientPath]);
+  await tab.evaluate(stashClient);
+  const fns = await tab.evaluate(`eval(sessionStorage.__ifkApi)`);
+  check("client loads and lists functions", Array.isArray(fns) && fns.includes("getItems"), fns);
+  const priv = await tab.evaluate(`window.__ifk.call('GET','/api/private')`);
+  check("in-page replay carries the HttpOnly cookie", priv?.status === 200, priv);
+  const item = await tab.evaluate(`window.__ifkApi.getItems(5, {limit: 1})`);
+  check("generated GET works", item?.status === 200 && Array.isArray(item.data?.data), item?.status);
+  const write = await tab.evaluate(`window.__ifkApi.createOrders({sku:'x'})`);
+  check("writes refused without approval", write?.error === "write needs approval", write);
+  const cross = await tab.evaluate(`window.__ifk.call('GET','https://example.com/x')`);
+  check("cross-origin replay refused", cross?.error === "cross-origin", cross);
+  const limited = await tab.evaluate(`window.__ifk.call('GET','/api/rate-limited')`);
+  const afterLimit = await tab.evaluate(`window.__ifk.call('GET','/api/private')`);
+  check("stops for good after a 429", limited?.stopped === "HTTP 429" && afterLimit?.error === "stopped", { limited, afterLimit });
+  const stopped = await tab.evaluate(`(window.__ifk.stop(), [typeof window.__ifk, fetch.toString().includes('native code'), sessionStorage.getItem('__ifk_state')])`);
+  check("stop() removes hooks and state", stopped[0] === "undefined" && stopped[1] === true && stopped[2] === null, stopped);
+  await tab.context.close();
+
+  // ── Bot wall stops replays ────────────────────────────────────────────
+  {
+    const t = await openTab();
+    await t.page.goto(`${base}/page1?csp=strict`, { waitUntil: "load" });
+    await bridgeInstall(t);
+    const wall = await t.evaluate(`window.__ifk.call('GET','/api/wall')`);
+    check("bot wall stops replays", wall?.stopped === "bot wall", wall);
+    await t.context.close();
+  }
+
+  // ── Same-origin iframe ────────────────────────────────────────────────
+  {
+    const t = await openTab();
+    await t.page.goto(`${base}/frame-host`, { waitUntil: "load" });
+    await bridgeInstall(t);
+    await t.page.frameLocator("#fr").locator("#inner").click();
+    await t.page.waitForTimeout(400);
+    const ep = await t.evaluate(`JSON.parse(window.__ifk.drain(0).chunk).endpoints[${JSON.stringify(`PUT ${base}/api/from-frame/{id}`)}]`);
+    check("same-origin iframe calls captured with payload", ep?.req?.json?.note === "string", ep);
+    await t.context.close();
+  }
+
+  // ── Passive mode: no patching, path-only coverage ─────────────────────
+  {
+    const t = await openTab();
+    await t.page.goto(`${base}/page1?csp=strict`, { waitUntil: "load" });
+    const r = await bridgeInstall(t, PASSIVE_KIT);
+    await t.page.click("#flow");
+    await t.page.waitForFunction(() => window.flowOk === true);
+    await t.page.waitForTimeout(400);
+    const s = await t.evaluate(`[window.__ifk.summary(), fetch.toString().includes('native code')]`);
+    check("passive mode leaves fetch untouched and still sees paths", r?.mode === "passive" && s[1] === true && s[0].pathOnly > 3 && s[0].withPayload === 0, s);
+    await t.context.close();
+  }
+
+  // ── Drain fallback reassembles to the same report ─────────────────────
+  {
+    const t = await openTab();
+    await t.page.goto(`${base}/page1?csp=strict`, { waitUntil: "load" });
+    await bridgeInstall(t);
+    await t.evaluate(`Promise.resolve(window.runMany()).then(()=>1)`);
+    await t.page.waitForTimeout(300);
+    let cursor = 0, joined = "";
+    while (cursor !== null) {
+      const r = await t.evaluate(`window.__ifk.drain(${cursor}, 4000)`);
+      joined += r.chunk;
+      cursor = r.next;
+    }
+    const rep = kit.parseCapture(joined);
+    check("drain chunks join into a valid capture", Object.keys(rep.endpoints).length >= 30);
+    await t.context.close();
+  }
+
+  // ── Privacy gate refuses a leaky capture ──────────────────────────────
+  {
+    const bad = path.join(tmp, "bad");
+    fs.writeFileSync(bad, JSON.stringify({ kind: "iframer-capture", v: 1, origin: base, coverage: { seen: 1, withPayload: 1, pathOnly: 0, blindSpots: [] }, endpoints: { [`GET ${base}/api/u/${SECRETS.email}`]: { kind: "fetch", n: 1, status: [200], query: [], headers: [], auth: [] } }, pathOnly: [] }));
+    let code = 0;
+    try { execFileSync("bun", [path.join(ROOT, "bin/cli.js"), "ingest", bad, "--out", path.join(tmp, "bad-out"), "--no-knowledge"], { stdio: "pipe" }); }
+    catch (e) { code = e.status; }
+    check("ingest refuses a capture with an email in it", code === 2 && !fs.existsSync(path.join(tmp, "bad-out")) && !fs.existsSync(bad), { code });
+  }
+
+  // ── --latest finds the newest capture in a T3-style downloads folder ──
+  {
+    const t3 = path.join(tmp, "t3", "userdata", "server-browser", "downloads", "abc123");
+    fs.mkdirSync(t3, { recursive: true });
+    const f = path.join(t3, "9390849a-5559-4c12-a76a-cfc97c238f21");
+    fs.writeFileSync(f, JSON.stringify({ kind: "iframer-capture", v: 1, origin: base, coverage: { seen: 0, withPayload: 0, pathOnly: 0, blindSpots: [] }, endpoints: {}, pathOnly: [] }));
+    fs.writeFileSync(path.join(t3, "other-file"), "not a capture");
+    process.env.T3_HOME = path.join(tmp, "t3");
+    check("--latest finds an extensionless T3 download", kit.findLatestCapture() === f);
+  }
+} catch (e) {
+  failed++;
+  console.log(`  ✗ crashed: ${e.stack || e.message}`);
+} finally {
+  await browser.close();
+  server.close();
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+console.log(`\n  ${passed} passed, ${failed} failed`);
+process.exit(failed ? 1 : 0);

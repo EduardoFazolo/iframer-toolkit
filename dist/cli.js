@@ -1109,7 +1109,7 @@ var init_crypto = __esm({
 // src/lib/session/persistence.ts
 async function extractSession(context, page) {
   const cookies = await context.cookies();
-  const { localStorage, sessionStorage } = await page.evaluate(() => {
+  const { localStorage, sessionStorage: sessionStorage2 } = await page.evaluate(() => {
     const ls = {};
     const ss = {};
     for (let i = 0; i < window.localStorage.length; i++) {
@@ -1126,7 +1126,7 @@ async function extractSession(context, page) {
   return {
     cookies,
     localStorage: { [origin]: localStorage },
-    sessionStorage: { [origin]: sessionStorage },
+    sessionStorage: { [origin]: sessionStorage2 },
     extractedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
 }
@@ -2238,8 +2238,8 @@ async function humanMove(page, toX, toY) {
   const lastPos = mousePositions.get(page);
   const fromX = lastPos?.x ?? randRange(TIMING.IDLE_MOUSE_X);
   const fromY = lastPos?.y ?? randRange(TIMING.IDLE_MOUSE_Y);
-  const path13 = generatePath(fromX, fromY, toX, toY);
-  for (const point of path13) {
+  const path15 = generatePath(fromX, fromY, toX, toY);
+  for (const point of path15) {
     await mouse.move(point.x, point.y);
     await sleep4(rand(2, 12));
   }
@@ -2888,7 +2888,7 @@ async function download(page, step) {
   const status = resp.status();
   if (!resp.ok()) throw new Error(`download: HTTP ${status} for ${step.url}`);
   const buf = await resp.body();
-  const fs12 = await import("fs");
+  const fs14 = await import("fs");
   const pathMod = await import("path");
   const { getDataDir: getDataDir2 } = await Promise.resolve().then(() => (init_paths(), paths_exports));
   let outPath;
@@ -2902,8 +2902,8 @@ async function download(page, step) {
     }
     outPath = pathMod.join(getDataDir2(), "downloads", step.path || name);
   }
-  fs12.mkdirSync(pathMod.dirname(outPath), { recursive: true });
-  fs12.writeFileSync(outPath, buf);
+  fs14.mkdirSync(pathMod.dirname(outPath), { recursive: true });
+  fs14.writeFileSync(outPath, buf);
   return { path: outPath, size: buf.length, status };
 }
 async function typeCode(page, step, ctx) {
@@ -2966,12 +2966,12 @@ async function find(page, step, ctx) {
   const elInfo = await element.evaluate((el) => {
     const tag = el.tagName.toLowerCase();
     const text = (el.textContent?.trim() || "").slice(0, 60);
-    const path13 = [];
+    const path15 = [];
     let current = el;
     while (current && current !== document.body && current !== document.documentElement) {
       let seg = current.tagName.toLowerCase();
       if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-        path13.unshift(`#${current.id}`);
+        path15.unshift(`#${current.id}`);
         break;
       }
       const parent = current.parentElement;
@@ -2983,10 +2983,10 @@ async function find(page, step, ctx) {
           seg += `:nth-of-type(${idx})`;
         }
       }
-      path13.unshift(seg);
+      path15.unshift(seg);
       current = parent;
     }
-    return { tag, text, selector: path13.join(" > ") };
+    return { tag, text, selector: path15.join(" > ") };
   });
   const ref = `@e${ctx.nextRefId++}`;
   const displayRole = step.role || elInfo.tag;
@@ -3180,12 +3180,12 @@ async function takeSnapshot(page, ctx, options) {
       return textual && el.getAttribute("tabindex") === "-1";
     }
     function buildSelector(el) {
-      const path13 = [];
+      const path15 = [];
       let current = el;
       while (current && current !== document.body && current !== document.documentElement) {
         let seg = current.tagName.toLowerCase();
         if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-          path13.unshift(`#${current.id}`);
+          path15.unshift(`#${current.id}`);
           break;
         }
         const parent = current.parentElement;
@@ -3197,10 +3197,10 @@ async function takeSnapshot(page, ctx, options) {
             seg += `:nth-of-type(${idx})`;
           }
         }
-        path13.unshift(seg);
+        path15.unshift(seg);
         current = parent;
       }
-      return path13.join(" > ");
+      return path15.join(" > ");
     }
     function getName(el) {
       const ariaLabel = el.getAttribute("aria-label");
@@ -3337,12 +3337,12 @@ async function annotatedScreenshot(page, ctx) {
       return true;
     }
     function buildSelector(el) {
-      const path13 = [];
+      const path15 = [];
       let current = el;
       while (current && current !== document.body && current !== document.documentElement) {
         let seg = current.tagName.toLowerCase();
         if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-          path13.unshift(`#${current.id}`);
+          path15.unshift(`#${current.id}`);
           break;
         }
         const parent = current.parentElement;
@@ -3354,10 +3354,10 @@ async function annotatedScreenshot(page, ctx) {
             seg += `:nth-of-type(${idx})`;
           }
         }
-        path13.unshift(seg);
+        path15.unshift(seg);
         current = parent;
       }
-      return path13.join(" > ");
+      return path15.join(" > ");
     }
     function getName(el) {
       const ariaLabel = el.getAttribute("aria-label");
@@ -5199,8 +5199,8 @@ function isLikelyId(segment) {
 function isRecord(x) {
   return typeof x === "object" && x !== null && !Array.isArray(x);
 }
-function parameterizePath(path13) {
-  const parts = path13.split("/");
+function parameterizePath(path15) {
+  const parts = path15.split("/");
   let idCount = 0;
   const parameterized = parts.map((part) => {
     if (part && isLikelyId(part)) {
@@ -5289,16 +5289,16 @@ function gqlActionFromBody(body) {
   return void 0;
 }
 function classifyRequest(req) {
-  const path13 = req.path;
-  const lowerPath = path13.toLowerCase();
+  const path15 = req.path;
+  const lowerPath = path15.toLowerCase();
   const ct = (req.requestHeaders["content-type"] || req.requestHeaders["Content-Type"] || "").toLowerCase();
   const body = req.requestBody;
   if (ct.includes("application/grpc")) {
-    return { protocol: "grpc-web", action: path13.replace(/^\//, "") };
+    return { protocol: "grpc-web", action: path15.replace(/^\//, "") };
   }
   const soapAction = req.requestHeaders["soapaction"] || req.requestHeaders["SOAPAction"];
   if (soapAction || ct.includes("text/xml") || ct.includes("application/soap+xml")) {
-    return { protocol: "soap", action: (soapAction || path13).replace(/^["/]|["/]$/g, "") };
+    return { protocol: "soap", action: (soapAction || path15).replace(/^["/]|["/]$/g, "") };
   }
   if (/\/graphql\b/.test(lowerPath) || hasGraphQLShape(body)) {
     return { protocol: "graphql", action: gqlActionFromBody(body) ?? "anonymous" };
@@ -5313,7 +5313,7 @@ function classifyRequest(req) {
     const friendly = gqlActionFromBody(body);
     if (friendly) return { protocol: "form-rpc", action: friendly };
   }
-  return { protocol: "rest", action: `${req.method} ${parameterizePath(path13)}` };
+  return { protocol: "rest", action: `${req.method} ${parameterizePath(path15)}` };
 }
 function inferVerb(protocol, action, method, responseBody) {
   const lower = action.toLowerCase();
@@ -5348,8 +5348,8 @@ function buildFunctionName(protocol, action, method, verb) {
   if (protocol === "rest") {
     const parts = action.split(" ");
     const httpMethod = parts[0];
-    const path13 = parts.slice(1).join(" ");
-    const segs = path13.split("/").filter((s) => s && !s.startsWith("{"));
+    const path15 = parts.slice(1).join(" ");
+    const segs = path15.split("/").filter((s) => s && !s.startsWith("{"));
     const verbPrefix = httpMethod === "GET" ? verb === "list" ? "list" : "get" : httpMethod === "POST" ? "create" : httpMethod === "PUT" ? "update" : httpMethod === "PATCH" ? "patch" : httpMethod === "DELETE" ? "delete" : httpMethod.toLowerCase();
     return camelCase(`${verbPrefix} ${segs.join(" ")}`) || camelCase(action);
   }
@@ -6330,14 +6330,14 @@ var require_buffer_util = __commonJS({
       }
       return target;
     }
-    function _mask(source, mask, output, offset, length) {
+    function _mask(source, mask2, output, offset, length) {
       for (let i = 0; i < length; i++) {
-        output[offset + i] = source[i] ^ mask[i & 3];
+        output[offset + i] = source[i] ^ mask2[i & 3];
       }
     }
-    function _unmask(buffer, mask) {
+    function _unmask(buffer, mask2) {
       for (let i = 0; i < buffer.length; i++) {
-        buffer[i] ^= mask[i & 3];
+        buffer[i] ^= mask2[i & 3];
       }
     }
     function toArrayBuffer(buf) {
@@ -6370,13 +6370,13 @@ var require_buffer_util = __commonJS({
     if (!process.env.WS_NO_BUFFER_UTIL) {
       try {
         const bufferUtil = require("bufferutil");
-        module2.exports.mask = function(source, mask, output, offset, length) {
-          if (length < 48) _mask(source, mask, output, offset, length);
-          else bufferUtil.mask(source, mask, output, offset, length);
+        module2.exports.mask = function(source, mask2, output, offset, length) {
+          if (length < 48) _mask(source, mask2, output, offset, length);
+          else bufferUtil.mask(source, mask2, output, offset, length);
         };
-        module2.exports.unmask = function(buffer, mask) {
-          if (buffer.length < 32) _unmask(buffer, mask);
-          else bufferUtil.unmask(buffer, mask);
+        module2.exports.unmask = function(buffer, mask2) {
+          if (buffer.length < 32) _unmask(buffer, mask2);
+          else bufferUtil.unmask(buffer, mask2);
         };
       } catch (e) {
       }
@@ -7708,14 +7708,14 @@ var require_sender = __commonJS({
        * @public
        */
       static frame(data, options) {
-        let mask;
+        let mask2;
         let merge = false;
         let offset = 2;
         let skipMasking = false;
         if (options.mask) {
-          mask = options.maskBuffer || maskBuffer;
+          mask2 = options.maskBuffer || maskBuffer;
           if (options.generateMask) {
-            options.generateMask(mask);
+            options.generateMask(mask2);
           } else {
             if (randomPoolPointer === RANDOM_POOL_SIZE) {
               if (randomPool === void 0) {
@@ -7724,12 +7724,12 @@ var require_sender = __commonJS({
               randomFillSync(randomPool, 0, RANDOM_POOL_SIZE);
               randomPoolPointer = 0;
             }
-            mask[0] = randomPool[randomPoolPointer++];
-            mask[1] = randomPool[randomPoolPointer++];
-            mask[2] = randomPool[randomPoolPointer++];
-            mask[3] = randomPool[randomPoolPointer++];
+            mask2[0] = randomPool[randomPoolPointer++];
+            mask2[1] = randomPool[randomPoolPointer++];
+            mask2[2] = randomPool[randomPoolPointer++];
+            mask2[3] = randomPool[randomPoolPointer++];
           }
-          skipMasking = (mask[0] | mask[1] | mask[2] | mask[3]) === 0;
+          skipMasking = (mask2[0] | mask2[1] | mask2[2] | mask2[3]) === 0;
           offset = 6;
         }
         let dataLength;
@@ -7764,16 +7764,16 @@ var require_sender = __commonJS({
         }
         if (!options.mask) return [target, data];
         target[1] |= 128;
-        target[offset - 4] = mask[0];
-        target[offset - 3] = mask[1];
-        target[offset - 2] = mask[2];
-        target[offset - 1] = mask[3];
+        target[offset - 4] = mask2[0];
+        target[offset - 3] = mask2[1];
+        target[offset - 2] = mask2[2];
+        target[offset - 1] = mask2[3];
         if (skipMasking) return [target, data];
         if (merge) {
-          applyMask(data, mask, target, offset, dataLength);
+          applyMask(data, mask2, target, offset, dataLength);
           return [target];
         }
-        applyMask(data, mask, data, 0, dataLength);
+        applyMask(data, mask2, data, 0, dataLength);
         return [target, data];
       }
       /**
@@ -7785,7 +7785,7 @@ var require_sender = __commonJS({
        * @param {Function} [cb] Callback
        * @public
        */
-      close(code, data, mask, cb) {
+      close(code, data, mask2, cb) {
         let buf;
         if (code === void 0) {
           buf = EMPTY_BUFFER;
@@ -7813,7 +7813,7 @@ var require_sender = __commonJS({
           [kByteLength]: buf.length,
           fin: true,
           generateMask: this._generateMask,
-          mask,
+          mask: mask2,
           maskBuffer: this._maskBuffer,
           opcode: 8,
           readOnly: false,
@@ -7833,7 +7833,7 @@ var require_sender = __commonJS({
        * @param {Function} [cb] Callback
        * @public
        */
-      ping(data, mask, cb) {
+      ping(data, mask2, cb) {
         let byteLength;
         let readOnly;
         if (typeof data === "string") {
@@ -7854,7 +7854,7 @@ var require_sender = __commonJS({
           [kByteLength]: byteLength,
           fin: true,
           generateMask: this._generateMask,
-          mask,
+          mask: mask2,
           maskBuffer: this._maskBuffer,
           opcode: 9,
           readOnly,
@@ -7880,7 +7880,7 @@ var require_sender = __commonJS({
        * @param {Function} [cb] Callback
        * @public
        */
-      pong(data, mask, cb) {
+      pong(data, mask2, cb) {
         let byteLength;
         let readOnly;
         if (typeof data === "string") {
@@ -7901,7 +7901,7 @@ var require_sender = __commonJS({
           [kByteLength]: byteLength,
           fin: true,
           generateMask: this._generateMask,
-          mask,
+          mask: mask2,
           maskBuffer: this._maskBuffer,
           opcode: 10,
           readOnly,
@@ -8812,24 +8812,24 @@ var require_websocket = __commonJS({
        * @param {Function} [cb] Callback which is executed when the ping is sent
        * @public
        */
-      ping(data, mask, cb) {
+      ping(data, mask2, cb) {
         if (this.readyState === _WebSocket.CONNECTING) {
           throw new Error("WebSocket is not open: readyState 0 (CONNECTING)");
         }
         if (typeof data === "function") {
           cb = data;
-          data = mask = void 0;
-        } else if (typeof mask === "function") {
-          cb = mask;
-          mask = void 0;
+          data = mask2 = void 0;
+        } else if (typeof mask2 === "function") {
+          cb = mask2;
+          mask2 = void 0;
         }
         if (typeof data === "number") data = data.toString();
         if (this.readyState !== _WebSocket.OPEN) {
           sendAfterClose(this, data, cb);
           return;
         }
-        if (mask === void 0) mask = !this._isServer;
-        this._sender.ping(data || EMPTY_BUFFER, mask, cb);
+        if (mask2 === void 0) mask2 = !this._isServer;
+        this._sender.ping(data || EMPTY_BUFFER, mask2, cb);
       }
       /**
        * Send a pong.
@@ -8839,24 +8839,24 @@ var require_websocket = __commonJS({
        * @param {Function} [cb] Callback which is executed when the pong is sent
        * @public
        */
-      pong(data, mask, cb) {
+      pong(data, mask2, cb) {
         if (this.readyState === _WebSocket.CONNECTING) {
           throw new Error("WebSocket is not open: readyState 0 (CONNECTING)");
         }
         if (typeof data === "function") {
           cb = data;
-          data = mask = void 0;
-        } else if (typeof mask === "function") {
-          cb = mask;
-          mask = void 0;
+          data = mask2 = void 0;
+        } else if (typeof mask2 === "function") {
+          cb = mask2;
+          mask2 = void 0;
         }
         if (typeof data === "number") data = data.toString();
         if (this.readyState !== _WebSocket.OPEN) {
           sendAfterClose(this, data, cb);
           return;
         }
-        if (mask === void 0) mask = !this._isServer;
-        this._sender.pong(data || EMPTY_BUFFER, mask, cb);
+        if (mask2 === void 0) mask2 = !this._isServer;
+        this._sender.pong(data || EMPTY_BUFFER, mask2, cb);
       }
       /**
        * Resume the socket.
@@ -11128,7 +11128,7 @@ var init_capture_manager = __esm({
         const { context, page } = await this.daemon.ensure(mode, instanceId);
         const cookies = urls && urls.length > 0 ? await context.cookies(urls) : await context.cookies();
         const localStorage = {};
-        const sessionStorage = {};
+        const sessionStorage2 = {};
         try {
           const stores = await page.evaluate(() => {
             const ls = {};
@@ -11144,15 +11144,15 @@ var init_capture_manager = __esm({
             return { origin: window.location.origin, ls, ss };
           });
           localStorage[stores.origin] = stores.ls;
-          sessionStorage[stores.origin] = stores.ss;
+          sessionStorage2[stores.origin] = stores.ss;
         } catch {
         }
         return {
           ok: true,
           cookies,
           localStorage,
-          sessionStorage,
-          message: `${cookies.length} cookies, ${Object.values(localStorage).reduce((n, s) => n + Object.keys(s).length, 0)} localStorage keys, ${Object.values(sessionStorage).reduce((n, s) => n + Object.keys(s).length, 0)} sessionStorage keys.`
+          sessionStorage: sessionStorage2,
+          message: `${cookies.length} cookies, ${Object.values(localStorage).reduce((n, s) => n + Object.keys(s).length, 0)} localStorage keys, ${Object.values(sessionStorage2).reduce((n, s) => n + Object.keys(s).length, 0)} sessionStorage keys.`
         };
       }
     };
@@ -11615,35 +11615,966 @@ In binary-headful mode, prefer asking the user to solve it in the visible window
   }
 });
 
+// src/lib/kit/page-kit.ts
+function pageKit(opts) {
+  opts = opts || {};
+  var w = window;
+  var VERSION = 1;
+  var KEY = "__ifk_state";
+  if (w.__ifk && w.__ifk.version === VERSION) {
+    var s0 = w.__ifk.summary();
+    return { installed: true, again: true, version: VERSION, seen: s0.seen };
+  }
+  var mode = opts.mode === "passive" ? "passive" : "hook";
+  var hostRe = null;
+  try {
+    if (opts.hostFilter) hostRe = new RegExp(opts.hostFilter, "i");
+  } catch (e) {
+  }
+  var MAX_BODY = opts.maxBody || 2e5;
+  var MAX_CALLS = opts.maxCalls || 50;
+  var m = {};
+  var po = {};
+  var budget = { calls: 0, stopped: null };
+  var restored = 0;
+  try {
+    var saved = JSON.parse(sessionStorage.getItem(KEY) || "null");
+    if (saved && saved.v === VERSION) {
+      m = saved.m || {};
+      po = saved.po || {};
+      if (saved.budget) budget = saved.budget;
+      restored = Object.keys(m).length;
+    }
+  } catch (e) {
+  }
+  var AUTH_H = /^(authorization|cookie|x-csrf|x-xsrf|x-api-key|x-auth|x-token|x-session|x-access|x-client-token|x-request-token)/i;
+  var NOISE_H = /^(accept|accept-language|accept-encoding|cache-control|connection|pragma|sec-|user-agent|referer|origin|dnt|te|if-none-match|if-modified-since|upgrade-insecure-requests)$/i;
+  var NOISE_H_PREFIX = /^sec-/i;
+  function isValueLike(s) {
+    if (!s) return false;
+    var d = s;
+    try {
+      d = decodeURIComponent(s);
+    } catch (e) {
+    }
+    if (/^[0-9]+$/.test(d)) return true;
+    if (/^[0-9a-f]{8,}$/i.test(d)) return true;
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(d)) return true;
+    if (/@/.test(d)) return true;
+    if (/^\+?[0-9][0-9 ().-]{6,}$/.test(d)) return true;
+    if (/^[\w.~-]{20,}$/.test(d)) return true;
+    if (d.length >= 10 && /[0-9]/.test(d) && /[a-z]/i.test(d) && !/^[a-z]+[0-9]{1,2}$/i.test(d)) return true;
+    return false;
+  }
+  function tpl(p) {
+    return p.split("/").map(function(s) {
+      return isValueLike(s) ? "{id}" : s;
+    }).join("/");
+  }
+  function abs(u, base) {
+    try {
+      return new URL(String(u), base || location.href);
+    } catch (e) {
+      return null;
+    }
+  }
+  function shape(v, d) {
+    d = d || 0;
+    if (v === null) return "null";
+    if (Array.isArray(v)) return v.length ? [shape(v[0], d + 1)] : [];
+    if (typeof v === "object") {
+      if (d > 6) return "object";
+      var o = {};
+      var keys = Object.keys(v);
+      var dyn = keys.filter(isValueLike);
+      if (dyn.length && dyn.length >= keys.length / 2) {
+        o["{key}"] = shape(v[dyn[0]], d + 1);
+        keys = keys.filter(function(k) {
+          return !isValueLike(k);
+        });
+      }
+      keys.slice(0, 60).forEach(function(k) {
+        if (!isValueLike(k)) o[k] = shape(v[k], d + 1);
+      });
+      return o;
+    }
+    return typeof v;
+  }
+  function keysOf(iter) {
+    var o = {};
+    iter.forEach(function(_, k) {
+      o[isValueLike(k) ? "{key}" : k] = "string";
+    });
+    return o;
+  }
+  function bodyShape(b) {
+    try {
+      if (b == null) return void 0;
+      if (typeof b === "string") {
+        try {
+          return { json: shape(JSON.parse(b)) };
+        } catch (e) {
+        }
+        if (/^[^=&\s]+=[^&]*(&|$)/.test(b)) return { form: keysOf(new URLSearchParams(b)) };
+        return { text: b.length };
+      }
+      if (typeof URLSearchParams !== "undefined" && b instanceof URLSearchParams) return { form: keysOf(b) };
+      if (typeof FormData !== "undefined" && b instanceof FormData) return { multipart: keysOf(b) };
+      if (typeof Blob !== "undefined" && b instanceof Blob) return { binary: b.size };
+      if (b instanceof ArrayBuffer || ArrayBuffer.isView(b)) return { binary: b.byteLength };
+    } catch (e) {
+    }
+    return { unknown: true };
+  }
+  function resShape(text, ct) {
+    if (!text) return void 0;
+    if (/json/i.test(ct || "")) {
+      try {
+        return shape(JSON.parse(text));
+      } catch (e) {
+      }
+    }
+    return { contentType: (ct || "").split(";")[0], bytes: text.length };
+  }
+  function cap(t) {
+    return t && t.length > MAX_BODY ? "" : t;
+  }
+  var persistTimer = null;
+  function persist() {
+    try {
+      sessionStorage.setItem(KEY, JSON.stringify({ v: VERSION, m, po, budget }));
+    } catch (e) {
+    }
+  }
+  function persistSoon() {
+    if (persistTimer) return;
+    persistTimer = setTimeout(function() {
+      persistTimer = null;
+      persist();
+    }, 300);
+  }
+  function rec(kind, method, url, headers, body, status, ct, text, base) {
+    try {
+      var u = abs(url, base);
+      if (!u || !/^https?:$/.test(u.protocol)) return;
+      if (hostRe && !hostRe.test(u.host)) return;
+      var k = String(method || "GET").toUpperCase() + " " + u.origin + tpl(u.pathname);
+      var e = m[k] || (m[k] = { kind, n: 0, status: [], query: [], headers: [], auth: [] });
+      e.n++;
+      if (status != null && e.status.indexOf(status) < 0) e.status.push(status);
+      u.searchParams.forEach(function(_, q) {
+        var qn = isValueLike(q) ? "{key}" : q;
+        if (e.query.indexOf(qn) < 0) e.query.push(qn);
+      });
+      Object.keys(headers || {}).forEach(function(h) {
+        var l = h.toLowerCase();
+        if (AUTH_H.test(l)) {
+          if (e.auth.indexOf(l) < 0) e.auth.push(l);
+        } else if (!NOISE_H.test(l) && !NOISE_H_PREFIX.test(l) && e.headers.indexOf(l) < 0) e.headers.push(l);
+      });
+      if (body !== void 0 && !e.req) e.req = bodyShape(body);
+      if (text !== void 0 && !e.res) e.res = resShape(text, ct);
+      persistSoon();
+    } catch (err) {
+    }
+  }
+  var restores = [];
+  function patch(obj, name, make) {
+    try {
+      var orig = obj[name];
+      if (!orig) return;
+      var wrapped = make(orig);
+      obj[name] = wrapped;
+      restores.push(function() {
+        try {
+          if (obj[name] === wrapped) obj[name] = orig;
+        } catch (e) {
+        }
+      });
+    } catch (e) {
+    }
+  }
+  var origFetch = w.fetch;
+  function hookWindow(win) {
+    try {
+      if (win.__ifkHooked) return;
+      win.__ifkHooked = true;
+    } catch (e) {
+      return;
+    }
+    var base = function() {
+      try {
+        return win.location.href;
+      } catch (e) {
+        return location.href;
+      }
+    };
+    patch(win, "fetch", function(oFetch) {
+      return function(input, init) {
+        var p = oFetch.apply(this, arguments);
+        try {
+          var isReq = typeof win.Request !== "undefined" && input instanceof win.Request;
+          var method = init && init.method || isReq && input.method || "GET";
+          var url = isReq ? input.url : input;
+          var hs = {};
+          var src = init && init.headers || isReq && input.headers;
+          if (src) new win.Headers(src).forEach(function(_, k) {
+            hs[k] = 1;
+          });
+          var b = init && init.body;
+          var at = base();
+          p.then(function(res) {
+            try {
+              var ct = res.headers.get("content-type");
+              if (/event-stream|octet|video|audio|image/i.test(ct || "")) return rec("fetch", method, url, hs, b, res.status, ct, void 0, at);
+              res.clone().text().then(function(t) {
+                rec("fetch", method, url, hs, b, res.status, ct, cap(t), at);
+              }, function() {
+                rec("fetch", method, url, hs, b, res.status, ct, void 0, at);
+              });
+            } catch (e) {
+            }
+          }, function() {
+          });
+        } catch (e) {
+        }
+        return p;
+      };
+    });
+    var X = win.XMLHttpRequest && win.XMLHttpRequest.prototype;
+    if (X) {
+      patch(X, "open", function(oOpen) {
+        return function(method, url) {
+          try {
+            this.__ifkI = { method, url, h: {}, at: base() };
+          } catch (e) {
+          }
+          return oOpen.apply(this, arguments);
+        };
+      });
+      patch(X, "setRequestHeader", function(oSet) {
+        return function(k) {
+          try {
+            if (this.__ifkI) this.__ifkI.h[k] = 1;
+          } catch (e) {
+          }
+          return oSet.apply(this, arguments);
+        };
+      });
+      patch(X, "send", function(oSend) {
+        return function(b) {
+          try {
+            var i = this.__ifkI, x = this;
+            if (i) x.addEventListener("loadend", function() {
+              var t;
+              try {
+                t = x.responseType === "" || x.responseType === "text" ? cap(x.responseText) : void 0;
+              } catch (e) {
+              }
+              var ct = null;
+              try {
+                ct = x.getResponseHeader("content-type");
+              } catch (e) {
+              }
+              rec("xhr", i.method, i.url, i.h, b, x.status, ct, t, i.at);
+            });
+          } catch (e) {
+          }
+          return oSend.apply(this, arguments);
+        };
+      });
+    }
+    if (win.navigator && win.navigator.sendBeacon) {
+      patch(win.navigator, "sendBeacon", function(oBeacon) {
+        return function(u, d) {
+          rec("beacon", "POST", u, {}, d, void 0, void 0, void 0, base());
+          return oBeacon.apply(this, arguments);
+        };
+      });
+    }
+    ["WebSocket", "EventSource"].forEach(function(name) {
+      patch(win, name, function(Orig) {
+        var Wrapped = function(u, p) {
+          try {
+            var url = String(u);
+            if (name === "WebSocket") url = url.replace(/^ws/, "http");
+            rec(name === "WebSocket" ? "ws" : "sse", "GET", url, {}, void 0, void 0, void 0, void 0, base());
+          } catch (e) {
+          }
+          return p === void 0 ? new Orig(u) : new Orig(u, p);
+        };
+        Wrapped.prototype = Orig.prototype;
+        ["CONNECTING", "OPEN", "CLOSING", "CLOSED"].forEach(function(k) {
+          if (k in Orig) Wrapped[k] = Orig[k];
+        });
+        return Wrapped;
+      });
+    });
+  }
+  function onSubmit(ev) {
+    try {
+      var f = ev.target;
+      var doc = f.ownerDocument || document;
+      rec("form", f.method || "GET", f.action || doc.location.href, {}, new FormData(f), void 0, void 0, void 0, doc.location.href);
+    } catch (e) {
+    }
+  }
+  function watchDocument(doc) {
+    try {
+      if (doc.__ifkWatched) return;
+      doc.__ifkWatched = true;
+      doc.addEventListener("submit", onSubmit, true);
+      restores.push(function() {
+        try {
+          doc.removeEventListener("submit", onSubmit, true);
+          doc.__ifkWatched = false;
+        } catch (e) {
+        }
+      });
+    } catch (e) {
+    }
+  }
+  function attachFrame(f) {
+    try {
+      var fw = f.contentWindow;
+      if (!fw || !fw.document) return;
+      if (mode === "hook") hookWindow(fw);
+      watchDocument(fw.document);
+    } catch (e) {
+    }
+    try {
+      if (!f.__ifkLoad) {
+        f.__ifkLoad = true;
+        f.addEventListener("load", function() {
+          attachFrame(f);
+        });
+      }
+    } catch (e) {
+    }
+  }
+  function scanFrames(root) {
+    try {
+      Array.prototype.forEach.call((root || document).querySelectorAll("iframe,frame"), attachFrame);
+    } catch (e) {
+    }
+  }
+  if (mode === "hook") hookWindow(w);
+  watchDocument(document);
+  scanFrames(document);
+  var mo = null;
+  try {
+    mo = new MutationObserver(function(muts) {
+      muts.forEach(function(mu) {
+        Array.prototype.forEach.call(mu.addedNodes || [], function(n) {
+          if (n.nodeType !== 1) return;
+          if (n.tagName === "IFRAME" || n.tagName === "FRAME") attachFrame(n);
+          else if (n.querySelectorAll) scanFrames(n);
+        });
+      });
+    });
+    mo.observe(document.documentElement, { childList: true, subtree: true });
+  } catch (e) {
+  }
+  var obs = null;
+  try {
+    obs = new PerformanceObserver(function(l) {
+      l.getEntries().forEach(function(r) {
+        if (!/fetch|xmlhttprequest|beacon/.test(r.initiatorType)) return;
+        var u = abs(r.name);
+        if (!u || hostRe && !hostRe.test(u.host)) return;
+        po[u.origin + tpl(u.pathname)] = r.responseStatus || 0;
+      });
+      persistSoon();
+    });
+    obs.observe({ type: "resource", buffered: true });
+  } catch (e) {
+  }
+  w.addEventListener("pagehide", persist);
+  function report() {
+    var hooked = {};
+    Object.keys(m).forEach(function(k) {
+      hooked[k.slice(k.indexOf(" ") + 1)] = 1;
+    });
+    var pathOnly = Object.keys(po).filter(function(p) {
+      return !hooked[p];
+    });
+    var payload = Object.keys(m).filter(function(k) {
+      return m[k].req || m[k].res;
+    });
+    return {
+      kind: "iframer-capture",
+      v: VERSION,
+      origin: location.origin,
+      capturedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      kit: { mode, hostFilter: opts.hostFilter || null },
+      coverage: {
+        seen: Object.keys(m).length + pathOnly.length,
+        withPayload: payload.length,
+        pathOnly: pathOnly.length,
+        complete: false,
+        blindSpots: ["HttpOnly cookies", "Set-Cookie", "browser-added headers", "worker traffic", "document POST responses", "redirect hops", "cross-origin iframes"]
+      },
+      endpoints: m,
+      pathOnly
+    };
+  }
+  function looksLikeWall(status, text) {
+    if (status === 403 || status === 429) return "HTTP " + status;
+    if (text && /captcha|cf-chl|challenge-platform|are you a robot|access denied/i.test(text.slice(0, 5e3))) return "bot wall";
+    return null;
+  }
+  w.__ifk = {
+    version: VERSION,
+    mode,
+    summary: function() {
+      var c = report().coverage;
+      return { installed: true, mode, seen: c.seen, withPayload: c.withPayload, pathOnly: c.pathOnly, replays: budget.calls, stopped: budget.stopped };
+    },
+    // Fallback for tools that can't download files: page the report through evaluate results.
+    drain: function(cursor, maxBytes) {
+      var s = JSON.stringify(report());
+      cursor = cursor || 0;
+      var chunk = s.slice(cursor, cursor + (maxBytes || 6e4));
+      return { chunk, next: cursor + chunk.length < s.length ? cursor + chunk.length : null, total: s.length };
+    },
+    // Writes the report out of the page as a download. T3 lists its local path
+    // in preview_status.downloads; `iframer ingest` reads it from there.
+    dump: function() {
+      var s = JSON.stringify(report());
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([s], { type: "application/json" }));
+      a.download = "iframer-capture-" + Date.now() + ".json";
+      (document.body || document.documentElement).appendChild(a);
+      a.click();
+      a.remove();
+      return { bytes: s.length, file: a.download };
+    },
+    // Replays through the page so the browser attaches its own cookies,
+    // including HttpOnly ones. Same-origin, GET/HEAD only unless approved,
+    // capped per session, and it stops for good on 403/429 or a bot wall.
+    call: function(method, path15, o) {
+      o = o || {};
+      method = String(method || "GET").toUpperCase();
+      if (budget.stopped) return Promise.resolve({ error: "stopped", reason: budget.stopped });
+      if (method !== "GET" && method !== "HEAD" && !o.approved) {
+        return Promise.resolve({ error: "write needs approval", hint: "ask the user, then pass {approved:true} for this one request" });
+      }
+      var u = abs(path15);
+      if (!u) return Promise.resolve({ error: "bad url" });
+      if (u.origin !== location.origin && !o.crossOrigin) return Promise.resolve({ error: "cross-origin", hint: "navigate to " + u.origin + " first" });
+      if (budget.calls >= MAX_CALLS) {
+        budget.stopped = "budget of " + MAX_CALLS + " calls";
+        persist();
+        return Promise.resolve({ error: "stopped", reason: budget.stopped });
+      }
+      budget.calls++;
+      var init = { method, credentials: "include", headers: o.headers || {} };
+      if (o.json !== void 0) {
+        init.body = JSON.stringify(o.json);
+        init.headers["content-type"] = "application/json";
+      } else if (o.body !== void 0) init.body = o.body;
+      var maxBytes = o.maxBytes || 2e4;
+      return origFetch.call(w, u.href, init).then(function(r) {
+        return r.text().then(function(t) {
+          var out = { status: r.status };
+          var wall = looksLikeWall(r.status, t);
+          if (wall) {
+            budget.stopped = wall;
+            out.stopped = wall;
+          }
+          persist();
+          if (t.length > maxBytes) {
+            out.truncated = t.length;
+            t = t.slice(0, maxBytes);
+          }
+          try {
+            out.data = JSON.parse(t);
+          } catch (e) {
+            out.text = t.slice(0, 2e3);
+          }
+          return out;
+        });
+      }, function(e) {
+        return { error: String(e && e.message || e) };
+      });
+    },
+    // Removes every hook and forgets the capture.
+    stop: function() {
+      restores.forEach(function(r) {
+        r();
+      });
+      restores = [];
+      try {
+        mo && mo.disconnect();
+      } catch (e) {
+      }
+      try {
+        obs && obs.disconnect();
+      } catch (e) {
+      }
+      try {
+        w.removeEventListener("pagehide", persist);
+      } catch (e) {
+      }
+      try {
+        w.__ifkHooked = false;
+      } catch (e) {
+      }
+      try {
+        sessionStorage.removeItem(KEY);
+        sessionStorage.removeItem("__ifk");
+      } catch (e) {
+      }
+      delete w.__ifk;
+      return { stopped: true };
+    }
+  };
+  persist();
+  return { installed: true, again: false, version: VERSION, mode, restored };
+}
+var init_page_kit = __esm({
+  "src/lib/kit/page-kit.ts"() {
+    "use strict";
+  }
+});
+
+// src/lib/kit/capture.ts
+function parseCapture(raw) {
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    throw new CaptureError("not JSON: expected a file written by the kit's dump() or the joined drain() chunks");
+  }
+  if (data?.kind !== "iframer-capture" && !(data?.v === 1 && data?.endpoints && data?.coverage)) {
+    throw new CaptureError('not an iframer capture (missing kind: "iframer-capture")');
+  }
+  if (data.v !== 1) throw new CaptureError(`unsupported capture version ${data.v}; update iframer`);
+  if (typeof data.origin !== "string" || typeof data.endpoints !== "object") throw new CaptureError("capture is missing origin or endpoints");
+  data.pathOnly ??= [];
+  return data;
+}
+function downloadDirs() {
+  const home = import_os4.default.homedir();
+  const t3Home = process.env.T3_HOME || import_path12.default.join(home, ".t3");
+  return [
+    import_path12.default.join(t3Home, "userdata", "server-browser", "downloads"),
+    import_path12.default.join(home, "Downloads")
+  ];
+}
+function findLatestCapture(dirs = downloadDirs(), maxAgeMs = 24 * 36e5) {
+  const now = Date.now();
+  let best = null;
+  const consider = (p) => {
+    try {
+      const st = import_fs11.default.statSync(p);
+      if (!st.isFile() || st.size > 2e7 || now - st.mtimeMs > maxAgeMs) return;
+      if (best && st.mtimeMs <= best.t) return;
+      const fd = import_fs11.default.openSync(p, "r");
+      const buf = Buffer.alloc(64);
+      import_fs11.default.readSync(fd, buf, 0, 64, 0);
+      import_fs11.default.closeSync(fd);
+      if (!buf.toString("utf8").startsWith('{"kind":"iframer-capture"')) return;
+      best = { p, t: st.mtimeMs };
+    } catch {
+    }
+  };
+  const walk = (dir, depth) => {
+    let entries;
+    try {
+      entries = import_fs11.default.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = import_path12.default.join(dir, e.name);
+      if (e.isDirectory() && depth > 0) walk(p, depth - 1);
+      else if (e.isFile()) consider(p);
+    }
+  };
+  for (const d of dirs) walk(d, 2);
+  return best?.p ?? null;
+}
+function mask(s) {
+  return s.length <= 4 ? "****" : `${s.slice(0, 3)}\u2026 (${s.length} chars)`;
+}
+function scanString(s, where, out) {
+  if (TYPE_NAMES.has(s)) return;
+  for (const [kind, re] of DETECTORS) {
+    if (kind === "token") {
+      for (const part of s.split(/[/\s?&=#]/)) {
+        if (part.includes("{")) continue;
+        if (re.test(part)) {
+          out.push({ where, kind, sample: mask(part) });
+          return;
+        }
+      }
+      continue;
+    }
+    const hit = s.match(re);
+    if (hit) {
+      out.push({ where, kind, sample: mask(hit[0]) });
+      return;
+    }
+  }
+}
+function walkValues(v, where, out) {
+  if (typeof v === "string") return scanString(v, where, out);
+  if (Array.isArray(v)) return v.forEach((x, i) => walkValues(x, `${where}[${i}]`, out));
+  if (v && typeof v === "object") {
+    for (const [k, x] of Object.entries(v)) {
+      scanString(k, `${where}.${k} (key)`, out);
+      walkValues(x, `${where}.${k}`, out);
+    }
+  }
+}
+function scanCapture(report) {
+  const out = [];
+  for (const [key, ep] of Object.entries(report.endpoints)) {
+    const where = `endpoints["${key.length > 80 ? key.slice(0, 80) + "\u2026" : key}"]`;
+    scanString(key, where, out);
+    walkValues(ep, where, out);
+  }
+  report.pathOnly.forEach((p, i) => scanString(p, `pathOnly[${i}]`, out));
+  return out;
+}
+function splitKey(key) {
+  const sp = key.indexOf(" ");
+  const method = key.slice(0, sp);
+  const rest = key.slice(sp + 1);
+  const m = rest.match(/^(https?:\/\/[^/]+)(\/.*)?$/);
+  return { method, origin: m ? m[1] : "", path: m?.[2] || "/" };
+}
+function pascal(s) {
+  return s.split(/[^A-Za-z0-9]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join("");
+}
+function functionNameFor(method, p, res, kind) {
+  const segs = p.split("/").filter((s) => s && !s.startsWith("{") && !/^(api|rest|v\d+)$/i.test(s));
+  const tail = segs.slice(-2).map(pascal).join("") || "Root";
+  let verb = VERB[method] ?? method.toLowerCase();
+  const endsWithId = /\{id\}\/?$/.test(p);
+  if (method === "GET" && !endsWithId && res && typeof res === "object" && (Array.isArray(res) || Object.values(res).some(Array.isArray))) verb = "list";
+  if (kind === "beacon") verb = "send";
+  if (kind === "ws" || kind === "sse") verb = "open";
+  if (method === "POST" && segs.length && /^(search|login|logout|send|submit|query|graphql)$/i.test(segs[segs.length - 1])) verb = "";
+  const name = verb + tail;
+  return name[0].toLowerCase() + name.slice(1);
+}
+function buildApiMap(report) {
+  const used = /* @__PURE__ */ new Map();
+  const endpoints = Object.entries(report.endpoints).map(([key, ep]) => ({ key, ep, ...splitKey(key) })).sort((a, b) => a.path === b.path ? a.method.localeCompare(b.method) : a.path.localeCompare(b.path)).map(({ ep, method, origin, path: p }) => {
+    let fn = functionNameFor(method, p, ep.res, ep.kind);
+    const n = used.get(fn) ?? 0;
+    used.set(fn, n + 1);
+    if (n) fn += n + 1;
+    return {
+      method,
+      origin,
+      path: p,
+      kind: ep.kind,
+      calls: ep.n,
+      status: ep.status,
+      query: ep.query,
+      headers: ep.headers,
+      authHeaders: ep.auth,
+      request: ep.req,
+      response: ep.res,
+      functionName: fn
+    };
+  });
+  return {
+    origin: report.origin,
+    capturedAt: report.capturedAt,
+    coverage: report.coverage,
+    replay: "in-page only: load the kit, then the client, and call window.__ifkApi.<fn>() through the agent's evaluate tool. HttpOnly cookies never leave the browser, so the same calls fail from curl.",
+    endpoints,
+    pathOnly: report.pathOnly
+  };
+}
+function renderClient(map) {
+  const lines = [];
+  const skipped = [];
+  lines.push(`// Generated by \`iframer ingest\` from ${map.origin}${map.capturedAt ? ` (${map.capturedAt.slice(0, 10)})` : ""}.`);
+  lines.push(`// Runs IN the page, after the iframer kit, so the browser attaches the session`);
+  lines.push(`// cookies. Load it like the kit (file -> sessionStorage -> top-level eval).`);
+  lines.push(`// Writes (non-GET) need {approved:true}: ask the user first.`);
+  lines.push(`(function () {`);
+  lines.push(`  function c(m, p, o) {`);
+  lines.push(`    if (!window.__ifk) return Promise.resolve({ error: "NOT_INSTALLED: eval(sessionStorage.__ifk) first" });`);
+  lines.push(`    return window.__ifk.call(m, p, o);`);
+  lines.push(`  }`);
+  lines.push(`  function q(query) {`);
+  lines.push(`    if (!query) return "";`);
+  lines.push(`    var s = new URLSearchParams(query).toString();`);
+  lines.push(`    return s ? "?" + s : "";`);
+  lines.push(`  }`);
+  lines.push(`  window.__ifkApi = {`);
+  for (const ep of map.endpoints) {
+    if (ep.kind === "ws" || ep.kind === "sse" || ep.kind === "beacon") {
+      skipped.push(`${ep.kind} ${ep.path}`);
+      continue;
+    }
+    if (ep.origin !== map.origin) {
+      skipped.push(`${ep.method} ${ep.origin}${ep.path} (cross-origin)`);
+      continue;
+    }
+    let ids = 0;
+    const params = [];
+    const urlExpr = JSON.stringify(ep.path).replace(/\{id\}/g, () => {
+      const name = ids++ === 0 ? "id" : `id${ids}`;
+      params.push(name);
+      return `" + encodeURIComponent(${name}) + "`;
+    }).replace(/ \+ ""$/, "").replace(/^"" \+ /, "");
+    const hasBody = ep.method !== "GET" && ep.method !== "HEAD";
+    if (hasBody) params.push("body");
+    params.push("query", "opts");
+    const optsExpr = hasBody ? `Object.assign({ json: body }, opts)` : `opts`;
+    const doc = [
+      ep.query.length ? `query: ${ep.query.join(", ")}` : "",
+      ep.status.length ? `seen ${ep.status.join("/")}` : ""
+    ].filter(Boolean).join("; ");
+    lines.push(`    // ${ep.method} ${ep.path}${doc ? `  (${doc})` : ""}`);
+    lines.push(`    ${ep.functionName}: function (${params.join(", ")}) { return c(${JSON.stringify(ep.method)}, ${urlExpr} + q(query), ${optsExpr}); },`);
+  }
+  lines.push(`  };`);
+  lines.push(`  return Object.keys(window.__ifkApi);`);
+  lines.push(`})();`);
+  if (skipped.length) lines.push(`// Not wrapped: ${skipped.join("; ")}`);
+  return lines.join("\n") + "\n";
+}
+function tsType(s, indent = "  ") {
+  if (typeof s === "string") {
+    if (s === "null") return "null";
+    if (["string", "number", "boolean"].includes(s)) return s;
+    return "unknown";
+  }
+  if (Array.isArray(s)) return s.length ? `Array<${tsType(s[0], indent)}>` : "unknown[]";
+  if (s && typeof s === "object") {
+    const entries = Object.entries(s);
+    if (!entries.length) return "Record<string, unknown>";
+    const inner = indent + "  ";
+    const body = entries.map(([k, v]) => k === "{key}" ? `${inner}[key: string]: ${tsType(v, inner)};` : `${inner}${/^[A-Za-z_$][\w$]*$/.test(k) ? k : JSON.stringify(k)}?: ${tsType(v, inner)};`);
+    return `{
+${body.join("\n")}
+${indent}}`;
+  }
+  return "unknown";
+}
+function renderTypes(map) {
+  const out = [`// Generated by \`iframer ingest\` from ${map.origin}. Shapes come from one sample each: fields may be optional.`];
+  out.push(`type IfkResult<T> = Promise<{ status?: number; data?: T; text?: string; truncated?: number; error?: string; stopped?: string }>;`);
+  out.push(`type IfkOpts = { approved?: boolean; headers?: Record<string, string>; maxBytes?: number };`);
+  out.push(`interface IfkApi {`);
+  for (const ep of map.endpoints) {
+    if (ep.kind === "ws" || ep.kind === "sse" || ep.kind === "beacon" || ep.origin !== map.origin) continue;
+    const ids = (ep.path.match(/\{id\}/g) || []).map((_, i) => `${i ? `id${i + 1}` : "id"}: string | number`);
+    const hasBody = ep.method !== "GET" && ep.method !== "HEAD";
+    const req = ep.request?.json !== void 0 ? tsType(ep.request.json, "  ") : ep.request?.form || ep.request?.multipart ? "Record<string, string>" : "unknown";
+    const res = ep.response && typeof ep.response === "object" && !Array.isArray(ep.response) && "contentType" in ep.response && "bytes" in ep.response ? "unknown" : tsType(ep.response, "  ");
+    const params = [...ids, ...hasBody ? [`body: ${req}`] : [], `query?: Record<string, string>`, `opts?: IfkOpts`];
+    out.push(`  /** ${ep.method} ${ep.path} */`);
+    out.push(`  ${ep.functionName}(${params.join(", ")}): IfkResult<${res}>;`);
+  }
+  out.push(`}`);
+  out.push(`declare global { interface Window { __ifkApi: IfkApi } }`);
+  out.push(`export {};`);
+  return out.join("\n") + "\n";
+}
+function shortShape(s, depth = 0) {
+  if (typeof s === "string") return s;
+  if (Array.isArray(s)) return s.length ? `${shortShape(s[0], depth + 1)}[]` : "[]";
+  if (s && typeof s === "object") {
+    const keys = Object.keys(s);
+    if (depth > 0) return `{${keys.slice(0, 4).join(",")}${keys.length > 4 ? ",\u2026" : ""}}`;
+    return `{${keys.slice(0, 6).map((k) => `${k}:${shortShape(s[k], depth + 1)}`).join(", ")}${keys.length > 6 ? ", \u2026" : ""}}`;
+  }
+  return "?";
+}
+function describeEndpoint(ep) {
+  const parts = [ep.kind, ep.status.length ? `status ${ep.status.join("/")}` : ""];
+  if (ep.request?.json !== void 0) parts.push(`body ${shortShape(ep.request.json)}`);
+  else if (ep.request?.form) parts.push(`form ${Object.keys(ep.request.form).join(",")}`);
+  if (ep.response !== void 0) parts.push(`returns ${shortShape(ep.response)}`);
+  if (ep.authHeaders.length) parts.push(`auth ${ep.authHeaders.join(",")}`);
+  return parts.filter(Boolean).join("; ");
+}
+var import_fs11, import_os4, import_path12, CaptureError, TYPE_NAMES, DETECTORS, VERB;
+var init_capture = __esm({
+  "src/lib/kit/capture.ts"() {
+    "use strict";
+    import_fs11 = __toESM(require("fs"));
+    import_os4 = __toESM(require("os"));
+    import_path12 = __toESM(require("path"));
+    CaptureError = class extends Error {
+    };
+    TYPE_NAMES = /* @__PURE__ */ new Set(["string", "number", "boolean", "null", "object", "undefined", "bigint", "symbol", "function", "{id}", "{key}"]);
+    DETECTORS = [
+      ["email", /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/],
+      ["jwt", /eyJ[A-Za-z0-9_-]{5,}/],
+      ["bearer", /\bbearer\s+\S{6,}/i],
+      ["phone", /\+?\d[\d ().-]{8,}\d/],
+      ["token", /(?=[A-Za-z0-9_\-.]*\d)(?=[A-Za-z0-9_\-.]*[A-Za-z])^[A-Za-z0-9_\-.]{24,}$/]
+    ];
+    VERB = { GET: "get", HEAD: "head", POST: "create", PUT: "update", PATCH: "update", DELETE: "delete" };
+  }
+});
+
+// src/lib/kit/index.ts
+var kit_exports = {};
+__export(kit_exports, {
+  CaptureError: () => CaptureError,
+  KIT_TARGETS: () => KIT_TARGETS,
+  buildApiMap: () => buildApiMap,
+  describeEndpoint: () => describeEndpoint,
+  downloadDirs: () => downloadDirs,
+  findLatestCapture: () => findLatestCapture,
+  kitDir: () => kitDir,
+  kitInstructions: () => kitInstructions,
+  kitSource: () => kitSource,
+  parseCapture: () => parseCapture,
+  renderClient: () => renderClient,
+  renderTypes: () => renderTypes,
+  scanCapture: () => scanCapture,
+  writeKit: () => writeKit
+});
+function kitSource(opts = {}) {
+  const clean = {};
+  if (opts.mode) clean.mode = opts.mode;
+  if (opts.hostFilter) clean.hostFilter = opts.hostFilter;
+  if (opts.maxBody) clean.maxBody = opts.maxBody;
+  if (opts.maxCalls) clean.maxCalls = opts.maxCalls;
+  return `(${pageKit.toString()})(${JSON.stringify(clean)});
+`;
+}
+function kitDir() {
+  return import_path13.default.join(getDataDir(), "kit");
+}
+function writeKit(opts = {}, file = import_path13.default.join(kitDir(), "iframer-kit.js")) {
+  import_fs12.default.mkdirSync(import_path13.default.dirname(file), { recursive: true });
+  import_fs12.default.writeFileSync(file, kitSource(opts), "utf8");
+  return file;
+}
+function kitInstructions(target, kitPath, clientPath) {
+  const common = [
+    ``,
+    `Rules:`,
+    `- After EVERY full page load, run \`${INSTALL}\` again. It restores what was captured. Check with \`${STATUS}\`.`,
+    `- Drive the site with your normal tools while it records. Only shapes are kept, never values.`,
+    `- Replay: \`window.__ifk.call('GET','/path')\` runs in the page with the user's cookies. Writes need {approved:true}, so ask the user first. It stops on 403, 429 or a captcha page: do not retry.`,
+    `- Coverage is never complete: workers, redirect hops, HttpOnly cookies and cross-origin iframes are invisible to the kit.`,
+    `- Done: \`window.__ifk.stop()\` removes the hooks.`
+  ];
+  if (target === "t3") {
+    return [
+      `T3 Code preview tab. Use the same tabId on every call.`,
+      ``,
+      `Install (once per tab session):`,
+      `1. preview_evaluate: ${MAKE_INPUT}`,
+      `2. preview_act: action=upload, selector=#__ifk_in, paths=["${kitPath}"]`,
+      `3. preview_evaluate: ${STASH}`,
+      `4. preview_evaluate: ${INSTALL}   -> {installed:true}`,
+      ``,
+      `Export:`,
+      `5. preview_evaluate: window.__ifk.dump()`,
+      `6. Run: iframer ingest --latest   (finds the newest capture in T3's downloads; or pass preview_status.downloads[].path)`,
+      ...clientPath ? [
+        ``,
+        `Use the generated client (after the kit is installed):`,
+        `a. preview_evaluate: ${MAKE_INPUT}`,
+        `b. preview_act: action=upload, selector=#__ifk_in, paths=["${clientPath}"]`,
+        `c. preview_evaluate: ${stash("__ifkApi")}`,
+        `d. preview_evaluate: eval(sessionStorage.__ifkApi)   -> list of function names`,
+        `e. preview_evaluate: window.__ifkApi.<functionName>(...)`,
+        `After a page load: eval(sessionStorage.__ifk); eval(sessionStorage.__ifkApi)`
+      ] : [],
+      ...common
+    ].join("\n");
+  }
+  if (target === "playwright-mcp") {
+    return [
+      `Playwright MCP (or any tool with browser_evaluate + browser_file_upload).`,
+      ``,
+      `Install:`,
+      `1. browser_evaluate: ${MAKE_INPUT}`,
+      `2. Click #__ifk_in so the file chooser opens, then browser_file_upload paths=["${kitPath}"]`,
+      `3. browser_evaluate: ${STASH}`,
+      `4. browser_evaluate: ${INSTALL}`,
+      ``,
+      `Export: browser_evaluate window.__ifk.dump(), then \`iframer ingest <download path>\`.`,
+      `If downloads aren't saved, use the drain fallback below.`,
+      ``,
+      drainFallback(),
+      ...common
+    ].join("\n");
+  }
+  return [
+    `Any browser tool that can evaluate JavaScript in the page.`,
+    ``,
+    `Install:`,
+    `- If the tool can upload files: put a hidden <input type=file id=__ifk_in>, upload ${kitPath} into it, then`,
+    `  evaluate ${STASH} and ${INSTALL}.`,
+    `- Otherwise evaluate the source from \`iframer kit --print\` (~15 KB). Without the sessionStorage`,
+    `  copy, you must evaluate it again after every page load, which costs those tokens each time.`,
+    ``,
+    `Export: evaluate window.__ifk.dump() and run \`iframer ingest <download path>\` if your tool saves downloads.`,
+    ``,
+    drainFallback(),
+    ...common
+  ].join("\n");
+}
+function drainFallback() {
+  return [
+    `Drain fallback (no downloads): evaluate window.__ifk.drain(0) -> {chunk, next}. Repeat with drain(next)`,
+    `until next is null, write the joined chunks to a file, then \`iframer ingest <file>\`.`
+  ].join("\n");
+}
+var import_fs12, import_path13, KIT_TARGETS, MAKE_INPUT, stash, STASH, INSTALL, STATUS;
+var init_kit = __esm({
+  "src/lib/kit/index.ts"() {
+    "use strict";
+    import_fs12 = __toESM(require("fs"));
+    import_path13 = __toESM(require("path"));
+    init_paths();
+    init_page_kit();
+    init_capture();
+    KIT_TARGETS = ["t3", "playwright-mcp", "any"];
+    MAKE_INPUT = `(()=>{let i=document.createElement('input');i.type='file';i.id='__ifk_in';i.style.display='none';document.documentElement.append(i);return 1})()`;
+    stash = (key) => `document.getElementById('__ifk_in').files[0].text().then(t=>{sessionStorage.${key}=t;document.getElementById('__ifk_in').remove();return t.length})`;
+    STASH = stash("__ifk");
+    INSTALL = `eval(sessionStorage.__ifk)`;
+    STATUS = `window.__ifk?window.__ifk.summary():'NOT_INSTALLED'`;
+  }
+});
+
 // bin/cli.js
-var fs11 = require("fs");
-var os4 = require("os");
-var path12 = require("path");
+var fs13 = require("fs");
+var os5 = require("os");
+var path14 = require("path");
 var { execSync: execSync3 } = require("child_process");
 var readline = require("readline");
-var HOME_DIR = os4.homedir();
-var CONFIG_DIR = process.env.IFRAMER_DATA_DIR || path12.join(HOME_DIR, ".iframer");
-var CLAUDE_CONFIG_PATH = path12.join(HOME_DIR, ".claude.json");
-var CODEX_CONFIG_PATH = path12.join(HOME_DIR, ".codex", "config.toml");
+var HOME_DIR = os5.homedir();
+var CONFIG_DIR = process.env.IFRAMER_DATA_DIR || path14.join(HOME_DIR, ".iframer");
+var CLAUDE_CONFIG_PATH = path14.join(HOME_DIR, ".claude.json");
+var CODEX_CONFIG_PATH = path14.join(HOME_DIR, ".codex", "config.toml");
 var LOCAL_USER_ID = "iframer-local";
 function resolveLocalToken() {
   if (process.env.IFRAMER_SECRET) return process.env.IFRAMER_SECRET;
   const candidates = [
-    path12.join(CONFIG_DIR, "secret"),
-    path12.join(process.env.XDG_RUNTIME_DIR || os4.tmpdir(), "iframer-secret")
+    path14.join(CONFIG_DIR, "secret"),
+    path14.join(process.env.XDG_RUNTIME_DIR || os5.tmpdir(), "iframer-secret")
   ];
   for (const file of candidates) {
     try {
-      const existing = fs11.readFileSync(file, "utf8").trim();
+      const existing = fs13.readFileSync(file, "utf8").trim();
       if (existing) return existing;
     } catch {
     }
   }
   for (const file of candidates) {
     try {
-      fs11.mkdirSync(path12.dirname(file), { recursive: true });
+      fs13.mkdirSync(path14.dirname(file), { recursive: true });
       const secret = require("crypto").randomBytes(32).toString("hex");
-      fs11.writeFileSync(file, secret, { mode: 384 });
+      fs13.writeFileSync(file, secret, { mode: 384 });
       return secret;
     } catch {
     }
@@ -11694,21 +12625,21 @@ function promptHidden(question) {
   });
 }
 function resolveMcpRuntime() {
-  const mcpServerTS = path12.join(__dirname, "..", "src", "mcp", "server.ts");
-  const mcpServerCJS = path12.join(__dirname, "mcp-server.cjs");
+  const mcpServerTS = path14.join(__dirname, "..", "src", "mcp", "server.ts");
+  const mcpServerCJS = path14.join(__dirname, "mcp-server.cjs");
   let bunPath;
   try {
     bunPath = execSync3("which bun", { encoding: "utf8" }).trim();
   } catch {
   }
-  if (bunPath && fs11.existsSync(mcpServerTS)) {
+  if (bunPath && fs13.existsSync(mcpServerTS)) {
     return {
       command: bunPath,
       args: ["run", mcpServerTS],
       message: "  Using bun to run MCP server from source (no build needed)"
     };
   }
-  if (fs11.existsSync(mcpServerCJS)) {
+  if (fs13.existsSync(mcpServerCJS)) {
     return {
       command: "node",
       args: [mcpServerCJS],
@@ -11723,8 +12654,8 @@ function resolveIframerSecret() {
   let secret = process.env.IFRAMER_SECRET;
   if (secret) return secret;
   try {
-    const envPath = path12.join(__dirname, "..", ".env");
-    const envContent = fs11.readFileSync(envPath, "utf8");
+    const envPath = path14.join(__dirname, "..", ".env");
+    const envContent = fs13.readFileSync(envPath, "utf8");
     const match = envContent.match(/^IFRAMER_SECRET=(.+)$/m);
     if (match) secret = match[1].trim();
   } catch {
@@ -11733,22 +12664,22 @@ function resolveIframerSecret() {
 }
 function installSkill() {
   const candidates = [
-    path12.join(__dirname, "..", "skills", "iframer.md"),
-    path12.join(__dirname, "skills", "iframer.md")
+    path14.join(__dirname, "..", "skills", "iframer.md"),
+    path14.join(__dirname, "skills", "iframer.md")
   ];
   let source = null;
   for (const c of candidates) {
-    if (fs11.existsSync(c)) {
+    if (fs13.existsSync(c)) {
       source = c;
       break;
     }
   }
   if (!source) return false;
-  const destDir = path12.join(HOME_DIR, ".claude", "commands");
-  const dest = path12.join(destDir, "iframer.md");
+  const destDir = path14.join(HOME_DIR, ".claude", "commands");
+  const dest = path14.join(destDir, "iframer.md");
   try {
-    fs11.mkdirSync(destDir, { recursive: true });
-    fs11.copyFileSync(source, dest);
+    fs13.mkdirSync(destDir, { recursive: true });
+    fs13.copyFileSync(source, dest);
     return true;
   } catch (err) {
     console.error(`  Warning: could not install skill: ${err.message}`);
@@ -11756,10 +12687,10 @@ function installSkill() {
   }
 }
 function removeSkill() {
-  const dest = path12.join(HOME_DIR, ".claude", "commands", "iframer.md");
+  const dest = path14.join(HOME_DIR, ".claude", "commands", "iframer.md");
   try {
-    if (fs11.existsSync(dest)) {
-      fs11.unlinkSync(dest);
+    if (fs13.existsSync(dest)) {
+      fs13.unlinkSync(dest);
       return true;
     }
   } catch {
@@ -11768,8 +12699,8 @@ function removeSkill() {
 }
 function writeMachineSecret(secret) {
   try {
-    fs11.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs11.writeFileSync(path12.join(CONFIG_DIR, "secret"), secret, { mode: 384 });
+    fs13.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs13.writeFileSync(path14.join(CONFIG_DIR, "secret"), secret, { mode: 384 });
     return true;
   } catch (err) {
     console.error(`  Warning: could not write ~/.iframer/secret: ${err.message}`);
@@ -11778,7 +12709,7 @@ function writeMachineSecret(secret) {
 }
 function loadClaudeConfig() {
   try {
-    return JSON.parse(fs11.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    return JSON.parse(fs13.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
   } catch {
     return {};
   }
@@ -11787,13 +12718,13 @@ function installClaudeMcp(mcpName, mcpEntry) {
   const config = loadClaudeConfig();
   if (!config.mcpServers) config.mcpServers = {};
   config.mcpServers[mcpName] = mcpEntry;
-  fs11.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
+  fs13.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
   return CLAUDE_CONFIG_PATH;
 }
 function removeClaudeMcp(mcpName) {
   let config;
   try {
-    config = JSON.parse(fs11.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    config = JSON.parse(fs13.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
   } catch {
     return { removed: false, path: CLAUDE_CONFIG_PATH };
   }
@@ -11801,7 +12732,7 @@ function removeClaudeMcp(mcpName) {
     return { removed: false, path: CLAUDE_CONFIG_PATH };
   }
   delete config.mcpServers[mcpName];
-  fs11.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
+  fs13.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
   return { removed: true, path: CLAUDE_CONFIG_PATH };
 }
 function escapeTomlString(value) {
@@ -11848,10 +12779,10 @@ function renderCodexMcpBlock(mcpName, mcpEntry) {
   return lines.join("\n");
 }
 function installCodexMcp(mcpName, mcpEntry) {
-  fs11.mkdirSync(path12.dirname(CODEX_CONFIG_PATH), { recursive: true });
+  fs13.mkdirSync(path14.dirname(CODEX_CONFIG_PATH), { recursive: true });
   let content = "";
   try {
-    content = fs11.readFileSync(CODEX_CONFIG_PATH, "utf8");
+    content = fs13.readFileSync(CODEX_CONFIG_PATH, "utf8");
   } catch {
   }
   const existing = findCodexMcpSection(content, mcpName);
@@ -11860,7 +12791,7 @@ function installCodexMcp(mcpName, mcpEntry) {
   }
   const trimmed = content.trimEnd();
   const block = renderCodexMcpBlock(mcpName, mcpEntry);
-  fs11.writeFileSync(CODEX_CONFIG_PATH, trimmed ? `${trimmed}
+  fs13.writeFileSync(CODEX_CONFIG_PATH, trimmed ? `${trimmed}
 
 ${block}
 ` : `${block}
@@ -11870,7 +12801,7 @@ ${block}
 function removeCodexMcp(mcpName) {
   let content;
   try {
-    content = fs11.readFileSync(CODEX_CONFIG_PATH, "utf8");
+    content = fs13.readFileSync(CODEX_CONFIG_PATH, "utf8");
   } catch {
     return { removed: false, path: CODEX_CONFIG_PATH };
   }
@@ -11879,7 +12810,7 @@ function removeCodexMcp(mcpName) {
     return { removed: false, path: CODEX_CONFIG_PATH };
   }
   const next = [...existing.lines.slice(0, existing.start), ...existing.lines.slice(existing.end)].join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
-  fs11.writeFileSync(CODEX_CONFIG_PATH, next ? `${next}
+  fs13.writeFileSync(CODEX_CONFIG_PATH, next ? `${next}
 ` : "");
   return { removed: true, path: CODEX_CONFIG_PATH };
 }
@@ -11897,7 +12828,7 @@ async function executeViaWarmServer(steps, options) {
     if (info && isPidAlive2(info.pid)) {
       let ownVersion = null;
       try {
-        ownVersion = JSON.parse(fs11.readFileSync(path12.join(__dirname, "..", "package.json"), "utf8")).version;
+        ownVersion = JSON.parse(fs13.readFileSync(path14.join(__dirname, "..", "package.json"), "utf8")).version;
       } catch {
       }
       if (ownVersion && info.version !== ownVersion) {
@@ -11939,9 +12870,9 @@ async function getLocalIframer() {
   if (_iframer) return _iframer;
   try {
     const { Iframer: Iframer2 } = await Promise.resolve().then(() => (init_iframer(), iframer_exports));
-    const publicDir = path12.join(os4.tmpdir(), "iframer-screenshots");
-    const screenshotDir = path12.join(publicDir, "screenshots");
-    fs11.mkdirSync(screenshotDir, { recursive: true });
+    const publicDir = path14.join(os5.tmpdir(), "iframer-screenshots");
+    const screenshotDir = path14.join(publicDir, "screenshots");
+    fs13.mkdirSync(screenshotDir, { recursive: true });
     _iframer = new Iframer2({
       screenshotDir,
       publicUrl: `file://${publicDir}`
@@ -12035,7 +12966,7 @@ async function installChrome() {
 }
 function isMcpInstalled(mcpName) {
   try {
-    const config = JSON.parse(fs11.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    const config = JSON.parse(fs13.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
     return !!(config.mcpServers && config.mcpServers[mcpName]);
   } catch {
     return false;
@@ -12043,7 +12974,7 @@ function isMcpInstalled(mcpName) {
 }
 var EXTENSION_ID = "mjfdkiicioigljhenkgaldhihllfdpll";
 function extensionDir() {
-  return path12.join(__dirname, "..", "extension");
+  return path14.join(__dirname, "..", "extension");
 }
 function semverNewer(a, b) {
   const pa = String(a).split(".").map((n) => parseInt(n, 10) || 0);
@@ -12057,7 +12988,7 @@ function semverNewer(a, b) {
 async function reloadAndRestartServer(reloadExtension) {
   let info = null;
   try {
-    info = JSON.parse(fs11.readFileSync(path12.join(CONFIG_DIR, "server.json"), "utf8"));
+    info = JSON.parse(fs13.readFileSync(path14.join(CONFIG_DIR, "server.json"), "utf8"));
   } catch {
   }
   if (!info || !info.port) {
@@ -12086,34 +13017,34 @@ async function reloadAndRestartServer(reloadExtension) {
 var NM_HOST_NAME = "com.iframer.token";
 function nativeMessagingBrowserDirs() {
   if (process.platform === "darwin") {
-    const as = path12.join(HOME_DIR, "Library", "Application Support");
+    const as = path14.join(HOME_DIR, "Library", "Application Support");
     return [
-      { browser: "Chrome", dir: path12.join(as, "Google", "Chrome"), always: true },
-      { browser: "Chrome Beta", dir: path12.join(as, "Google", "Chrome Beta") },
-      { browser: "Chrome Canary", dir: path12.join(as, "Google", "Chrome Canary") },
-      { browser: "Chromium", dir: path12.join(as, "Chromium") },
-      { browser: "Brave", dir: path12.join(as, "BraveSoftware", "Brave-Browser") },
-      { browser: "Edge", dir: path12.join(as, "Microsoft Edge") },
-      { browser: "Vivaldi", dir: path12.join(as, "Vivaldi") },
-      { browser: "Arc", dir: path12.join(as, "Arc", "User Data") }
+      { browser: "Chrome", dir: path14.join(as, "Google", "Chrome"), always: true },
+      { browser: "Chrome Beta", dir: path14.join(as, "Google", "Chrome Beta") },
+      { browser: "Chrome Canary", dir: path14.join(as, "Google", "Chrome Canary") },
+      { browser: "Chromium", dir: path14.join(as, "Chromium") },
+      { browser: "Brave", dir: path14.join(as, "BraveSoftware", "Brave-Browser") },
+      { browser: "Edge", dir: path14.join(as, "Microsoft Edge") },
+      { browser: "Vivaldi", dir: path14.join(as, "Vivaldi") },
+      { browser: "Arc", dir: path14.join(as, "Arc", "User Data") }
     ];
   }
-  const cfg = process.env.XDG_CONFIG_HOME || path12.join(HOME_DIR, ".config");
+  const cfg = process.env.XDG_CONFIG_HOME || path14.join(HOME_DIR, ".config");
   return [
-    { browser: "Chrome", dir: path12.join(cfg, "google-chrome"), always: true },
-    { browser: "Chrome Beta", dir: path12.join(cfg, "google-chrome-beta") },
-    { browser: "Chromium", dir: path12.join(cfg, "chromium") },
-    { browser: "Brave", dir: path12.join(cfg, "BraveSoftware", "Brave-Browser") },
-    { browser: "Edge", dir: path12.join(cfg, "microsoft-edge") },
-    { browser: "Vivaldi", dir: path12.join(cfg, "vivaldi") }
+    { browser: "Chrome", dir: path14.join(cfg, "google-chrome"), always: true },
+    { browser: "Chrome Beta", dir: path14.join(cfg, "google-chrome-beta") },
+    { browser: "Chromium", dir: path14.join(cfg, "chromium") },
+    { browser: "Brave", dir: path14.join(cfg, "BraveSoftware", "Brave-Browser") },
+    { browser: "Edge", dir: path14.join(cfg, "microsoft-edge") },
+    { browser: "Vivaldi", dir: path14.join(cfg, "vivaldi") }
   ];
 }
 function extensionMarkerPath() {
-  return path12.join(CONFIG_DIR, "extension.json");
+  return path14.join(CONFIG_DIR, "extension.json");
 }
 function readExtensionMarker() {
   try {
-    return JSON.parse(fs11.readFileSync(extensionMarkerPath(), "utf8"));
+    return JSON.parse(fs13.readFileSync(extensionMarkerPath(), "utf8"));
   } catch {
     return null;
   }
@@ -12122,12 +13053,12 @@ function extensionInstalled() {
   return !!readExtensionMarker();
 }
 function writeExtensionMarker(flavor, browsers) {
-  fs11.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs11.writeFileSync(extensionMarkerPath(), JSON.stringify({ installed: true, flavor, browsers, installedAt: (/* @__PURE__ */ new Date()).toISOString() }, null, 2));
+  fs13.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs13.writeFileSync(extensionMarkerPath(), JSON.stringify({ installed: true, flavor, browsers, installedAt: (/* @__PURE__ */ new Date()).toISOString() }, null, 2));
 }
 function clearExtensionMarker() {
   try {
-    fs11.unlinkSync(extensionMarkerPath());
+    fs13.unlinkSync(extensionMarkerPath());
   } catch {
   }
 }
@@ -12139,27 +13070,27 @@ var EXTENSION_FLAVORS = {
 function installExtensionHost() {
   const setup = require_native_host_setup();
   resolveLocalToken();
-  const srcHost = path12.join(__dirname, "..", "extension", "native-host.cjs");
-  if (!fs11.existsSync(srcHost)) {
+  const srcHost = path14.join(__dirname, "..", "extension", "native-host.cjs");
+  if (!fs13.existsSync(srcHost)) {
     console.error(`  Host script not found: ${srcHost}`);
     process.exit(1);
   }
-  fs11.mkdirSync(CONFIG_DIR, { recursive: true });
-  const hostScript = path12.join(CONFIG_DIR, "extension-token-host.cjs");
-  fs11.copyFileSync(srcHost, hostScript);
+  fs13.mkdirSync(CONFIG_DIR, { recursive: true });
+  const hostScript = path14.join(CONFIG_DIR, "extension-token-host.cjs");
+  fs13.copyFileSync(srcHost, hostScript);
   const dataDir = process.env.IFRAMER_DATA_DIR || void 0;
   const isWindows = process.platform === "win32";
-  const wrapper = path12.join(CONFIG_DIR, isWindows ? "extension-token-host.bat" : "extension-token-host.sh");
+  const wrapper = path14.join(CONFIG_DIR, isWindows ? "extension-token-host.bat" : "extension-token-host.sh");
   if (isWindows) {
-    fs11.writeFileSync(wrapper, setup.windowsWrapper({ execPath: process.execPath, homeDir: HOME_DIR, dataDir }));
+    fs13.writeFileSync(wrapper, setup.windowsWrapper({ execPath: process.execPath, homeDir: HOME_DIR, dataDir }));
   } else {
-    fs11.writeFileSync(wrapper, setup.posixWrapper({ execPath: process.execPath, hostScript, dataDir }), { mode: 493 });
+    fs13.writeFileSync(wrapper, setup.posixWrapper({ execPath: process.execPath, hostScript, dataDir }), { mode: 493 });
   }
   const manifest = setup.hostManifest(wrapper, EXTENSION_ID);
   const installed = [];
   if (isWindows) {
-    const manifestPath = path12.join(CONFIG_DIR, `${NM_HOST_NAME}.json`);
-    fs11.writeFileSync(manifestPath, manifest);
+    const manifestPath = path14.join(CONFIG_DIR, `${NM_HOST_NAME}.json`);
+    fs13.writeFileSync(manifestPath, manifest);
     for (const { browser, root } of setup.WINDOWS_BROWSERS) {
       try {
         require("child_process").execFileSync(
@@ -12176,11 +13107,11 @@ function installExtensionHost() {
     return { installed, wrapper };
   }
   for (const { browser, dir, always } of nativeMessagingBrowserDirs()) {
-    if (!always && !fs11.existsSync(dir)) continue;
+    if (!always && !fs13.existsSync(dir)) continue;
     try {
-      const nmDir = path12.join(dir, "NativeMessagingHosts");
-      fs11.mkdirSync(nmDir, { recursive: true });
-      fs11.writeFileSync(path12.join(nmDir, `${NM_HOST_NAME}.json`), manifest);
+      const nmDir = path14.join(dir, "NativeMessagingHosts");
+      fs13.mkdirSync(nmDir, { recursive: true });
+      fs13.writeFileSync(path14.join(nmDir, `${NM_HOST_NAME}.json`), manifest);
       installed.push(browser);
     } catch (e) {
       console.error(`  ${browser}: failed (${e.message})`);
@@ -12202,10 +13133,10 @@ function removeExtensionHost() {
     }
   } else {
     for (const { browser, dir } of nativeMessagingBrowserDirs()) {
-      const file = path12.join(dir, "NativeMessagingHosts", `${NM_HOST_NAME}.json`);
+      const file = path14.join(dir, "NativeMessagingHosts", `${NM_HOST_NAME}.json`);
       try {
-        if (fs11.existsSync(file)) {
-          fs11.unlinkSync(file);
+        if (fs13.existsSync(file)) {
+          fs13.unlinkSync(file);
           removed.push(browser);
         }
       } catch {
@@ -12214,19 +13145,19 @@ function removeExtensionHost() {
   }
   for (const f of ["extension-token-host.cjs", "extension-token-host.sh", "extension-token-host.bat", `${NM_HOST_NAME}.json`]) {
     try {
-      fs11.unlinkSync(path12.join(CONFIG_DIR, f));
+      fs13.unlinkSync(path14.join(CONFIG_DIR, f));
     } catch {
     }
   }
   return removed;
 }
 async function removeChrome() {
-  const chromeDir = path12.join(CONFIG_DIR, "chrome");
-  if (!fs11.existsSync(chromeDir)) {
+  const chromeDir = path14.join(CONFIG_DIR, "chrome");
+  if (!fs13.existsSync(chromeDir)) {
     console.log("  Chrome for Testing not found, nothing to remove.");
     return;
   }
-  fs11.rmSync(chromeDir, { recursive: true, force: true });
+  fs13.rmSync(chromeDir, { recursive: true, force: true });
   console.log(`  Removed ${chromeDir}`);
 }
 async function main() {
@@ -12236,7 +13167,7 @@ async function main() {
     case "-v":
     case "version": {
       try {
-        console.log(JSON.parse(fs11.readFileSync(path12.join(__dirname, "..", "package.json"), "utf8")).version);
+        console.log(JSON.parse(fs13.readFileSync(path14.join(__dirname, "..", "package.json"), "utf8")).version);
       } catch (e) {
         console.error(`  Could not read the version: ${e.message}`);
         process.exit(1);
@@ -12247,7 +13178,7 @@ async function main() {
     case "status": {
       let server = "not running";
       try {
-        const info = JSON.parse(fs11.readFileSync(path12.join(CONFIG_DIR, "server.json"), "utf8"));
+        const info = JSON.parse(fs13.readFileSync(path14.join(CONFIG_DIR, "server.json"), "utf8"));
         const res = await fetch(`http://127.0.0.1:${info.port}/health`, { signal: AbortSignal.timeout(1500) });
         if (res.ok) server = `http://127.0.0.1:${info.port}`;
       } catch {
@@ -12273,7 +13204,7 @@ async function main() {
       let instances = null;
       let serverUp = false;
       try {
-        const info = JSON.parse(fs11.readFileSync(path12.join(CONFIG_DIR, "server.json"), "utf8"));
+        const info = JSON.parse(fs13.readFileSync(path14.join(CONFIG_DIR, "server.json"), "utf8"));
         if (info && info.port) {
           serverUp = true;
           const res = await fetch(`http://127.0.0.1:${info.port}/instances`, {
@@ -12447,8 +13378,8 @@ async function main() {
         const parsed = JSON.parse(input);
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
         if (!Array.isArray(parsed) && parsed.options) inputOptions = parsed.options;
-      } else if (fs11.existsSync(input)) {
-        const parsed = JSON.parse(fs11.readFileSync(input, "utf-8"));
+      } else if (fs13.existsSync(input)) {
+        const parsed = JSON.parse(fs13.readFileSync(input, "utf-8"));
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
         if (!Array.isArray(parsed) && parsed.options) inputOptions = parsed.options;
       } else {
@@ -12485,10 +13416,10 @@ async function main() {
           try {
             const res = await fetch(shot, { signal: AbortSignal.timeout(1e4) });
             if (res.ok) {
-              const dir = path12.join(os4.tmpdir(), "iframer-screenshots", "screenshots");
-              fs11.mkdirSync(dir, { recursive: true });
-              const file = path12.join(dir, `state-${Date.now()}.jpg`);
-              fs11.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
+              const dir = path14.join(os5.tmpdir(), "iframer-screenshots", "screenshots");
+              fs13.mkdirSync(dir, { recursive: true });
+              const file = path14.join(dir, `state-${Date.now()}.jpg`);
+              fs13.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
               shot = `file://${file}`;
             }
           } catch {
@@ -12558,7 +13489,7 @@ Screenshot: ${shot}`);
       if (sub === "stop") {
         let stopped = false;
         try {
-          const info = JSON.parse(fs11.readFileSync(path12.join(CONFIG_DIR, "server.json"), "utf8"));
+          const info = JSON.parse(fs13.readFileSync(path14.join(CONFIG_DIR, "server.json"), "utf8"));
           if (info && info.port) {
             const res = await fetch(`http://127.0.0.1:${info.port}/interactive/stop`, {
               method: "POST",
@@ -12673,8 +13604,8 @@ Screenshot: ${shot}`);
       } else if (input.startsWith("[") || input.startsWith("{")) {
         const parsed = JSON.parse(input);
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
-      } else if (fs11.existsSync(input)) {
-        const parsed = JSON.parse(fs11.readFileSync(input, "utf-8"));
+      } else if (fs13.existsSync(input)) {
+        const parsed = JSON.parse(fs13.readFileSync(input, "utf-8"));
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
       } else {
         console.error(`  Not a URL or file: ${input}`);
@@ -12687,8 +13618,8 @@ Screenshot: ${shot}`);
       const result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options });
       if (result.capturedApi && result.capturedApi.length > 0) {
         const outputDir = parseFlag(args, "--output") || `./${result.capturedApi[0].domain}`;
-        fs11.mkdirSync(outputDir, { recursive: true });
-        fs11.writeFileSync(path12.join(outputDir, "captured-api.json"), JSON.stringify(result.capturedApi, null, 2));
+        fs13.mkdirSync(outputDir, { recursive: true });
+        fs13.writeFileSync(path14.join(outputDir, "captured-api.json"), JSON.stringify(result.capturedApi, null, 2));
         console.log(`  Captured ${result.capturedApi.reduce((sum, api) => sum + api.endpoints.length, 0)} endpoints`);
         console.log(`  Saved to: ${outputDir}/captured-api.json`);
         for (const api of result.capturedApi) {
@@ -12704,6 +13635,126 @@ Screenshot: ${shot}`);
       }
       break;
     }
+    // ─── In-page capture kit (any agent browser, T3 Code first) ─────
+    case "kit": {
+      const kit = await Promise.resolve().then(() => (init_kit(), kit_exports));
+      const target = parseFlag(args, "--for") || "t3";
+      if (!kit.KIT_TARGETS.includes(target)) {
+        console.error(`  Unknown --for ${target}. Use one of: ${kit.KIT_TARGETS.join(", ")}`);
+        process.exit(1);
+      }
+      const mode = parseFlag(args, "--mode");
+      if (mode && mode !== "hook" && mode !== "passive") {
+        console.error("  --mode must be hook (default) or passive (no patching, URLs + forms only)");
+        process.exit(1);
+      }
+      const opts = { mode, hostFilter: parseFlag(args, "--host-filter") };
+      if (hasFlag(args, "--print")) {
+        process.stdout.write(kit.kitSource(opts));
+        break;
+      }
+      const outFile = parseFlag(args, "--out");
+      const kitPath = kit.writeKit(opts, outFile ? path14.resolve(outFile) : void 0);
+      const client = parseFlag(args, "--client");
+      console.log(kit.kitInstructions(target, kitPath, client ? path14.resolve(client) : void 0));
+      break;
+    }
+    case "ingest": {
+      const kit = await Promise.resolve().then(() => (init_kit(), kit_exports));
+      const json = hasFlag(args, "--json");
+      let input = args[0] && !args[0].startsWith("--") ? args[0] : void 0;
+      if (!input && hasFlag(args, "--latest")) {
+        input = kit.findLatestCapture();
+        if (!input) {
+          console.error(`  No capture from the last 24h in: ${kit.downloadDirs().join(", ")}`);
+          console.error("  Run window.__ifk.dump() in the page first, or pass the file path.");
+          process.exit(1);
+        }
+      }
+      if (!input) {
+        console.error("  Usage: iframer ingest <capture file | - | --latest>");
+        console.error("    --latest             Newest capture in T3 Code's downloads or ~/Downloads");
+        console.error("    --out <dir>          Output directory (default: ./<host>-api/)");
+        console.error("    --typed              Also write client.d.ts");
+        console.error("    --keep               Keep the capture file (default: deleted after ingest)");
+        console.error("    --no-knowledge       Don't update ~/.iframer/knowledge");
+        console.error("    --json               One-line JSON summary");
+        process.exit(1);
+      }
+      const fromStdin = input === "-";
+      const raw = fromStdin ? fs13.readFileSync(0, "utf8") : fs13.readFileSync(input, "utf8");
+      const removeInput = () => {
+        if (fromStdin || hasFlag(args, "--keep")) return;
+        try {
+          fs13.unlinkSync(input);
+        } catch {
+        }
+      };
+      let report;
+      try {
+        report = kit.parseCapture(raw);
+      } catch (e) {
+        console.error(`  ${e.message}`);
+        process.exit(1);
+      }
+      const findings = kit.scanCapture(report);
+      if (findings.length) {
+        removeInput();
+        if (json) console.log(JSON.stringify({ ok: false, error: "privacy", findings }));
+        else {
+          console.error(`  Refused: ${findings.length} value(s) look like secrets or personal data.`);
+          for (const f of findings.slice(0, 10)) console.error(`    ${f.kind}: ${f.sample} at ${f.where}`);
+          console.error(hasFlag(args, "--keep") ? `  File kept: ${input}` : "  The capture file was deleted. Nothing was written.");
+        }
+        process.exit(2);
+      }
+      const map = kit.buildApiMap(report);
+      const host = new URL(report.origin).host;
+      const outDir = path14.resolve(parseFlag(args, "--out") || `./${host.replace(/[^a-z0-9.-]/gi, "_")}-api`);
+      fs13.mkdirSync(outDir, { recursive: true });
+      const written = [];
+      const write2 = (name, body) => {
+        const p = path14.join(outDir, name);
+        fs13.writeFileSync(p, body);
+        written.push(p);
+      };
+      write2("api.json", JSON.stringify(map, null, 2) + "\n");
+      write2("client.js", kit.renderClient(map));
+      if (hasFlag(args, "--typed")) write2("client.d.ts", kit.renderTypes(map));
+      if (!hasFlag(args, "--no-knowledge")) {
+        const { mergeKnowledge: mergeKnowledge2 } = await Promise.resolve().then(() => (init_knowledge(), knowledge_exports));
+        const authHeaders = [...new Set(map.endpoints.flatMap((e) => e.authHeaders))];
+        const c2 = report.coverage;
+        mergeKnowledge2(host, {
+          lastMode: `kit-${report.kit?.mode || "hook"}`,
+          browserRequired: true,
+          auth: { type: authHeaders.length ? "session cookies + headers" : "session cookies", headers: authHeaders.length ? authHeaders : void 0 },
+          endpoints: map.endpoints.map((e) => ({
+            method: e.method,
+            path: e.origin === map.origin ? e.path : `${e.origin}${e.path}`,
+            description: kit.describeEndpoint(e),
+            example: e.origin === map.origin ? `window.__ifk.call(${JSON.stringify(e.method)}, ${JSON.stringify(e.path)})` : void 0,
+            firstSeen: report.capturedAt
+          })),
+          notes: [
+            `In-page capture: ${c2.seen} seen, ${c2.withPayload} with payload, ${c2.pathOnly} path only. Not complete: ${c2.blindSpots.join(", ")}.`,
+            "Replay in the page (window.__ifk.call): HttpOnly cookies never leave the browser."
+          ]
+        });
+      }
+      removeInput();
+      const c = report.coverage;
+      if (json) {
+        console.log(JSON.stringify({ ok: true, origin: report.origin, endpoints: map.endpoints.length, coverage: { seen: c.seen, withPayload: c.withPayload, pathOnly: c.pathOnly }, files: written, inputDeleted: !fromStdin && !hasFlag(args, "--keep") }));
+      } else {
+        console.log(`  ${report.origin}: ${map.endpoints.length} endpoints (${c.withPayload} with payload, ${c.pathOnly} path only). Not complete.`);
+        for (const e of map.endpoints.slice(0, 40)) console.log(`    ${e.method.padEnd(6)} ${e.origin === map.origin ? e.path : e.origin + e.path}  -> ${e.functionName}`);
+        if (map.endpoints.length > 40) console.log(`    \u2026 ${map.endpoints.length - 40} more in api.json`);
+        console.log(`  Wrote: ${written.join(", ")}`);
+        if (!fromStdin && !hasFlag(args, "--keep")) console.log("  Capture file deleted.");
+      }
+      break;
+    }
     // ─── Install MCP ─────────────────────────────────────────────────
     case "install-mcp": {
       const runtime = resolveMcpRuntime();
@@ -12713,7 +13764,7 @@ Screenshot: ${shot}`);
       let secretSource = secret ? "env/.env" : null;
       if (!secret) {
         try {
-          secret = fs11.readFileSync(path12.join(CONFIG_DIR, "secret"), "utf8").trim();
+          secret = fs13.readFileSync(path14.join(CONFIG_DIR, "secret"), "utf8").trim();
           if (secret) secretSource = "~/.iframer/secret";
         } catch {
         }
@@ -12753,10 +13804,10 @@ Screenshot: ${shot}`);
     }
     // ─── Telemetry report ────────────────────────────────────────────
     case "telemetry": {
-      const file = path12.join(CONFIG_DIR, "telemetry.jsonl");
+      const file = path14.join(CONFIG_DIR, "telemetry.jsonl");
       if (args.includes("--clear")) {
         try {
-          fs11.unlinkSync(file);
+          fs13.unlinkSync(file);
         } catch {
         }
         console.log("  Telemetry log cleared.");
@@ -12764,7 +13815,7 @@ Screenshot: ${shot}`);
       }
       let lines;
       try {
-        lines = fs11.readFileSync(file, "utf8").trim().split("\n").filter(Boolean);
+        lines = fs13.readFileSync(file, "utf8").trim().split("\n").filter(Boolean);
       } catch {
         console.log("  No telemetry recorded yet. It logs automatically as agents use iframer");
         console.log("  (new MCP sessions only \u2014 restart a session if it predates telemetry).");
@@ -12889,11 +13940,11 @@ Screenshot: ${shot}`);
     // ─── Update (npm as the extension update channel) ────────────────
     case "update": {
       const checkOnly = args.includes("--check");
-      const pkgRoot = path12.join(__dirname, "..");
-      const isDev = fs11.existsSync(path12.join(pkgRoot, ".git"));
+      const pkgRoot = path14.join(__dirname, "..");
+      const isDev = fs13.existsSync(path14.join(pkgRoot, ".git"));
       let installed = "unknown";
       try {
-        installed = JSON.parse(fs11.readFileSync(path12.join(pkgRoot, "package.json"), "utf8")).version;
+        installed = JSON.parse(fs13.readFileSync(path14.join(pkgRoot, "package.json"), "utf8")).version;
       } catch {
       }
       let latest = null;
@@ -12992,6 +14043,20 @@ Screenshot: ${shot}`);
       --output <dir>                Save directory
       --typed                       Generate TypeScript
       --mode <mode>                 Browser mode
+
+  Capture in a browser iframer doesn't control (T3 Code, Playwright MCP, ...):
+    kit                             Write the in-page kit, print the agent steps
+      --for <t3|playwright-mcp|any> Which browser tool's steps to print (default: t3)
+      --mode passive                No patching: URLs + forms only (for sites that detect it)
+      --host-filter <regex>         Only record matching hosts
+      --client <path>               Also print steps to load a generated client.js
+      --print                       Print the kit source instead (for tools without upload)
+    ingest <file|-|--latest>        Turn a capture into api.json + client.js + knowledge
+      --typed                       Also write client.d.ts
+      --out <dir>                   Output directory (default: ./<host>-api/)
+      --keep                        Keep the capture file (default: deleted)
+      --no-knowledge                Don't update ~/.iframer/knowledge
+      --json                        One-line JSON summary
 
   Session:
     session stop                    Save state + close idle browsers on the shared daemon

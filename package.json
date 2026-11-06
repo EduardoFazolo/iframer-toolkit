@@ -47,7 +47,8 @@
     "test": "bun test tests/unit",
     "test:extension": "node tests/integration/extension-bridge.mjs",
     "prepublishOnly": "bun run build",
-    "test:cdp-relay": "bun tests/integration/cdp-relay.mjs"
+    "test:cdp-relay": "bun tests/integration/cdp-relay.mjs",
+    "test:kit": "bun tests/integration/kit-bridge.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
