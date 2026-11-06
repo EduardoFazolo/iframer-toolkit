@@ -15,10 +15,10 @@ function renderStatus(status) {
   const connected = status && status.connected;
   $("dot").className = "dot" + (connected ? " on" : "");
   const reasonText = {
-    "no-token": "No token set — try Pair automatically, or paste it below.",
-    "server-not-found": "iframer server not found. Is Claude Code / iframer running?",
+    "no-token": "No token yet. Run `iframer install extension chrome` in a terminal and this pairs by itself, or paste the output of `iframer extension token` below.",
+    "server-not-found": "iframer server not found. It starts with your Claude/iframer session. Will connect by itself.",
     "server-not-running": "iframer server not running — it starts with your Claude/iframer session. Will connect by itself.",
-    "bad-token": "Token rejected. Check it matches ~/.iframer/secret.",
+    "bad-token": "Token rejected by the server. Paste the output of `iframer extension token` below.",
     disconnected: "Disconnected — retrying…",
   };
   if (connected) {
@@ -86,7 +86,7 @@ $("autopair").addEventListener("click", async () => {
   const res = await send("auto-pair");
   if (res.ok) {
     if (res.token) $("token").value = res.token;
-    $("pairmsg").textContent = "✓ Paired.";
+    $("pairmsg").textContent = res.status && res.status.connected ? "✓ Paired." : "Token saved. See the status above.";
     renderStatus(res.status);
   } else {
     $("pairmsg").textContent = res.error || "Auto-pair failed — paste the token manually below.";
@@ -103,6 +103,15 @@ $("save").addEventListener("click", async () => {
   await refresh();
   $("save").disabled = false;
   $("save").textContent = "Save & connect";
+});
+
+// Keep the popup live: pairing usually finishes while it's open.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  if (changes.status) renderStatus(changes.status.newValue);
+  if (changes.token && changes.token.newValue && document.activeElement !== $("token")) {
+    $("token").value = changes.token.newValue;
+  }
 });
 
 init();

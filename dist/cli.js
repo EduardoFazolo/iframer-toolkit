@@ -114,8 +114,8 @@ function isPidAlive(pid) {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (e) {
+    return e.code === "EPERM";
   }
 }
 function pidMatchesMarker(pid, marker) {
@@ -389,8 +389,12 @@ var init_local_server = __esm({
           const child = (0, import_child_process2.spawn)(command2, args2, {
             env,
             stdio: ["ignore", logFd, logFd],
-            detached: true
+            detached: true,
+            // On Windows a detached child otherwise gets its own console window,
+            // and closing that window kills the server.
+            windowsHide: true
           });
+          child.on("error", (e) => console.error(`[iframer] could not start the local server: ${e.message}`));
           child.unref();
           import_fs2.default.closeSync(logFd);
           const deadline = Date.now() + STARTUP_TIMEOUT_MS;
@@ -1411,6 +1415,25 @@ function getLocalToken() {
   throw new Error(
     `iframer: could not read or create a persistent encryption secret in any writable location (${candidates.join(", ")}). Set IFRAMER_SECRET to a stable value shared between the MCP server and CLI (openssl rand -hex 32).`
   );
+}
+function getPairingTokens() {
+  const tokens = /* @__PURE__ */ new Set();
+  try {
+    tokens.add(getLocalToken());
+  } catch {
+  }
+  const candidates = [
+    import_path4.default.join(getDataDir(), "secret"),
+    import_path4.default.join(process.env.XDG_RUNTIME_DIR || import_os2.default.tmpdir(), "iframer-secret")
+  ];
+  for (const file of candidates) {
+    try {
+      tokens.add(import_fs5.default.readFileSync(file, "utf8").trim());
+    } catch {
+    }
+  }
+  tokens.delete("");
+  return [...tokens];
 }
 function deriveKey(token, purpose = INFO) {
   return new Promise((resolve, reject) => {
@@ -10205,7 +10228,7 @@ var init_version = __esm({
 function cdpKey(clientId, tabId) {
   return `${clientId}:${tabId}`;
 }
-var import_crypto5, REQUEST_TIMEOUT_MS, HEARTBEAT_MS, ExtensionBridge, extensionBridge;
+var import_crypto5, REQUEST_TIMEOUT_MS, HEARTBEAT_MS, CONNECT_GRACE_MS, NOT_CONNECTED_MESSAGE, ExtensionBridge, extensionBridge;
 var init_bridge = __esm({
   "src/lib/extension/bridge.ts"() {
     "use strict";
@@ -10215,8 +10238,12 @@ var init_bridge = __esm({
     init_version();
     REQUEST_TIMEOUT_MS = 18e4;
     HEARTBEAT_MS = 15e3;
+    CONNECT_GRACE_MS = 35e3;
+    NOT_CONNECTED_MESSAGE = "No iframer extension is connected. Open Chrome and make sure the iframer extension is enabled (setup: `iframer install extension chrome`). It pairs by itself; the popup says why if it can't.";
     ExtensionBridge = class {
       wss = null;
+      attachedAt = 0;
+      clientWaiters = [];
       clients = /* @__PURE__ */ new Map();
       pending = /* @__PURE__ */ new Map();
       nextReqId = 1;
@@ -10234,21 +10261,17 @@ var init_bridge = __esm({
       /** Attach the WS server to the already-listening HTTP server. Idempotent. */
       attach(server) {
         if (this.wss) return;
+        this.attachedAt = Date.now();
         this.wss = new import_websocket_server.default({ server, path: "/extension/ws" });
         this.wss.on("connection", (ws, req) => {
-          let expected = "";
-          try {
-            expected = getLocalToken();
-          } catch {
-            expected = "";
-          }
-          if (!expected) {
+          const accepted = getPairingTokens();
+          if (accepted.length === 0) {
             ws.close(4001, "unauthorized");
             return;
           }
           const queryToken = new URL(req.url || "", "http://127.0.0.1").searchParams.get("token");
           if (queryToken !== null) {
-            if (queryToken !== expected) {
+            if (!accepted.includes(queryToken)) {
               ws.close(4001, "unauthorized");
               return;
             }
@@ -10260,7 +10283,7 @@ var init_bridge = __esm({
             clearTimeout(timer);
             try {
               const m = JSON.parse(data.toString());
-              if (m?.type === "auth" && m.token === expected) {
+              if (m?.type === "auth" && typeof m.token === "string" && accepted.includes(m.token)) {
                 this.acceptClient(ws);
                 return;
               }
@@ -10280,6 +10303,7 @@ var init_bridge = __esm({
         };
         this.clients.set(client.clientId, client);
         this.startHeartbeat(client);
+        for (const wake of this.clientWaiters.splice(0)) wake();
         try {
           ws.send(JSON.stringify({ type: "server_info", version: getVersion() }));
         } catch {
@@ -10375,6 +10399,22 @@ var init_bridge = __esm({
       hasClients() {
         return this.clients.size > 0;
       }
+      /** Resolves once a client is connected, or when the startup grace window ends.
+       *  After that window it returns at once, so a machine with no extension still
+       *  gets its "not connected" answer immediately. */
+      async waitForClient() {
+        if (this.clients.size > 0) return;
+        const left = this.attachedAt + CONNECT_GRACE_MS - Date.now();
+        if (left <= 0) return;
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, left);
+          timer.unref?.();
+          this.clientWaiters.push(() => {
+            clearTimeout(timer);
+            resolve();
+          });
+        });
+      }
       status() {
         return {
           connected: this.clients.size > 0,
@@ -10391,6 +10431,7 @@ var init_bridge = __esm({
       /** List tabs across ALL connected clients, tagged with profile/client, and
        *  refresh the tabId → client ownership map used for routing. */
       async listTabs() {
+        await this.waitForClient();
         const all = [];
         this.tabOwner.clear();
         this.collidingTabs.clear();
@@ -10426,10 +10467,9 @@ var init_bridge = __esm({
           if (!c) throw new Error(`No connected extension with clientId ${clientId}.`);
           return c;
         }
+        await this.waitForClient();
         if (this.clients.size === 0) {
-          throw new Error(
-            "No iframer extension is connected. Open Chrome, install/enable the iframer extension, and pair it (paste the token, dot goes green)."
-          );
+          throw new Error(NOT_CONNECTED_MESSAGE);
         }
         if (this.clients.size === 1) {
           return [...this.clients.values()][0];
@@ -10454,16 +10494,15 @@ var init_bridge = __esm({
       }
       /** Pick a client for a browser-level op that has no tabId (create tab, etc.).
        *  Explicit clientId wins; otherwise require exactly one connected profile. */
-      resolveClientNoTab(clientId) {
+      async resolveClientNoTab(clientId) {
         if (clientId) {
           const c = this.clients.get(clientId);
           if (!c) throw new Error(`No connected extension with clientId ${clientId}.`);
           return c;
         }
+        await this.waitForClient();
         if (this.clients.size === 0) {
-          throw new Error(
-            "No iframer extension is connected. Open Chrome, install/enable the iframer extension, and pair it (paste the token, dot goes green)."
-          );
+          throw new Error(NOT_CONNECTED_MESSAGE);
         }
         if (this.clients.size === 1) return [...this.clients.values()][0];
         throw new Error(
@@ -10481,7 +10520,7 @@ var init_bridge = __esm({
       }
       /** Group tabs into a native Chrome tab group. */
       async groupTabs(tabIds, opts = {}, clientId) {
-        const client = clientId ? this.resolveClientNoTab(clientId) : await this.resolveClient(tabIds[0]);
+        const client = clientId ? await this.resolveClientNoTab(clientId) : await this.resolveClient(tabIds[0]);
         return this.send(client, "group_tabs", {
           tabIds,
           title: opts.title,
@@ -10492,22 +10531,22 @@ var init_bridge = __esm({
       }
       /** Remove tabs from their group (chrome.tabs.ungroup). */
       async ungroupTabs(tabIds, clientId) {
-        const client = clientId ? this.resolveClientNoTab(clientId) : await this.resolveClient(tabIds[0]);
+        const client = clientId ? await this.resolveClientNoTab(clientId) : await this.resolveClient(tabIds[0]);
         return this.send(client, "ungroup_tabs", { tabIds });
       }
       /** Rename / recolor / collapse an existing group by id. */
       async updateGroup(groupId, opts, clientId) {
-        const client = this.resolveClientNoTab(clientId);
+        const client = await this.resolveClientNoTab(clientId);
         return this.send(client, "update_group", { groupId, ...opts });
       }
       /** List all tab groups across the browser. */
       async listGroups(clientId) {
-        const client = this.resolveClientNoTab(clientId);
+        const client = await this.resolveClientNoTab(clientId);
         return this.send(client, "list_groups", {});
       }
       /** Open a new tab in the user's real Chrome via chrome.tabs.create. */
       async createTab(url, opts = {}, clientId) {
-        const client = this.resolveClientNoTab(clientId);
+        const client = await this.resolveClientNoTab(clientId);
         const res = await this.send(client, "create_tab", {
           url,
           active: opts.active,
@@ -11707,6 +11746,122 @@ var init_iframer = __esm({
   }
 });
 
+// src/lib/extension/native-host-setup.cjs
+var require_native_host_setup = __commonJS({
+  "src/lib/extension/native-host-setup.cjs"(exports2, module2) {
+    "use strict";
+    var { spawn: spawn4 } = require("child_process");
+    var HOST_NAME = "com.iframer.token";
+    var WINDOWS_BROWSERS = [
+      { browser: "Chrome", root: "Software\\Google\\Chrome" },
+      { browser: "Chromium", root: "Software\\Chromium" },
+      { browser: "Edge", root: "Software\\Microsoft\\Edge" },
+      { browser: "Brave", root: "Software\\BraveSoftware\\Brave-Browser" },
+      { browser: "Vivaldi", root: "Software\\Vivaldi" }
+    ];
+    function windowsRegistryKey(root) {
+      return `HKCU\\${root}\\NativeMessagingHosts\\${HOST_NAME}`;
+    }
+    function windowsWrapper({ execPath, homeDir, dataDir }) {
+      const esc = (s) => s.replace(/%/g, "%%");
+      const prefix = homeDir.toLowerCase().replace(/[\\/]+$/, "") + "\\";
+      const fromHome = (p) => p.toLowerCase().startsWith(prefix) ? `%USERPROFILE%\\${esc(p.slice(prefix.length))}` : esc(p);
+      return [
+        "@echo off",
+        "chcp 65001 >nul",
+        ...dataDir ? [`set "IFRAMER_DATA_DIR=${fromHome(dataDir)}"`] : [],
+        `set "NODE_BIN=${fromHome(execPath)}"`,
+        'if not exist "%NODE_BIN%" set "NODE_BIN=node"',
+        '"%NODE_BIN%" "%~dp0extension-token-host.cjs"',
+        ""
+      ].join("\r\n");
+    }
+    function posixWrapper({ execPath, hostScript, dataDir }) {
+      return [
+        "#!/bin/sh",
+        ...dataDir ? [`export IFRAMER_DATA_DIR="${dataDir}"`] : [],
+        `for BIN in "${execPath}" "$(command -v node 2>/dev/null)" /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node; do`,
+        `  [ -n "$BIN" ] && [ -x "$BIN" ] && exec "$BIN" "${hostScript}"`,
+        "done",
+        "exit 1",
+        ""
+      ].join("\n");
+    }
+    function hostManifest(wrapperPath, extensionId) {
+      return JSON.stringify(
+        {
+          name: HOST_NAME,
+          description: "iframer pairing-token host",
+          path: wrapperPath,
+          type: "stdio",
+          allowed_origins: [`chrome-extension://${extensionId}/`]
+        },
+        null,
+        2
+      );
+    }
+    function testHost(wrapperPath, { timeoutMs = 15e3, platform = process.platform, env = process.env } = {}) {
+      return new Promise((resolve) => {
+        let child;
+        let settled = false;
+        let timer;
+        let stderr = "";
+        const finish = (result) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          try {
+            child.kill();
+          } catch {
+          }
+          resolve(result);
+        };
+        try {
+          child = platform === "win32" ? spawn4("cmd.exe", ["/d", "/s", "/c", `"${wrapperPath}"`], { env, windowsVerbatimArguments: true, windowsHide: true }) : spawn4(wrapperPath, [], { env });
+        } catch (e) {
+          finish({ ok: false, error: e.message });
+          return;
+        }
+        timer = setTimeout(() => finish({ ok: false, error: `no answer within ${timeoutMs}ms` }), timeoutMs);
+        child.on("error", (e) => finish({ ok: false, error: e.message }));
+        child.stderr.on("data", (d) => {
+          stderr += d;
+        });
+        child.on("exit", (code) => {
+          setTimeout(() => finish({ ok: false, error: stderr.trim() || `host exited with code ${code}` }), 200);
+        });
+        let out = Buffer.alloc(0);
+        child.stdout.on("data", (d) => {
+          out = Buffer.concat([out, d]);
+          if (out.length < 4) return;
+          const len = out.readUInt32LE(0);
+          if (out.length < 4 + len) return;
+          try {
+            finish({ ok: true, info: JSON.parse(out.subarray(4, 4 + len).toString("utf8")) });
+          } catch (e) {
+            finish({ ok: false, error: `bad reply: ${e.message}` });
+          }
+        });
+        const payload = Buffer.from(JSON.stringify({ cmd: "get-info" }), "utf8");
+        const header = Buffer.alloc(4);
+        header.writeUInt32LE(payload.length, 0);
+        child.stdin.on("error", () => {
+        });
+        child.stdin.write(Buffer.concat([header, payload]));
+      });
+    }
+    module2.exports = {
+      HOST_NAME,
+      WINDOWS_BROWSERS,
+      windowsRegistryKey,
+      windowsWrapper,
+      posixWrapper,
+      hostManifest,
+      testHost
+    };
+  }
+});
+
 // src/lib/format-result.ts
 var format_result_exports = {};
 __export(format_result_exports, {
@@ -12309,8 +12464,9 @@ if (command === "remove") {
 if (command === "extension") {
   const sub = args.shift();
   if (sub === "path") command = "extension-path";
+  else if (sub === "token") command = "extension-token";
   else {
-    console.error("  Usage: iframer extension path");
+    console.error("  Usage: iframer extension <path|token>");
     process.exit(1);
   }
 }
@@ -12422,10 +12578,7 @@ var EXTENSION_FLAVORS = {
   firefox: { label: "Firefox", supported: false }
 };
 function installExtensionHost() {
-  if (process.platform !== "darwin" && process.platform !== "linux") {
-    console.error("  Extension auto-pairing is only supported on macOS and Linux.");
-    process.exit(1);
-  }
+  const setup = require_native_host_setup();
   resolveLocalToken();
   const srcHost = path13.join(__dirname, "..", "extension", "native-host.cjs");
   if (!fs13.existsSync(srcHost)) {
@@ -12435,31 +12588,34 @@ function installExtensionHost() {
   fs13.mkdirSync(CONFIG_DIR, { recursive: true });
   const hostScript = path13.join(CONFIG_DIR, "extension-token-host.cjs");
   fs13.copyFileSync(srcHost, hostScript);
-  const wrapper = path13.join(CONFIG_DIR, "extension-token-host.sh");
-  fs13.writeFileSync(
-    wrapper,
-    [
-      "#!/bin/sh",
-      `for BIN in "${process.execPath}" "$(command -v node 2>/dev/null)" /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node; do`,
-      `  [ -n "$BIN" ] && [ -x "$BIN" ] && exec "$BIN" "${hostScript}"`,
-      "done",
-      "exit 1",
-      ""
-    ].join("\n"),
-    { mode: 493 }
-  );
-  const manifest = JSON.stringify(
-    {
-      name: NM_HOST_NAME,
-      description: "iframer pairing-token host",
-      path: wrapper,
-      type: "stdio",
-      allowed_origins: [`chrome-extension://${EXTENSION_ID}/`]
-    },
-    null,
-    2
-  );
+  const dataDir = process.env.IFRAMER_DATA_DIR || void 0;
+  const isWindows = process.platform === "win32";
+  const wrapper = path13.join(CONFIG_DIR, isWindows ? "extension-token-host.bat" : "extension-token-host.sh");
+  if (isWindows) {
+    fs13.writeFileSync(wrapper, setup.windowsWrapper({ execPath: process.execPath, homeDir: HOME_DIR, dataDir }));
+  } else {
+    fs13.writeFileSync(wrapper, setup.posixWrapper({ execPath: process.execPath, hostScript, dataDir }), { mode: 493 });
+  }
+  const manifest = setup.hostManifest(wrapper, EXTENSION_ID);
   const installed = [];
+  if (isWindows) {
+    const manifestPath = path13.join(CONFIG_DIR, `${NM_HOST_NAME}.json`);
+    fs13.writeFileSync(manifestPath, manifest);
+    for (const { browser, root } of setup.WINDOWS_BROWSERS) {
+      try {
+        require("child_process").execFileSync(
+          "reg.exe",
+          ["add", setup.windowsRegistryKey(root), "/ve", "/t", "REG_SZ", "/d", manifestPath, "/f"],
+          { stdio: "pipe", windowsHide: true }
+        );
+        installed.push(browser);
+      } catch (e) {
+        console.error(`  ${browser}: failed (${e.message})`);
+      }
+    }
+    if (installed.length) writeExtensionMarker("chrome", installed);
+    return { installed, wrapper };
+  }
   for (const { browser, dir, always } of nativeMessagingBrowserDirs()) {
     if (!always && !fs13.existsSync(dir)) continue;
     try {
@@ -12472,21 +12628,32 @@ function installExtensionHost() {
     }
   }
   if (installed.length) writeExtensionMarker("chrome", installed);
-  return installed;
+  return { installed, wrapper };
 }
 function removeExtensionHost() {
   const removed = [];
-  for (const { browser, dir } of nativeMessagingBrowserDirs()) {
-    const file = path13.join(dir, "NativeMessagingHosts", `${NM_HOST_NAME}.json`);
-    try {
-      if (fs13.existsSync(file)) {
-        fs13.unlinkSync(file);
+  if (process.platform === "win32") {
+    const setup = require_native_host_setup();
+    for (const { browser, root } of setup.WINDOWS_BROWSERS) {
+      try {
+        require("child_process").execFileSync("reg.exe", ["delete", setup.windowsRegistryKey(root), "/f"], { stdio: "pipe", windowsHide: true });
         removed.push(browser);
+      } catch {
       }
-    } catch {
+    }
+  } else {
+    for (const { browser, dir } of nativeMessagingBrowserDirs()) {
+      const file = path13.join(dir, "NativeMessagingHosts", `${NM_HOST_NAME}.json`);
+      try {
+        if (fs13.existsSync(file)) {
+          fs13.unlinkSync(file);
+          removed.push(browser);
+        }
+      } catch {
+      }
     }
   }
-  for (const f of ["extension-token-host.cjs", "extension-token-host.sh"]) {
+  for (const f of ["extension-token-host.cjs", "extension-token-host.sh", "extension-token-host.bat", `${NM_HOST_NAME}.json`]) {
     try {
       fs13.unlinkSync(path13.join(CONFIG_DIR, f));
     } catch {
@@ -12505,6 +12672,18 @@ async function removeChrome() {
 }
 async function main() {
   switch (command) {
+    // ─── Version ─────────────────────────────────────────────────────
+    case "--version":
+    case "-v":
+    case "version": {
+      try {
+        console.log(JSON.parse(fs13.readFileSync(path13.join(__dirname, "..", "package.json"), "utf8")).version);
+      } catch (e) {
+        console.error(`  Could not read the version: ${e.message}`);
+        process.exit(1);
+      }
+      break;
+    }
     // ─── Status ──────────────────────────────────────────────────────
     case "status": {
       const docker = await isDockerRunning();
@@ -13362,12 +13541,29 @@ Screenshot: ${shot}`);
       }
       console.log(`  Installing the iframer extension for ${spec.label}...
 `);
-      const installed = installExtensionHost();
+      const { installed, wrapper } = installExtensionHost();
       if (installed.length === 0) {
         console.log("  No Chromium-family browser directories found \u2014 nothing installed.");
         break;
       }
       console.log(`  Pairing host installed for: ${installed.join(", ")}`);
+      const hostTest = await require_native_host_setup().testHost(wrapper);
+      if (hostTest.ok && hostTest.info && hostTest.info.token) {
+        console.log("  Pairing host test: OK");
+      } else {
+        console.log(`  Pairing host test FAILED: ${hostTest.error || "host returned no token"}`);
+        console.log("  Auto-pairing won't work. To pair by hand, run `iframer extension token`");
+        console.log("  and paste the result into the extension popup.");
+      }
+      try {
+        const { LocalServerManager: LocalServerManager2 } = await Promise.resolve().then(() => (init_local_server(), local_server_exports));
+        const manager = new LocalServerManager2();
+        await manager.ensureRunning();
+        console.log(`  Server running: ${manager.getBaseUrl()}`);
+      } catch (e) {
+        console.log(`  Server failed to start: ${e.message}`);
+        console.log("  The extension can't connect until it runs. Log: ~/.iframer/local-server.log");
+      }
       console.log("\n  \u250C\u2500 ONE manual step to finish \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
       console.log("  \u2502  1. Open  chrome://extensions");
       console.log("  \u2502  2. Turn on  Developer mode  (top-right)");
@@ -13381,6 +13577,10 @@ Screenshot: ${shot}`);
     }
     case "extension-path": {
       console.log(extensionDir());
+      break;
+    }
+    case "extension-token": {
+      console.log(LOCAL_TOKEN);
       break;
     }
     // ─── Update (npm as the extension update channel) ────────────────
@@ -13538,8 +13738,10 @@ Screenshot: ${shot}`);
     install mcp [--dev]             Register iframer MCP in Claude Code and Codex
     install extension chrome        Install the (optional) browser extension for Chrome/Chromium
     extension path                  Print the extension folder to load in chrome://extensions
-    update                          Update iframer via npm; reload the extension too if it's installed
+    extension token                 Print the pairing token (only needed to pair by hand)
+    update                        Update iframer via npm; reload the extension too if it's installed
     update --check                  Report whether a newer version is available (no install)
+    version, --version, -v          Print the installed version
     remove                          Remove everything (Chromium + MCP)
     remove chromium                 Delete downloaded Chrome for Testing
     remove mcp [--dev]              Unregister iframer MCP from Claude Code and Codex

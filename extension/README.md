@@ -81,22 +81,24 @@ build` instead; `iframer update` detects that and says so.)
 ## Pair it (one time, zero copying)
 
 ```sh
-iframer install extension
+iframer install extension chrome
 ```
 
-then restart the browser. That installs a Chrome **native-messaging host**
+on macOS, Linux or Windows. That installs a Chrome **native-messaging host**
 (locked to this extension's pinned ID) that hands the extension the pairing
 token straight from `~/.iframer/secret` — every profile and every Chromium-family
 browser (Chrome, Brave, Edge, …) pairs itself, and re-pairs automatically after
-a reinstall or a rotated secret. No copying, ever.
+a reinstall or a rotated secret. No copying, ever. The command also tests the
+host and starts the local server, and tells you if either one fails.
 
 Manual fallback (host not installed): click the iframer toolbar icon → paste the
-token from `cat ~/.iframer/secret` → **Save & connect**.
+output of `iframer extension token` → **Save & connect**.
 
-Either way the dot turns green when it finds the running iframer server (it
-scans ports 3022–3042 on `127.0.0.1`; the server allocates its port from the
-same window). The token is the same machine-local secret the iframer CLI/MCP
-already use. It is only ever sent to `127.0.0.1`.
+Either way the dot turns green only once the running iframer server has accepted
+the token (the host locates the server; without a host the extension scans ports
+3022–3042 on `127.0.0.1`, the window the server allocates its port from). The
+token is the same machine-local secret the iframer CLI/MCP already use. It is
+only ever sent to `127.0.0.1`.
 
 ## Use it
 

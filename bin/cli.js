@@ -599,8 +599,9 @@ if (command === "remove") {
 if (command === "extension") {
   const sub = args.shift();
   if (sub === "path") command = "extension-path";
+  else if (sub === "token") command = "extension-token";
   else {
-    console.error("  Usage: iframer extension path");
+    console.error("  Usage: iframer extension <path|token>");
     process.exit(1);
   }
 }
@@ -722,10 +723,7 @@ const EXTENSION_FLAVORS = {
 };
 
 function installExtensionHost() {
-  if (process.platform !== "darwin" && process.platform !== "linux") {
-    console.error("  Extension auto-pairing is only supported on macOS and Linux.");
-    process.exit(1);
-  }
+  const setup = require("../src/lib/extension/native-host-setup.cjs");
   // Make sure the secret exists — it's what the host will serve.
   resolveLocalToken();
 
@@ -740,35 +738,38 @@ function installExtensionHost() {
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
   const hostScript = path.join(CONFIG_DIR, "extension-token-host.cjs");
   fs.copyFileSync(srcHost, hostScript);
-  // Chrome spawns the host with a minimal PATH (no nvm/homebrew), so pin the
-  // runtime that installed this — with common fallbacks in case it moves.
-  const wrapper = path.join(CONFIG_DIR, "extension-token-host.sh");
-  fs.writeFileSync(
-    wrapper,
-    [
-      "#!/bin/sh",
-      `for BIN in "${process.execPath}" "$(command -v node 2>/dev/null)" /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node; do`,
-      `  [ -n "$BIN" ] && [ -x "$BIN" ] && exec "$BIN" "${hostScript}"`,
-      "done",
-      "exit 1",
-      "",
-    ].join("\n"),
-    { mode: 0o755 },
-  );
+  const dataDir = process.env.IFRAMER_DATA_DIR || undefined;
+  const isWindows = process.platform === "win32";
+  const wrapper = path.join(CONFIG_DIR, isWindows ? "extension-token-host.bat" : "extension-token-host.sh");
+  if (isWindows) {
+    fs.writeFileSync(wrapper, setup.windowsWrapper({ execPath: process.execPath, homeDir: HOME_DIR, dataDir }));
+  } else {
+    fs.writeFileSync(wrapper, setup.posixWrapper({ execPath: process.execPath, hostScript, dataDir }), { mode: 0o755 });
+  }
 
-  const manifest = JSON.stringify(
-    {
-      name: NM_HOST_NAME,
-      description: "iframer pairing-token host",
-      path: wrapper,
-      type: "stdio",
-      allowed_origins: [`chrome-extension://${EXTENSION_ID}/`],
-    },
-    null,
-    2,
-  );
+  const manifest = setup.hostManifest(wrapper, EXTENSION_ID);
 
   const installed = [];
+  if (isWindows) {
+    const manifestPath = path.join(CONFIG_DIR, `${NM_HOST_NAME}.json`);
+    fs.writeFileSync(manifestPath, manifest);
+    for (const { browser, root } of setup.WINDOWS_BROWSERS) {
+      try {
+        // No shell, so spaces and non-ASCII letters in the path need no quoting.
+        require("child_process").execFileSync(
+          "reg.exe",
+          ["add", setup.windowsRegistryKey(root), "/ve", "/t", "REG_SZ", "/d", manifestPath, "/f"],
+          { stdio: "pipe", windowsHide: true },
+        );
+        installed.push(browser);
+      } catch (e) {
+        console.error(`  ${browser}: failed (${e.message})`);
+      }
+    }
+    if (installed.length) writeExtensionMarker("chrome", installed);
+    return { installed, wrapper };
+  }
+
   for (const { browser, dir, always } of nativeMessagingBrowserDirs()) {
     if (!always && !fs.existsSync(dir)) continue;
     try {
@@ -781,21 +782,31 @@ function installExtensionHost() {
     }
   }
   if (installed.length) writeExtensionMarker("chrome", installed);
-  return installed;
+  return { installed, wrapper };
 }
 
 function removeExtensionHost() {
   const removed = [];
-  for (const { browser, dir } of nativeMessagingBrowserDirs()) {
-    const file = path.join(dir, "NativeMessagingHosts", `${NM_HOST_NAME}.json`);
-    try {
-      if (fs.existsSync(file)) {
-        fs.unlinkSync(file);
+  if (process.platform === "win32") {
+    const setup = require("../src/lib/extension/native-host-setup.cjs");
+    for (const { browser, root } of setup.WINDOWS_BROWSERS) {
+      try {
+        require("child_process").execFileSync("reg.exe", ["delete", setup.windowsRegistryKey(root), "/f"], { stdio: "pipe", windowsHide: true });
         removed.push(browser);
-      }
-    } catch {}
+      } catch {} // key wasn't there
+    }
+  } else {
+    for (const { browser, dir } of nativeMessagingBrowserDirs()) {
+      const file = path.join(dir, "NativeMessagingHosts", `${NM_HOST_NAME}.json`);
+      try {
+        if (fs.existsSync(file)) {
+          fs.unlinkSync(file);
+          removed.push(browser);
+        }
+      } catch {}
+    }
   }
-  for (const f of ["extension-token-host.cjs", "extension-token-host.sh"]) {
+  for (const f of ["extension-token-host.cjs", "extension-token-host.sh", "extension-token-host.bat", `${NM_HOST_NAME}.json`]) {
     try { fs.unlinkSync(path.join(CONFIG_DIR, f)); } catch {}
   }
   return removed;
@@ -813,6 +824,20 @@ async function removeChrome() {
 
 async function main() {
   switch (command) {
+
+    // ─── Version ─────────────────────────────────────────────────────
+
+    case "--version":
+    case "-v":
+    case "version": {
+      try {
+        console.log(JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8")).version);
+      } catch (e) {
+        console.error(`  Could not read the version: ${e.message}`);
+        process.exit(1);
+      }
+      break;
+    }
 
     // ─── Status ──────────────────────────────────────────────────────
 
@@ -1721,12 +1746,34 @@ async function main() {
       }
 
       console.log(`  Installing the iframer extension for ${spec.label}...\n`);
-      const installed = installExtensionHost();
+      const { installed, wrapper } = installExtensionHost();
       if (installed.length === 0) {
         console.log("  No Chromium-family browser directories found — nothing installed.");
         break;
       }
       console.log(`  Pairing host installed for: ${installed.join(", ")}`);
+
+      // Prove it works now, instead of failing silently inside the browser later.
+      const hostTest = await require("../src/lib/extension/native-host-setup.cjs").testHost(wrapper);
+      if (hostTest.ok && hostTest.info && hostTest.info.token) {
+        console.log("  Pairing host test: OK");
+      } else {
+        console.log(`  Pairing host test FAILED: ${hostTest.error || "host returned no token"}`);
+        console.log("  Auto-pairing won't work. To pair by hand, run `iframer extension token`");
+        console.log("  and paste the result into the extension popup.");
+      }
+
+      // Keep the server up, so the extension connects as soon as it's loaded.
+      try {
+        const { LocalServerManager } = await import("../src/mcp/local-server.ts");
+        const manager = new LocalServerManager();
+        await manager.ensureRunning();
+        console.log(`  Server running: ${manager.getBaseUrl()}`);
+      } catch (e) {
+        console.log(`  Server failed to start: ${e.message}`);
+        console.log("  The extension can't connect until it runs. Log: ~/.iframer/local-server.log");
+      }
+
       console.log("\n  ┌─ ONE manual step to finish ────────────────────────────────┐");
       console.log("  │  1. Open  chrome://extensions");
       console.log("  │  2. Turn on  Developer mode  (top-right)");
@@ -1741,6 +1788,11 @@ async function main() {
 
     case "extension-path": {
       console.log(extensionDir());
+      break;
+    }
+
+    case "extension-token": {
+      console.log(LOCAL_TOKEN);
       break;
     }
 
@@ -1898,8 +1950,10 @@ async function main() {
     install mcp [--dev]             Register iframer MCP in Claude Code and Codex
     install extension chrome        Install the (optional) browser extension for Chrome/Chromium
     extension path                  Print the extension folder to load in chrome://extensions
-    update                          Update iframer via npm; reload the extension too if it's installed
+    extension token                 Print the pairing token (only needed to pair by hand)
+    update                        Update iframer via npm; reload the extension too if it's installed
     update --check                  Report whether a newer version is available (no install)
+    version, --version, -v          Print the installed version
     remove                          Remove everything (Chromium + MCP)
     remove chromium                 Delete downloaded Chrome for Testing
     remove mcp [--dev]              Unregister iframer MCP from Claude Code and Codex

@@ -12,8 +12,15 @@
 // stdlib) and must read the same secret locations as src/lib/auth/crypto.ts.
 
 const fs = require("fs");
+const http = require("http");
 const os = require("os");
 const path = require("path");
+
+// Same window the local server allocates its port from
+// (src/mcp/local-server.ts, extension/background.js).
+const PORT_START = 3022;
+const PORT_END = 3042;
+const PROBE_TIMEOUT_MS = 1500;
 
 function readToken() {
   if (process.env.IFRAMER_SECRET) return process.env.IFRAMER_SECRET;
@@ -33,34 +40,107 @@ function readToken() {
   return "";
 }
 
-// Where is the iframer server right now? Reads the server registry the local
-// server writes on startup (src/lib/browser/registry.ts) and checks the pid is
-// actually alive — so the extension can connect straight to the right port
-// instead of blind-scanning 21 ports (each dead dial logs a console error).
-function readServerInfo() {
+function readRegisteredPort() {
   const dataDir = process.env.IFRAMER_DATA_DIR || path.join(os.homedir(), ".iframer");
   try {
     const info = JSON.parse(fs.readFileSync(path.join(dataDir, "server.json"), "utf8"));
-    let alive = false;
-    if (info && typeof info.pid === "number") {
-      try {
-        process.kill(info.pid, 0);
-        alive = true;
-      } catch {
-        /* pid gone — stale registry */
-      }
-    }
-    return { port: info && typeof info.port === "number" ? info.port : null, alive };
+    return info && typeof info.port === "number" ? info.port : null;
   } catch {
-    return { port: null, alive: false };
+    return null;
   }
 }
 
-function send(msg) {
+function probe(port) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(ok);
+    };
+    const req = http.get({ host: "127.0.0.1", port, path: "/health", agent: false }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (d) => {
+        if (body.length < 4096) body += d;
+      });
+      res.on("end", () => {
+        try {
+          finish(JSON.parse(body).ok === true);
+        } catch {
+          finish(false);
+        }
+      });
+      res.on("error", () => finish(false));
+    });
+    req.on("error", () => finish(false));
+    const timer = setTimeout(() => {
+      req.destroy();
+      finish(false);
+    }, PROBE_TIMEOUT_MS);
+  });
+}
+
+// Where is the iframer server right now? Only a server that actually answers
+// counts. A pid check can't decide this: on Windows a reused pid looks alive,
+// and a server running as another user looks dead. Probing from here also lets
+// the extension find the port without dialing dead ones (each dead dial logs a
+// console error in the extension).
+async function locateServer() {
+  const registered = readRegisteredPort();
+  if (registered && (await probe(registered))) return { port: registered, alive: true };
+
+  const ports = [];
+  for (let p = PORT_START; p <= PORT_END; p++) if (p !== registered) ports.push(p);
+  // All at once: Windows takes about 2s to refuse a closed port, one by one
+  // would take most of a minute.
+  const found = await new Promise((resolve) => {
+    let left = ports.length;
+    for (const p of ports) {
+      probe(p).then((ok) => {
+        if (ok) resolve(p);
+        else if (--left === 0) resolve(null);
+      });
+    }
+  });
+  return found ? { port: found, alive: true } : { port: registered, alive: false };
+}
+
+function send(msg, done) {
   const payload = Buffer.from(JSON.stringify(msg), "utf8");
   const header = Buffer.alloc(4);
   header.writeUInt32LE(payload.length, 0);
-  process.stdout.write(Buffer.concat([header, payload]));
+  process.stdout.write(Buffer.concat([header, payload]), done);
+}
+
+// Chrome may close stdin while a reply is still being worked out, so exit only
+// once stdin has ended AND every reply has been written.
+let pending = 0;
+let stdinEnded = false;
+function exitIfDone() {
+  if (stdinEnded && pending === 0) process.exit(0);
+}
+
+async function reply(msg) {
+  let out;
+  try {
+    if (msg && msg.cmd === "get-token") {
+      const token = readToken();
+      out = token ? { ok: true, token } : { ok: false, error: "no secret file found — run any iframer command once to create it" };
+    } else if (msg && msg.cmd === "get-info") {
+      // Token + live server location in one call.
+      out = { ok: true, token: readToken() || null, ...(await locateServer()) };
+    } else {
+      out = { ok: false, error: "unknown command" };
+    }
+  } catch (e) {
+    out = { ok: false, error: String((e && e.message) || e) };
+  }
+  send(out, () => {
+    pending--;
+    exitIfDone();
+  });
 }
 
 let buf = Buffer.alloc(0);
@@ -75,17 +155,13 @@ process.stdin.on("data", (chunk) => {
     try {
       msg = JSON.parse(body.toString("utf8"));
     } catch {
-      /* respond with error below */
+      /* answered as an unknown command */
     }
-    if (msg && msg.cmd === "get-token") {
-      const token = readToken();
-      send(token ? { ok: true, token } : { ok: false, error: "no secret file found — run any iframer command once to create it" });
-    } else if (msg && msg.cmd === "get-info") {
-      // Token + live server location in one call.
-      send({ ok: true, token: readToken() || null, ...readServerInfo() });
-    } else {
-      send({ ok: false, error: "unknown command" });
-    }
+    pending++;
+    reply(msg);
   }
 });
-process.stdin.on("end", () => process.exit(0));
+process.stdin.on("end", () => {
+  stdinEnded = true;
+  exitIfDone();
+});

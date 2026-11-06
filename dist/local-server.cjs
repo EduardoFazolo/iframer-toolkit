@@ -561,8 +561,8 @@ function isPidAlive(pid) {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (e) {
+    return e.code === "EPERM";
   }
 }
 function pidMatchesMarker(pid, marker) {
@@ -1111,6 +1111,25 @@ function getLocalToken() {
   throw new Error(
     `iframer: could not read or create a persistent encryption secret in any writable location (${candidates.join(", ")}). Set IFRAMER_SECRET to a stable value shared between the MCP server and CLI (openssl rand -hex 32).`
   );
+}
+function getPairingTokens() {
+  const tokens = /* @__PURE__ */ new Set();
+  try {
+    tokens.add(getLocalToken());
+  } catch {
+  }
+  const candidates = [
+    import_path3.default.join(getDataDir(), "secret"),
+    import_path3.default.join(process.env.XDG_RUNTIME_DIR || import_os2.default.tmpdir(), "iframer-secret")
+  ];
+  for (const file of candidates) {
+    try {
+      tokens.add(import_fs4.default.readFileSync(file, "utf8").trim());
+    } catch {
+    }
+  }
+  tokens.delete("");
+  return [...tokens];
 }
 function deriveKey(token, purpose = INFO) {
   return new Promise((resolve, reject) => {
@@ -5820,8 +5839,12 @@ function getVersion() {
 // src/lib/extension/bridge.ts
 var REQUEST_TIMEOUT_MS = 18e4;
 var HEARTBEAT_MS = 15e3;
+var CONNECT_GRACE_MS = 35e3;
+var NOT_CONNECTED_MESSAGE = "No iframer extension is connected. Open Chrome and make sure the iframer extension is enabled (setup: `iframer install extension chrome`). It pairs by itself; the popup says why if it can't.";
 var ExtensionBridge = class {
   wss = null;
+  attachedAt = 0;
+  clientWaiters = [];
   clients = /* @__PURE__ */ new Map();
   pending = /* @__PURE__ */ new Map();
   nextReqId = 1;
@@ -5839,21 +5862,17 @@ var ExtensionBridge = class {
   /** Attach the WS server to the already-listening HTTP server. Idempotent. */
   attach(server2) {
     if (this.wss) return;
+    this.attachedAt = Date.now();
     this.wss = new import_ws.WebSocketServer({ server: server2, path: "/extension/ws" });
     this.wss.on("connection", (ws, req) => {
-      let expected = "";
-      try {
-        expected = getLocalToken();
-      } catch {
-        expected = "";
-      }
-      if (!expected) {
+      const accepted = getPairingTokens();
+      if (accepted.length === 0) {
         ws.close(4001, "unauthorized");
         return;
       }
       const queryToken = new URL(req.url || "", "http://127.0.0.1").searchParams.get("token");
       if (queryToken !== null) {
-        if (queryToken !== expected) {
+        if (!accepted.includes(queryToken)) {
           ws.close(4001, "unauthorized");
           return;
         }
@@ -5865,7 +5884,7 @@ var ExtensionBridge = class {
         clearTimeout(timer);
         try {
           const m = JSON.parse(data.toString());
-          if (m?.type === "auth" && m.token === expected) {
+          if (m?.type === "auth" && typeof m.token === "string" && accepted.includes(m.token)) {
             this.acceptClient(ws);
             return;
           }
@@ -5885,6 +5904,7 @@ var ExtensionBridge = class {
     };
     this.clients.set(client.clientId, client);
     this.startHeartbeat(client);
+    for (const wake of this.clientWaiters.splice(0)) wake();
     try {
       ws.send(JSON.stringify({ type: "server_info", version: getVersion() }));
     } catch {
@@ -5980,6 +6000,22 @@ var ExtensionBridge = class {
   hasClients() {
     return this.clients.size > 0;
   }
+  /** Resolves once a client is connected, or when the startup grace window ends.
+   *  After that window it returns at once, so a machine with no extension still
+   *  gets its "not connected" answer immediately. */
+  async waitForClient() {
+    if (this.clients.size > 0) return;
+    const left = this.attachedAt + CONNECT_GRACE_MS - Date.now();
+    if (left <= 0) return;
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, left);
+      timer.unref?.();
+      this.clientWaiters.push(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
   status() {
     return {
       connected: this.clients.size > 0,
@@ -5996,6 +6032,7 @@ var ExtensionBridge = class {
   /** List tabs across ALL connected clients, tagged with profile/client, and
    *  refresh the tabId → client ownership map used for routing. */
   async listTabs() {
+    await this.waitForClient();
     const all = [];
     this.tabOwner.clear();
     this.collidingTabs.clear();
@@ -6031,10 +6068,9 @@ var ExtensionBridge = class {
       if (!c) throw new Error(`No connected extension with clientId ${clientId}.`);
       return c;
     }
+    await this.waitForClient();
     if (this.clients.size === 0) {
-      throw new Error(
-        "No iframer extension is connected. Open Chrome, install/enable the iframer extension, and pair it (paste the token, dot goes green)."
-      );
+      throw new Error(NOT_CONNECTED_MESSAGE);
     }
     if (this.clients.size === 1) {
       return [...this.clients.values()][0];
@@ -6059,16 +6095,15 @@ var ExtensionBridge = class {
   }
   /** Pick a client for a browser-level op that has no tabId (create tab, etc.).
    *  Explicit clientId wins; otherwise require exactly one connected profile. */
-  resolveClientNoTab(clientId) {
+  async resolveClientNoTab(clientId) {
     if (clientId) {
       const c = this.clients.get(clientId);
       if (!c) throw new Error(`No connected extension with clientId ${clientId}.`);
       return c;
     }
+    await this.waitForClient();
     if (this.clients.size === 0) {
-      throw new Error(
-        "No iframer extension is connected. Open Chrome, install/enable the iframer extension, and pair it (paste the token, dot goes green)."
-      );
+      throw new Error(NOT_CONNECTED_MESSAGE);
     }
     if (this.clients.size === 1) return [...this.clients.values()][0];
     throw new Error(
@@ -6086,7 +6121,7 @@ var ExtensionBridge = class {
   }
   /** Group tabs into a native Chrome tab group. */
   async groupTabs(tabIds, opts = {}, clientId) {
-    const client = clientId ? this.resolveClientNoTab(clientId) : await this.resolveClient(tabIds[0]);
+    const client = clientId ? await this.resolveClientNoTab(clientId) : await this.resolveClient(tabIds[0]);
     return this.send(client, "group_tabs", {
       tabIds,
       title: opts.title,
@@ -6097,22 +6132,22 @@ var ExtensionBridge = class {
   }
   /** Remove tabs from their group (chrome.tabs.ungroup). */
   async ungroupTabs(tabIds, clientId) {
-    const client = clientId ? this.resolveClientNoTab(clientId) : await this.resolveClient(tabIds[0]);
+    const client = clientId ? await this.resolveClientNoTab(clientId) : await this.resolveClient(tabIds[0]);
     return this.send(client, "ungroup_tabs", { tabIds });
   }
   /** Rename / recolor / collapse an existing group by id. */
   async updateGroup(groupId, opts, clientId) {
-    const client = this.resolveClientNoTab(clientId);
+    const client = await this.resolveClientNoTab(clientId);
     return this.send(client, "update_group", { groupId, ...opts });
   }
   /** List all tab groups across the browser. */
   async listGroups(clientId) {
-    const client = this.resolveClientNoTab(clientId);
+    const client = await this.resolveClientNoTab(clientId);
     return this.send(client, "list_groups", {});
   }
   /** Open a new tab in the user's real Chrome via chrome.tabs.create. */
   async createTab(url, opts = {}, clientId) {
-    const client = this.resolveClientNoTab(clientId);
+    const client = await this.resolveClientNoTab(clientId);
     const res = await this.send(client, "create_tab", {
       url,
       active: opts.active,

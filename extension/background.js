@@ -12,10 +12,17 @@
 const PORT_START = 3022;
 const PORT_END = 3042;
 const RECONNECT_MS = 2000;
+// Windows takes about 2s to refuse a dead port, and a busy server can take a
+// moment to accept, so don't call a port a miss too quickly.
+const OPEN_TIMEOUT_MS = 1500;
+// The server answers a good token with server_info and a bad one with close 4001.
+const AUTH_TIMEOUT_MS = 5000;
+// A cold node start can take seconds on Windows (antivirus scanning).
+const NATIVE_TIMEOUT_MS = 8000;
 
 let ws = null;
 let currentPort = null;
-let scanning = false;
+let scanPromise = null;
 
 async function getToken() {
   const { token } = await chrome.storage.local.get("token");
@@ -28,12 +35,16 @@ async function getToken() {
 // isn't installed (→ legacy port scan).
 function nativeCall(msg) {
   return new Promise((resolve) => {
+    // A host that never answers must not block connecting: treat it as absent.
+    const timer = setTimeout(() => resolve(null), NATIVE_TIMEOUT_MS);
     try {
       chrome.runtime.sendNativeMessage("com.iframer.token", msg, (resp) => {
         void chrome.runtime.lastError; // host not installed — that's fine
+        clearTimeout(timer);
         resolve(resp || null);
       });
     } catch {
+      clearTimeout(timer);
       resolve(null);
     }
   });
@@ -51,6 +62,9 @@ async function fetchTokenNatively() {
 // DISPLAY NAME. Returns {email, id} or null if not signed in.
 function getChromeProfile() {
   return new Promise((resolve) => {
+    // Not every Chromium build implements this API. The email is only a display
+    // name, so a call that never returns must not hold up connecting.
+    setTimeout(() => resolve(null), 1000);
     try {
       chrome.identity.getProfileUserInfo({ accountStatus: "ANY" }, (info) => {
         if (chrome.runtime.lastError) return resolve(null);
@@ -111,9 +125,17 @@ async function sendHello(sock) {
   }
 }
 
-async function setStatus(patch) {
-  const prev = (await chrome.storage.local.get("status")).status || {};
-  await chrome.storage.local.set({ status: { ...prev, ...patch } });
+// One at a time: this reads, merges, then writes, so two overlapping calls could
+// put back the old value (a live connection showing as "disconnected").
+let statusWrites = Promise.resolve();
+function setStatus(patch) {
+  statusWrites = statusWrites
+    .then(async () => {
+      const prev = (await chrome.storage.local.get("status")).status || {};
+      await chrome.storage.local.set({ status: { ...prev, ...patch } });
+    })
+    .catch(() => {});
+  return statusWrites;
 }
 
 // Numeric semver compare: is `a` newer than `b`? (x.y.z, extra parts ignored.)
@@ -156,71 +178,104 @@ async function checkForUpdate(serverVersion) {
 let nextScanAt = 0;
 let scanBackoffMs = 0;
 const SCAN_BACKOFF_MAX_MS = 60_000;
+// Asking the native host dials nothing, so there's no console noise to back off
+// from: keep it quick, so a server that just started gets found.
+const HOST_POLL_MAX_MS = 10_000;
 
 function resetScanBackoff() {
   nextScanAt = 0;
   scanBackoffMs = 0;
 }
 
-function bumpScanBackoff() {
-  scanBackoffMs = Math.min(scanBackoffMs ? scanBackoffMs * 2 : 5_000, SCAN_BACKOFF_MAX_MS);
+function bumpScanBackoff(maxMs = SCAN_BACKOFF_MAX_MS) {
+  scanBackoffMs = Math.min(scanBackoffMs ? scanBackoffMs * 2 : 5_000, maxMs);
   nextScanAt = Date.now() + scanBackoffMs;
 }
 
-async function connectLoop() {
-  if (scanning || (ws && ws.readyState === WebSocket.OPEN)) return;
-  if (Date.now() < nextScanAt) return;
-  scanning = true;
-  try {
-    // Ask the native host where the server is. When it answers, we never dial
-    // blind: a dead port dialed = a console error logged, so we only open a
-    // socket to a port the registry says a LIVE server process owns.
-    const info = await nativeCall({ cmd: "get-info" });
-
-    let token = await getToken();
-    if (info && info.ok && info.token && info.token !== token) {
-      token = String(info.token);
-      await chrome.storage.local.set({ token });
-    }
-    if (!token) {
-      await setStatus({ connected: false, reason: "no-token" });
-      bumpScanBackoff();
-      return;
-    }
-
-    if (info && info.ok && "alive" in info) {
-      if (!info.alive || !info.port) {
-        // Server simply isn't running (it starts with an iframer session).
-        // Don't attempt any connection — zero console noise.
-        await setStatus({ connected: false, reason: "server-not-running" });
-        bumpScanBackoff();
-        return;
-      }
-      const ok = await tryConnect(info.port, token);
-      if (ok) {
-        resetScanBackoff();
-        return;
-      }
-      await setStatus({ connected: false, reason: "server-not-found" });
-      bumpScanBackoff();
-      return;
-    }
-
-    // No native host (or an old copy) — legacy full port scan.
-    for (let port = PORT_START; port <= PORT_END; port++) {
-      const ok = await tryConnect(port, token);
-      if (ok) {
-        resetScanBackoff();
-        return;
-      }
-    }
-    await setStatus({ connected: false, reason: "server-not-found" });
-    bumpScanBackoff();
-  } finally {
-    scanning = false;
-  }
+function connectLoop() {
+  if (ws && ws.readyState === WebSocket.OPEN) return Promise.resolve();
+  if (scanPromise) return scanPromise;
+  if (Date.now() < nextScanAt) return Promise.resolve();
+  scanPromise = runScan()
+    .catch(() => {})
+    .finally(() => {
+      scanPromise = null;
+    });
+  return scanPromise;
 }
 
+// For an explicit action (new token, auto-pair): skip the backoff, let any scan
+// still using the old token finish, then connect fresh and wait for the outcome.
+async function reconnectNow() {
+  resetScanBackoff();
+  if (scanPromise) await scanPromise;
+  try { if (ws) ws.close(); } catch {}
+  ws = null;
+  await connectLoop();
+}
+
+// Try each known token on this port. Returns "ok", "bad-token" or "miss".
+async function connectToPort(port, tokens) {
+  let result = "miss";
+  for (const token of tokens) {
+    result = await tryConnect(port, token);
+    if (result === "ok") await chrome.storage.local.set({ token });
+    if (result !== "bad-token") return result;
+  }
+  return result;
+}
+
+async function runScan() {
+  // Ask the native host where the server is. When it answers, we never dial
+  // blind: a dead port dialed = a console error logged, so we only open a
+  // socket to a port it found a live server on.
+  const info = await nativeCall({ cmd: "get-info" });
+  const stored = await getToken();
+  // The host's token first, then any stored or pasted one. Neither overwrites
+  // the other until the server has actually accepted it.
+  const tokens = [...new Set([info && info.token, stored].filter(Boolean).map(String))];
+  if (!tokens.length) {
+    await setStatus({ connected: false, reason: "no-token" });
+    bumpScanBackoff();
+    return;
+  }
+  if (!stored) await chrome.storage.local.set({ token: tokens[0] });
+
+  let result = "miss";
+  const hostKnowsServer = !!(info && info.ok && "alive" in info);
+  if (hostKnowsServer) {
+    if (!info.alive || !info.port) {
+      // Server simply isn't running (it starts with an iframer session).
+      // Don't attempt any connection — zero console noise.
+      await setStatus({ connected: false, reason: "server-not-running" });
+      bumpScanBackoff(HOST_POLL_MAX_MS);
+      return;
+    }
+    result = await connectToPort(info.port, tokens);
+  } else {
+    // No native host (or an old copy) — legacy full port scan.
+    for (let port = PORT_START; port <= PORT_END; port++) {
+      const r = await connectToPort(port, tokens);
+      if (r === "ok") {
+        result = r;
+        break;
+      }
+      // Keep looking after a rejection: another user's server can hold a lower
+      // port on the same machine, with ours further up the window.
+      if (r === "bad-token") result = r;
+    }
+  }
+
+  if (result === "ok") {
+    resetScanBackoff();
+    return;
+  }
+  await setStatus({ connected: false, reason: result === "bad-token" ? "bad-token" : "server-not-found" });
+  bumpScanBackoff(hostKnowsServer ? HOST_POLL_MAX_MS : SCAN_BACKOFF_MAX_MS);
+}
+
+// Resolves "ok" only after the server has accepted the token. An open socket
+// proves nothing: auth happens after it opens.
 function tryConnect(port, token) {
   return new Promise((resolve) => {
     let settled = false;
@@ -230,47 +285,44 @@ function tryConnect(port, token) {
       // goes in a first {type:"auth"} message instead; the server waits for it.
       sock = new WebSocket(`ws://127.0.0.1:${port}/extension/ws`);
     } catch {
-      resolve(false);
+      resolve("miss");
       return;
     }
+    let timer;
     const done = (val) => {
+      clearTimeout(timer);
       if (!settled) {
         settled = true;
         resolve(val);
       }
     };
-    // If it doesn't open quickly, treat this port as a miss.
-    const timer = setTimeout(() => {
-      try { sock.close(); } catch {}
-      done(false);
-    }, 800);
+    const giveUpAfter = (ms) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        try { sock.close(); } catch {}
+        done("miss");
+      }, ms);
+    };
+    giveUpAfter(OPEN_TIMEOUT_MS);
 
     sock.onopen = () => {
-      clearTimeout(timer);
-      ws = sock;
-      currentPort = port;
-      wire(sock);
+      giveUpAfter(AUTH_TIMEOUT_MS);
       try {
         sock.send(JSON.stringify({ type: "auth", token }));
       } catch {}
+    };
+    // The server only sends us anything once the token is accepted.
+    sock.onmessage = (ev) => {
+      ws = sock;
+      currentPort = port;
+      wire(sock);
+      handleMessage(sock, ev.data);
       sendHello(sock);
       setStatus({ connected: true, port, reason: null });
-      done(true);
+      done("ok");
     };
-    sock.onclose = (ev) => {
-      clearTimeout(timer);
-      // 4001 = server is there but rejected our token. Stop scanning; surface it.
-      if (ev.code === 4001) {
-        setStatus({ connected: false, reason: "bad-token" });
-        done(true); // "found" the server, just unauthorized — don't keep scanning
-        return;
-      }
-      done(false);
-    };
-    sock.onerror = () => {
-      clearTimeout(timer);
-      done(false);
-    };
+    sock.onclose = (ev) => done(ev.code === 4001 ? "bad-token" : "miss");
+    sock.onerror = () => done("miss");
   });
 }
 
@@ -561,6 +613,11 @@ chrome.debugger.onDetach.addListener((source, reason) => {
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     if (msg.cmd === "get-state") {
+      // Opening the popup means someone is waiting: retry now, not on the backoff.
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        resetScanBackoff();
+        connectLoop();
+      }
       const { status } = await chrome.storage.local.get("status");
       const { profileId, profileName } = await ensureProfile();
       sendResponse({ ok: true, status: status || { connected: false }, profileId, profileName });
@@ -595,24 +652,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       if (!token) {
         sendResponse({
           ok: false,
-          error: "Pairing host not reachable. Run `iframer install extension` in a terminal, then restart the browser.",
+          error: "Pairing host not reachable. Run `iframer install extension chrome` in a terminal, then try again.",
         });
         return;
       }
       await chrome.storage.local.set({ token });
-      resetScanBackoff();
-      try { if (ws) ws.close(); } catch {}
-      ws = null;
-      await connectLoop();
+      await reconnectNow();
       const { status } = await chrome.storage.local.get("status");
       sendResponse({ ok: true, token, status: status || { connected: false } });
     } else if (msg.cmd === "set-token") {
       await chrome.storage.local.set({ token: msg.token || "" });
       // Force a fresh connection attempt with the new token.
-      resetScanBackoff();
-      try { if (ws) ws.close(); } catch {}
-      ws = null;
-      await connectLoop();
+      await reconnectNow();
       const { status } = await chrome.storage.local.get("status");
       sendResponse({ ok: true, status: status || { connected: false } });
     } else {

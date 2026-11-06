@@ -112,8 +112,8 @@ function isPidAlive(pid) {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (e) {
+    return e.code === "EPERM";
   }
 }
 function readServerInfo() {
@@ -223,8 +223,12 @@ var LocalServerManager = class {
       const child = (0, import_child_process.spawn)(command, args, {
         env,
         stdio: ["ignore", logFd, logFd],
-        detached: true
+        detached: true,
+        // On Windows a detached child otherwise gets its own console window,
+        // and closing that window kills the server.
+        windowsHide: true
       });
+      child.on("error", (e) => console.error(`[iframer] could not start the local server: ${e.message}`));
       child.unref();
       import_fs3.default.closeSync(logFd);
       const deadline = Date.now() + STARTUP_TIMEOUT_MS;

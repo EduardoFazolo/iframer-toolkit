@@ -84,6 +84,7 @@ To update later:
 ```sh
 iframer-toolkit update             # update via npm (also refreshes the extension if installed)
 iframer-toolkit update --check     # just report whether a newer version exists
+iframer-toolkit --version          # print the installed version
 ```
 
 Your agent can also just run `iframer-toolkit install` for you; it figures out the rest.
@@ -176,15 +177,15 @@ Loading it from that exact path matters: it's what lets `iframer update` refresh
 
 ### Pairing (automatic)
 
-Once loaded, the extension pairs itself. The pairing host installed in step 1 hands it the same local token the CLI and MCP already use, straight from `~/.iframer/secret`. Nothing to copy, nothing to type.
+Once loaded, the extension pairs itself on macOS, Linux and Windows. The pairing host installed in step 1 hands it the same local token the CLI and MCP already use, straight from `~/.iframer/secret`. Nothing to copy, nothing to type. The install command also tests the host and starts the local server, and it tells you if either one fails.
 
-If that ever fails (host not installed, or you're on a platform it doesn't support), click the iframer icon in the toolbar and paste the token yourself:
+If auto-pairing ever fails, click the iframer icon in the toolbar and paste the output of this command, in any terminal:
 ```sh
-cat ~/.iframer/secret
+iframer extension token
 ```
 then **Save & connect**.
 
-Either way, check the popup: the dot next to "iframer" turns green once it finds the running local server.
+Either way, check the popup: the dot next to "iframer" turns green only once the running server has accepted the token. If it can't connect, the popup says why and keeps retrying.
 
 You can repeat this whole install on more than one Chrome profile, or in Brave, Edge, or another Chromium-based browser, at the same time. Each one pairs under its own profile name, and iframer routes each task to whichever profile actually has the tab. Once paired, the agent lists your open tabs with the `tabs` tool and drives the one you mean. See [`extension/README.md`](extension/README.md) for how the pipeline and multi-profile routing work under the hood.
 
@@ -253,6 +254,7 @@ Setup:
   install mcp [--dev]              Register MCP server in Claude Code and Codex
   install extension chrome         Install the optional browser extension pairing host
   extension path                   Print the extension folder to load in chrome://extensions
+  extension token                  Print the pairing token (only needed to pair by hand)
   update [--check]                 Update iframer via npm (--check: report only)
   remove [chromium|mcp|extension]  Remove everything, or one piece
 

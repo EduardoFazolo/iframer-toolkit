@@ -63,6 +63,35 @@ export function getLocalToken(): string {
   );
 }
 
+/**
+ * Every token the extension may pair with. The running server can hold an
+ * IFRAMER_SECRET from its environment (baked into the MCP config) that differs
+ * from ~/.iframer/secret if that file was later recreated. The pairing host only
+ * reads the file, so requiring the env value alone would reject it forever.
+ * Both are this user's local secrets, so either one proves the same thing.
+ */
+export function getPairingTokens(): string[] {
+  const tokens = new Set<string>();
+  try {
+    tokens.add(getLocalToken());
+  } catch {
+    // no secret resolvable: the file candidates below are all that's left
+  }
+  const candidates = [
+    path.join(getDataDir(), "secret"),
+    path.join(process.env.XDG_RUNTIME_DIR || os.tmpdir(), "iframer-secret"),
+  ];
+  for (const file of candidates) {
+    try {
+      tokens.add(fs.readFileSync(file, "utf8").trim());
+    } catch {
+      // not present here
+    }
+  }
+  tokens.delete("");
+  return [...tokens];
+}
+
 export function deriveKey(token: string, purpose: string = INFO): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     crypto.hkdf("sha256", token, SALT, purpose, KEY_LENGTH, (err, key) => {

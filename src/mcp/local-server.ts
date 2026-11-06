@@ -123,7 +123,13 @@ export class LocalServerManager {
         env,
         stdio: ["ignore", logFd, logFd],
         detached: true,
+        // On Windows a detached child otherwise gets its own console window,
+        // and closing that window kills the server.
+        windowsHide: true,
       });
+      // A spawn failure (node not on PATH) is reported by the health timeout
+      // below; without a listener it would crash this process instead.
+      child.on("error", (e) => console.error(`[iframer] could not start the local server: ${e.message}`));
       child.unref();
       fs.closeSync(logFd);
 
