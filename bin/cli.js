@@ -1289,6 +1289,128 @@ async function main() {
       break;
     }
 
+    // ─── In-page capture kit (any agent browser, T3 Code first) ─────
+
+    case "kit": {
+      const kit = await import("../src/lib/kit/index.ts");
+      const target = parseFlag(args, "--for") || "t3";
+      if (!kit.KIT_TARGETS.includes(target)) {
+        console.error(`  Unknown --for ${target}. Use one of: ${kit.KIT_TARGETS.join(", ")}`);
+        process.exit(1);
+      }
+      const mode = parseFlag(args, "--mode");
+      if (mode && mode !== "hook" && mode !== "passive") {
+        console.error("  --mode must be hook (default) or passive (no patching, URLs + forms only)");
+        process.exit(1);
+      }
+      const opts = { mode, hostFilter: parseFlag(args, "--host-filter") };
+      if (hasFlag(args, "--print")) {
+        process.stdout.write(kit.kitSource(opts));
+        break;
+      }
+      const outFile = parseFlag(args, "--out");
+      const kitPath = kit.writeKit(opts, outFile ? path.resolve(outFile) : undefined);
+      const client = parseFlag(args, "--client");
+      console.log(kit.kitInstructions(target, kitPath, client ? path.resolve(client) : undefined));
+      break;
+    }
+
+    case "ingest": {
+      const kit = await import("../src/lib/kit/index.ts");
+      const json = hasFlag(args, "--json");
+      let input = args[0] && !args[0].startsWith("--") ? args[0] : undefined;
+      if (!input && hasFlag(args, "--latest")) {
+        input = kit.findLatestCapture();
+        if (!input) {
+          console.error(`  No capture from the last 24h in: ${kit.downloadDirs().join(", ")}`);
+          console.error("  Run window.__ifk.dump() in the page first, or pass the file path.");
+          process.exit(1);
+        }
+      }
+      if (!input) {
+        console.error("  Usage: iframer ingest <capture file | - | --latest>");
+        console.error("    --latest             Newest capture in T3 Code's downloads or ~/Downloads");
+        console.error("    --out <dir>          Output directory (default: ./<host>-api/)");
+        console.error("    --typed              Also write client.d.ts");
+        console.error("    --keep               Keep the capture file (default: deleted after ingest)");
+        console.error("    --no-knowledge       Don't update ~/.iframer/knowledge");
+        console.error("    --json               One-line JSON summary");
+        process.exit(1);
+      }
+      const fromStdin = input === "-";
+      const raw = fromStdin ? fs.readFileSync(0, "utf8") : fs.readFileSync(input, "utf8");
+      const removeInput = () => {
+        if (fromStdin || hasFlag(args, "--keep")) return;
+        try { fs.unlinkSync(input); } catch {}
+      };
+
+      let report;
+      try {
+        report = kit.parseCapture(raw);
+      } catch (e) {
+        console.error(`  ${e.message}`);
+        process.exit(1);
+      }
+
+      const findings = kit.scanCapture(report);
+      if (findings.length) {
+        // Fail closed: the capture held something value-like, so it is not safe to keep around.
+        removeInput();
+        if (json) console.log(JSON.stringify({ ok: false, error: "privacy", findings }));
+        else {
+          console.error(`  Refused: ${findings.length} value(s) look like secrets or personal data.`);
+          for (const f of findings.slice(0, 10)) console.error(`    ${f.kind}: ${f.sample} at ${f.where}`);
+          console.error(hasFlag(args, "--keep") ? `  File kept: ${input}` : "  The capture file was deleted. Nothing was written.");
+        }
+        process.exit(2);
+      }
+
+      const map = kit.buildApiMap(report);
+      const host = new URL(report.origin).host;
+      const outDir = path.resolve(parseFlag(args, "--out") || `./${host.replace(/[^a-z0-9.-]/gi, "_")}-api`);
+      fs.mkdirSync(outDir, { recursive: true });
+      const written = [];
+      const write = (name, body) => { const p = path.join(outDir, name); fs.writeFileSync(p, body); written.push(p); };
+      write("api.json", JSON.stringify(map, null, 2) + "\n");
+      write("client.js", kit.renderClient(map));
+      if (hasFlag(args, "--typed")) write("client.d.ts", kit.renderTypes(map));
+
+      if (!hasFlag(args, "--no-knowledge")) {
+        const { mergeKnowledge } = await import("../src/lib/knowledge.ts");
+        const authHeaders = [...new Set(map.endpoints.flatMap((e) => e.authHeaders))];
+        const c = report.coverage;
+        mergeKnowledge(host, {
+          lastMode: `kit-${report.kit?.mode || "hook"}`,
+          browserRequired: true,
+          auth: { type: authHeaders.length ? "session cookies + headers" : "session cookies", headers: authHeaders.length ? authHeaders : undefined },
+          endpoints: map.endpoints.map((e) => ({
+            method: e.method,
+            path: e.origin === map.origin ? e.path : `${e.origin}${e.path}`,
+            description: kit.describeEndpoint(e),
+            example: e.origin === map.origin ? `window.__ifk.call(${JSON.stringify(e.method)}, ${JSON.stringify(e.path)})` : undefined,
+            firstSeen: report.capturedAt,
+          })),
+          notes: [
+            `In-page capture: ${c.seen} seen, ${c.withPayload} with payload, ${c.pathOnly} path only. Not complete: ${c.blindSpots.join(", ")}.`,
+            "Replay in the page (window.__ifk.call): HttpOnly cookies never leave the browser.",
+          ],
+        });
+      }
+      removeInput();
+
+      const c = report.coverage;
+      if (json) {
+        console.log(JSON.stringify({ ok: true, origin: report.origin, endpoints: map.endpoints.length, coverage: { seen: c.seen, withPayload: c.withPayload, pathOnly: c.pathOnly }, files: written, inputDeleted: !fromStdin && !hasFlag(args, "--keep") }));
+      } else {
+        console.log(`  ${report.origin}: ${map.endpoints.length} endpoints (${c.withPayload} with payload, ${c.pathOnly} path only). Not complete.`);
+        for (const e of map.endpoints.slice(0, 40)) console.log(`    ${e.method.padEnd(6)} ${e.origin === map.origin ? e.path : e.origin + e.path}  -> ${e.functionName}`);
+        if (map.endpoints.length > 40) console.log(`    … ${map.endpoints.length - 40} more in api.json`);
+        console.log(`  Wrote: ${written.join(", ")}`);
+        if (!fromStdin && !hasFlag(args, "--keep")) console.log("  Capture file deleted.");
+      }
+      break;
+    }
+
     // ─── Install MCP ─────────────────────────────────────────────────
 
     case "install-mcp": {
@@ -1593,6 +1715,20 @@ async function main() {
       --output <dir>                Save directory
       --typed                       Generate TypeScript
       --mode <mode>                 Browser mode
+
+  Capture in a browser iframer doesn't control (T3 Code, Playwright MCP, ...):
+    kit                             Write the in-page kit, print the agent steps
+      --for <t3|playwright-mcp|any> Which browser tool's steps to print (default: t3)
+      --mode passive                No patching: URLs + forms only (for sites that detect it)
+      --host-filter <regex>         Only record matching hosts
+      --client <path>               Also print steps to load a generated client.js
+      --print                       Print the kit source instead (for tools without upload)
+    ingest <file|-|--latest>        Turn a capture into api.json + client.js + knowledge
+      --typed                       Also write client.d.ts
+      --out <dir>                   Output directory (default: ./<host>-api/)
+      --keep                        Keep the capture file (default: deleted)
+      --no-knowledge                Don't update ~/.iframer/knowledge
+      --json                        One-line JSON summary
 
   Session:
     session stop                    Save state + close idle browsers on the shared daemon

@@ -166,6 +166,24 @@ execute: steps: [{ type: "click", selector: "@e3" }, { type: "screenshot" }]
 
 The more interactions (scroll, click tabs, navigate sub-pages), the more API calls get captured. Results feed into the knowledge cache automatically.
 
+### Reverse-engineer inside a browser iframer doesn't control (T3 Code, Playwright MCP, ...)
+
+When you already drive a browser through your own tools (a T3 Code preview tab, Playwright MCP, Chrome DevTools MCP), don't launch iframer's browser: load the in-page kit into that tab. It records the page's own calls on the user's real session and exports shapes, never values. Use the CLI for this, not the MCP tools.
+
+```
+1. iframer kit --for t3          # or --for playwright-mcp / --for any. Prints the exact tool calls.
+2. Follow the printed install steps (upload the kit file, stash it, top-level eval). Never paste the kit's source.
+3. Drive the site with your normal tools. After EVERY full page load: eval(sessionStorage.__ifk)
+4. window.__ifk.dump(), then: iframer ingest --latest --typed
+   -> ./<host>-api/api.json, client.js, client.d.ts, plus the knowledge cache. The capture file is deleted.
+```
+
+- Replays run IN the page: `window.__ifk.call('GET','/path')`, or load the generated `client.js` (`iframer kit --for t3 --client ./<host>-api/client.js` prints the steps). HttpOnly cookies never leave the browser, so curl replays fail.
+- Writes need `{approved:true}`: ask the user first. Replays stop for good on 403, 429 or a captcha page. Do not retry or work around it.
+- Sites that detect tampering: `iframer kit --mode passive` (no patching; URLs and form posts only).
+- Report coverage as the kit states it. It is never complete: workers, redirect hops and cross-origin iframes are invisible.
+- `ingest` refuses (exit 2) if anything value-like slipped into the capture. Don't edit the file to force it through; tell the user what was found.
+
 ### Handle captchas
 
 Captcha handling depends on the browser mode:

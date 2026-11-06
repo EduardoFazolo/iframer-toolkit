@@ -313,6 +313,23 @@ iframer-toolkit --clear-cache               # wipe all cached knowledge
 iframer-toolkit --clear-cache figma.com     # wipe one domain
 ```
 
+## Bring your own browser: T3 Code and other agent browsers
+
+If your agent already has a browser (a T3 Code preview tab, Playwright MCP, Chrome DevTools MCP), iframer can reverse engineer the site inside it, on the session you're already logged into, without launching anything.
+
+```bash
+iframer kit --for t3            # writes ~/.iframer/kit/iframer-kit.js, prints the agent's tool calls
+# agent: upload the kit into the tab, eval it, use the site, then window.__ifk.dump()
+iframer ingest --latest --typed # finds the capture in T3's downloads -> ./<host>-api/
+```
+
+- **Small for the agent:** the kit and the capture move as files, so neither lands in the agent's context. On the 40-endpoint test site, the whole install-capture-export round was about 550 tokens of tool calls.
+- **Shapes, not values:** paths are templated (`/users/{id}`), bodies and responses become type shapes, headers become names. `ingest` scans the result and refuses it if anything looks like a token, email or phone number.
+- **Output:** `api.json` (endpoint map with coverage), `client.js` (in-page client over `window.__ifk.call`), `client.d.ts` with `--typed`, and the domain's knowledge file.
+- **Replay stays in the page:** HttpOnly cookies are invisible to page JS, so generated calls run through the tab. Same-origin only, GET unless approved, 50 calls per session, and a hard stop on 403, 429 or a captcha page.
+- **Not complete:** worker requests, redirect hops, cross-origin iframes and Set-Cookie are invisible to the kit, and every report says so.
+- **Other tools:** `--for playwright-mcp` or `--for any`. Tools without file upload can evaluate `iframer kit --print` instead, which costs about 17 KB per page load.
+
 ## Captcha solving
 
 iframer can try to solve reCAPTCHA and hCaptcha with Claude's vision API, in any browser mode. Treat it as best effort: it fails on many challenges, and when someone is at the screen it's more reliable to have them solve it in a `binary-headful` window. To try it, use the `solve-captcha` step in a pipeline:
