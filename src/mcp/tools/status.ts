@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { localApiGet, apiGet, isDockerRunning, err, getErrorMessage } from "../helpers";
+import { localApiGet, err, getErrorMessage } from "../helpers";
 import { DomainModeStore } from "../../lib/domain-modes";
 
 export function registerStatusTool(server: McpServer) {
@@ -10,10 +10,6 @@ export function registerStatusTool(server: McpServer) {
     async () => {
       try {
         const status: Record<string, unknown> = {};
-
-        // Docker health
-        const dockerRunning = await isDockerRunning();
-        status.dockerApi = dockerRunning;
 
         // Local server health + modes
         try {
@@ -37,16 +33,6 @@ export function registerStatusTool(server: McpServer) {
           const inst = await localApiGet<{ ok: boolean; instances?: unknown[] }>("/instances");
           if (inst.instances && inst.instances.length) status.liveInstances = inst.instances;
         } catch {}
-
-        // Docker session (if running)
-        if (dockerRunning) {
-          try {
-            const sessionData = await apiGet<{ active?: boolean; noVncUrl?: string }>("/interactive/status");
-            status.dockerSession = sessionData.active
-              ? { active: true, noVncUrl: sessionData.noVncUrl }
-              : { active: false };
-          } catch {}
-        }
 
         // Credentials from local store
         try {

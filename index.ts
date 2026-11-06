@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import { getScreenshotDir } from "./src/lib/paths";
 import { registerRoutes, iframer } from "./src/api/routes";
 import { tokenAuth } from "./src/api/middleware";
 import { errorHandler } from "./src/api/error-handler";
@@ -9,7 +10,7 @@ import { writeServerInfo, clearServerInfo, reapOrphanBrowsers } from "./src/lib/
 import { extensionBridge } from "./src/lib/extension/bridge";
 
 const app = express();
-const PORT = parseInt(process.env.PORT || "3021", 10);
+const PORT = parseInt(process.env.PORT || "3022", 10);
 const REAP_INTERVAL_MS = 60_000;
 const IDLE_EXIT_MS = parseInt(process.env.IFRAMER_SERVER_IDLE_EXIT_MS || String(30 * 60 * 1000), 10);
 const SHUTDOWN_DEADLINE_MS = 10_000;
@@ -27,8 +28,8 @@ const OWN_VERSION = (() => {
   return undefined;
 })();
 
-const SCREENSHOT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), ".screenshots");
-fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+const SCREENSHOT_DIR = getScreenshotDir();
+fs.mkdirSync(SCREENSHOT_DIR, { recursive: true, mode: 0o700 });
 app.use("/screenshots", express.static(SCREENSHOT_DIR));
 
 app.use(express.json());

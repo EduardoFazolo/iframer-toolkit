@@ -182,7 +182,7 @@ async function runNoPasswordBranch(
     `login: no visible password or email field on ${currentUrl} after 5000ms${indicatorStr}. ` +
     `Page title: "${pageDiag.title}". ` +
     `The site may be showing a bot-detection wall, captcha, or an unsupported login flow. ` +
-    `Retry with a stronger browser mode (binary-headful or docker-headful).`
+    `Retry with a stronger browser mode (binary-headful).`
   );
 }
 

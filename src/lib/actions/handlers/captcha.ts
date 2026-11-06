@@ -84,7 +84,20 @@ export async function recaptchaAnswer(page: Page, step: Step<"recaptcha-answer">
 }
 
 export async function solveCaptcha(page: Page, _step: Step<"solve-captcha">, _ctx: unknown, monitor?: StaleStateMonitor): Promise<CaptchaSolveResult> {
+  const startTime = Date.now();
   await page.waitForTimeout(TIMING.CAPTCHA_DETECT_WAIT);
+
+  // `navigate` auto-solves captchas and solving usually submits the form, so
+  // finding none here is normal. It must not turn a solved page into a failure.
+  const widget = await page
+    .waitForSelector(
+      'iframe[src*="recaptcha/api2/anchor"], iframe[src*="recaptcha/enterprise/anchor"], iframe[title*="reCAPTCHA"], iframe[src*="hcaptcha.com"], iframe[title*="hCaptcha"]',
+      { timeout: 5_000 },
+    )
+    .catch(() => null);
+  if (!widget) {
+    return { solved: false, noCaptcha: true, rounds: 0, durationMs: Date.now() - startTime, reason: "No captcha on this page" };
+  }
 
   const isHCaptcha = await page.evaluate(() => {
     const iframes = Array.from(document.querySelectorAll('iframe'));
@@ -102,7 +115,12 @@ export async function solveCaptcha(page: Page, _step: Step<"solve-captcha">, _ct
 
   log.info(`detected: ${isHCaptcha ? 'hCaptcha' : 'reCAPTCHA'}`);
 
-  return isHCaptcha
+  const result = isHCaptcha
     ? await solveHCaptcha(page, monitor)
     : await solveRecaptcha(page, monitor);
+
+  if (!result.solved) {
+    throw new Error(`Captcha not solved after ${result.rounds} round(s): ${result.reason ?? "unknown reason"}`);
+  }
+  return result;
 }

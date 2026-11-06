@@ -2,7 +2,7 @@ import type { Page } from "patchright";
 
 // ─── Browser Modes ─────────────────────────────────────────────────
 
-export type BrowserMode = "headless" | "binary-headful" | "docker-headful" | "extension";
+export type BrowserMode = "headless" | "binary-headful" | "extension";
 
 // ─── Pipeline Step Types ────────────────────────────────────────────
 
@@ -260,12 +260,6 @@ export interface FetchResult {
   error?: string;
 }
 
-export interface SessionStartOptions {
-  url?: string;
-  headers?: Record<string, string>;
-  locale?: string;
-}
-
 export interface SessionStopResult {
   ok: boolean;
   sessionSaved: boolean;
@@ -295,7 +289,6 @@ export interface IframerConfig {
   staleTimeoutMs?: number;        // Default: 20_000
   sessionTimeoutMs?: number;      // Default: 300_000
   dataDir?: string;               // Default: ~/.iframer — file-based storage path
-  mode?: "docker" | "local";      // Default: auto-detect
 }
 
 // ─── Mode Availability ─────────────────────────────────────────────
@@ -308,7 +301,6 @@ export interface ModeStatus {
 export interface ModeAvailability {
   headless: ModeStatus;
   "binary-headful": ModeStatus;
-  "docker-headful": ModeStatus;
 }
 
 // ─── Domain Mode Memory ────────────────────────────────────────────
@@ -375,8 +367,7 @@ export interface ExecutionContext {
    *  Origin-scoped, so calling injectStorage is idempotent across navigations. */
   sessionData?: import("./session/persistence").SessionData;
   /** Runtime callback to request a one-time code (email/SMS/app OTP) from the
-   *  user via the MCP client. Only wired up on the local execution path —
-   *  Docker mode has no way to elicit back to the MCP client mid-pipeline. */
+   *  user via the MCP client. */
   elicitOtp?: (domain: string) => Promise<string | null>;
   /** Set when driving the user's real Chrome through the extension relay,
    *  which drops Cmd/Ctrl modifiers on synthetic key events. */

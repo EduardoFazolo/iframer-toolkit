@@ -7,8 +7,8 @@ export interface AuthRequest extends Request {
 }
 
 // Canonical user identity — MUST match LOCAL_USER in src/mcp/helpers.ts and
-// LOCAL_USER_ID in bin/cli.js so the Docker API, CLI, and MCP all read and
-// write the same credential / session rows in the shared SQLite file.
+// LOCAL_USER_ID in bin/cli.js so the server, CLI, and MCP all read and write
+// the same credential / session rows in the shared SQLite file.
 const CANONICAL_USER = "iframer-local";
 
 export function tokenAuth(req: Request, res: Response, next: NextFunction): void {

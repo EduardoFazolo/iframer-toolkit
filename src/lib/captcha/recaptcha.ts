@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import type Anthropic from "@anthropic-ai/sdk";
 import type { Page } from "patchright";
 import {
   clickRecaptchaCheckbox,
@@ -10,13 +10,13 @@ import {
 } from "../browser/humanize";
 import type { StaleStateMonitor } from "../stale-monitor";
 import { TIMING, CAPTCHA_GRID } from "../constants";
+import { askVision, CaptchaApiError, getCaptchaClient } from "./vision";
 import { createLogger } from "../logger";
 
 const log = createLogger("captcha-solver");
 const MAX_ROUNDS = 8;
 const MAX_DURATION_MS = 45_000;
 const TILE_SETTLE_MS = TIMING.TILE_SETTLE;
-const MODEL = "claude-haiku-4-5-20251001";
 
 export interface SolveResult {
   solved: boolean;
@@ -24,12 +24,8 @@ export interface SolveResult {
   durationMs: number;
   submitted?: boolean;
   reason?: string;
-}
-
-function getClient(): Anthropic {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set — required for captcha auto-solve");
-  return new Anthropic({ apiKey });
+  /** The page has no captcha widget, e.g. `navigate` already solved it. */
+  noCaptcha?: boolean;
 }
 
 function extractTarget(prompt: string): string {
@@ -114,46 +110,40 @@ async function classifyTiles(
   rows: number,
   cols: number
 ): Promise<number[]> {
+  // One failed call fails the whole batch: a tile with no answer isn't a "no".
   const results = await Promise.all(
     tiles.map(async (tile) => {
       const tileRow = Math.floor(tile.index / cols) + 1;
       const tileCol = (tile.index % cols) + 1;
 
-      try {
-        const response = await client.messages.create({
-          model: MODEL,
-          max_tokens: 10,
-          messages: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "image",
-                  source: { type: "base64", media_type: "image/jpeg", data: fullGridBase64 },
-                },
-                {
-                  type: "image",
-                  source: { type: "base64", media_type: "image/jpeg", data: tile.imageBase64 },
-                },
-                {
-                  type: "text",
-                  text: `Image 1 is a full picture divided into a ${rows}x${cols} grid. Image 2 is the tile at row ${tileRow}, column ${tileCol} of that grid.
+      const answer = await askVision(client, {
+        max_tokens: 256,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: { type: "base64", media_type: "image/jpeg", data: fullGridBase64 },
+              },
+              {
+                type: "image",
+                source: { type: "base64", media_type: "image/jpeg", data: tile.imageBase64 },
+              },
+              {
+                type: "text",
+                text: `Image 1 is a full picture divided into a ${rows}x${cols} grid. Image 2 is the tile at row ${tileRow}, column ${tileCol} of that grid.
 
 Does this tile contain a ${target}? Reply ONLY "yes" or "no".`,
-                },
-              ],
-            },
-          ],
-        });
+              },
+            ],
+          },
+        ],
+      });
 
-        const answer = ((response.content[0] as { type: string; text?: string }).text ?? "").toLowerCase().trim();
-        const match = answer.startsWith("yes");
-        if (match) log.debug(`tile ${tile.index} (r${tileRow}c${tileCol}): YES`);
-        return { index: tile.index, match };
-      } catch (err: unknown) {
-        log.error(`tile ${tile.index} classification failed: ${err instanceof Error ? err.message : String(err)}`);
-        return { index: tile.index, match: false };
-      }
+      const match = answer.toLowerCase().startsWith("yes");
+      if (match) log.debug(`tile ${tile.index} (r${tileRow}c${tileCol}): YES`);
+      return { index: tile.index, match };
     })
   );
 
@@ -193,100 +183,107 @@ async function submitForm(page: Page): Promise<boolean> {
 
 export async function solveRecaptcha(page: Page, monitor?: StaleStateMonitor): Promise<SolveResult> {
   const startTime = Date.now();
-  const client = getClient();
+  const client = getCaptchaClient();
   let rounds = 0;
 
-  const checkboxResult = await clickRecaptchaCheckbox(page);
-  if (checkboxResult.solved) {
-    const submitted = await submitForm(page);
-    return { solved: true, rounds: 0, durationMs: Date.now() - startTime, submitted };
-  }
-
-  if (!checkboxResult.challengeInfo) {
-    return { solved: false, rounds: 0, durationMs: Date.now() - startTime, reason: "No challenge appeared after clicking checkbox" };
-  }
-
-  let challengeInfo: ChallengeInfo | null = checkboxResult.challengeInfo;
-
-  while (rounds < MAX_ROUNDS) {
-    if (Date.now() - startTime > MAX_DURATION_MS) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Timeout exceeded" };
+  try {
+    const checkboxResult = await clickRecaptchaCheckbox(page);
+    if (checkboxResult.solved) {
+      const submitted = await submitForm(page);
+      return { solved: true, rounds: 0, durationMs: Date.now() - startTime, submitted };
     }
 
-    rounds++;
-    monitor?.reportActivity();
-    if (!challengeInfo) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge info lost" };
-    }
-    const target = extractTarget(challengeInfo.prompt);
-    log.info(`Round ${rounds}: looking for "${target}" in ${challengeInfo.rows}x${challengeInfo.cols} grid`);
-
-    const [fullGridImage, tileImages] = await Promise.all([
-      screenshotFullGrid(page, challengeInfo),
-      screenshotTiles(page, challengeInfo),
-    ]);
-
-    if (!fullGridImage || tileImages.length === 0) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Failed to screenshot challenge" };
+    if (!checkboxResult.challengeInfo) {
+      return { solved: false, rounds: 0, durationMs: Date.now() - startTime, reason: "No challenge appeared after clicking checkbox" };
     }
 
-    monitor?.reportActivity();
-    const matchingIndices = await classifyTiles(
-      client, fullGridImage, tileImages, target,
-      challengeInfo.rows, challengeInfo.cols
-    );
+    let challengeInfo: ChallengeInfo | null = checkboxResult.challengeInfo;
 
-    log.info(`Round ${rounds}: matched tiles [${matchingIndices.join(", ")}]`);
-    monitor?.reportActivity();
+    while (rounds < MAX_ROUNDS) {
+      if (Date.now() - startTime > MAX_DURATION_MS) {
+        return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Timeout exceeded" };
+      }
 
-    if (matchingIndices.length > 0) {
-      await clickChallengeTiles(page, matchingIndices);
+      rounds++;
+      monitor?.reportActivity();
+      if (!challengeInfo) {
+        return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge info lost" };
+      }
+      const target = extractTarget(challengeInfo.prompt);
+      log.info(`Round ${rounds}: looking for "${target}" in ${challengeInfo.rows}x${challengeInfo.cols} grid`);
 
-      const isDynamic = challengeInfo.prompt.toLowerCase().includes("none left");
-      if (isDynamic) {
-        await new Promise((r) => setTimeout(r, TILE_SETTLE_MS));
+      const [fullGridImage, tileImages] = await Promise.all([
+        screenshotFullGrid(page, challengeInfo),
+        screenshotTiles(page, challengeInfo),
+      ]);
 
-        const newInfo = await getChallengeInfo(page);
-        if (newInfo) {
-          const [newFullGrid, newTiles] = await Promise.all([
-            screenshotFullGrid(page, newInfo),
-            screenshotTiles(page, newInfo),
-          ]);
+      if (!fullGridImage || tileImages.length === 0) {
+        return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Failed to screenshot challenge" };
+      }
 
-          if (newFullGrid && newTiles.length > 0) {
-            const replacedTiles = newTiles.filter((t) => matchingIndices.includes(t.index));
-            if (replacedTiles.length > 0) {
-              monitor?.reportActivity();
-              const newMatches = await classifyTiles(
-                client, newFullGrid, replacedTiles, target,
-                newInfo.rows, newInfo.cols
-              );
-              if (newMatches.length > 0) {
-                log.info(`Round ${rounds}: dynamic tiles matched [${newMatches.join(", ")}]`);
-                await clickChallengeTiles(page, newMatches);
-                await new Promise((r) => setTimeout(r, TILE_SETTLE_MS));
+      monitor?.reportActivity();
+      const matchingIndices = await classifyTiles(
+        client, fullGridImage, tileImages, target,
+        challengeInfo.rows, challengeInfo.cols
+      );
+
+      log.info(`Round ${rounds}: matched tiles [${matchingIndices.join(", ")}]`);
+      monitor?.reportActivity();
+
+      if (matchingIndices.length > 0) {
+        await clickChallengeTiles(page, matchingIndices);
+
+        const isDynamic = challengeInfo.prompt.toLowerCase().includes("none left");
+        if (isDynamic) {
+          await new Promise((r) => setTimeout(r, TILE_SETTLE_MS));
+
+          const newInfo = await getChallengeInfo(page);
+          if (newInfo) {
+            const [newFullGrid, newTiles] = await Promise.all([
+              screenshotFullGrid(page, newInfo),
+              screenshotTiles(page, newInfo),
+            ]);
+
+            if (newFullGrid && newTiles.length > 0) {
+              const replacedTiles = newTiles.filter((t) => matchingIndices.includes(t.index));
+              if (replacedTiles.length > 0) {
+                monitor?.reportActivity();
+                const newMatches = await classifyTiles(
+                  client, newFullGrid, replacedTiles, target,
+                  newInfo.rows, newInfo.cols
+                );
+                if (newMatches.length > 0) {
+                  log.info(`Round ${rounds}: dynamic tiles matched [${newMatches.join(", ")}]`);
+                  await clickChallengeTiles(page, newMatches);
+                  await new Promise((r) => setTimeout(r, TILE_SETTLE_MS));
+                }
               }
             }
           }
         }
       }
+
+      const verifyResult = await clickChallengeVerify(page);
+      monitor?.reportActivity();
+      if (verifyResult.solved) {
+        log.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
+        const submitted = await submitForm(page);
+        return { solved: true, rounds, durationMs: Date.now() - startTime, submitted };
+      }
+
+      challengeInfo = verifyResult.challengeInfo || null;
+      if (!challengeInfo) {
+        return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge disappeared after verify" };
+      }
+
+      log.info(`Round ${rounds}: not solved, new challenge appeared`);
     }
 
-    const verifyResult = await clickChallengeVerify(page);
-    monitor?.reportActivity();
-    if (verifyResult.solved) {
-      log.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
-      const submitted = await submitForm(page);
-      return { solved: true, rounds, durationMs: Date.now() - startTime, submitted };
+    return { solved: false, rounds, durationMs: Date.now() - startTime, reason: `Max rounds (${MAX_ROUNDS}) exceeded` };
+  } catch (err: unknown) {
+    if (err instanceof CaptchaApiError) {
+      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: err.message };
     }
-
-    challengeInfo = verifyResult.challengeInfo || null;
-    if (!challengeInfo) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge disappeared after verify" };
-    }
-
-    log.info(`Round ${rounds}: not solved, new challenge appeared`);
+    throw err;
   }
-
-  return { solved: false, rounds, durationMs: Date.now() - startTime, reason: `Max rounds (${MAX_ROUNDS}) exceeded` };
 }

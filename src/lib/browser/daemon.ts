@@ -68,10 +68,6 @@ export class BrowserDaemon {
   }
 
   async ensure(mode: BrowserMode, instanceId: string = DEFAULT_INSTANCE, sessionProfile: string = instanceId): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
-    if (mode === "docker-headful") {
-      throw new Error("Docker mode doesn't use the daemon. Use the Docker API.");
-    }
-
     const key = keyOf(mode, instanceId);
     let instance = this.instances.get(key);
 

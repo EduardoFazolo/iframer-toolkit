@@ -39,9 +39,6 @@
   },
   "scripts": {
     "start": "bun run index.ts",
-    "start:docker": "docker compose up --build -d",
-    "stop:docker": "docker compose down",
-    "logs:docker": "docker compose logs -f api",
     "test:smoke": "node tests/smoke.js",
     "mcp:install": "node bin/cli.js install-mcp",
     "mcp:remove": "node bin/cli.js remove-mcp",
@@ -56,7 +53,6 @@
     "@anthropic-ai/sdk": "^0.80.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.8.0",
-    "fingerprint-generator": "^2.1.81",
     "patchright": "^1.58.2",
     "playwright-core": "^1.58.0",
     "ws": "^8.18.0",

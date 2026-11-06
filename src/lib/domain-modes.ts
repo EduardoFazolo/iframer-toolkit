@@ -9,7 +9,7 @@ function defaultFile(): string {
   return path.join(getDataDir(), "domain-modes.json");
 }
 const TTL_DAYS = 14;
-const ESCALATION_LADDER: BrowserMode[] = ["headless", "docker-headful", "binary-headful"];
+const ESCALATION_LADDER: BrowserMode[] = ["headless", "binary-headful"];
 
 export class DomainModeStore {
   private data: Record<string, DomainModeEntry> = {};

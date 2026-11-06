@@ -23,40 +23,16 @@ def _shot_name(engine, target_id, run):
 
 
 # --------------------------------------------------------------------------- iframer
-DOCKER_ENV = {
-    "IFRAMER_MODE": "docker",
-    "IFRAMER_URL": os.environ.get("BENCH_DOCKER_URL", "http://localhost:3121"),
-    "IFRAMER_SECRET": os.environ.get("BENCH_DOCKER_SECRET", "benchmark-iframer-secret"),
-}
-
-
-FORWARDER_JS = ("const n=require('net');n.createServer(s=>{const c=n.connect(3021,'127.0.0.1');s.pipe(c).pipe(s);"
-                "s.on('error',()=>c.destroy());c.on('error',()=>s.destroy())}).listen(3022,'0.0.0.0')")
-
-
-def docker_reset(container="benchmark-iframer-api"):
-    """The container's daemon wedges now and then (session stop never returns, chrome pids pile up).
-    Restart it and re-arm the loopback forwarder (index.ts binds 127.0.0.1 only)."""
-    subprocess.run(["docker", "restart", container], capture_output=True, timeout=120)
-    time.sleep(6)
-    subprocess.run(["docker", "exec", "-d", container, "node", "-e", FORWARDER_JS], capture_output=True, timeout=30)
-    time.sleep(2)
-
-
-def _sess(cmd, envp, to, env):
+def _sess(cmd, to):
     try:
-        subprocess.run(["iframer", "session", cmd], capture_output=True, timeout=to, env=envp)
+        subprocess.run(["iframer", "session", cmd], capture_output=True, timeout=to)
         return True
     except subprocess.TimeoutExpired:
-        if env:
-            docker_reset()
         return False
 
 
-def run_iframer(target, mode, run, read_js=READ_JS, timeout_s=150, env=None):
-    """mode: None (auto-escalate), 'headless', 'binary-headful', 'docker-headful'.
-    env: extra environment, e.g. DOCKER_ENV to route the CLI at the benchmark container."""
-    envp = dict(os.environ, **(env or {}))
+def run_iframer(target, mode, run, read_js=READ_JS, timeout_s=150):
+    """mode: None (auto-escalate), 'headless', 'binary-headful'."""
     steps = [{"type": "navigate", "url": target["url"]}, {"type": "wait", "ms": target["wait"]}]
     for js in target.get("triggers", []):
         steps.append({"type": "evaluate", "expression": js})
@@ -68,16 +44,14 @@ def run_iframer(target, mode, run, read_js=READ_JS, timeout_s=150, env=None):
     # fresh browser + fresh cookies every run: no warm instance from the previous config,
     # no cf_clearance carried from run 1 to run 2. (Same cold start camoufox pays.)
     meta0 = {}
-    if not _sess("stop", envp, 45, env):
-        meta0["reset"] = "container restarted: session stop hung"
-    _sess("clear", envp, 30, env)
+    if not _sess("stop", 45):
+        meta0["reset"] = "session stop hung"
+    _sess("clear", 30)
     t0 = time.time()
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s, env=envp)
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
     except subprocess.TimeoutExpired:
-        if env:
-            docker_reset()
-        return {"ok": False, "data": None, "error": f"CLI timeout {timeout_s}s", "wall_s": round(time.time() - t0, 1), "meta": dict(meta0, reset="container restarted: execute hung")}
+        return {"ok": False, "data": None, "error": f"CLI timeout {timeout_s}s", "wall_s": round(time.time() - t0, 1), "meta": meta0}
     wall = round(time.time() - t0, 1)
     out = p.stdout.strip()
     try:
@@ -88,7 +62,7 @@ def run_iframer(target, mode, run, read_js=READ_JS, timeout_s=150, env=None):
     shot = (j.get("finalState") or {}).get("screenshotUrl")
     if shot:
         try:
-            dst = _shot_name(f"iframer-{'docker-' if env else ''}{mode or 'auto'}", target["id"], run)
+            dst = _shot_name(f"iframer-{mode or 'auto'}", target["id"], run)
             if shot.startswith("http"):
                 urllib.request.urlretrieve(shot, dst)
             elif shot.startswith("file://"):
@@ -216,9 +190,6 @@ def run_camoufox_docker(target, headless, run, read_js=READ_JS):
 
 
 CONFIGS = {
-    "iframer-docker-headful":  lambda t, r, js: run_iframer(t, "docker-headful", r, js, env=DOCKER_ENV),
-    "iframer-docker-headless": lambda t, r, js: run_iframer(t, "headless", r, js, env=DOCKER_ENV),
-    "iframer-docker-auto":     lambda t, r, js: run_iframer(t, None, r, js, env=DOCKER_ENV),
     "camoufox-docker-headless": lambda t, r, js: run_camoufox_docker(t, True, r, js),
     "camoufox-docker-virtual":  lambda t, r, js: run_camoufox_docker(t, "virtual", r, js),
     "camofox-docker":  lambda t, r, js: run_camofox(t, r, js, base=os.environ.get("BENCH_CAMOFOX_DOCKER_URL", "http://localhost:9378")),

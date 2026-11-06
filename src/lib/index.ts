@@ -10,7 +10,6 @@ export type {
   ObstacleEncounter,
   FetchRequest,
   FetchResult,
-  SessionStartOptions,
   SessionStopResult,
   CredentialInput,
   Credential,

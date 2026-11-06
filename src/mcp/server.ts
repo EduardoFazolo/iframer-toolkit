@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { BASE_URL } from "./helpers";
 import { registerStatusTool } from "./tools/status";
 import { registerBrowseTool } from "./tools/browse";
 import { registerExecuteTool } from "./tools/execute";
@@ -16,21 +15,7 @@ import { recordCall, recordDefinitions, contentChars, safeJsonLen } from "./tele
 
 // ─── Instructions ───────────────────────────────────────────────────
 
-const IS_DEV = process.env.IFRAMER_URL?.includes("localhost") || process.env.IFRAMER_URL?.includes("127.0.0.1");
-
-const INSTRUCTIONS = IS_DEV
-  ? `iframer-dev — local development instance of iframer (connects to ${BASE_URL}).
-
-CRITICAL RULES:
-1. NEVER ask the user "do you have credentials?". Call credentials action=list and read the response.
-2. NEVER ask the user for passwords in chat. Use credentials action=store (secure form) or the CLI fallback.
-3. DO NOT present options when you can just act. Check credentials, execute, show results.
-4. If execute fails, read the error. It tells you exactly what happened and where.
-5. Call "session" action=stop when done to save session state.
-
-CAPTCHA: Use the "solve-captcha" step — auto-detects reCAPTCHA/hCaptcha and solves with vision AI.
-REVERSE ENGINEERING: Use the "reverse-engineer" tool when the user asks to capture/map APIs.`
-  : `iframer — browser access for AI agents when normal methods fail.
+const INSTRUCTIONS = `iframer — browser access for AI agents when normal methods fail.
 
 CRITICAL RULES:
 1. NEVER ask "do you have credentials?". Call credentials action=list and read the response.
@@ -47,7 +32,7 @@ If headless detects Imperva or Akamai, immediately stop headless and pivot to he
 
 BROWSER MODES: Don't specify options.mode — iframer auto-selects and auto-escalates (headless → binary-headful). Only set a mode if the user explicitly asks.
 
-CAPTCHA: In binary-headful mode, ask the user to solve it in the visible window. In docker-headful mode, use the "solve-captcha" step.
+CAPTCHA: In binary-headful mode, ask the user to solve it in the visible window. Otherwise try the "solve-captcha" step (best effort, needs ANTHROPIC_API_KEY).
 
 REVERSE ENGINEERING: Use the "reverse-engineer" tool when the user asks to capture/map/save API endpoints.`;
 

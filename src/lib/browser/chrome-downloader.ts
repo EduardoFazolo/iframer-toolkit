@@ -134,13 +134,6 @@ export function findChrome(): string | null {
             "/usr/bin/google-chrome",
             "/usr/bin/chromium-browser",
             "/usr/bin/chromium",
-            // Playwright/Patchright installed browsers (Docker containers)
-            ...(() => {
-              try {
-                const dirs = fs.readdirSync("/ms-playwright").filter(d => d.startsWith("chromium-")).sort().reverse();
-                return dirs.map(d => path.join("/ms-playwright", d, "chrome-linux", "chrome"));
-              } catch { return []; }
-            })(),
           ]
         : [
             "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",

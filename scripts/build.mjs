@@ -24,7 +24,6 @@ const shared = {
     "better-sqlite3",
     "bun:sqlite",
     "patchright",
-    "fingerprint-generator",
     "@anthropic-ai/sdk",
     "@modelcontextprotocol/sdk",
     "zod",

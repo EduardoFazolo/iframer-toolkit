@@ -32,6 +32,8 @@ function safePageUrl(page: Page): string {
 
 function classifyError(err: Error, step: PipelineStep): ErrorContext["errorType"] {
   if (err instanceof StaleStateError) return "stale-state";
+  // Before the message checks: a reason like "Timeout exceeded" is still a failed solve.
+  if (step.type === "solve-captcha") return "captcha-unsolvable";
   const msg = err.message.toLowerCase();
   // A login step that can't find a password field in a headless-type context
   // almost always means the site detected the headless browser and is
@@ -43,7 +45,6 @@ function classifyError(err: Error, step: PipelineStep): ErrorContext["errorType"
   if (msg.includes("timeout") || msg.includes("timed out")) return "timeout";
   if (msg.includes("not found") || msg.includes("no element") || msg.includes("waiting for selector")) return "element-not-found";
   if (msg.includes("navigation") || msg.includes("net::err")) return "navigation-failed";
-  if (step.type === "solve-captcha") return "captcha-unsolvable";
   return "action-failed";
 }
 
@@ -107,7 +108,7 @@ function getSuggestion(errorType: ErrorContext["errorType"], step: PipelineStep,
     case "navigation-failed":
       return "Navigation failed. The URL may be unreachable, blocked, or require authentication.";
     case "captcha-unsolvable":
-      return "Automatic reCAPTCHA solving failed. The challenge may require human intervention.";
+      return "Automatic captcha solving failed. Ask a person to solve it in a binary-headful window, then continue from the same page.";
     case "timeout":
       return "Operation timed out. The page may be slow or the element may not appear.";
     default:

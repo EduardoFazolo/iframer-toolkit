@@ -3,7 +3,7 @@ import { z } from "zod";
 import path from "path";
 import fs from "fs";
 import type { CapturedApi } from "../../lib/types";
-import { localApiPost, localApiGet, localApiDelete, apiPost, isDockerRunning, err, getErrorMessage, localServer } from "../helpers";
+import { localApiPost, localApiGet, localApiDelete, err, getErrorMessage, localServer } from "../helpers";
 import { formatCapturedApi } from "./reverse-engineer";
 import { getDataDir } from "../../lib/paths";
 
@@ -85,14 +85,6 @@ stop: save cookies/localStorage and close the browser — ALWAYS call when brows
               parts.push(`Local restart failed: ${e instanceof Error ? e.message : String(e)}`);
             }
           }
-
-          // Also restart Docker browser if available
-          try {
-            if (await isDockerRunning()) {
-              await apiPost("/browser/restart");
-              parts.push("Docker browser restarted.");
-            }
-          } catch {}
 
           parts.push("Credentials and knowledge cache are untouched. Next execute launches a fresh browser.");
           return { content: [{ type: "text" as const, text: parts.join(" ") }] };

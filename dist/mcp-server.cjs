@@ -208,7 +208,6 @@ var LocalServerManager = class {
       const env = {
         ...process.env,
         PORT: String(port),
-        IFRAMER_MODE: "local",
         IFRAMER_DATA_DIR: dataDir
       };
       if (process.env.IFRAMER_SECRET) {
@@ -378,9 +377,7 @@ function getErrorMessage(err2) {
 
 // src/mcp/helpers.ts
 var log2 = createLogger("mcp");
-var BASE_URL = process.env.IFRAMER_URL || "http://localhost:3021";
 var IFRAMER_SECRET = process.env.IFRAMER_SECRET;
-var IFRAMER_MODE = process.env.IFRAMER_MODE;
 var LOCAL_TOKEN = getLocalToken();
 var localServer = new LocalServerManager();
 async function ensureLocalServer() {
@@ -391,19 +388,6 @@ function authHeaders(secret) {
   const key = secret || IFRAMER_SECRET;
   if (key) headers["x-api-key"] = key;
   return headers;
-}
-async function apiPost(endpoint, body) {
-  const res = await fetch(`${BASE_URL}${endpoint}`, {
-    method: "POST",
-    headers: authHeaders(),
-    body: body ? JSON.stringify(body) : void 0,
-    signal: AbortSignal.timeout(18e4)
-  });
-  return res.json();
-}
-async function apiGet(endpoint) {
-  const res = await fetch(`${BASE_URL}${endpoint}`, { headers: authHeaders(), signal: AbortSignal.timeout(3e4) });
-  return res.json();
 }
 async function localApiPost(endpoint, body, timeoutMs = 18e4) {
   await ensureLocalServer();
@@ -428,15 +412,6 @@ async function localApiDelete(endpoint) {
   const res = await fetch(`${url}${endpoint}`, { method: "DELETE", headers: authHeaders(LOCAL_TOKEN), signal: AbortSignal.timeout(3e4) });
   return res.json();
 }
-async function isDockerRunning() {
-  try {
-    const res = await fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3e3) });
-    const data = await res.json();
-    return data.ok === true;
-  } catch {
-    return false;
-  }
-}
 async function resolveScreenshotPath(url) {
   try {
     if (url.startsWith("file://")) {
@@ -452,7 +427,7 @@ async function resolveScreenshotPath(url) {
     const fs10 = await import("fs");
     const dir = import_path5.default.join(import_os3.default.tmpdir(), "iframer-screenshots", "screenshots");
     fs10.mkdirSync(dir, { recursive: true });
-    const filePath = import_path5.default.join(dir, `docker-${Date.now()}.jpg`);
+    const filePath = import_path5.default.join(dir, `screenshot-${Date.now()}.jpg`);
     fs10.writeFileSync(filePath, buf);
     return filePath;
   } catch {
@@ -471,7 +446,7 @@ function defaultFile() {
   return import_path6.default.join(getDataDir(), "domain-modes.json");
 }
 var TTL_DAYS = 14;
-var ESCALATION_LADDER = ["headless", "docker-headful", "binary-headful"];
+var ESCALATION_LADDER = ["headless", "binary-headful"];
 var DomainModeStore = class {
   data = {};
   filePath;
@@ -576,8 +551,6 @@ function registerStatusTool(server2) {
     async () => {
       try {
         const status = {};
-        const dockerRunning = await isDockerRunning();
-        status.dockerApi = dockerRunning;
         try {
           const localHealth = await localApiGet("/health");
           status.localServer = localHealth.ok;
@@ -594,13 +567,6 @@ function registerStatusTool(server2) {
           const inst = await localApiGet("/instances");
           if (inst.instances && inst.instances.length) status.liveInstances = inst.instances;
         } catch {
-        }
-        if (dockerRunning) {
-          try {
-            const sessionData = await apiGet("/interactive/status");
-            status.dockerSession = sessionData.active ? { active: true, noVncUrl: sessionData.noVncUrl } : { active: false };
-          } catch {
-          }
         }
         try {
           const credData = await localApiGet("/credentials");
@@ -710,8 +676,8 @@ A captcha is blocking this run. Use the "recaptcha" step with an action:
   {type:"recaptcha", action:"click"}               \u2192 click the "I'm not a robot" checkbox
   {type:"recaptcha", action:"answer", tiles:[...]} \u2192 select tiles + verify + re-check (handles refreshing grids)
   {type:"recaptcha", action:"select"|"verify"}     \u2192 manual tile-select / submit, if you need finer control
-  {type:"recaptcha", action:"solve"}               \u2192 automatic vision solve (docker-headful)
-Or {type:"solve-captcha"} for one-shot auto-detect + solve.
+  {type:"recaptcha", action:"solve"}               \u2192 automatic vision solve (needs ANTHROPIC_API_KEY)
+Or {type:"solve-captcha"} for one-shot auto-detect + solve (needs ANTHROPIC_API_KEY).
 In binary-headful mode, prefer asking the user to solve it in the visible window.`;
 function captchaBlocked(data) {
   if (data.error?.errorType === "captcha-unsolvable") return true;
@@ -844,7 +810,7 @@ Returns: ok, completedSteps, output for snapshot/find/read/extract steps, obstac
         continueOnObstacle: import_zod3.z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
         continueOnError: import_zod3.z.boolean().optional().describe("Continue past failing steps (default: false)"),
         captureApi: import_zod3.z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes. Also surfaces every HTTP >= 400 response per step \u2014 turn it on when a form submit fails with only a vague on-page message, to read the server's real answer."),
-        mode: import_zod3.z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("DO NOT SET unless the user explicitly requests a mode \u2014 iframer auto-selects and auto-escalates. 'extension' drives a real-Chrome tab (requires options.tabId from the `tabs` tool)."),
+        mode: import_zod3.z.enum(["headless", "binary-headful", "extension"]).optional().describe("DO NOT SET unless the user explicitly requests a mode \u2014 iframer auto-selects and auto-escalates. 'extension' drives a real-Chrome tab (requires options.tabId from the `tabs` tool)."),
         autoEscalate: import_zod3.z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)"),
         instanceId: import_zod3.z.string().optional().describe("Named parallel browser (default 'default') \u2014 distinct ids drive several browsers at once, each with its own session state."),
         tabId: import_zod3.z.number().optional().describe("mode='extension': the real-Chrome tab id to drive (from the `tabs` tool)."),
@@ -854,6 +820,13 @@ Returns: ok, completedSteps, output for snapshot/find/read/extract steps, obstac
     },
     async (params) => {
       try {
+        let runWithMode2 = function(mode) {
+          return localApiPost("/execute", {
+            steps,
+            options: { ...params.options, mode: mode || void 0 }
+          });
+        };
+        var runWithMode = runWithMode2;
         const steps = normalizeSteps(params.steps);
         if (params.options?.mode === "extension") {
           const tabId = params.options?.tabId;
@@ -877,43 +850,9 @@ Returns: ok, completedSteps, output for snapshot/find/read/extract steps, obstac
           if (!extResult.ok) return { content: content2, isError: true };
           return { content: content2 };
         }
-        const dockerRunning = await isDockerRunning();
-        async function runWithMode(mode) {
-          if (mode === "docker-headful") {
-            if (!dockerRunning) {
-              return {
-                ok: false,
-                completedSteps: 0,
-                totalSteps: steps.length,
-                results: [],
-                finalState: { url: "", title: "" },
-                obstacles: [],
-                durationMs: 0,
-                modeUsed: "docker-headful",
-                error: {
-                  failedAtStep: 0,
-                  failedStep: steps[0],
-                  errorType: "action-failed",
-                  message: "docker-headful mode was requested but the Docker API is not reachable.",
-                  pageState: { url: "", title: "" },
-                  suggestion: "Start Docker with `bun run start:docker`, or omit options.mode.",
-                  retryable: false
-                }
-              };
-            }
-            return apiPost("/execute", {
-              steps,
-              options: { ...params.options, mode: "docker-headful", autoEscalate: false }
-            });
-          }
-          return localApiPost("/execute", {
-            steps,
-            options: { ...params.options, mode: mode || void 0 }
-          });
-        }
         let execResult;
         try {
-          execResult = await runWithMode(params.options?.mode);
+          execResult = await runWithMode2(params.options?.mode);
         } catch (execErr) {
           const msg = execErr instanceof Error ? execErr.message : String(execErr);
           const isCrash = /ECONNREFUSED|ECONNRESET|EPIPE|socket hang up|fetch failed/i.test(msg);
@@ -924,7 +863,7 @@ Returns: ok, completedSteps, output for snapshot/find/read/extract steps, obstac
             } catch {
             }
             try {
-              execResult = await runWithMode(params.options?.mode);
+              execResult = await runWithMode2(params.options?.mode);
             } catch (retryErr) {
               return err(
                 `Browser server crashed and retry also failed.
@@ -940,14 +879,8 @@ Call \`session restart\` to reset, then retry.`
         }
         const requestedMode = params.options?.mode;
         if (!execResult.ok && execResult.error?.errorType === "bot-blocked" && params.options?.autoEscalate !== false && !requestedMode) {
-          const escalation = ["docker-headful", "binary-headful"];
-          for (const nextMode of escalation) {
-            if (nextMode === "docker-headful" && !dockerRunning) continue;
-            log2.info(`Auto-escalating to ${nextMode}`);
-            execResult = await runWithMode(nextMode);
-            if (execResult.ok) break;
-            if (execResult.error?.errorType !== "bot-blocked") break;
-          }
+          log2.info("Auto-escalating to binary-headful");
+          execResult = await runWithMode2("binary-headful");
         }
         const lines = formatExecuteResult(execResult);
         let screenshotUrl = null;
@@ -995,7 +928,7 @@ During capture, drive the site like a user (open the inbox, send a message\u2026
         staleTimeoutMs: import_zod4.z.number().optional().describe("Override the 20s stale-state timeout per step"),
         continueOnObstacle: import_zod4.z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
         continueOnError: import_zod4.z.boolean().optional().describe("Continue past failing steps (default: false)"),
-        mode: import_zod4.z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("Mode override. 'extension' captures a tab already open in the user's real Chrome (requires options.tabId from `tabs`)."),
+        mode: import_zod4.z.enum(["headless", "binary-headful", "extension"]).optional().describe("Mode override. 'extension' captures a tab already open in the user's real Chrome (requires options.tabId from `tabs`)."),
         tabId: import_zod4.z.number().optional().describe("mode='extension': the real-Chrome tab id (from `tabs`)."),
         clientId: import_zod4.z.string().optional().describe("mode='extension': owning profile's clientId when the tab is ambiguous.")
       }).optional()
@@ -1008,7 +941,6 @@ During capture, drive the site like a user (open the inbox, send a message\u2026
           options: { ...params.options, captureApi: true }
         };
         const mode = params.options?.mode;
-        const dockerRunning = await isDockerRunning();
         let captureResult;
         if (mode === "extension") {
           if (typeof params.options?.tabId !== "number") {
@@ -1020,8 +952,6 @@ During capture, drive the site like a user (open the inbox, send a message\u2026
             steps,
             options: { ...params.options, captureApi: true }
           });
-        } else if (mode === "docker-headful" && dockerRunning) {
-          captureResult = await apiPost("/execute", execParams);
         } else {
           captureResult = await localApiPost("/execute", execParams);
         }
@@ -1256,13 +1186,6 @@ stop: save cookies/localStorage and close the browser \u2014 ALWAYS call when br
             } catch (e) {
               parts.push(`Local restart failed: ${e instanceof Error ? e.message : String(e)}`);
             }
-          }
-          try {
-            if (await isDockerRunning()) {
-              await apiPost("/browser/restart");
-              parts.push("Docker browser restarted.");
-            }
-          } catch {
           }
           parts.push("Credentials and knowledge cache are untouched. Next execute launches a fresh browser.");
           return { content: [{ type: "text", text: parts.join(" ") }] };
@@ -2095,18 +2018,7 @@ function safeJsonLen(v) {
 }
 
 // src/mcp/server.ts
-var IS_DEV = process.env.IFRAMER_URL?.includes("localhost") || process.env.IFRAMER_URL?.includes("127.0.0.1");
-var INSTRUCTIONS = IS_DEV ? `iframer-dev \u2014 local development instance of iframer (connects to ${BASE_URL}).
-
-CRITICAL RULES:
-1. NEVER ask the user "do you have credentials?". Call credentials action=list and read the response.
-2. NEVER ask the user for passwords in chat. Use credentials action=store (secure form) or the CLI fallback.
-3. DO NOT present options when you can just act. Check credentials, execute, show results.
-4. If execute fails, read the error. It tells you exactly what happened and where.
-5. Call "session" action=stop when done to save session state.
-
-CAPTCHA: Use the "solve-captcha" step \u2014 auto-detects reCAPTCHA/hCaptcha and solves with vision AI.
-REVERSE ENGINEERING: Use the "reverse-engineer" tool when the user asks to capture/map APIs.` : `iframer \u2014 browser access for AI agents when normal methods fail.
+var INSTRUCTIONS = `iframer \u2014 browser access for AI agents when normal methods fail.
 
 CRITICAL RULES:
 1. NEVER ask "do you have credentials?". Call credentials action=list and read the response.
@@ -2123,7 +2035,7 @@ If headless detects Imperva or Akamai, immediately stop headless and pivot to he
 
 BROWSER MODES: Don't specify options.mode \u2014 iframer auto-selects and auto-escalates (headless \u2192 binary-headful). Only set a mode if the user explicitly asks.
 
-CAPTCHA: In binary-headful mode, ask the user to solve it in the visible window. In docker-headful mode, use the "solve-captcha" step.
+CAPTCHA: In binary-headful mode, ask the user to solve it in the visible window. Otherwise try the "solve-captcha" step (best effort, needs ANTHROPIC_API_KEY).
 
 REVERSE ENGINEERING: Use the "reverse-engineer" tool when the user asks to capture/map/save API endpoints.`;
 var server = new import_mcp.McpServer(

@@ -16,7 +16,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const srv = spawn("bun", ["run", "index.ts"], {
   cwd: repo,
-  env: { ...process.env, PORT: String(PORT), IFRAMER_SECRET: SECRET, IFRAMER_MODE: "local", IFRAMER_DATA_DIR: DATA_DIR },
+  env: { ...process.env, PORT: String(PORT), IFRAMER_SECRET: SECRET, IFRAMER_DATA_DIR: DATA_DIR },
   stdio: ["ignore", "pipe", "pipe"],
 });
 srv.stdout.on("data", (d) => process.stdout.write(`[srv] ${d}`));

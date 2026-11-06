@@ -134,10 +134,6 @@ export const TIMEOUTS = {
   TAB_BLANK_RESOLVE: 3_000,
 } as const;
 
-// ─── Chrome Version ────────────────────────────────────────────────
-
-export const CHROME_MIN_VERSION = 130;
-
 // ─── AI Model ──────────────────────────────────────────────────────
 
 export const CAPTCHA_SOLVER_MODEL = "claude-haiku-4-5-20251001";

@@ -6,9 +6,7 @@ import { LocalServerManager } from "./local-server";
 
 export const log = createLogger("mcp");
 
-export const BASE_URL = process.env.IFRAMER_URL || "http://localhost:3021";
 export const IFRAMER_SECRET = process.env.IFRAMER_SECRET;
-export const IFRAMER_MODE = process.env.IFRAMER_MODE;
 
 // Shared user identity — MUST match LOCAL_USER_ID in bin/cli.js and
 // CANONICAL_USER in src/api/middleware.ts.
@@ -32,29 +30,6 @@ function authHeaders(secret?: string): Record<string, string> {
   const key = secret || IFRAMER_SECRET;
   if (key) headers["x-api-key"] = key;
   return headers;
-}
-
-/** POST to the Docker server at BASE_URL (:3021). */
-export async function apiPost<T = Record<string, unknown>>(endpoint: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${BASE_URL}${endpoint}`, {
-    method: "POST",
-    headers: authHeaders(),
-    body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(180_000),
-  });
-  return res.json() as Promise<T>;
-}
-
-/** GET from the Docker server at BASE_URL (:3021). */
-export async function apiGet<T = Record<string, unknown>>(endpoint: string): Promise<T> {
-  const res = await fetch(`${BASE_URL}${endpoint}`, { headers: authHeaders(), signal: AbortSignal.timeout(30_000) });
-  return res.json() as Promise<T>;
-}
-
-/** DELETE on the Docker server at BASE_URL (:3021). */
-export async function apiDelete<T = Record<string, unknown>>(endpoint: string): Promise<T> {
-  const res = await fetch(`${BASE_URL}${endpoint}`, { method: "DELETE", headers: authHeaders(), signal: AbortSignal.timeout(30_000) });
-  return res.json() as Promise<T>;
 }
 
 /** POST to the local background server (:3022). `timeoutMs` overrides the
@@ -88,18 +63,6 @@ export async function localApiDelete<T = Record<string, unknown>>(endpoint: stri
   return res.json() as Promise<T>;
 }
 
-// ─── Docker detection ───────────────────────────────────────────────
-
-export async function isDockerRunning(): Promise<boolean> {
-  try {
-    const res = await fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3000) });
-    const data = await res.json() as { ok?: boolean };
-    return data.ok === true;
-  } catch {
-    return false;
-  }
-}
-
 // ─── Screenshot resolution ──────────────────────────────────────────
 
 /**
@@ -115,14 +78,14 @@ export async function resolveScreenshotPath(url: string): Promise<string | null>
       if (fs.existsSync(filePath)) return filePath;
       return null;
     }
-    // Docker/HTTP URL: download to temp file
+    // HTTP URL (the server's /screenshots route): download to a temp file
     const res = await fetch(url);
     if (!res.ok) return null;
     const buf = Buffer.from(await res.arrayBuffer());
     const fs = await import("fs");
     const dir = path.join(os.tmpdir(), "iframer-screenshots", "screenshots");
     fs.mkdirSync(dir, { recursive: true });
-    const filePath = path.join(dir, `docker-${Date.now()}.jpg`);
+    const filePath = path.join(dir, `screenshot-${Date.now()}.jpg`);
     fs.writeFileSync(filePath, buf);
     return filePath;
   } catch {

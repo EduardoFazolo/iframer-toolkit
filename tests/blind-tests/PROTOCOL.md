@@ -179,6 +179,8 @@ Header of every results file (first line of the narrative): date, iframer versio
 
 ## 10. Docker sitting, what it took (2026-09-18)
 
+iframer's own Docker mode was removed on 2026-11-05, so the `iframer-docker` configs in this document can't be re-run. This section and the saved results stay as the dated record. The camoufox and camofox containers still work.
+
 Containers, all prefixed `benchmark-iframer-`, images built from `docker/`:
 - `benchmark-iframer-api`: the repo Dockerfile, host port 3121 -> container 3022 (see trap 1), VNC 6180-6184, data dir `~/.iframer-benchmark`, secret `benchmark-iframer-secret`, run with `--init` (see trap 2). Host CLI reaches it with `IFRAMER_MODE=docker IFRAMER_URL=http://localhost:3121 IFRAMER_SECRET=...`.
 - `benchmark-iframer-camoufox`: python camoufox + Xvfb, driven by `docker exec ... camoufox_worker.py`.

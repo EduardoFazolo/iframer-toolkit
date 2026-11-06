@@ -5,14 +5,13 @@ import { HeadedRequiredError, protectionHooks, PROTECTED_INTERVAL_MS } from "../
 // NOTE: this WS transport requires the server to run under node, not bun.
 import { chromium as cdpChromium } from "playwright-core";
 import type { Page as PatchrightPage } from "patchright";
-import type { Pipeline, PipelineResult, BrowserMode, SessionStartOptions } from "../types";
+import type { Pipeline, PipelineResult, BrowserMode } from "../types";
 import type { StorageBackend } from "../storage";
 import type { SessionData } from "../session/persistence";
 import type { RefStore } from "./ref-store";
 import { BrowserDaemon, DEFAULT_INSTANCE } from "../browser/daemon";
 import { DomainModeStore } from "../domain-modes";
 import { PipelineRunner } from "../pipeline";
-import * as sessionManager from "../browser/session-manager";
 import { deriveKey, encrypt, decrypt } from "../auth/crypto";
 import { extractSession, injectCookies } from "../session/persistence";
 import { detectBlock } from "../block-detection";
@@ -56,7 +55,6 @@ export interface PipelineExecutorDeps {
   domainModes: DomainModeStore;
   refStore: RefStore;
   availableModes: () => BrowserMode[];
-  startSession: (userId: string, token: string, options: SessionStartOptions) => Promise<{ noVncUrl: string; wsPort: number }>;
 }
 
 /**
@@ -176,9 +174,7 @@ export class PipelineExecutor {
       if (nextMode) {
         log.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
 
-        if (failedMode !== "docker-headful") {
-          await this.deps.daemon.stopMode(failedMode, instanceId);
-        }
+        await this.deps.daemon.stopMode(failedMode, instanceId);
 
         result = await this.executeWithMode(userId, token, pipeline, nextMode, instanceId);
         result.modeEscalated = true;
@@ -192,9 +188,7 @@ export class PipelineExecutor {
           const thirdMode = this.deps.domainModes.getNextMode(nextMode, availableModes);
           if (thirdMode) {
             log.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
-            if (nextMode !== "docker-headful") {
-              await this.deps.daemon.stopMode(nextMode, instanceId);
-            }
+            await this.deps.daemon.stopMode(nextMode, instanceId);
             result = await this.executeWithMode(userId, token, pipeline, thirdMode, instanceId);
             result.modeEscalated = true;
             result.modeUsed = thirdMode;
@@ -213,9 +207,6 @@ export class PipelineExecutor {
   }
 
   private async executeWithMode(userId: string, token: string, pipeline: Pipeline, mode: BrowserMode, instanceId: string = DEFAULT_INSTANCE, respectful = false): Promise<PipelineResult> {
-    if (mode === "docker-headful") {
-      return this.executeDocker(userId, token, pipeline, respectful);
-    }
     return this.executeLocal(userId, token, pipeline, mode, instanceId, respectful);
   }
 
@@ -351,47 +342,6 @@ export class PipelineExecutor {
     }
   }
 
-  /** Execute via Docker session-manager. */
-  private async executeDocker(userId: string, token: string, pipeline: Pipeline, respectful = false): Promise<PipelineResult> {
-    let session = sessionManager.getSession(userId);
-    if (!session) {
-      const firstNav = pipeline.steps.find((s) => s.type === "navigate");
-      await this.deps.startSession(userId, token, firstNav ? { url: firstNav.url } : {});
-      session = sessionManager.getSession(userId)!;
-    }
-
-    sessionManager.resetTimeout(userId);
-
-    const ctx = this.deps.refStore.makeContext(userId, token);
-    const runner = new PipelineRunner(ctx, protectionHooks(false, respectful));
-    const result = await runner.run(session.page, pipeline);
-
-    if (result.ok) {
-      const blockResult = await detectBlock(session.page);
-      if (blockResult.blocked) {
-        const pageState = await capturePageState(session.page, ctx, { screenshot: true, namePrefix: "block" });
-        return {
-          ...result,
-          ok: false,
-          modeUsed: "docker-headful",
-          error: {
-            failedAtStep: result.completedSteps - 1,
-            failedStep: pipeline.steps[result.completedSteps - 1],
-            errorType: "bot-blocked",
-            message: `Page blocked by bot detection: ${blockResult.reason}`,
-            pageState,
-            suggestion: "The page is blocked by bot detection. Try a different browser mode.",
-            retryable: true,
-          },
-        };
-      }
-    }
-
-    this.deps.refStore.sync(userId, ctx);
-    result.modeUsed = "docker-headful";
-    return result;
-  }
-
   /** Execute via local Chrome daemon (headless + binary-headful). */
   private async executeLocal(userId: string, token: string, pipeline: Pipeline, mode: BrowserMode, instanceId: string = DEFAULT_INSTANCE, respectful = false): Promise<PipelineResult> {
     const startTime = Date.now();
@@ -431,7 +381,7 @@ export class PipelineExecutor {
         acquired = false;
         await this.deps.daemon.stopMode(mode, instanceId);
         const available = this.deps.availableModes();
-        const headed = available.includes("binary-headful") ? "binary-headful" : "docker-headful";
+        const headed: BrowserMode = "binary-headful";
         if (!available.includes(headed)) throw new Error("A headed browser is required but unavailable.");
         await new Promise(resolve => setTimeout(resolve, PROTECTED_INTERVAL_MS));
         const index = err.stepIndex;
@@ -471,7 +421,7 @@ export class PipelineExecutor {
               errorType: "bot-blocked",
               message: `Page blocked by bot detection: ${blockResult.reason}`,
               pageState,
-              suggestion: `The page was blocked in ${mode} mode. ${mode === "headless" ? "Try docker-headful mode." : mode === "docker-headful" ? "Try binary-headful mode." : "All modes exhausted."}`,
+              suggestion: `The page was blocked in ${mode} mode. ${mode === "headless" ? "Try binary-headful mode." : "All modes exhausted."}`,
               retryable: true,
             },
           };

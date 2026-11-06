@@ -93,7 +93,6 @@ Ships as:
 - **CLI** (`iframer-toolkit` / `iframer`): browse, screenshot, credentials, sessions, reverse-engineer APIs
 - **MCP server**: plugs into Claude Code or Codex so agents drive the browser themselves
 - **Browser extension** (optional): lets the agent drive tabs in your real Chrome, on your real logged-in session
-- **Self-hosted Docker server** (optional): adds live headful browsing over noVNC for remote or multi-user setups
 
 ## Quick start
 
@@ -128,19 +127,17 @@ Claude / Codex (MCP) ──▶ iframer MCP server ──▶ shared local server 
                                                       and per-domain knowledge cache
 ```
 
-By default, `install mcp` runs in **local mode**, no Docker needed. Both the MCP clients and the `iframer execute` CLI talk to one shared local server (discovered via `~/.iframer/server.json`, loopback only) that keeps a stealth-patched Chromium warm between calls, tracks every browser it spawns in an on-disk PID registry so nothing leaks, and idle-exits when no one needs it. `install mcp` registers the server in both Claude Code (`~/.claude.json`) and Codex (`~/.codex/config.toml`).
+Everything runs on your machine. Both the MCP clients and the `iframer execute` CLI talk to one shared local server (discovered via `~/.iframer/server.json`, loopback only) that keeps a stealth-patched Chromium warm between calls, tracks every browser it spawns in an on-disk PID registry so nothing leaks, and idle-exits when no one needs it. `install mcp` registers the server in both Claude Code (`~/.claude.json`) and Codex (`~/.codex/config.toml`).
 
 **Warm CLI.** `iframer execute` routes to that shared daemon instead of launching a cold browser per invocation, so after the first call it's as fast as the MCP (pass `--in-process` to force a private throwaway browser). Each agent gets its own browser instance, keyed off `CLAUDE_CODE_SESSION_ID` / `TERM_SESSION_ID` or `IFRAMER_INSTANCE`, so concurrent agents never share a window, while all CLI calls share one login session.
 
 **Resuming a task.** The browser and its page persist in the daemon between calls and survive an interrupt (Ctrl-C). Name a multi-step or human-in-the-loop task's browser with a stable `instanceId`, and to resume, run `execute` again with the same `instanceId` and act on the current page (`snapshot` / `read` / `find`). Don't navigate again; that reloads the page and loses state like an OTP screen. `iframer instances` lists the live windows and which page each is on.
 
-**One credential store for every browser mode.** Stored credentials, session cookies/localStorage, and the knowledge cache all live in one SQLite file at `~/.iframer/iframer.db`. Store a password once, from the CLI or the MCP, and every mode (`headless`, `binary-headful`, `docker-headful`) uses the same row.
+**One credential store for every browser mode.** Stored credentials, session cookies/localStorage, and the knowledge cache all live in one SQLite file at `~/.iframer/iframer.db`. Store a password once, from the CLI or the MCP, and every mode (`headless`, `binary-headful`) uses the same row.
 
-**Auto-escalation.** When a pipeline is blocked in `headless` (bot detection, captcha), iframer retries in `binary-headful` and then `docker-headful` without a round trip to the agent. The mode that worked is recorded in `~/.iframer/domain-modes.json`, so the next run on that domain starts at the right mode.
+**Auto-escalation.** When a pipeline is blocked in `headless` (bot detection, captcha), iframer retries in `binary-headful` without a round trip to the agent. The mode that worked is recorded in `~/.iframer/domain-modes.json`, so the next run on that domain starts at the right mode.
 
 **Knowledge cache.** After every successful run, iframer writes a per-domain markdown file at `~/.iframer/knowledge/<domain>.md` recording which cookies, localStorage keys, and headers the site uses for auth, plus any API endpoints seen along the way. The next time an agent needs data from that domain, it reads the cache first; if there's a direct-API path, it skips the browser entirely. See [Knowledge cache](#knowledge-cache) below.
-
-For live remote viewing, multi-user, or Linux server deployments, see [Self-hosting with Docker](#self-hosting-with-docker) below.
 
 ## Extension mode: drive your real Chrome
 
@@ -196,7 +193,7 @@ iframer-toolkit <command> [args]
 
 Pipeline:
   execute <pipeline.json|json>     Run a pipeline of browser steps
-    --mode <mode>                  Force browser mode (headless|binary-headful|docker-headful)
+    --mode <mode>                  Force browser mode (headless|binary-headful)
     --capture-api                  Record XHR/fetch requests during execution
     --continue-on-error            Don't stop on step failure
     --timeout <ms>                 Stale-state timeout (default: 20000)
@@ -212,7 +209,6 @@ Quick actions:
   screenshot <url>                 Take a screenshot of a URL
     --mode <mode>                  Browser mode (default: headless)
     --annotate                     Overlay element badges with refs
-    -o, --output <path>            Output file path
   reverse-engineer <url|file>      Capture API calls a site makes
     --output <dir>                 Save directory
     --typed                        Generate TypeScript
@@ -261,13 +257,6 @@ Setup:
 Browser:
   modes                            Show available browser modes
   status                            Show system status
-
-Docker (interactive):
-  interactive <url>                Open a live headful browser session (Docker only)
-  interactive stop                 Stop the Docker session
-  interactive status               Check the Docker session
-  watch                            Auto-open noVNC when a session starts
-  act <action> [args...]           Send an action to the Docker session
 ```
 
 The binary is available as either `iframer-toolkit` (full name) or `iframer` (short alias). `npx iframer-toolkit ...` also works without a global install.
@@ -326,68 +315,26 @@ iframer-toolkit --clear-cache figma.com     # wipe one domain
 
 ## Captcha solving
 
-iframer detects and solves reCAPTCHA and hCaptcha using Claude's vision API. Use the `solve-captcha` step in a pipeline:
+iframer can try to solve reCAPTCHA and hCaptcha with Claude's vision API, in any browser mode. Treat it as best effort: it fails on many challenges, and when someone is at the screen it's more reliable to have them solve it in a `binary-headful` window. To try it, use the `solve-captcha` step in a pipeline:
 
 ```json
 { "type": "solve-captcha" }
 ```
 
-Requires `ANTHROPIC_API_KEY` in your environment.
+Requires `ANTHROPIC_API_KEY` in the environment that starts the iframer server: your shell for the CLI, or the `env` block of your MCP config. If the server is already running, stop it first so it picks up the key. With a key set, `navigate` also tries automatically when it lands on a captcha, and each attempt uses API credit.
+
+If it can't solve the captcha, the run fails with `captcha-unsolvable` and the reason.
 
 ## Environment variables
 
 | Variable            | Required | Description |
 |---------------------|----------|-------------|
 | `ANTHROPIC_API_KEY` | For captcha | Used for vision-based captcha solving |
+| `IFRAMER_CAPTCHA_MODEL` | No | Claude model the solver uses (default: `claude-haiku-4-5-20251001`). |
 | `IFRAMER_SECRET`    | No       | Encryption key for sessions & credentials. Defaults to the value at `~/.iframer/secret` (auto-generated on first `install mcp`). Override in the shell or in `.env` to pin a specific key. |
 | `IFRAMER_TELEMETRY` | No       | Set to `0` in the MCP env to disable the local token-telemetry log (`iframer telemetry` reads it). |
 | `IFRAMER_LOCAL_PORT`| No       | Base port for the shared local server (default: `3022`, loopback only). |
-| `IFRAMER_DATA_DIR`  | No       | Override the data directory. Default: `~/.iframer`. The Docker container sets this to `/iframer-data` so a bind mount makes host and container share one database. |
-| `IFRAMER_MODE`      | No       | `local` (default) or `docker`. Force a mode regardless of what's running. |
-| `IFRAMER_URL`       | No       | Docker API URL when self-hosting (default: `http://localhost:3021`). |
-
-## Self-hosting with Docker
-
-The Docker server adds a live headful browsing mode over noVNC (watch the agent drive the browser in real time) and lets multiple clients share one browser pool. The Docker path only runs when a pipeline explicitly requests `mode: "docker-headful"`; `headless` and `binary-headful` always run directly on the host even when Docker is up, so host-stored credentials stay visible.
-
-`docker-compose.yml` bind-mounts `~/.iframer` from the host into the container as `/iframer-data` and sets `IFRAMER_DATA_DIR=/iframer-data`, so container and host share the same SQLite file. Credentials stored via the CLI or MCP on the host are immediately visible to `docker-headful`, no copy step.
-
-**1. Clone and configure**
-
-```sh
-git clone https://github.com/EduardoFazolo/iframer-toolkit.git
-cd iframer-toolkit
-cp .env.example .env
-# Edit .env: set ANTHROPIC_API_KEY (for captcha) and IFRAMER_SECRET (for auth)
-```
-
-**2. Start**
-
-```sh
-bun run start:docker   # docker compose up --build -d
-bun run logs:docker    # tail container logs
-bun run stop:docker    # stop containers
-```
-
-**3. Point the MCP at it (remote host only)**
-
-If Docker runs on a remote machine and the MCP on a different one, install the MCP with the remote URL:
-
-```sh
-IFRAMER_URL=https://your-host:3021 iframer-toolkit install mcp --dev
-```
-
-When Docker is on the same host as the MCP, no extra setup is needed; the local MCP server auto-detects the Docker API on `localhost:3021` and routes only `docker-headful` requests through it.
-
-**4. Watch the browser live**
-
-When a `docker-headful` session is active, open noVNC:
-
-```
-http://your-host:6080
-```
-
-Or run `iframer-toolkit watch` to auto-open it.
+| `IFRAMER_DATA_DIR`  | No       | Override the data directory. Default: `~/.iframer`. |
 
 ## Architecture
 
@@ -402,7 +349,6 @@ Or run `iframer-toolkit watch` to auto-open it.
 | Session persistence| Same SQLite file, cookies + localStorage re-injected across runs and modes |
 | Knowledge cache    | Plain markdown at `~/.iframer/knowledge/<domain>.md` |
 | Captcha solving    | Anthropic vision API (`@anthropic-ai/sdk`) |
-| Live viewing       | Xvfb + x11vnc + noVNC + websockify (Docker mode only) |
 | MCP server         | `@modelcontextprotocol/sdk` |
 | Runtime            | Node.js ≥18 (Bun for development) |
 
@@ -438,7 +384,7 @@ bun run bin/cli.js status
 # Run the MCP server from source
 bun run src/mcp/server.ts
 
-# Run the Docker API server from source (no Docker)
+# Run the local server from source
 bun run start   # bun run index.ts
 
 # Rebuild the distributable bundles (dist/cli.js, dist/mcp-server.cjs, dist/local-server.cjs)

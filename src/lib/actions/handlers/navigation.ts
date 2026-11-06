@@ -1,7 +1,7 @@
 import type { Page } from "patchright";
 import { clipboardRead } from "../../clipboard";
 import type { PipelineStep, ExecutionContext } from "../../types";
-import { STEALTH_SCRIPT, contextStealthScripts } from "../../browser/stealth";
+import { STEALTH_SCRIPT } from "../../browser/stealth";
 import { humanClick, humanClickXY, humanType, humanScroll, humanMove } from "../../browser/humanize";
 import { injectStorage } from "../../session/persistence";
 import { createLogger } from "../../logger";
@@ -60,9 +60,8 @@ export async function navigate(page: Page, step: Step<"navigate">, ctx: Executio
   } finally {
     page.off("dialog", onDialog);
   }
-  const stealthScript = contextStealthScripts.get(page.context()) ?? STEALTH_SCRIPT;
   try {
-    await page.evaluate(stealthScript);
+    await page.evaluate(STEALTH_SCRIPT);
   } catch (err) {
     log.warn(`stealth injection failed: ${err}`);
   }

@@ -1,3 +1,4 @@
+import { randomBytes } from "crypto";
 import fs from "fs";
 import path from "path";
 import { createLogger } from "./logger";
@@ -19,11 +20,14 @@ export function saveScreenshot(
   screenshotDir: string,
   publicUrl: string
 ): string {
-  fs.mkdirSync(screenshotDir, { recursive: true });
-  const filePath = path.join(screenshotDir, filename);
-  fs.writeFileSync(filePath, buffer);
+  fs.mkdirSync(screenshotDir, { recursive: true, mode: 0o700 });
+  // /screenshots needs no auth (MCP clients fetch from it) and these can show
+  // private pages, so names must not be guessable from a timestamp.
+  const ext = path.extname(filename);
+  const unique = `${path.basename(filename, ext)}-${randomBytes(8).toString("hex")}${ext}`;
+  fs.writeFileSync(path.join(screenshotDir, unique), buffer, { mode: 0o600 });
   maybePrune(screenshotDir);
-  return `${publicUrl}/screenshots/${filename}`;
+  return `${publicUrl}/screenshots/${unique}`;
 }
 
 /** Throttled wrapper around pruneScreenshots (scans at most once per 5 min). */

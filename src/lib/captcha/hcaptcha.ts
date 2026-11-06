@@ -1,21 +1,16 @@
-import Anthropic from "@anthropic-ai/sdk";
-import type { Page } from "patchright";
+import type Anthropic from "@anthropic-ai/sdk";
+import type { ElementHandle, Frame, Page } from "patchright";
 import { humanClickXY, humanMove } from "../browser/humanize";
 import type { StaleStateMonitor } from "../stale-monitor";
 import type { SolveResult } from "./recaptcha";
+import { askVision, CaptchaApiError, getCaptchaClient, parseChallengeAnswer, type ChallengeAnswer } from "./vision";
 import { createLogger } from "../logger";
 
 const log = createLogger("hcaptcha-solver");
 
 const MAX_ROUNDS = 8;
 const MAX_DURATION_MS = 60_000;
-const MODEL = "claude-haiku-4-5-20251001";
-
-function getClient(): Anthropic {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set — required for captcha auto-solve");
-  return new Anthropic({ apiKey });
-}
+const CHALLENGE_FRAME = 'iframe[title="hCaptcha challenge"], iframe[title*="hcaptcha challenge" i]';
 
 function rand(min: number, max: number): number {
   return Math.random() * (max - min) + min;
@@ -23,6 +18,25 @@ function rand(min: number, max: number): number {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+// ─── Token: the only proof of a solve ───────────────────────────────
+
+/** hCaptcha writes the response token into the page once it accepts a solve. A
+ *  closed challenge frame proves nothing: it also closes on errors and expiry. */
+async function hasToken(page: Page, waitMs = 0): Promise<boolean> {
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    const found = await page
+      .evaluate(() =>
+        Array.from(document.querySelectorAll('[name="h-captcha-response"]')).some(
+          (el) => (el as HTMLTextAreaElement).value.length > 0,
+        ),
+      )
+      .catch(() => false);
+    if (found || Date.now() >= deadline) return found;
+    await sleep(250);
+  }
 }
 
 // ─── Checkbox ───────────────────────────────────────────────────────
@@ -48,245 +62,149 @@ async function clickCheckbox(page: Page): Promise<boolean> {
   await humanClickXY(page, cx, cy);
   await sleep(2500);
 
-  const frame = await checkboxFrame.contentFrame();
-  if (frame) {
-    try {
-      const checked = await frame.evaluate(() => {
-        const cb = document.querySelector("#checkbox");
-        return cb?.getAttribute("aria-checked") === "true";
-      });
-      if (checked) return true;
-    } catch {}
-  }
-
-  return false;
+  return hasToken(page);
 }
 
-// ─── Challenge info ─────────────────────────────────────────────────
+// ─── Challenge ──────────────────────────────────────────────────────
 
 interface HCaptchaChallenge {
   prompt: string;
-  rows: number;
-  cols: number;
-  tiles: { index: number; centerX: number; centerY: number }[];
-  verifyButton: { x: number; y: number };
-  frameBox: { x: number; y: number; width: number; height: number };
+  /** What the model looks at, and what its coordinates are relative to. */
+  target: ElementHandle;
+  box: { x: number; y: number; width: number; height: number };
+  frame: Frame;
 }
 
-async function getChallengeInfo(page: Page): Promise<HCaptchaChallenge | null> {
-  const challengeFrame = await page
-    .waitForSelector(
-      'iframe[title="hCaptcha challenge"], iframe[title*="hcaptcha challenge" i]',
-      { timeout: 8_000 }
-    )
-    .catch(() => null);
-
+/** Current hCaptcha draws the whole task on a single <canvas> with no element
+ *  per tile, so a task can only be answered in coordinates. Falls back to the
+ *  whole challenge frame if a challenge has no canvas. */
+async function getChallenge(page: Page): Promise<HCaptchaChallenge | null> {
+  const challengeFrame = await page.waitForSelector(CHALLENGE_FRAME, { timeout: 8_000 }).catch(() => null);
   if (!challengeFrame) return null;
-
-  const frameBox = await challengeFrame.boundingBox();
-  if (!frameBox) return null;
 
   const frame = await challengeFrame.contentFrame();
   if (!frame) return null;
 
-  const info = await frame
+  const prompt = await frame
     .evaluate(() => {
-      const promptEl = document.querySelector(
-        ".prompt-text, .task-instructions, [class*='prompt'], [class*='task-description']"
-      );
-      const prompt = promptEl ? (promptEl as HTMLElement).innerText.trim() : "";
-
-      const tileEls = document.querySelectorAll(
-        ".task-image, [class*='task-grid'] > *, [class*='challenge-container'] .image-wrapper, .image-wrapper"
-      );
-      const count = tileEls.length;
-
-      let rows = 3, cols = 3;
-      if (count === 16) { rows = 4; cols = 4; }
-      else if (count === 9) { rows = 3; cols = 3; }
-      else if (count === 6) { rows = 2; cols = 3; }
-
-      return { prompt, count, rows, cols };
+      const el = document.querySelector(".prompt-text, .task-instructions, [class*='prompt'], [class*='task-description']");
+      return el ? (el as HTMLElement).innerText.trim() : "";
     })
-    .catch(() => ({ prompt: "", count: 0, rows: 3, cols: 3 }));
+    .catch(() => "");
+  if (!prompt) return null;
 
-  if (!info.prompt && info.count === 0) return null;
+  const target = (await frame.$("canvas").catch(() => null)) ?? challengeFrame;
+  const box = await target.boundingBox();
+  if (!box) return null;
 
-  const gridPadTop = 150;
-  const gridPadLeft = 20;
-  const gridPadRight = 20;
-  const gridPadBottom = 80;
-
-  const gridWidth = frameBox.width - gridPadLeft - gridPadRight;
-  const gridHeight = frameBox.height - gridPadTop - gridPadBottom;
-
-  const tileW = gridWidth / info.cols;
-  const tileH = gridHeight / info.rows;
-
-  const tiles: { index: number; centerX: number; centerY: number }[] = [];
-  for (let r = 0; r < info.rows; r++) {
-    for (let c = 0; c < info.cols; c++) {
-      tiles.push({
-        index: r * info.cols + c,
-        centerX: Math.round(frameBox.x + gridPadLeft + c * tileW + tileW / 2),
-        centerY: Math.round(frameBox.y + gridPadTop + r * tileH + tileH / 2),
-      });
-    }
-  }
-
-  const verifyBtnBox = await frame.evaluate(() => {
-    const btn = document.querySelector('.button-submit.button, [aria-label="Verify"], [aria-label="Skip Challenge"]') as HTMLElement;
-    if (!btn) return null;
-    const r = btn.getBoundingClientRect();
-    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-  }).catch(() => null);
-
-  const verifyButton = verifyBtnBox
-    ? { x: Math.round(frameBox.x + verifyBtnBox.x), y: Math.round(frameBox.y + verifyBtnBox.y) }
-    : { x: Math.round(frameBox.x + frameBox.width - 55), y: Math.round(frameBox.y + frameBox.height - 30) };
-
-  log.info(`Round challenge: "${info.prompt}" (${info.rows}x${info.cols})`);
-
-  return { prompt: info.prompt, rows: info.rows, cols: info.cols, tiles, verifyButton, frameBox };
+  log.info(`Round challenge: "${prompt}" (${Math.round(box.width)}x${Math.round(box.height)})`);
+  return { prompt, target, box, frame };
 }
 
-// ─── Vision classification ──────────────────────────────────────────
+async function askForAnswer(client: Anthropic, challenge: HCaptchaChallenge): Promise<ChallengeAnswer | null> {
+  // scale:"css" keeps image pixels equal to page pixels on high-DPI screens.
+  const buf = await challenge.target.screenshot({ type: "jpeg", quality: 85, scale: "css" });
+  const width = Math.round(challenge.box.width);
+  const height = Math.round(challenge.box.height);
 
-async function screenshotChallenge(page: Page, challenge: HCaptchaChallenge): Promise<string | null> {
-  const { frameBox } = challenge;
-  try {
-    await sleep(1000);
-    const challengeEl = await page.$('iframe[title="hCaptcha challenge"], iframe[title*="hcaptcha challenge" i]').catch(() => null);
-    let buf: Buffer;
-    if (challengeEl) {
-      buf = Buffer.from(await challengeEl.screenshot({ type: "jpeg", quality: 85 }));
-    } else {
-      buf = await page.screenshot({ type: "jpeg", quality: 85, clip: frameBox });
-    }
-    return buf.toString("base64");
-  } catch (err: unknown) {
-    log.error(`screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
-    return null;
+  const text = await askVision(client, {
+    max_tokens: 1024,
+    messages: [{
+      role: "user",
+      content: [
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: Buffer.from(buf).toString("base64") } },
+        {
+          type: "text",
+          text: `This image is ${width}x${height} pixels. The task shown with it: "${challenge.prompt}".
+Work out the answer, then end your reply with one line of JSON, using pixel coordinates in this image.
+To click: {"clicks":[[x,y],[x,y]]}
+To drag: {"drag":[[fromX,fromY],[toX,toY]]}
+If you can't tell: {"clicks":[]}`,
+        },
+      ],
+    }],
+  });
+
+  const answer = parseChallengeAnswer(text, width, height);
+  if (!answer) log.warn(`no usable answer in model reply: "${text.slice(0, 120)}"`);
+  return answer;
+}
+
+async function perform(page: Page, challenge: HCaptchaChallenge, answer: ChallengeAnswer): Promise<void> {
+  const { x, y } = challenge.box;
+  if ("drag" in answer) {
+    await humanMove(page, x + answer.drag.from.x, y + answer.drag.from.y);
+    await sleep(rand(100, 250));
+    await page.mouse.down();
+    await humanMove(page, x + answer.drag.to.x, y + answer.drag.to.y);
+    await sleep(rand(100, 250));
+    await page.mouse.up();
+    return;
+  }
+  for (const click of answer.clicks) {
+    await humanClickXY(page, x + click.x, y + click.y);
+    await sleep(rand(150, 400));
   }
 }
 
-async function classifyTiles(
-  client: Anthropic,
-  screenshotBase64: string,
-  challenge: HCaptchaChallenge
-): Promise<number[]> {
-  const { prompt, rows, cols } = challenge;
-  const total = rows * cols;
-
-  try {
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 30,
-      system: `Output ONLY a comma-separated list of tile numbers or "none". Valid examples: "0,3,5" or "2" or "none". Output nothing else.`,
-      messages: [{
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: screenshotBase64 } },
-          { type: "text", text: `Task: "${prompt}". Tiles 0-${total - 1} left-to-right top-to-bottom in a ${rows}×${cols} grid. Which tiles match? Reply ONLY with numbers or "none".` },
-        ],
-      }],
-    });
-
-    const text = ((response.content[0] as { type: string; text?: string }).text ?? "").trim();
-    log.debug(`classify response: "${text}"`);
-
-    if (text.toLowerCase().startsWith("none")) return [];
-    return text
-      .split(/[,\s]+/)
-      .map((s: string) => parseInt(s.trim(), 10))
-      .filter((n: number) => !isNaN(n) && n >= 0 && n < total);
-  } catch (err: unknown) {
-    log.error(`classification failed: ${err instanceof Error ? err.message : String(err)}`);
-    return [];
-  }
-}
-
-// ─── Verify ─────────────────────────────────────────────────────────
-
-async function isSolved(page: Page): Promise<boolean> {
-  const el = await page
-    .$('iframe[title="hCaptcha challenge"], iframe[title*="hcaptcha challenge" i]')
-    .catch(() => null);
-  if (!el) return true;
-  const visible = await el.isVisible().catch(() => false);
-  return !visible;
-}
-
-async function clickVerify(page: Page, challenge: HCaptchaChallenge): Promise<boolean> {
-  await humanClickXY(page, challenge.verifyButton.x, challenge.verifyButton.y);
+/** The one submit button. It reads Verify, Next or Skip depending on the state,
+ *  and with nothing answered it asks for a different task. */
+async function clickSubmit(page: Page, challenge: HCaptchaChallenge): Promise<void> {
+  const button = await challenge.frame.$(".button-submit").catch(() => null);
+  const box = button ? await button.boundingBox() : null;
+  if (!box) throw new Error("hCaptcha submit button not found");
+  await humanClickXY(page, box.x + box.width / 2, box.y + box.height / 2);
   await sleep(2500);
-  return isSolved(page);
 }
 
 // ─── Main solver ─────────────────────────────────────────────────────
 
 export async function solveHCaptcha(page: Page, monitor?: StaleStateMonitor): Promise<SolveResult> {
   const startTime = Date.now();
-  const client = getClient();
+  const client = getCaptchaClient();
+  const result = (solved: boolean, reason?: string): SolveResult => ({
+    solved, rounds, durationMs: Date.now() - startTime, ...(reason ? { reason } : {}),
+  });
   let rounds = 0;
 
-  let solvedOnCheckbox = false;
   try {
-    solvedOnCheckbox = await clickCheckbox(page);
+    if (await clickCheckbox(page)) {
+      log.info("Solved on checkbox click (no challenge)");
+      return result(true);
+    }
+
+    while (rounds < MAX_ROUNDS) {
+      if (Date.now() - startTime > MAX_DURATION_MS) return result(false, "Timeout exceeded");
+
+      rounds++;
+      monitor?.reportActivity();
+
+      const challenge = await getChallenge(page);
+      if (!challenge) {
+        if (await hasToken(page, 3000)) return result(true);
+        return result(false, "The challenge closed without a token");
+      }
+
+      await sleep(1000); // the canvas draws after the frame appears
+      const answer = await askForAnswer(client, challenge);
+      monitor?.reportActivity();
+      log.info(`Round ${rounds}: ${answer ? JSON.stringify(answer) : "no answer"}`);
+
+      if (answer) await perform(page, challenge, answer);
+      await sleep(rand(500, 1000));
+      await clickSubmit(page, challenge);
+      monitor?.reportActivity();
+
+      if (await hasToken(page)) {
+        log.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
+        return result(true);
+      }
+      log.info(`Round ${rounds}: not solved, retrying`);
+    }
+
+    return result(false, `Max rounds (${MAX_ROUNDS}) exceeded`);
   } catch (err: unknown) {
-    return { solved: false, rounds: 0, durationMs: Date.now() - startTime, reason: err instanceof Error ? err.message : String(err) };
+    if (err instanceof CaptchaApiError) return result(false, err.message);
+    return result(false, err instanceof Error ? err.message : String(err));
   }
-
-  if (solvedOnCheckbox) {
-    log.info("Solved on checkbox click (no challenge)");
-    return { solved: true, rounds: 0, durationMs: Date.now() - startTime };
-  }
-
-  while (rounds < MAX_ROUNDS) {
-    if (Date.now() - startTime > MAX_DURATION_MS) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Timeout exceeded" };
-    }
-
-    rounds++;
-    monitor?.reportActivity();
-
-    const challenge = await getChallengeInfo(page);
-    if (!challenge) {
-      log.info("Challenge frame gone — assuming solved");
-      return { solved: true, rounds, durationMs: Date.now() - startTime };
-    }
-
-    const screenshotBase64 = await screenshotChallenge(page, challenge);
-    if (!screenshotBase64) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Failed to screenshot challenge" };
-    }
-
-    monitor?.reportActivity();
-    const matchingIndices = await classifyTiles(client, screenshotBase64, challenge);
-    log.info(`Round ${rounds}: clicking tiles [${matchingIndices.join(", ")}]`);
-
-    monitor?.reportActivity();
-
-    for (const idx of matchingIndices) {
-      const tile = challenge.tiles[idx];
-      if (!tile) continue;
-      await humanClickXY(page, tile.centerX + rand(-5, 5), tile.centerY + rand(-5, 5));
-      await sleep(rand(150, 400));
-    }
-
-    await sleep(rand(500, 1000));
-
-    const solved = await clickVerify(page, challenge);
-    monitor?.reportActivity();
-
-    if (solved) {
-      log.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
-      return { solved: true, rounds, durationMs: Date.now() - startTime };
-    }
-
-    log.info(`Round ${rounds}: not solved, retrying`);
-    await sleep(rand(500, 1000));
-  }
-
-  return { solved: false, rounds, durationMs: Date.now() - startTime, reason: `Max rounds (${MAX_ROUNDS}) exceeded` };
 }

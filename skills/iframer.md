@@ -57,14 +57,14 @@ The `execute` tool takes a `steps` array. Each step is an object with a `type` f
 | `upload` | `selector`, `files` | Set absolute local file paths on an `<input type=file>` |
 | `paste` | `selector?` | Paste the OS clipboard into a field, or the focused element if omitted. More reliable than a ⌘V `keyboard` step. |
 | `download` | `url`, `path?` | Fetch a file with the browser's cookies and save it server-side, no Save-As dialog. Default path: `~/.iframer/downloads/<name>`. |
-| `solve-captcha` | — | Auto-detect and solve reCAPTCHA or hCaptcha |
+| `solve-captcha` | — | Best-effort reCAPTCHA or hCaptcha solve with vision AI. Works in any mode; needs `ANTHROPIC_API_KEY`. Fails the run with `captcha-unsolvable` if it can't solve it. |
 | `recaptcha` | `action`, `tiles?` | Manual captcha control: `info`, `click`, `answer`, `select`, `verify`, `solve`. The full workflow arrives in the result when a captcha blocks a run. |
 
 ### Pipeline options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `mode` | auto | `headless`, `binary-headful`, `docker-headful`. Omit for auto-select + auto-escalation. |
+| `mode` | auto | `headless`, `binary-headful`. Omit for auto-select + auto-escalation. |
 | `captureApi` | false | Record all XHR/fetch requests. Use for reverse-engineering, and when a form submit fails with only a vague on-page message: every HTTP >= 400 response is reported per step, so you read the server's real answer (e.g. `POST /api/apply → 422: {"error":"..."}`) instead of guessing. |
 | `staleTimeoutMs` | 20000 | Per-step stale-state timeout |
 | `continueOnError` | false | Don't abort pipeline on step failure |
@@ -180,15 +180,12 @@ Captcha handling depends on the browser mode:
 execute: steps: [{ type: "screenshot" }]  // verify captcha is gone, then continue
 ```
 
-**Docker-headful** (remote browser via noVNC):
-- Use the `solve-captcha` step — it auto-detects and solves reCAPTCHA/hCaptcha via vision AI.
+**Headless, or nobody at the screen**:
+- If you hit a captcha in headless, iframer auto-escalates to binary-headful.
+- If nobody can solve it by hand, try the `solve-captcha` step. It's best effort: it uses vision AI, needs `ANTHROPIC_API_KEY`, and fails on many challenges.
 ```
 execute: steps: [{ type: "solve-captcha" }, { type: "screenshot" }]
 ```
-
-**Headless**:
-- Captchas can't be solved in headless. If you hit one, iframer auto-escalates to binary-headful.
-- If it still fails, switch to docker-headful and use `solve-captcha`.
 
 ### Handle OTP / 2FA codes
 
@@ -210,7 +207,7 @@ When the browser crashes, freezes, or you get connection errors:
 ```
 session: { action: "restart" }
 ```
-This kills ALL running browser instances (local + Docker) and resets state. Credentials and knowledge cache are NOT affected. The next `execute` call launches a fresh browser automatically.
+This kills ALL running browser instances and resets state. Credentials and knowledge cache are NOT affected. The next `execute` call launches a fresh browser automatically.
 
 **The execute tool also auto-recovers:** if it detects a *connection-level* crash (connection closed, ECONNREFUSED/ECONNRESET/EPIPE, socket hang up), it restarts the browser server and retries once before reporting failure. Timeouts are deliberately NOT auto-retried — a slow-but-healthy pipeline that hit the client timeout must not be re-run, or non-idempotent steps (form submits, purchases) would double-execute. If auto-recovery fails, or a step timed out, call `session restart` manually and continue from where you left off (don't blindly re-run the whole pipeline).
 
@@ -241,7 +238,7 @@ knowledge: { action: "clear", domain: "example.com" }
 
 If an `execute` call takes a very long time (30s+), it's probably stuck on one of:
 
-1. **Captcha blocking progress** — the login/navigate step can't proceed because a captcha appeared. In binary-headful mode, tell the user to solve it in the visible window. In docker-headful mode, add a `solve-captcha` step.
+1. **Captcha blocking progress** — the login/navigate step can't proceed because a captcha appeared. In binary-headful mode, tell the user to solve it in the visible window. If nobody can, add a `solve-captcha` step.
 
 2. **Waiting for a page transition that never happens** — the site didn't redirect after form submission. Take a screenshot to see the current state, then decide what to do (wrong button clicked, error message on page, etc.).
 
@@ -254,7 +251,7 @@ If an `execute` call takes a very long time (30s+), it's probably stuck on one o
 
 2. If captcha visible:
    - binary-headful → ask user to solve it in the visible window
-   - docker-headful → execute: steps: [{ type: "solve-captcha" }]
+   - nobody at the screen → execute: steps: [{ type: "solve-captcha" }]
 
 3. If the page shows an error or unexpected state:
    - Take a snapshot to get element refs
@@ -265,11 +262,9 @@ If an `execute` call takes a very long time (30s+), it's probably stuck on one o
 
 **CRITICAL: Don't restart from scratch.** The browser session persists between execute calls (same daemon, same page context). If you were mid-login and hit a captcha, you don't need to navigate back to the login page — you're still there. Just solve the captcha and continue.
 
-**Timeouts:** Docker-headful is slower than local modes — Xvfb + VNC + Chrome share one container. Heavy SPAs (Slack, Figma) can take 30+ seconds to load. If an execute call times out:
+**Timeouts:** Heavy SPAs (Slack, Figma) can take 30+ seconds to load. If an execute call times out:
 1. Use `staleTimeoutMs: 60000` or higher for heavy sites
-2. Check `status` to confirm Docker is still running
-3. Take a screenshot to see where the browser is — the session is likely still alive
-4. If the container crashed, `docker compose up -d` restarts it; stored sessions/credentials survive since they're in the host's SQLite
+2. Take a screenshot to see where the browser is — the session is likely still alive
 
 ## Multi-step flows (email → code, OAuth, etc.)
 
@@ -304,7 +299,6 @@ Instead:
 **Your progress is NOT lost.** Credentials, sessions, and knowledge cache are in the SQLite database on disk — they survive MCP server restarts. You don't need to re-login or re-store anything.
 
 If the MCP disconnects repeatedly on the same operation, the site is probably too heavy for the current mode. Switch to a lighter approach:
-- If using `docker-headful` → switch to `binary-headful` (less overhead)
 - If doing a complex multi-step pipeline → break it into smaller execute calls
 - If just trying to capture APIs → you probably already have enough from previous runs. Check `knowledge get <domain>` before retrying.
 
@@ -314,7 +308,7 @@ If the MCP disconnects repeatedly on the same operation, the site is probably to
 |---------|-----------------|
 | Guessing CSS selectors like `button[data-qa='submit']` | Use `snapshot` → read refs → use `@e` refs |
 | Passing `usernameSelector`/`passwordSelector` to login step | Omit them — auto-detect handles it |
-| Re-storing credentials when login fails | Retry with stronger mode (`binary-headful` or `docker-headful`) |
+| Re-storing credentials when login fails | Retry with stronger mode (`binary-headful`) |
 | Launching browser without checking knowledge cache | Always call `knowledge get <domain>` first |
 | Using `browse` for a page that needs interaction | Use `execute` with a pipeline |
 | Running a huge pipeline without snapshots | Split into navigate+snapshot, then interact based on refs |
@@ -383,16 +377,13 @@ job to close it, not theirs.
 | Simple data extraction, no login | Omit mode (auto-select, starts headless) |
 | Site with login | Omit mode (auto-escalation if headless is blocked) |
 | Known bot-detection (Cloudflare, etc.) | `binary-headful` |
-| Heavy SPA (Slack, Figma, Linear, etc.) | `binary-headful` — Docker often stalls on heavy pages |
+| Heavy SPA (Slack, Figma, Linear, etc.) | `binary-headful` |
 | Interactive session (browsing, clicking around) | `binary-headful` — most stable for long flows |
-| Need automated captcha solving | `docker-headful` (uses vision AI to solve) |
-| Need to watch the browser remotely / headless server | `docker-headful` |
+| Nobody available to solve a captcha | Any mode, with a best-effort `solve-captcha` step (needs `ANTHROPIC_API_KEY`) |
 | Reverse-engineering after login | Same mode that login succeeded in |
 | "Use my browser" / user's own logins / their open tab | `extension` + `tabId` from the `tabs` tool |
 
-**Prefer `binary-headful` over `docker-headful` for most tasks.** Binary-headful runs Chrome directly on the user's machine — it's faster, more stable for long sessions, and the user can solve captchas manually. Docker-headful adds overhead (Xvfb, VNC, container networking) and heavy SPAs frequently stall or timeout inside the container.
-
-Use `docker-headful` only when: (a) automated captcha solving is needed, (b) the user asks for it explicitly, or (c) it's a remote/headless server with no display.
+**Prefer `binary-headful` for sites that block headless.** It runs Chrome directly on the user's machine, is stable for long sessions, and the user can solve captchas manually.
 
 ## Response handling
 

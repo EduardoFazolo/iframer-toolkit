@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { PipelineResult, CapturedApi, CapturedEndpoint, ApiProtocol } from "../../lib/types";
-import { localApiPost, apiPost, isDockerRunning, resolveScreenshotPath, err, getErrorMessage } from "../helpers";
+import { localApiPost, resolveScreenshotPath, err, getErrorMessage } from "../helpers";
 import { normalizeSteps } from "./step-schema";
 
 type TextContent = { type: "text"; text: string };
@@ -20,7 +20,7 @@ During capture, drive the site like a user (open the inbox, send a messageâ€¦) â
         staleTimeoutMs: z.number().optional().describe("Override the 20s stale-state timeout per step"),
         continueOnObstacle: z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
         continueOnError: z.boolean().optional().describe("Continue past failing steps (default: false)"),
-        mode: z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("Mode override. 'extension' captures a tab already open in the user's real Chrome (requires options.tabId from `tabs`)."),
+        mode: z.enum(["headless", "binary-headful", "extension"]).optional().describe("Mode override. 'extension' captures a tab already open in the user's real Chrome (requires options.tabId from `tabs`)."),
         tabId: z.number().optional().describe("mode='extension': the real-Chrome tab id (from `tabs`)."),
         clientId: z.string().optional().describe("mode='extension': owning profile's clientId when the tab is ambiguous."),
       }).optional(),
@@ -34,9 +34,7 @@ During capture, drive the site like a user (open the inbox, send a messageâ€¦) â
           steps,
           options: { ...params.options, captureApi: true },
         };
-        // Route through Docker only for docker-headful mode, local server for everything else
         const mode = params.options?.mode;
-        const dockerRunning = await isDockerRunning();
         let captureResult: PipelineResult;
         if (mode === "extension") {
           if (typeof params.options?.tabId !== "number") {
@@ -48,8 +46,6 @@ During capture, drive the site like a user (open the inbox, send a messageâ€¦) â
             steps,
             options: { ...params.options, captureApi: true },
           });
-        } else if (mode === "docker-headful" && dockerRunning) {
-          captureResult = await apiPost<PipelineResult>("/execute", execParams);
         } else {
           captureResult = await localApiPost<PipelineResult>("/execute", execParams);
         }

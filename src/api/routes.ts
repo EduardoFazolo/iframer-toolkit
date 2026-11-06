@@ -12,9 +12,7 @@ function auth(req: Request): AuthRequest {
   return req as AuthRequest;
 }
 
-const iframer = new Iframer({
-  mode: (process.env.IFRAMER_MODE as "local" | "docker") || "local",
-});
+const iframer = new Iframer();
 
 export function registerRoutes(app: Express): void {
   app.get("/health", (_req, res) => res.json({ ok: true }));
@@ -83,110 +81,15 @@ export function registerRoutes(app: Express): void {
     res.json(result);
   }));
 
-  // ─── Interactive session endpoints ───────────────────────────────
+  // ─── Session management ─────────────────────────────────────────
 
-  app.post("/interactive/start", asyncHandler(async (req: Request, res: Response) => {
-    const { url } = req.body || {};
-    const r = auth(req);
-    const result = await iframer.startSession(r.userId, r.token, { url });
-    const existing = iframer.getSession(r.userId);
-    res.json({
-      ok: true,
-      noVncUrl: result.noVncUrl,
-      wsPort: result.wsPort,
-      message: existing ? "Session already active" : undefined,
-    });
-  }));
-
-  app.get("/interactive/status", (req: Request, res: Response) => {
-    const session = iframer.getSession(auth(req).userId);
-    if (!session) return res.json({ ok: true, active: false });
-
-    res.json({
-      ok: true,
-      active: true,
-      noVncUrl: `http://localhost:${session.wsPort}/vnc.html?autoconnect=true`,
-      wsPort: session.wsPort,
-      createdAt: session.createdAt.toISOString(),
-    });
-  });
-
+  // Saves browser state and closes idle browsers. Older CLI and MCP processes
+  // can talk to a newer server (and the reverse), so the path stays as it is.
   app.post("/interactive/stop", asyncHandler(async (req: Request, res: Response) => {
     const r = auth(req);
     const result = await iframer.stopSession(r.userId, r.token);
     res.json(result);
   }));
-
-  app.get("/interactive/screenshot", asyncHandler(async (req: Request, res: Response) => {
-    const r = auth(req);
-    const session = iframer.getSession(r.userId);
-    if (!session) throw new AppError(404, "No active interactive session");
-
-    if (req.query.format === "raw") {
-      const buf = await session.page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
-      res.set("Content-Type", "image/jpeg");
-      res.send(buf);
-      return;
-    }
-
-    const result = await iframer.screenshot(r.userId);
-    if (!result) throw new AppError(404, "No active interactive session");
-    res.json({ ok: true, ...result });
-  }));
-
-  // ─── Legacy single-action endpoint (delegates to execute) ────────
-
-  app.post("/interactive/act", asyncHandler(async (req: Request, res: Response) => {
-    const r = auth(req);
-    const session = iframer.getSession(r.userId);
-    if (!session) throw new AppError(404, "No active interactive session");
-
-    const { action, screenshot: wantScreenshot = true } = req.body || {};
-    if (!action || !action.type) throw new AppError(400, "Missing action.type");
-
-    const result = await iframer.execute(r.userId, r.token, {
-      steps: [action],
-      options: { screenshotAfterEach: wantScreenshot, continueOnObstacle: false },
-    });
-
-    const stepResult = result.results[0];
-    res.json({
-      ok: result.ok,
-      result: stepResult?.result,
-      screenshotUrl: stepResult?.screenshotUrl || result.finalState?.screenshotUrl,
-      url: result.finalState?.url,
-      title: result.finalState?.title,
-      error: result.error?.message,
-    });
-  }));
-
-  // ─── Legacy batch endpoint (delegates to execute) ────────────────
-
-  app.post("/interactive/batch", asyncHandler(async (req: Request, res: Response) => {
-    const r = auth(req);
-    const session = iframer.getSession(r.userId);
-    if (!session) throw new AppError(404, "No active interactive session");
-
-    const { actions, screenshot: wantScreenshot = true, continueOnError = false } = req.body || {};
-    if (!Array.isArray(actions) || actions.length === 0) {
-      throw new AppError(400, "actions must be a non-empty array");
-    }
-
-    const result = await iframer.execute(r.userId, r.token, {
-      steps: actions,
-      options: { continueOnError, screenshotAfterEach: false },
-    });
-
-    res.json({
-      ok: result.ok,
-      results: result.results.map((r) => ({ index: r.stepIndex, ok: r.ok, result: r.result, error: r.error })),
-      screenshotUrl: wantScreenshot ? result.finalState?.screenshotUrl : undefined,
-      url: result.finalState?.url,
-      title: result.finalState?.title,
-    });
-  }));
-
-  // ─── Session management ─────────────────────────────────────────
 
   app.delete("/session", asyncHandler(async (req: Request, res: Response) => {
     await iframer.clearSession(auth(req).userId);
@@ -215,23 +118,6 @@ export function registerRoutes(app: Express): void {
   app.delete("/credentials/:domain", asyncHandler(async (req: Request, res: Response) => {
     await iframer.deleteCredential(auth(req).userId, req.params.domain as string);
     res.json({ ok: true, message: `Credentials for ${req.params.domain} deleted` });
-  }));
-
-  app.post("/credentials/login", asyncHandler(async (req: Request, res: Response) => {
-    const { domain, usernameSelector, passwordSelector, submitSelector, totpSelector } = req.body || {};
-    if (!domain) throw new AppError(400, "Missing domain");
-
-    const r = auth(req);
-    const result = await iframer.loginWithCredentials(r.userId, r.token, domain, {
-      username: usernameSelector,
-      password: passwordSelector,
-      submit: submitSelector,
-      totp: totpSelector,
-    });
-
-    if (!result.ok) throw new AppError(400, result.error || "Login failed");
-    const { ok: _ok, ...resultRest } = result;
-    res.json({ ok: true, message: "Login attempted", ...resultRest });
   }));
 
   // ─── Extension bridge (real-tab control) ─────────────────────────

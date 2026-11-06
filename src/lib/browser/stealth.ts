@@ -1,12 +1,9 @@
-import type { Page, BrowserContext } from "patchright";
+import type { Page } from "patchright";
 import type { BrowserFingerprint } from "./fingerprint";
 
-// Map from context → per-session stealth script (fingerprint-parameterized).
-// Lives here so it can be imported by code that doesn't need the full session-manager.
-export const contextStealthScripts = new Map<BrowserContext, string>();
 
 export const CHROME_VERSION = "136.0.7103.93";
-// Default UA — will be overridden per-session by fingerprint-generator
+// Default UA
 export const USER_AGENT = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME_VERSION} Safari/537.36`;
 
 const NATIVE_TOSTRING_HELPER = `
@@ -352,7 +349,7 @@ function buildStealthScriptInner(p: {
   `;
 }
 
-// Default static script (Windows) — used as fallback before fingerprint is generated
+// Default static script (Windows)
 export const STEALTH_SCRIPT = buildStealthScript();
 
 export function stealthContextOptions(overrides: Record<string, any> = {}, _sessionId?: string, fp?: BrowserFingerprint): Record<string, any> {

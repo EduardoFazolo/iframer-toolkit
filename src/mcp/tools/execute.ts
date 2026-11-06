@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { PipelineResult } from "../../lib/types";
-import { apiPost, localApiPost, isDockerRunning, resolveScreenshotPath, err, getErrorMessage, log, localServer } from "../helpers";
+import { localApiPost, resolveScreenshotPath, err, getErrorMessage, log, localServer } from "../helpers";
 import { stepSchema, normalizeSteps } from "./step-schema";
 import { formatExecuteResult } from "../../lib/format-result";
 
@@ -36,7 +36,7 @@ Returns: ok, completedSteps, output for snapshot/find/read/extract steps, obstac
         continueOnObstacle: z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
         continueOnError: z.boolean().optional().describe("Continue past failing steps (default: false)"),
         captureApi: z.boolean().optional().describe("Record all API calls (XHR/fetch) the page makes. Also surfaces every HTTP >= 400 response per step — turn it on when a form submit fails with only a vague on-page message, to read the server's real answer."),
-        mode: z.enum(["headless", "binary-headful", "docker-headful", "extension"]).optional().describe("DO NOT SET unless the user explicitly requests a mode — iframer auto-selects and auto-escalates. 'extension' drives a real-Chrome tab (requires options.tabId from the `tabs` tool)."),
+        mode: z.enum(["headless", "binary-headful", "extension"]).optional().describe("DO NOT SET unless the user explicitly requests a mode — iframer auto-selects and auto-escalates. 'extension' drives a real-Chrome tab (requires options.tabId from the `tabs` tool)."),
         autoEscalate: z.boolean().optional().describe("Auto-retry with a stronger mode if blocked (default: true)"),
         instanceId: z.string().optional().describe("Named parallel browser (default 'default') — distinct ids drive several browsers at once, each with its own session state."),
         tabId: z.number().optional().describe("mode='extension': the real-Chrome tab id to drive (from the `tabs` tool)."),
@@ -78,36 +78,8 @@ Returns: ok, completedSteps, output for snapshot/find/read/extract steps, obstac
           return { content };
         }
 
-        const dockerRunning = await isDockerRunning();
-
-        async function runWithMode(mode?: string): Promise<PipelineResult> {
-          // docker-headful is the only mode that goes through the Docker API.
-          // Every other mode runs on the local background server so CLI, MCP,
-          // and all browser modes share one credential / session / knowledge store.
-          if (mode === "docker-headful") {
-            if (!dockerRunning) {
-              return {
-                ok: false, completedSteps: 0, totalSteps: steps.length,
-                results: [], finalState: { url: "", title: "" }, obstacles: [],
-                durationMs: 0, modeUsed: "docker-headful",
-                error: {
-                  failedAtStep: 0, failedStep: steps[0],
-                  errorType: "action-failed",
-                  message: "docker-headful mode was requested but the Docker API is not reachable.",
-                  pageState: { url: "", title: "" },
-                  suggestion: "Start Docker with `bun run start:docker`, or omit options.mode.",
-                  retryable: false,
-                },
-              };
-            }
-            return apiPost<PipelineResult>("/execute", {
-              steps,
-              options: { ...params.options, mode: "docker-headful", autoEscalate: false },
-            });
-          }
-
-          // headless, binary-headful, and auto-select all go to the local
-          // background server. Auto-escalation stays enabled.
+        // Auto-escalation stays enabled on the server.
+        function runWithMode(mode?: string): Promise<PipelineResult> {
           return localApiPost<PipelineResult>("/execute", {
             steps,
             options: { ...params.options, mode: mode || undefined },
@@ -147,14 +119,8 @@ Returns: ok, completedSteps, output for snapshot/find/read/extract steps, obstac
         // escalation didn't fire — e.g., server returned before escalating)
         const requestedMode = params.options?.mode;
         if (!execResult.ok && execResult.error?.errorType === "bot-blocked" && params.options?.autoEscalate !== false && !requestedMode) {
-          const escalation = ["docker-headful", "binary-headful"];
-          for (const nextMode of escalation) {
-            if (nextMode === "docker-headful" && !dockerRunning) continue;
-            log.info(`Auto-escalating to ${nextMode}`);
-            execResult = await runWithMode(nextMode);
-            if (execResult.ok) break;
-            if (execResult.error?.errorType !== "bot-blocked") break;
-          }
+          log.info("Auto-escalating to binary-headful");
+          execResult = await runWithMode("binary-headful");
         }
 
         const lines = formatExecuteResult(execResult);

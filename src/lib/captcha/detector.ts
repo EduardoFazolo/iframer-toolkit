@@ -16,7 +16,7 @@ export class RecaptchaDetector implements ObstacleDetector {
         [
           'iframe[src*="recaptcha/api2/anchor"], iframe[title*="reCAPTCHA"]',
           'iframe[src*="recaptcha/api2/bframe"]',
-          '.g-recaptcha:not([data-size="invisible"]), [data-sitekey]:not([data-size="invisible"])',
+          '.g-recaptcha:not([data-size="invisible"]), [data-sitekey]:not([data-size="invisible"]):not(.h-captcha):not(.cf-turnstile)',
         ].some((sel) => {
           const el = document.querySelector(sel);
           if (!el) return false;
@@ -40,6 +40,7 @@ export class HCaptchaDetector implements ObstacleDetector {
           'iframe[src*="hcaptcha.com"]',
           'iframe[title*="hCaptcha"]',
           "[data-hcaptcha-widget-id]",
+          '.h-captcha:not([data-size="invisible"])',
         ].some((sel) => {
           const el = document.querySelector(sel);
           if (!el) return false;
@@ -114,9 +115,10 @@ export class LoginWallDetector implements ObstacleDetector {
   }
 }
 
+// hCaptcha first: other widgets carry data-sitekey too, which the reCAPTCHA check also accepts.
 export const defaultDetectors: ObstacleDetector[] = [
-  new RecaptchaDetector(),
   new HCaptchaDetector(),
+  new RecaptchaDetector(),
   new CookieConsentDetector(),
   new LoginWallDetector(),
 ];

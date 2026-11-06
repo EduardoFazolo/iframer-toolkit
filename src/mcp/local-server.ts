@@ -103,7 +103,6 @@ export class LocalServerManager {
       const env: Record<string, string> = {
         ...process.env as Record<string, string>,
         PORT: String(port),
-        IFRAMER_MODE: "local",
         IFRAMER_DATA_DIR: dataDir,
       };
       if (process.env.IFRAMER_SECRET) {

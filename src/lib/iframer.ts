@@ -1,29 +1,23 @@
-import path from "path";
-import { fileURLToPath } from "url";
+import { getScreenshotDir } from "./paths";
 import type {
   IframerConfig,
   Pipeline,
   PipelineResult,
   FetchRequest,
   FetchResult,
-  SessionStartOptions,
   SessionStopResult,
   CredentialInput,
   Credential,
   BrowserMode,
   ModeAvailability,
 } from "./types";
-import * as sessionManager from "./browser/session-manager";
 import { closeBrowser } from "./browser/launcher";
-import { deriveKey, encrypt, decrypt } from "./auth/crypto";
-import { extractSession, injectCookies, injectStorage } from "./session/persistence";
-import type { SessionData } from "./session/persistence";
-import { saveScreenshot } from "./screenshot";
+import { deriveKey, encrypt } from "./auth/crypto";
+import { extractSession } from "./session/persistence";
 import { createStore, type StorageBackend } from "./storage";
 import { BrowserDaemon, DEFAULT_INSTANCE } from "./browser/daemon";
 import { DomainModeStore } from "./domain-modes";
 import { checkModeAvailability } from "./browser/cdp-launcher";
-import { TIMEOUTS } from "./constants";
 import { createLogger } from "./logger";
 import { getErrorMessage } from "./errors";
 import type { ExecutionConfig } from "./execution/config";
@@ -36,8 +30,7 @@ import { CredentialStore } from "./auth/credential-store";
 
 const log = createLogger("iframer");
 
-const DEFAULT_SCREENSHOT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../.screenshots");
-const DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
+const DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3022}`;
 const DEFAULT_STALE_TIMEOUT_MS = 20_000;
 
 /**
@@ -49,7 +42,6 @@ export class Iframer {
   private store: StorageBackend;
   private daemon: BrowserDaemon;
   private domainModes: DomainModeStore;
-  private operatingMode: "docker" | "local";
   private config: ExecutionConfig;
 
   private refStore: RefStore;
@@ -60,28 +52,26 @@ export class Iframer {
 
   constructor(config: IframerConfig = {}) {
     this.config = {
-      screenshotDir: config.screenshotDir || DEFAULT_SCREENSHOT_DIR,
+      screenshotDir: config.screenshotDir || getScreenshotDir(),
       publicUrl: config.publicUrl || DEFAULT_PUBLIC_URL,
       staleTimeoutMs: config.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS,
     };
 
-    // Storage: SQLite in data directory (honors IFRAMER_DATA_DIR for Docker bind-mount)
+    // Storage: SQLite in the data directory (honors IFRAMER_DATA_DIR)
     this.store = createStore({ dataDir: config.dataDir });
     this.daemon = new BrowserDaemon(config.sessionTimeoutMs);
     this.domainModes = new DomainModeStore();
-    this.operatingMode = config.mode || "local";
 
     this.refStore = new RefStore(this.store, this.config);
     this.fetchService = new FetchService(this.store);
     this.captureManager = new CaptureManager(this.daemon);
-    this.credentials = new CredentialStore(this.store, this.config);
+    this.credentials = new CredentialStore(this.store);
     this.executor = new PipelineExecutor({
       daemon: this.daemon,
       store: this.store,
       domainModes: this.domainModes,
       refStore: this.refStore,
       availableModes: () => this.getAvailableModes(),
-      startSession: (userId, token, options) => this.startSession(userId, token, options),
     });
   }
 
@@ -91,7 +81,6 @@ export class Iframer {
     const modes: BrowserMode[] = ["headless"];
     const { binaryHeadful } = checkModeAvailability();
     if (binaryHeadful) modes.push("binary-headful");
-    if (this.operatingMode === "docker") modes.push("docker-headful");
     return modes;
   }
 
@@ -102,10 +91,6 @@ export class Iframer {
       "binary-headful": {
         available: binaryHeadful,
         reason: binaryHeadful ? undefined : "No display available",
-      },
-      "docker-headful": {
-        available: this.operatingMode === "docker",
-        reason: this.operatingMode === "docker" ? undefined : "Docker not configured",
       },
     };
   }
@@ -127,42 +112,7 @@ export class Iframer {
     return this.executor.execute(userId, token, pipeline, runtime);
   }
 
-  // ─── Interactive Sessions (Docker mode) ──────────────────────────
-
-  async startSession(userId: string, token: string, options: SessionStartOptions = {}): Promise<{ noVncUrl: string; wsPort: number }> {
-    const existing = sessionManager.getSession(userId);
-    if (existing) {
-      sessionManager.resetTimeout(userId);
-      return {
-        noVncUrl: `http://localhost:${existing.wsPort}/vnc.html?autoconnect=true`,
-        wsPort: existing.wsPort,
-      };
-    }
-
-    const session = await sessionManager.startSession(userId);
-
-    const encryptionKey = await deriveKey(token);
-    const blob = await this.store.getSession(userId);
-    let sessionData: SessionData | null = null;
-    if (blob && blob.length > 0) {
-      sessionData = JSON.parse(decrypt(blob, encryptionKey)) as SessionData;
-      if (sessionData) await injectCookies(session.context, sessionData);
-    }
-
-    if (options.url) {
-      await session.page.goto(options.url, { waitUntil: "domcontentloaded", timeout: TIMEOUTS.NAVIGATION });
-      if (sessionData) await injectStorage(session.page, sessionData);
-    }
-
-    return {
-      noVncUrl: `http://localhost:${session.wsPort}/vnc.html?autoconnect=true`,
-      wsPort: session.wsPort,
-    };
-  }
-
-  getSession(userId: string) {
-    return sessionManager.getSession(userId);
-  }
+  // ─── Sessions ────────────────────────────────────────────────────
 
   async stopSession(userId: string, token: string): Promise<SessionStopResult> {
     let sessionSaved = false;
@@ -184,15 +134,6 @@ export class Iframer {
           log.warn(`stopSession: failed to extract daemon state for ${inst.mode}::${inst.instanceId}: ${getErrorMessage(err)}`);
         }
       }
-    }
-
-    // Stop Docker session if active (Docker-mode only)
-    const dockerSessionData = await sessionManager.stopSession(userId);
-    if (dockerSessionData && token) {
-      const encryptionKey = await deriveKey(token);
-      const encrypted = encrypt(JSON.stringify(dockerSessionData), encryptionKey);
-      await this.store.setSession(userId, encrypted);
-      sessionSaved = true;
     }
 
     // Tear down idle local daemon browsers. Busy instances (another agent's
@@ -246,29 +187,11 @@ export class Iframer {
   async restartBrowser(): Promise<{ killed: string[]; message: string }> {
     const health = this.browserHealth();
     await this.daemon.stopAll(true); // crash-recovery hammer: kill even busy instances
-    await sessionManager.cleanupAllSessions();
     return {
       killed: health.modes,
       message: health.modes.length > 0
         ? `Killed browser(s): ${health.modes.join(", ")}. Next execute call will launch a fresh instance.`
         : "No browsers were running. Next execute call will launch fresh.",
-    };
-  }
-
-  // ─── Screenshots ─────────────────────────────────────────────────
-
-  async screenshot(userId: string): Promise<{ screenshotUrl: string; url: string; title: string } | null> {
-    const session = sessionManager.getSession(userId);
-    if (!session) return null;
-
-    sessionManager.resetTimeout(userId);
-    const buf = await session.page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
-    const screenshotUrl = saveScreenshot(buf, `screenshot-${Date.now()}.jpg`, this.config.screenshotDir, this.config.publicUrl);
-
-    return {
-      screenshotUrl,
-      url: session.page.url(),
-      title: await session.page.title(),
     };
   }
 
@@ -290,15 +213,6 @@ export class Iframer {
     return this.credentials.deleteCredential(userId, domain);
   }
 
-  loginWithCredentials(
-    userId: string,
-    token: string,
-    domain: string,
-    selectors: { username?: string; password?: string; submit?: string; totp?: string }
-  ) {
-    return this.credentials.loginWithCredentials(userId, token, domain, selectors);
-  }
-
   // ─── Session Data ─────────────────────────────────────────────────
 
   async clearSession(userId: string): Promise<void> {
@@ -310,7 +224,6 @@ export class Iframer {
   async shutdown(): Promise<void> {
     await this.daemon.stopAll(true);
     await closeBrowser();
-    await sessionManager.cleanupAllSessions();
     // Close SQLite if the store supports it
     if ("close" in this.store && typeof (this.store as StorageBackend & { close?: () => void }).close === "function") {
       (this.store as StorageBackend & { close: () => void }).close();

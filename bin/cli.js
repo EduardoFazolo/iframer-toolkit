@@ -7,14 +7,10 @@ const { execSync } = require("child_process");
 const readline = require("readline");
 
 const HOME_DIR = os.homedir();
-// Data directory — honors IFRAMER_DATA_DIR env var so the CLI and the
-// Docker container can share one source of truth via bind-mount.
+// Data directory — honors the IFRAMER_DATA_DIR env var.
 const CONFIG_DIR = process.env.IFRAMER_DATA_DIR || path.join(HOME_DIR, ".iframer");
 const CLAUDE_CONFIG_PATH = path.join(HOME_DIR, ".claude.json");
 const CODEX_CONFIG_PATH = path.join(HOME_DIR, ".codex", "config.toml");
-const DEFAULT_SERVER = process.env.IFRAMER_URL || "http://localhost:3021";
-const API_KEY = process.env.IFRAMER_SECRET;
-const USE_LOCAL = process.env.IFRAMER_MODE === "local" || !process.env.IFRAMER_URL;
 
 // Shared user identity — MUST match src/mcp/helpers.ts LOCAL_USER so CLI and
 // MCP share the same credential store rows.
@@ -65,16 +61,6 @@ const LOCAL_TOKEN = resolveLocalToken();
 
 // ─── Utilities ──────────────────────────────────────────────────────
 
-function openBrowser(url) {
-  try {
-    if (process.platform === "darwin") execSync(`open "${url}"`);
-    else if (process.platform === "win32") execSync(`start "${url}"`);
-    else execSync(`xdg-open "${url}"`);
-  } catch {
-    console.log(`  Open this URL in your browser:\n  ${url}`);
-  }
-}
-
 function prompt(question) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => {
@@ -116,32 +102,6 @@ function promptHidden(question) {
     };
     stdin.on("data", onData);
   });
-}
-
-function authHeaders() {
-  const headers = { "Content-Type": "application/json" };
-  if (API_KEY) headers["x-api-key"] = API_KEY;
-  return headers;
-}
-
-async function apiPost(endpoint, body) {
-  const res = await fetch(`${DEFAULT_SERVER}${endpoint}`, {
-    method: "POST",
-    headers: authHeaders(),
-    body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(180_000),
-  });
-  return res.json();
-}
-
-async function apiGet(endpoint) {
-  const res = await fetch(`${DEFAULT_SERVER}${endpoint}`, { headers: authHeaders() });
-  return res.json();
-}
-
-async function apiDelete(endpoint) {
-  const res = await fetch(`${DEFAULT_SERVER}${endpoint}`, { method: "DELETE", headers: authHeaders() });
-  return res.json();
 }
 
 function resolveMcpRuntime() {
@@ -452,35 +412,25 @@ async function executeViaWarmServer(steps, options) {
   }
 }
 
-/** Get a local Iframer instance (for commands that don't need Docker) */
+/** Get an in-process Iframer instance (for commands that don't use the shared server) */
 let _iframer = null;
 async function getLocalIframer() {
   if (_iframer) return _iframer;
   try {
     const { Iframer } = await import("../src/lib/iframer.ts");
-    const screenshotDir = path.join(os.tmpdir(), "iframer-screenshots");
+    // saveScreenshot returns <publicUrl>/screenshots/<file>, so the files go in that subfolder.
+    const publicDir = path.join(os.tmpdir(), "iframer-screenshots");
+    const screenshotDir = path.join(publicDir, "screenshots");
     fs.mkdirSync(screenshotDir, { recursive: true });
     _iframer = new Iframer({
       screenshotDir,
-      publicUrl: `file://${screenshotDir}`,
-      mode: "local",
+      publicUrl: `file://${publicDir}`,
     });
     return _iframer;
   } catch (err) {
     console.error(`  Failed to initialize local iframer: ${err.message}`);
-    console.error("  Make sure you're running with bun, or use Docker mode (IFRAMER_URL=http://localhost:3021).");
+    console.error("  Make sure you're running with bun.");
     process.exit(1);
-  }
-}
-
-/** Check if Docker API is running */
-async function isDockerRunning() {
-  try {
-    const res = await fetch(`${DEFAULT_SERVER}/health`, { signal: AbortSignal.timeout(3000) });
-    const data = await res.json();
-    return data.ok === true;
-  } catch {
-    return false;
   }
 }
 
@@ -499,7 +449,7 @@ function hasFlag(args, flag) {
 // Chrome tab needs a tab id, which only the `tabs` tool / extension API supply.
 // Without this gate a stray --mode extension used to fall through to the mode
 // heuristic and open a blank Chrome for Testing window.
-const LAUNCH_MODES = ["headless", "binary-headful", "docker-headful"];
+const LAUNCH_MODES = ["headless", "binary-headful"];
 
 function parseModeFlag(args) {
   const mode = parseFlag(args, "--mode");
@@ -512,29 +462,6 @@ function parseModeFlag(args) {
   }
   console.error(`\n  Unknown --mode "${mode}". Use one of: ${LAUNCH_MODES.join(", ")}.\n`);
   process.exit(1);
-}
-
-function handleResponse(data, screenshotPath) {
-  const { screenshot, tileScreenshots, ...rest } = data;
-  if (screenshot && screenshotPath) {
-    fs.writeFileSync(screenshotPath, Buffer.from(screenshot, "base64"));
-    rest._screenshotSaved = screenshotPath;
-  }
-  if (tileScreenshots && tileScreenshots.length > 0) {
-    const tileDir = "/tmp/browser-tiles";
-    fs.mkdirSync(tileDir, { recursive: true });
-    const tilePaths = [];
-    for (const tile of tileScreenshots) {
-      if (tile.screenshot) {
-        const tilePath = `${tileDir}/tile-${tile.index}.png`;
-        fs.writeFileSync(tilePath, Buffer.from(tile.screenshot, "base64"));
-        tilePaths.push(tilePath);
-      }
-    }
-    rest._tilesSaved = tilePaths;
-  }
-  console.log(JSON.stringify(rest, null, 2));
-  if (!data.ok) process.exit(1);
 }
 
 function printResult(data) {
@@ -842,10 +769,14 @@ async function main() {
     // ─── Status ──────────────────────────────────────────────────────
 
     case "status": {
-      const docker = await isDockerRunning();
-      console.log(`  Server: ${DEFAULT_SERVER}`);
-      console.log(`  Docker API: ${docker ? "running" : "not reachable"}`);
-      if (API_KEY) console.log("  Auth: IFRAMER_SECRET set");
+      let server = "not running";
+      try {
+        const info = JSON.parse(fs.readFileSync(path.join(CONFIG_DIR, "server.json"), "utf8"));
+        const res = await fetch(`http://127.0.0.1:${info.port}/health`, { signal: AbortSignal.timeout(1500) });
+        if (res.ok) server = `http://127.0.0.1:${info.port}`;
+      } catch {}
+      console.log(`  Server: ${server}`);
+      if (process.env.IFRAMER_SECRET) console.log("  Auth: IFRAMER_SECRET set");
 
       // Check local Chrome
       try {
@@ -859,7 +790,7 @@ async function main() {
       // Check display
       const hasDisplay = process.platform === "darwin" || process.platform === "win32" || !!process.env.DISPLAY;
       console.log(`  Display: ${hasDisplay ? "available" : "none ($DISPLAY not set)"}`);
-      console.log(`  Modes: headless${hasDisplay ? ", binary-headful" : ""}${docker ? ", docker-headful" : ""}`);
+      console.log(`  Modes: headless${hasDisplay ? ", binary-headful" : ""}`);
       break;
     }
 
@@ -909,7 +840,6 @@ async function main() {
     // ─── Modes ───────────────────────────────────────────────────────
 
     case "modes": {
-      const docker = await isDockerRunning();
       const hasDisplay = process.platform === "darwin" || process.platform === "win32" || !!process.env.DISPLAY;
 
       let chromeInstalled = false;
@@ -921,7 +851,6 @@ async function main() {
       console.log("  Available browser modes:\n");
       console.log(`    headless          ${chromeInstalled ? "✓ available" : "✗ Chrome for Testing not installed"}`);
       console.log(`    binary-headful    ${chromeInstalled && hasDisplay ? "✓ available" : "✗ " + (!chromeInstalled ? "Chrome not installed" : "no display")}`);
-      console.log(`    docker-headful    ${docker ? "✓ available" : "✗ Docker not running at " + DEFAULT_SERVER}`);
 
       if (!chromeInstalled) {
         console.log("\n  Install Chrome for Testing:");
@@ -1044,7 +973,7 @@ async function main() {
         console.error("    iframer execute '[{\"type\":\"navigate\",\"url\":\"https://example.com\"},{\"type\":\"screenshot\"}]'");
         console.error("    iframer execute pipeline.json");
         console.error("\n  Options:");
-        console.error("    --mode <headless|binary-headful|docker-headful>");
+        console.error("    --mode <headless|binary-headful>");
         console.error("    --capture-api        Record XHR/fetch requests");
         console.error("    --continue-on-error  Don't stop on step failure");
         console.error("    --timeout <ms>       Stale state timeout (default: 20000)");
@@ -1076,29 +1005,21 @@ async function main() {
       const timeout = parseFlag(args, "--timeout");
       if (timeout) options.staleTimeoutMs = parseInt(timeout);
 
-      // Execute via warm shared server, local iframer, or Docker API
-      const docker = await isDockerRunning();
+      // Warm path: shared daemon, per-agent browser slot, shared "default"
+      // session. --in-process forces the old cold path (also the fallback).
       let result;
-      if (mode === "docker-headful" && docker) {
-        result = await apiPost("/execute", { steps, options });
-      } else if (USE_LOCAL || !docker) {
-        // Warm path: shared daemon, per-agent browser slot, shared "default"
-        // session. --in-process forces the old cold path (also the fallback).
-        if (!hasFlag(args, "--in-process")) {
-          const warmOptions = { ...options };
-          if (!warmOptions.instanceId) {
-            // Explicit instanceId keeps full legacy semantics (own session row).
-            warmOptions.instanceId = deriveCliInstanceId();
-            warmOptions.sessionProfile = "default";
-          }
-          result = await executeViaWarmServer(steps, warmOptions);
+      if (!hasFlag(args, "--in-process")) {
+        const warmOptions = { ...options };
+        if (!warmOptions.instanceId) {
+          // Explicit instanceId keeps full legacy semantics (own session row).
+          warmOptions.instanceId = deriveCliInstanceId();
+          warmOptions.sessionProfile = "default";
         }
-        if (!result) {
-          const iframer = await getLocalIframer();
-          result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options });
-        }
-      } else {
-        result = await apiPost("/execute", { steps, options });
+        result = await executeViaWarmServer(steps, warmOptions);
+      }
+      if (!result) {
+        const iframer = await getLocalIframer();
+        result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options });
       }
 
       // Default output = the same compact agent-facing text the MCP produces
@@ -1153,16 +1074,8 @@ async function main() {
       const waitFor = parseFlag(args, "--wait-for");
       if (waitFor) options.waitForSelector = waitFor;
 
-      const docker = await isDockerRunning();
-      let result;
-      if (USE_LOCAL || !docker) {
-        const iframer = await getLocalIframer();
-        result = await iframer.fetch(LOCAL_USER_ID, LOCAL_TOKEN, options);
-      } else {
-        result = await apiPost("/fetch", options);
-      }
-
-      printResult(result);
+      const iframer = await getLocalIframer();
+      printResult(await iframer.fetch(LOCAL_USER_ID, LOCAL_TOKEN, options));
       break;
     }
 
@@ -1170,53 +1083,35 @@ async function main() {
 
     case "screenshot": {
       const url = args[0];
-      const outPath = parseFlag(args, "--output") || parseFlag(args, "-o") || "/tmp/iframer-screenshot.jpg";
+      if (!url || !url.startsWith("http")) {
+        console.error("  Usage: iframer screenshot <url> [--mode <mode>] [--annotate]");
+        process.exit(1);
+      }
 
-      if (url && url.startsWith("http")) {
-        // One-shot: navigate + screenshot
-        const mode = parseModeFlag(args) || "headless";
-        const annotate = hasFlag(args, "--annotate");
-        const docker = await isDockerRunning();
+      // One-shot: navigate + screenshot
+      const mode = parseModeFlag(args) || "headless";
+      const annotate = hasFlag(args, "--annotate");
 
-        const steps = [
-          { type: "navigate", url, waitUntil: "networkidle" },
-          { type: "wait", ms: 2000 },
-          { type: "screenshot", annotate },
-        ];
+      const steps = [
+        { type: "navigate", url, waitUntil: "networkidle" },
+        { type: "wait", ms: 2000 },
+        { type: "screenshot", annotate },
+      ];
 
-        let result;
-        if (USE_LOCAL || !docker) {
-          const iframer = await getLocalIframer();
-          result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options: { mode } });
-        } else {
-          result = await apiPost("/execute", { steps, options: { mode } });
-        }
+      const iframer = await getLocalIframer();
+      const result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options: { mode } });
 
-        if (result.ok && result.finalState?.screenshotUrl) {
-          console.log(`  Screenshot: ${result.finalState.screenshotUrl}`);
-          if (annotate) {
-            const snapStep = result.results?.find(r => r.step?.type === "screenshot");
-            if (snapStep?.result?.refs) {
-              console.log("\n  Refs:");
-              console.log(snapStep.result.refs);
-            }
+      if (result.ok && result.finalState?.screenshotUrl) {
+        console.log(`  Screenshot: ${result.finalState.screenshotUrl}`);
+        if (annotate) {
+          const snapStep = result.results?.find(r => r.step?.type === "screenshot");
+          if (snapStep?.result?.refs) {
+            console.log("\n  Refs:");
+            console.log(snapStep.result.refs);
           }
-        } else {
-          printResult(result);
         }
       } else {
-        // Legacy: screenshot from active Docker session
-        const res = await fetch(`${DEFAULT_SERVER}/interactive/screenshot?format=raw`, {
-          headers: authHeaders(),
-        });
-        if (!res.ok) {
-          const data = await res.json();
-          console.error(`  Error: ${data.error}`);
-          process.exit(1);
-        }
-        const buffer = Buffer.from(await res.arrayBuffer());
-        fs.writeFileSync(outPath, buffer);
-        console.log(outPath);
+        printResult(result);
       }
       break;
     }
@@ -1227,65 +1122,40 @@ async function main() {
       const sub = args[0];
 
       if (sub === "stop") {
-        const docker = await isDockerRunning();
-        if (docker) {
-          const data = await apiPost("/interactive/stop", null);
-          if (!data.ok) { console.error(`  Error: ${data.error}`); process.exit(1); }
-          console.log(`  Session stopped. State saved: ${data.sessionSaved}`);
-        } else {
-          // The warm daemon owns the browsers now — "task done" must close
-          // THEM, immediately, not just the (empty) in-process instance.
-          // Saves state first, then tears down idle browsers; a browser busy
-          // with another agent's run is left alone (its own idle timer or
-          // that agent's stop reclaims it).
-          let stopped = false;
-          try {
-            const info = JSON.parse(fs.readFileSync(path.join(CONFIG_DIR, "server.json"), "utf8"));
-            if (info && info.port) {
-              const res = await fetch(`http://127.0.0.1:${info.port}/interactive/stop`, {
-                method: "POST",
-                headers: { "x-api-key": LOCAL_TOKEN },
-                signal: AbortSignal.timeout(15_000),
-              });
-              if (res.ok) {
-                const data = await res.json();
-                console.log(`  Session stopped. State saved: ${data.sessionSaved}`);
-                stopped = true;
-              }
+        // The warm daemon owns the browsers now — "task done" must close
+        // THEM, immediately, not just the (empty) in-process instance.
+        // Saves state first, then tears down idle browsers; a browser busy
+        // with another agent's run is left alone (its own idle timer or
+        // that agent's stop reclaims it).
+        let stopped = false;
+        try {
+          const info = JSON.parse(fs.readFileSync(path.join(CONFIG_DIR, "server.json"), "utf8"));
+          if (info && info.port) {
+            const res = await fetch(`http://127.0.0.1:${info.port}/interactive/stop`, {
+              method: "POST",
+              headers: { "x-api-key": LOCAL_TOKEN },
+              signal: AbortSignal.timeout(15_000),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              console.log(`  Session stopped. State saved: ${data.sessionSaved}`);
+              stopped = true;
             }
-          } catch {}
-          if (!stopped) {
-            const iframer = await getLocalIframer();
-            const result = await iframer.stopSession(LOCAL_USER_ID, LOCAL_TOKEN);
-            console.log(`  Session stopped. State saved: ${result.sessionSaved}`);
           }
+        } catch {}
+        if (!stopped) {
+          const iframer = await getLocalIframer();
+          const result = await iframer.stopSession(LOCAL_USER_ID, LOCAL_TOKEN);
+          console.log(`  Session stopped. State saved: ${result.sessionSaved}`);
         }
 
       } else if (sub === "clear") {
-        const docker = await isDockerRunning();
-        if (docker) {
-          const data = await apiDelete("/session");
-          if (!data.ok) { console.error(`  Error: ${data.error}`); process.exit(1); }
-        } else {
-          const iframer = await getLocalIframer();
-          await iframer.clearSession(LOCAL_USER_ID);
-        }
+        const iframer = await getLocalIframer();
+        await iframer.clearSession(LOCAL_USER_ID);
         console.log("  Session data cleared.");
 
       } else if (sub === "status") {
-        const docker = await isDockerRunning();
-        if (docker) {
-          const data = await apiGet("/interactive/status");
-          if (!data.active) {
-            console.log("  No active session.");
-          } else {
-            console.log(`  Active session`);
-            console.log(`  noVNC: ${data.noVncUrl}`);
-            console.log(`  Started: ${data.createdAt}`);
-          }
-        } else {
-          console.log("  Local mode — no persistent sessions (sessions live within execute calls).");
-        }
+        console.log("  Sessions live within execute calls. Run `iframer instances` to see open browsers.");
 
       } else {
         console.error("  Usage: iframer session <stop|clear|status>");
@@ -1333,27 +1203,13 @@ async function main() {
           process.exit(1);
         }
 
-        const docker = await isDockerRunning();
-        if (USE_LOCAL || !docker) {
-          const iframer = await getLocalIframer();
-          await iframer.storeCredential(LOCAL_USER_ID, LOCAL_TOKEN, body);
-        } else {
-          const data = await apiPost("/credentials", body);
-          if (!data.ok) { console.error(`  Error: ${data.error}`); process.exit(1); }
-        }
+        const iframer = await getLocalIframer();
+        await iframer.storeCredential(LOCAL_USER_ID, LOCAL_TOKEN, body);
         console.log(`\n  Credentials stored for ${domain}`);
 
       } else if (sub === "list") {
-        const docker = await isDockerRunning();
-        let domains;
-        if (USE_LOCAL || !docker) {
-          const iframer = await getLocalIframer();
-          domains = await iframer.listCredentials(LOCAL_USER_ID);
-        } else {
-          const data = await apiGet("/credentials");
-          if (!data.ok) { console.error(`  Error: ${data.error}`); process.exit(1); }
-          domains = data.domains;
-        }
+        const iframer = await getLocalIframer();
+        const domains = await iframer.listCredentials(LOCAL_USER_ID);
         if (domains.length === 0) {
           console.log("  No credentials stored.");
         } else {
@@ -1364,14 +1220,8 @@ async function main() {
       } else if (sub === "remove") {
         const domain = args[1];
         if (!domain) { console.error("  Usage: iframer credentials remove <domain>"); process.exit(1); }
-        const docker = await isDockerRunning();
-        if (USE_LOCAL || !docker) {
-          const iframer = await getLocalIframer();
-          await iframer.deleteCredential(LOCAL_USER_ID, domain);
-        } else {
-          const data = await apiDelete(`/credentials/${encodeURIComponent(domain)}`);
-          if (!data.ok) { console.error(`  Error: ${data.error}`); process.exit(1); }
-        }
+        const iframer = await getLocalIframer();
+        await iframer.deleteCredential(LOCAL_USER_ID, domain);
         console.log(`  Credentials for ${domain} removed.`);
 
       } else {
@@ -1414,14 +1264,8 @@ async function main() {
       const mode = parseModeFlag(args);
       if (mode) options.mode = mode;
 
-      const docker = await isDockerRunning();
-      let result;
-      if (USE_LOCAL || !docker) {
-        const iframer = await getLocalIframer();
-        result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options });
-      } else {
-        result = await apiPost("/execute", { steps, options });
-      }
+      const iframer = await getLocalIframer();
+      const result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options });
 
       if (result.capturedApi && result.capturedApi.length > 0) {
         const outputDir = parseFlag(args, "--output") || `./${result.capturedApi[0].domain}`;
@@ -1445,162 +1289,12 @@ async function main() {
       break;
     }
 
-    // ─── Interactive (Docker only) ───────────────────────────────────
-
-    case "interactive": {
-      const sub = args[0];
-
-      if (sub === "stop") {
-        const data = await apiPost("/interactive/stop", null);
-        if (!data.ok) { console.error(`  Error: ${data.error}`); process.exit(1); }
-        console.log("  Interactive session stopped. Session saved.");
-
-      } else if (sub === "status") {
-        const data = await apiGet("/interactive/status");
-        if (!data.ok) { console.error(`  Error: ${data.error}`); process.exit(1); }
-        if (!data.active) {
-          console.log("  No active interactive session.");
-        } else {
-          console.log(`  Active session`);
-          console.log(`  noVNC: ${data.noVncUrl}`);
-          console.log(`  Started: ${data.createdAt}`);
-        }
-
-      } else if (sub) {
-        const data = await apiPost("/interactive/start", { url: sub });
-        if (!data.ok) { console.error(`  Error: ${data.error}`); process.exit(1); }
-        console.log(`\n  Interactive session started!`);
-        console.log(`  noVNC: ${data.noVncUrl}\n`);
-        console.log(`  Stop with: iframer interactive stop`);
-        openBrowser(data.noVncUrl);
-
-      } else {
-        console.error("  Usage: iframer interactive <url|stop|status>");
-        process.exit(1);
-      }
-      break;
-    }
-
-    // ─── Watch ───────────────────────────────────────────────────────
-
-    case "watch": {
-      console.log("  Watching for interactive session...\n");
-
-      const poll = async () => {
-        try {
-          const data = await apiGet("/interactive/status");
-          if (data.ok && data.active) return data.noVncUrl;
-        } catch {}
-        return null;
-      };
-
-      let vncUrl = await poll();
-      if (vncUrl) {
-        console.log(`  Session active! Opening noVNC viewer...`);
-        console.log(`  ${vncUrl}\n`);
-        openBrowser(vncUrl);
-      }
-
-      let lastUrl = vncUrl;
-      const interval = setInterval(async () => {
-        const url = await poll();
-        if (url && url !== lastUrl) {
-          console.log(`  New session detected! Opening noVNC viewer...`);
-          console.log(`  ${url}\n`);
-          openBrowser(url);
-        }
-        lastUrl = url;
-      }, 2000);
-
-      process.on("SIGINT", () => {
-        clearInterval(interval);
-        console.log("\n  Stopped watching.");
-        process.exit(0);
-      });
-
-      await new Promise(() => {});
-      break;
-    }
-
-    // ─── Act (legacy — send action to Docker session) ────────────────
-
-    case "act": {
-      const actionType = args[0];
-      if (!actionType) {
-        console.error(`  Usage: iframer act <action-type> [options]
-
-  Actions:
-    click <selector>                Click an element
-    human-click <selector>          Click with human-like mouse movement
-    human-click <x> <y>             Click at coordinates with human-like movement
-    human-type <selector> <text>    Type with human-like keystroke timing
-    navigate <url>                  Navigate to a URL
-    scroll [deltaY]                 Scroll the page
-    wait <ms>                       Wait for milliseconds
-    evaluate <expression>           Evaluate JavaScript
-    wait-for-selector <selector>    Wait for element to appear
-    keyboard <key>                  Press a keyboard key
-
-  reCAPTCHA:
-    recaptcha-click                 Click the reCAPTCHA checkbox
-    recaptcha-select <tiles...>     Click tiles by index (e.g. 0 2 5)
-    recaptcha-verify                Click the verify button
-    recaptcha-info                  Get challenge info without clicking`);
-        process.exit(1);
-      }
-
-      let action = {};
-      const screenshotPath = "/tmp/browser-act.png";
-
-      switch (actionType) {
-        case "click":
-          action = { type: "click", selector: args[1] }; break;
-        case "human-click":
-          if (args[1] && !isNaN(args[1]) && args[2] && !isNaN(args[2])) {
-            action = { type: "human-click", x: parseFloat(args[1]), y: parseFloat(args[2]) };
-          } else {
-            action = { type: "human-click", selector: args[1] };
-          }
-          break;
-        case "human-type":
-          action = { type: "human-type", selector: args[1], value: args.slice(2).join(" ") }; break;
-        case "navigate":
-          action = { type: "navigate", url: args[1], waitUntil: args[2] || "networkidle" }; break;
-        case "scroll":
-          action = { type: "scroll", deltaY: args[1] ? parseInt(args[1]) : undefined }; break;
-        case "wait":
-          action = { type: "wait", ms: parseInt(args[1]) || 1000 }; break;
-        case "evaluate":
-          action = { type: "evaluate", expression: args.slice(1).join(" ") }; break;
-        case "wait-for-selector":
-          action = { type: "wait-for-selector", selector: args[1], timeout: args[2] ? parseInt(args[2]) : undefined }; break;
-        case "keyboard":
-          action = { type: "keyboard", key: args[1] }; break;
-        case "recaptcha-click":
-          action = { type: "recaptcha-click" }; break;
-        case "recaptcha-select":
-          action = { type: "recaptcha-select", tiles: args.slice(1).map(Number) }; break;
-        case "recaptcha-verify":
-          action = { type: "recaptcha-verify" }; break;
-        case "recaptcha-info":
-          action = { type: "recaptcha-info" }; break;
-        default:
-          console.error(`  Unknown action: ${actionType}`);
-          process.exit(1);
-      }
-
-      const data = await apiPost("/interactive/act", { action });
-      handleResponse(data, screenshotPath);
-      break;
-    }
-
     // ─── Install MCP ─────────────────────────────────────────────────
 
     case "install-mcp": {
       const runtime = resolveMcpRuntime();
       console.log(runtime.message);
-      const isDev = args.includes("--dev");
-      const mcpName = isDev ? "iframer-dev" : "iframer";
+      const mcpName = "iframer";
 
       // Resolve the encryption token. Precedence:
       //   1. IFRAMER_SECRET env var or repo .env (dev override)
@@ -1629,7 +1323,6 @@ async function main() {
       // time without needing to read the file. Both paths (env var + file)
       // resolve to the same value.
       mcpEntry.env = { IFRAMER_SECRET: secret };
-      if (!isDev) mcpEntry.env.IFRAMER_MODE = "local";
 
       const claudeConfigPath = installClaudeMcp(mcpName, mcpEntry);
       const codexConfigPath = installCodexMcp(mcpName, mcpEntry);
@@ -1641,8 +1334,6 @@ async function main() {
 
       console.log(`\n  ${mcpName} MCP installed!`);
       console.log(`  Encryption key: ${secretSource} → ~/.iframer/secret`);
-      if (!isDev) console.log("  Mode: local (headless + binary-headful, no Docker needed)");
-      else console.log("  Mode: docker (connects to Docker container)");
       console.log(`  Claude Code config written to: ${claudeConfigPath}`);
       console.log(`  Codex config written to: ${codexConfigPath}`);
       if (skillInstalled) console.log("  Skill /iframer installed for Claude Code");
@@ -1854,6 +1545,7 @@ async function main() {
     // ─── Remove MCP ──────────────────────────────────────────────────
 
     case "remove-mcp": {
+      // `--dev` removes the iframer-dev entry older versions could register.
       const isDev = args.includes("--dev");
       const mcpName = isDev ? "iframer-dev" : "iframer";
       const claudeResult = removeClaudeMcp(mcpName);
@@ -1881,7 +1573,7 @@ async function main() {
 
   Pipeline:
     execute <pipeline.json|json>    Run a pipeline of browser steps
-      --mode <mode>                 Force browser mode (headless, binary-headful, docker-headful)
+      --mode <mode>                 Force browser mode (headless, binary-headful)
       --capture-api                 Record XHR/fetch requests during execution
       --continue-on-error           Don't stop on step failure
       --timeout <ms>                Stale state timeout (default: 20000)
@@ -1897,7 +1589,6 @@ async function main() {
     screenshot <url> [options]      Take a screenshot of a URL
       --mode <mode>                 Browser mode
       --annotate                    Overlay element badges with refs
-      -o, --output <path>           Output file path
     reverse-engineer <url|file>     Capture API calls a site makes
       --output <dir>                Save directory
       --typed                       Generate TypeScript
@@ -1937,17 +1628,10 @@ async function main() {
     install chromium                Download Chrome for Testing
     status                          Show system status
 
-  Docker (interactive):
-    interactive <url>               Open a live headful browser session (Docker only)
-    interactive stop                Stop Docker session
-    interactive status              Check Docker session
-    watch                           Auto-open noVNC when session starts
-    act <action> [args...]          Send action to Docker session
-
   Setup:
     install                         Install everything (Chromium + MCP)
     install chromium                Download Chrome for Testing
-    install mcp [--dev]             Register iframer MCP in Claude Code and Codex
+    install mcp                     Register iframer MCP in Claude Code and Codex
     install extension chrome        Install the (optional) browser extension for Chrome/Chromium
     extension path                  Print the extension folder to load in chrome://extensions
     extension token                 Print the pairing token (only needed to pair by hand)
@@ -1956,13 +1640,13 @@ async function main() {
     version, --version, -v          Print the installed version
     remove                          Remove everything (Chromium + MCP)
     remove chromium                 Delete downloaded Chrome for Testing
-    remove mcp [--dev]              Unregister iframer MCP from Claude Code and Codex
+    remove mcp                      Unregister iframer MCP from Claude Code and Codex
     remove extension                Remove the extension pairing host
 
   Environment:
-    IFRAMER_URL                     Docker API URL (default: http://localhost:3021)
-    IFRAMER_SECRET                  Auth token (must match Docker .env)
-    IFRAMER_MODE                    Force "local" or "docker" mode
+    IFRAMER_SECRET                  Encryption and pairing secret (default: ~/.iframer/secret)
+    IFRAMER_DATA_DIR                Data directory (default: ~/.iframer)
+    ANTHROPIC_API_KEY               Needed by the solve-captcha step
 `);
       break;
   }

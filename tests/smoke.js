@@ -4,10 +4,10 @@
  * Usage:
  *   node tests/smoke.js                                    # localhost, no auth
  *   IFRAMER_SECRET=your-secret node tests/smoke.js         # localhost, with auth
- *   URL=http://192.168.1.5:3021 node tests/smoke.js        # custom host
+ *   URL=http://127.0.0.1:3025 node tests/smoke.js          # custom port
  */
 
-const BASE = (process.env.URL || "http://localhost:3021").replace(/\/+$/, "");
+const BASE = (process.env.URL || "http://127.0.0.1:3022").replace(/\/+$/, "");
 const SECRET = process.env.IFRAMER_SECRET || "";
 
 let passed = 0;
@@ -72,14 +72,14 @@ async function run() {
 
   if (SECRET) {
     await test("request without secret returns 401", async () => {
-      const res = await fetch(`${BASE}/interactive/status`, {
+      const res = await fetch(`${BASE}/browser/health`, {
         headers: { "Content-Type": "application/json" },
       });
       assert(res.status === 401, `Expected 401, got ${res.status}`);
     });
 
     await test("request with wrong secret returns 401", async () => {
-      const res = await fetch(`${BASE}/interactive/status`, {
+      const res = await fetch(`${BASE}/browser/health`, {
         headers: { "Content-Type": "application/json", "x-api-key": "wrong" },
       });
       assert(res.status === 401, `Expected 401, got ${res.status}`);
@@ -128,19 +128,13 @@ async function run() {
 
   await post("/interactive/stop").catch(() => {});
 
-  await test("GET /interactive/status with no active session", async () => {
-    const { status, body } = await get("/interactive/status");
-    assert(status === 200, `Expected 200, got ${status}`);
-    assert(body.active === false, "Expected no active session");
-  });
-
   // ── Execute pipeline ──
 
   await test("POST /execute with navigate + extract", async () => {
     const { status, body } = await post("/execute", {
       steps: [
         { type: "navigate", url: "https://example.com" },
-        { type: "extract", expression: "document.querySelector('h1').textContent" },
+        { type: "extract", expression: "document.title" },
       ],
     });
     assert(status === 200, `Expected 200, got ${status}`);

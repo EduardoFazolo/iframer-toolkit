@@ -6,14 +6,18 @@ import os from "os";
  * SQLite DB, encryption secret, knowledge cache, domain-mode memory, logs.
  *
  * Precedence:
- *   1. IFRAMER_DATA_DIR env var — used by the Docker container via a
- *      bind-mount so container and host share ONE source of truth for
- *      credentials, sessions, knowledge, and the encryption secret.
- *   2. ~/.iframer on the host.
+ *   1. IFRAMER_DATA_DIR env var.
+ *   2. ~/.iframer.
  *
  * Chrome binaries and per-mode browser profiles do NOT live here — those are
  * platform-specific and resolved separately by the browser layer.
  */
 export function getDataDir(): string {
   return process.env.IFRAMER_DATA_DIR || path.join(os.homedir(), ".iframer");
+}
+
+/** Where the server saves screenshots and serves /screenshots from. Must not
+ *  depend on the code's location: built, the two callers sit in different dirs. */
+export function getScreenshotDir(): string {
+  return path.join(getDataDir(), "screenshots");
 }

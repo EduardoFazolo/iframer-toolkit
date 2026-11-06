@@ -30,8 +30,8 @@ A captcha is blocking this run. Use the "recaptcha" step with an action:
   {type:"recaptcha", action:"click"}               → click the "I'm not a robot" checkbox
   {type:"recaptcha", action:"answer", tiles:[...]} → select tiles + verify + re-check (handles refreshing grids)
   {type:"recaptcha", action:"select"|"verify"}     → manual tile-select / submit, if you need finer control
-  {type:"recaptcha", action:"solve"}               → automatic vision solve (docker-headful)
-Or {type:"solve-captcha"} for one-shot auto-detect + solve.
+  {type:"recaptcha", action:"solve"}               → automatic vision solve (needs ANTHROPIC_API_KEY)
+Or {type:"solve-captcha"} for one-shot auto-detect + solve (needs ANTHROPIC_API_KEY).
 In binary-headful mode, prefer asking the user to solve it in the visible window.`;
 
 function captchaBlocked(data: PipelineResult): boolean {

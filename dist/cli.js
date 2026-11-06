@@ -46,10 +46,14 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 // src/lib/paths.ts
 var paths_exports = {};
 __export(paths_exports, {
-  getDataDir: () => getDataDir
+  getDataDir: () => getDataDir,
+  getScreenshotDir: () => getScreenshotDir
 });
 function getDataDir() {
   return process.env.IFRAMER_DATA_DIR || import_path.default.join(import_os.default.homedir(), ".iframer");
+}
+function getScreenshotDir() {
+  return import_path.default.join(getDataDir(), "screenshots");
 }
 var import_path, import_os;
 var init_paths = __esm({
@@ -374,7 +378,6 @@ var init_local_server = __esm({
           const env = {
             ...process.env,
             PORT: String(port),
-            IFRAMER_MODE: "local",
             IFRAMER_DATA_DIR: dataDir
           };
           if (process.env.IFRAMER_SECRET) {
@@ -863,11 +866,10 @@ function stealthContextOptions(overrides = {}, _sessionId, fp) {
 async function applyStealthToPage(page) {
   await page.context().addInitScript(STEALTH_SCRIPT);
 }
-var contextStealthScripts, CHROME_VERSION, USER_AGENT, NATIVE_TOSTRING_HELPER, STEALTH_SCRIPT, STEALTH_ARGS;
+var CHROME_VERSION, USER_AGENT, NATIVE_TOSTRING_HELPER, STEALTH_SCRIPT, STEALTH_ARGS;
 var init_stealth = __esm({
   "src/lib/browser/stealth.ts"() {
     "use strict";
-    contextStealthScripts = /* @__PURE__ */ new Map();
     CHROME_VERSION = "136.0.7103.93";
     USER_AGENT = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME_VERSION} Safari/537.36`;
     NATIVE_TOSTRING_HELPER = `
@@ -901,11 +903,6 @@ var init_stealth = __esm({
 });
 
 // src/lib/browser/launcher.ts
-function findChromeExecutable() {
-  if (process.env.CHROME_EXECUTABLE) return process.env.CHROME_EXECUTABLE;
-  if (import_fs3.default.existsSync("/usr/bin/google-chrome-stable")) return "/usr/bin/google-chrome-stable";
-  return void 0;
-}
 function armHeadedIdleTimer() {
   if (headedIdleTimer) clearTimeout(headedIdleTimer);
   headedIdleTimer = setTimeout(() => {
@@ -983,42 +980,15 @@ async function closeBrowser() {
 async function getBrowserWithFallback(_preferred) {
   return { browser: await getBrowser(), name: "chromium" };
 }
-async function launchHeadful(displayNum) {
-  const executablePath = findChromeExecutable();
-  const hasExtensions = import_fs3.default.existsSync(UBLOCK_PATH);
-  const args2 = [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-blink-features=AutomationControlled",
-    "--disable-features=IsolateOrigins,site-per-process",
-    "--disable-infobars",
-    "--window-size=1920,1080",
-    "--force-device-scale-factor=1.25",
-    "--use-gl=angle",
-    "--use-angle=swiftshader"
-  ];
-  if (hasExtensions) args2.push(`--load-extension=${UBLOCK_PATH}`);
-  const launchOpts = {
-    headless: false,
-    args: args2,
-    env: { ...process.env, DISPLAY: `:${displayNum}` }
-  };
-  if (executablePath) launchOpts.executablePath = executablePath;
-  log2.debug(`headful: ${executablePath || "patchright chromium"}, extensions: ${hasExtensions}`);
-  return import_patchright.chromium.launch(launchOpts);
-}
-var import_fs3, import_patchright, log2, UBLOCK_PATH, cachedBrowser, headedBrowser, headedPid, headedIdleTimer, HEADED_IDLE_MS;
+var import_patchright, log2, cachedBrowser, headedBrowser, headedPid, headedIdleTimer, HEADED_IDLE_MS;
 var init_launcher = __esm({
   "src/lib/browser/launcher.ts"() {
     "use strict";
-    import_fs3 = __toESM(require("fs"));
     import_patchright = require("patchright");
     init_stealth();
     init_logger();
     init_registry();
     log2 = createLogger("launcher");
-    UBLOCK_PATH = "/extensions/uBlock0.chromium";
     cachedBrowser = null;
     headedBrowser = null;
     headedPid = null;
@@ -1027,170 +997,116 @@ var init_launcher = __esm({
   }
 });
 
-// src/lib/constants.ts
-var TIMING, CAPTCHA_GRID, SCREEN_DEFAULTS, THRESHOLDS, TIMEOUTS, CHROME_MIN_VERSION;
-var init_constants = __esm({
-  "src/lib/constants.ts"() {
-    "use strict";
-    TIMING = {
-      /** Mouse move settle delay */
-      MOUSE_MOVE: [50, 200],
-      /** Click down→up delay */
-      CLICK_HOLD: [30, 90],
-      /** Post-click settle */
-      POST_CLICK: [100, 300],
-      /** Per-character typing delay */
-      CHAR_DELAY: [30, 150],
-      /** Occasional word-boundary pause */
-      WORD_PAUSE: [200, 500],
-      /** Pre-action move range */
-      IDLE_MOUSE_X: [100, 400],
-      IDLE_MOUSE_Y: [100, 300],
-      /** Pre-checkbox random move */
-      PRE_CHECKBOX_X: [200, 600],
-      PRE_CHECKBOX_Y: [150, 400],
-      /** Pause after moving to checkbox area */
-      PRE_CHECKBOX_WAIT: [300, 800],
-      /** Wait after clicking reCAPTCHA checkbox */
-      POST_CHECKBOX_WAIT: 2500,
-      /** Wait after clicking verify button */
-      POST_VERIFY_WAIT: 2e3,
-      /** Wait between clicking captcha tiles */
-      TILE_CLICK_DELAY: [200, 500],
-      /** Time to wait for reCAPTCHA tile images to settle */
-      TILE_SETTLE: 800,
-      /** Delay before captcha auto-detection */
-      CAPTCHA_DETECT_WAIT: 1500,
-      /** Post-login navigation settle */
-      POST_LOGIN_WAIT: 1500,
-      /** Post-submit form delay */
-      POST_SUBMIT_WAIT: 500,
-      /** Post-submit form extended wait */
-      POST_SUBMIT_EXTENDED: 2e3,
-      /** Delay before navigating (human hesitation) */
-      PRE_NAVIGATE: [300, 700],
-      /** Per-digit input delay base */
-      DIGIT_DELAY_BASE: 80,
-      DIGIT_DELAY_RANGE: 120,
-      /** Post-click in forms */
-      POST_FORM_CLICK: 200,
-      /** Post-TOTP entry wait */
-      POST_TOTP_WAIT: 300,
-      /** Post-cookies inject wait */
-      POST_COOKIES_WAIT: 300,
-      /** Scroll step delay */
-      SCROLL_DELAY: 150,
-      /** Stale state check interval */
-      STALE_CHECK_INTERVAL: 2e3,
-      /** captureApi: grace period after the last step for a submit's XHR to fire */
-      CAPTURE_SETTLE: 300,
-      /** captureApi: max wait for in-flight requests to answer before stopping */
-      CAPTURE_PENDING_MAX: 3e3,
-      /** Post-failure probe ("does the selector exist right now?") budget */
-      FAILURE_PROBE: 3e3
-    };
-    CAPTCHA_GRID = {
-      /** Pixels from bframe top to grid start (reCAPTCHA) */
-      RECAPTCHA_HEADER_HEIGHT: 112,
-      /** Pixels from bframe top to grid start (hCaptcha) — slightly different */
-      HCAPTCHA_HEADER_HEIGHT: 110,
-      /** Default tile size when bframeBox is unavailable */
-      DEFAULT_TILE_SIZE: 125,
-      /** Grid padding (left+right total) */
-      GRID_PADDING: 24,
-      /** Grid left margin */
-      GRID_MARGIN: 12,
-      /** Verify button offset from bframe bottom */
-      VERIFY_BTN_BOTTOM_OFFSET: 35,
-      /** Verify button offset from bframe right */
-      VERIFY_BTN_RIGHT_OFFSET: 60
-    };
-    SCREEN_DEFAULTS = {
-      WIDTH: 1920,
-      HEIGHT: 1080,
-      AVAIL_HEIGHT: 1040,
-      DPR: 1.25
-    };
-    THRESHOLDS = {
-      /** Minimum character change to consider page "changed" */
-      STALE_CHAR_CHANGE: 100,
-      /** Minimum percentage change to consider page "changed" */
-      STALE_PERCENT_CHANGE: 0.05,
-      /** Minimum body text length to not be considered "empty" */
-      MIN_BODY_TEXT: 200,
-      /** Maximum response text length to capture */
-      MAX_RESPONSE_TEXT: 1e5
-    };
-    TIMEOUTS = {
-      DEFAULT_STALE: 2e4,
-      NAVIGATION: 6e4,
-      SELECTOR_WAIT: 1e4,
-      // Actionability wait for click. Under the 20s stale timer on purpose, so
-      // Playwright's own reason (not visible, covered by another element…) reaches
-      // the agent instead of a generic "no state change".
-      CLICK: 8e3,
-      TOTP_INPUT: 5e3,
-      API_REQUEST: 18e4,
-      HEALTH_CHECK: 3e3,
-      CHALLENGE_FRAME_WAIT: 5e3,
-      // New-tab following: after a click, how long to wait for a just-opened tab's
-      // 'page' event to arrive (only applies when no tab has registered yet), and
-      // how long to let the followed tab reach domcontentloaded before continuing.
-      TAB_FOLLOW_SETTLE: 400,
-      TAB_LOAD: 15e3,
-      // A new tab usually opens at about:blank then navigates to its real URL —
-      // wait this long for that first real navigation before judging it blank.
-      TAB_BLANK_RESOLVE: 3e3
-    };
-    CHROME_MIN_VERSION = 130;
+// src/lib/auth/crypto.ts
+function getLocalToken() {
+  if (process.env.IFRAMER_SECRET) return process.env.IFRAMER_SECRET;
+  const candidates = [
+    import_path4.default.join(getDataDir(), "secret"),
+    import_path4.default.join(process.env.XDG_RUNTIME_DIR || import_os2.default.tmpdir(), "iframer-secret")
+  ];
+  for (const file of candidates) {
+    try {
+      const existing = import_fs3.default.readFileSync(file, "utf8").trim();
+      if (existing) return existing;
+    } catch {
+    }
   }
-});
-
-// src/lib/browser/fingerprint.ts
-function generateWindowsFingerprint() {
-  const fp = generator.getFingerprint();
-  const { navigator: nav, screen } = fp.fingerprint;
-  const dprOptions = [1.25, 1.5, 1.25, 1.5, 1];
-  const dpr = dprOptions[Math.floor(Math.random() * dprOptions.length)];
-  const w = screen.width || SCREEN_DEFAULTS.WIDTH;
-  const h = screen.height || SCREEN_DEFAULTS.HEIGHT;
-  return {
-    userAgent: nav.userAgent,
-    platform: "Win32",
-    screenWidth: w,
-    screenHeight: h,
-    screenAvailHeight: h - 40,
-    // Windows taskbar ~40px
-    colorDepth: 24,
-    deviceScaleFactor: dpr,
-    hardwareConcurrency: nav.hardwareConcurrency || 8,
-    deviceMemory: nav.deviceMemory || 8,
-    languages: nav.languages || ["en-US", "en"],
-    uaData: nav.userAgentData
-  };
+  for (const file of candidates) {
+    try {
+      import_fs3.default.mkdirSync(import_path4.default.dirname(file), { recursive: true });
+      const secret = import_crypto.default.randomBytes(32).toString("hex");
+      import_fs3.default.writeFileSync(file, secret, { mode: 384 });
+      return secret;
+    } catch {
+    }
+  }
+  throw new Error(
+    `iframer: could not read or create a persistent encryption secret in any writable location (${candidates.join(", ")}). Set IFRAMER_SECRET to a stable value shared between the MCP server and CLI (openssl rand -hex 32).`
+  );
 }
-var import_fingerprint_generator, generator;
-var init_fingerprint = __esm({
-  "src/lib/browser/fingerprint.ts"() {
-    "use strict";
-    import_fingerprint_generator = require("fingerprint-generator");
-    init_constants();
-    generator = new import_fingerprint_generator.FingerprintGenerator({
-      browsers: [{ name: "chrome", minVersion: CHROME_MIN_VERSION }],
-      operatingSystems: ["windows"],
-      devices: ["desktop"],
-      locales: ["en-US"]
+function getPairingTokens() {
+  const tokens = /* @__PURE__ */ new Set();
+  try {
+    tokens.add(getLocalToken());
+  } catch {
+  }
+  const candidates = [
+    import_path4.default.join(getDataDir(), "secret"),
+    import_path4.default.join(process.env.XDG_RUNTIME_DIR || import_os2.default.tmpdir(), "iframer-secret")
+  ];
+  for (const file of candidates) {
+    try {
+      tokens.add(import_fs3.default.readFileSync(file, "utf8").trim());
+    } catch {
+    }
+  }
+  tokens.delete("");
+  return [...tokens];
+}
+function deriveKey(token, purpose = INFO) {
+  return new Promise((resolve, reject) => {
+    import_crypto.default.hkdf("sha256", token, SALT, purpose, KEY_LENGTH, (err, key) => {
+      if (err) return reject(err);
+      resolve(Buffer.from(key));
     });
+  });
+}
+function encrypt(plaintext, key) {
+  const iv = import_crypto.default.randomBytes(IV_LENGTH);
+  const cipher = import_crypto.default.createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, tag, encrypted]);
+}
+function decrypt(blob, key) {
+  const iv = blob.subarray(0, IV_LENGTH);
+  const tag = blob.subarray(IV_LENGTH, IV_LENGTH + TAG_LENGTH);
+  const ciphertext = blob.subarray(IV_LENGTH + TAG_LENGTH);
+  const decipher = import_crypto.default.createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(tag);
+  return decipher.update(ciphertext, void 0, "utf8") + decipher.final("utf8");
+}
+function generateTOTP(secret, period = 30, digits = 6) {
+  const base32Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const cleanSecret = secret.replace(/[\s=-]/g, "").toUpperCase();
+  let bits = "";
+  for (const c of cleanSecret) {
+    const val = base32Chars.indexOf(c);
+    if (val === -1) continue;
+    bits += val.toString(2).padStart(5, "0");
+  }
+  const keyBytes = [];
+  for (let i = 0; i + 8 <= bits.length; i += 8) {
+    keyBytes.push(parseInt(bits.substring(i, i + 8), 2));
+  }
+  const key = Buffer.from(keyBytes);
+  const time = Math.floor(Date.now() / 1e3 / period);
+  const timeBuffer = Buffer.alloc(8);
+  timeBuffer.writeUInt32BE(Math.floor(time / 4294967296), 0);
+  timeBuffer.writeUInt32BE(time & 4294967295, 4);
+  const hmac = import_crypto.default.createHmac("sha1", key).update(timeBuffer).digest();
+  const offset = hmac[hmac.length - 1] & 15;
+  const code = ((hmac[offset] & 127) << 24 | (hmac[offset + 1] & 255) << 16 | (hmac[offset + 2] & 255) << 8 | hmac[offset + 3] & 255) % Math.pow(10, digits);
+  return code.toString().padStart(digits, "0");
+}
+var import_crypto, import_fs3, import_os2, import_path4, SALT, INFO, KEY_LENGTH, IV_LENGTH, TAG_LENGTH;
+var init_crypto = __esm({
+  "src/lib/auth/crypto.ts"() {
+    "use strict";
+    import_crypto = __toESM(require("crypto"));
+    import_fs3 = __toESM(require("fs"));
+    import_os2 = __toESM(require("os"));
+    import_path4 = __toESM(require("path"));
+    init_paths();
+    SALT = "iframer-session";
+    INFO = "encryption";
+    KEY_LENGTH = 32;
+    IV_LENGTH = 12;
+    TAG_LENGTH = 16;
   }
 });
 
 // src/lib/session/persistence.ts
-var persistence_exports = {};
-__export(persistence_exports, {
-  extractSession: () => extractSession,
-  injectCookies: () => injectCookies,
-  injectStorage: () => injectStorage
-});
 async function extractSession(context, page) {
   const cookies = await context.cookies();
   const { localStorage, sessionStorage } = await page.evaluate(() => {
@@ -1245,331 +1161,6 @@ var init_persistence = __esm({
   }
 });
 
-// src/lib/browser/session-manager.ts
-function allocateDisplay() {
-  for (let i = 0; i < MAX_SESSIONS; i++) {
-    const num = BASE_DISPLAY + i;
-    if (!usedDisplays.has(num)) {
-      usedDisplays.add(num);
-      return num;
-    }
-  }
-  throw new Error("No available displays. Max concurrent sessions reached.");
-}
-function freeDisplay(num) {
-  usedDisplays.delete(num);
-}
-function waitForSocket(displayNum, timeoutMs = 5e3) {
-  const socketPath = `/tmp/.X11-unix/X${displayNum}`;
-  return new Promise((resolve, reject) => {
-    const start = Date.now();
-    const check = () => {
-      if (import_fs4.default.existsSync(socketPath)) return resolve();
-      if (Date.now() - start > timeoutMs) return reject(new Error(`Xvfb socket not ready after ${timeoutMs}ms`));
-      setTimeout(check, 100);
-    };
-    check();
-  });
-}
-function killProcess(proc) {
-  if (proc && !proc.killed) {
-    try {
-      proc.kill("SIGTERM");
-    } catch {
-    }
-  }
-}
-async function startSession(userId) {
-  if (sessions.has(userId)) {
-    return sessions.get(userId);
-  }
-  const displayNum = allocateDisplay();
-  const vncPort = 5900 + displayNum;
-  const wsPort = 6080 + (displayNum - BASE_DISPLAY);
-  const xvfb = (0, import_child_process3.spawn)("Xvfb", [`:${displayNum}`, "-screen", "0", "1920x1080x24", "-ac"], {
-    stdio: "ignore"
-  });
-  await waitForSocket(displayNum);
-  const x11vnc = (0, import_child_process3.spawn)(
-    "x11vnc",
-    ["-display", `:${displayNum}`, "-nopw", "-listen", "localhost", "-rfbport", String(vncPort), "-shared", "-forever"],
-    { stdio: "ignore" }
-  );
-  const noVncPath = import_fs4.default.existsSync("/usr/share/novnc") ? "/usr/share/novnc" : "/usr/share/noVNC";
-  const websockify = (0, import_child_process3.spawn)("websockify", ["--web", noVncPath, String(wsPort), `localhost:${vncPort}`], {
-    stdio: "ignore"
-  });
-  await new Promise((r) => setTimeout(r, 500));
-  const browser = await launchHeadful(displayNum);
-  const fingerprint = generateWindowsFingerprint();
-  const ctxOpts = stealthContextOptions({}, userId, fingerprint);
-  const context = await browser.newContext(ctxOpts);
-  const stealthScript = buildStealthScript(fingerprint);
-  contextStealthScripts.set(context, stealthScript);
-  const page = await context.newPage();
-  log3.debug(`fingerprint: ${fingerprint.userAgent.slice(0, 60)}... DPR=${fingerprint.deviceScaleFactor} screen=${fingerprint.screenWidth}x${fingerprint.screenHeight}`);
-  const session = {
-    displayNum,
-    vncPort,
-    wsPort,
-    xvfb,
-    x11vnc,
-    websockify,
-    browser,
-    context,
-    page,
-    createdAt: /* @__PURE__ */ new Date(),
-    timeoutTimer: null
-  };
-  session.timeoutTimer = setTimeout(() => stopSession(userId), SESSION_TIMEOUT);
-  sessions.set(userId, session);
-  return session;
-}
-function resetTimeout(userId) {
-  const session = sessions.get(userId);
-  if (session) {
-    clearTimeout(session.timeoutTimer);
-    session.timeoutTimer = setTimeout(() => stopSession(userId), SESSION_TIMEOUT);
-  }
-}
-function getSession(userId) {
-  return sessions.get(userId) || null;
-}
-async function stopSession(userId) {
-  const session = sessions.get(userId);
-  if (!session) return null;
-  clearTimeout(session.timeoutTimer);
-  let sessionData = null;
-  try {
-    const { extractSession: extractSession2 } = await Promise.resolve().then(() => (init_persistence(), persistence_exports));
-    sessionData = await extractSession2(session.context, session.page);
-  } catch {
-  }
-  contextStealthScripts.delete(session.context);
-  try {
-    await session.context.close();
-  } catch {
-  }
-  try {
-    await session.browser.close();
-  } catch {
-  }
-  killProcess(session.websockify);
-  killProcess(session.x11vnc);
-  killProcess(session.xvfb);
-  await new Promise((r) => setTimeout(r, 1e3));
-  try {
-    import_fs4.default.unlinkSync(`/tmp/.X11-unix/X${session.displayNum}`);
-  } catch {
-  }
-  freeDisplay(session.displayNum);
-  sessions.delete(userId);
-  return sessionData;
-}
-async function cleanupAllSessions() {
-  const userIds = [...sessions.keys()];
-  await Promise.all(userIds.map((id) => stopSession(id)));
-}
-var import_child_process3, import_fs4, log3, BASE_DISPLAY, MAX_SESSIONS, SESSION_TIMEOUT, sessions, usedDisplays;
-var init_session_manager = __esm({
-  "src/lib/browser/session-manager.ts"() {
-    "use strict";
-    import_child_process3 = require("child_process");
-    import_fs4 = __toESM(require("fs"));
-    init_launcher();
-    init_stealth();
-    init_logger();
-    init_fingerprint();
-    log3 = createLogger("session");
-    BASE_DISPLAY = parseInt(process.env.VNC_BASE_DISPLAY || "99", 10);
-    MAX_SESSIONS = parseInt(process.env.VNC_MAX_SESSIONS || "20", 10);
-    SESSION_TIMEOUT = parseInt(process.env.VNC_SESSION_TIMEOUT_MS || "300000", 10);
-    sessions = /* @__PURE__ */ new Map();
-    usedDisplays = /* @__PURE__ */ new Set();
-  }
-});
-
-// src/lib/auth/crypto.ts
-function getLocalToken() {
-  if (process.env.IFRAMER_SECRET) return process.env.IFRAMER_SECRET;
-  const candidates = [
-    import_path4.default.join(getDataDir(), "secret"),
-    import_path4.default.join(process.env.XDG_RUNTIME_DIR || import_os2.default.tmpdir(), "iframer-secret")
-  ];
-  for (const file of candidates) {
-    try {
-      const existing = import_fs5.default.readFileSync(file, "utf8").trim();
-      if (existing) return existing;
-    } catch {
-    }
-  }
-  for (const file of candidates) {
-    try {
-      import_fs5.default.mkdirSync(import_path4.default.dirname(file), { recursive: true });
-      const secret = import_crypto.default.randomBytes(32).toString("hex");
-      import_fs5.default.writeFileSync(file, secret, { mode: 384 });
-      return secret;
-    } catch {
-    }
-  }
-  throw new Error(
-    `iframer: could not read or create a persistent encryption secret in any writable location (${candidates.join(", ")}). Set IFRAMER_SECRET to a stable value shared between the MCP server and CLI (openssl rand -hex 32).`
-  );
-}
-function getPairingTokens() {
-  const tokens = /* @__PURE__ */ new Set();
-  try {
-    tokens.add(getLocalToken());
-  } catch {
-  }
-  const candidates = [
-    import_path4.default.join(getDataDir(), "secret"),
-    import_path4.default.join(process.env.XDG_RUNTIME_DIR || import_os2.default.tmpdir(), "iframer-secret")
-  ];
-  for (const file of candidates) {
-    try {
-      tokens.add(import_fs5.default.readFileSync(file, "utf8").trim());
-    } catch {
-    }
-  }
-  tokens.delete("");
-  return [...tokens];
-}
-function deriveKey(token, purpose = INFO) {
-  return new Promise((resolve, reject) => {
-    import_crypto.default.hkdf("sha256", token, SALT, purpose, KEY_LENGTH, (err, key) => {
-      if (err) return reject(err);
-      resolve(Buffer.from(key));
-    });
-  });
-}
-function encrypt(plaintext, key) {
-  const iv = import_crypto.default.randomBytes(IV_LENGTH);
-  const cipher = import_crypto.default.createCipheriv("aes-256-gcm", key, iv);
-  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return Buffer.concat([iv, tag, encrypted]);
-}
-function decrypt(blob, key) {
-  const iv = blob.subarray(0, IV_LENGTH);
-  const tag = blob.subarray(IV_LENGTH, IV_LENGTH + TAG_LENGTH);
-  const ciphertext = blob.subarray(IV_LENGTH + TAG_LENGTH);
-  const decipher = import_crypto.default.createDecipheriv("aes-256-gcm", key, iv);
-  decipher.setAuthTag(tag);
-  return decipher.update(ciphertext, void 0, "utf8") + decipher.final("utf8");
-}
-function generateTOTP(secret, period = 30, digits = 6) {
-  const base32Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  const cleanSecret = secret.replace(/[\s=-]/g, "").toUpperCase();
-  let bits = "";
-  for (const c of cleanSecret) {
-    const val = base32Chars.indexOf(c);
-    if (val === -1) continue;
-    bits += val.toString(2).padStart(5, "0");
-  }
-  const keyBytes = [];
-  for (let i = 0; i + 8 <= bits.length; i += 8) {
-    keyBytes.push(parseInt(bits.substring(i, i + 8), 2));
-  }
-  const key = Buffer.from(keyBytes);
-  const time = Math.floor(Date.now() / 1e3 / period);
-  const timeBuffer = Buffer.alloc(8);
-  timeBuffer.writeUInt32BE(Math.floor(time / 4294967296), 0);
-  timeBuffer.writeUInt32BE(time & 4294967295, 4);
-  const hmac = import_crypto.default.createHmac("sha1", key).update(timeBuffer).digest();
-  const offset = hmac[hmac.length - 1] & 15;
-  const code = ((hmac[offset] & 127) << 24 | (hmac[offset + 1] & 255) << 16 | (hmac[offset + 2] & 255) << 8 | hmac[offset + 3] & 255) % Math.pow(10, digits);
-  return code.toString().padStart(digits, "0");
-}
-var import_crypto, import_fs5, import_os2, import_path4, SALT, INFO, KEY_LENGTH, IV_LENGTH, TAG_LENGTH;
-var init_crypto = __esm({
-  "src/lib/auth/crypto.ts"() {
-    "use strict";
-    import_crypto = __toESM(require("crypto"));
-    import_fs5 = __toESM(require("fs"));
-    import_os2 = __toESM(require("os"));
-    import_path4 = __toESM(require("path"));
-    init_paths();
-    SALT = "iframer-session";
-    INFO = "encryption";
-    KEY_LENGTH = 32;
-    IV_LENGTH = 12;
-    TAG_LENGTH = 16;
-  }
-});
-
-// src/lib/screenshot.ts
-function saveScreenshot(buffer, filename, screenshotDir, publicUrl) {
-  import_fs6.default.mkdirSync(screenshotDir, { recursive: true });
-  const filePath = import_path5.default.join(screenshotDir, filename);
-  import_fs6.default.writeFileSync(filePath, buffer);
-  maybePrune(screenshotDir);
-  return `${publicUrl}/screenshots/${filename}`;
-}
-function maybePrune(dir) {
-  const now = Date.now();
-  if (now - lastPruneAt < PRUNE_THROTTLE_MS) return;
-  lastPruneAt = now;
-  pruneScreenshots(dir);
-}
-function pruneScreenshots(dir, opts = {}) {
-  const maxAgeMs = opts.maxAgeMs ?? MAX_AGE_MS;
-  const maxFiles = opts.maxFiles ?? MAX_FILES;
-  const now = opts.now ?? Date.now();
-  try {
-    const entries = import_fs6.default.readdirSync(dir).filter((f) => f.endsWith(".jpg") || f.endsWith(".jpeg") || f.endsWith(".png")).map((f) => {
-      const full = import_path5.default.join(dir, f);
-      try {
-        return { full, mtimeMs: import_fs6.default.statSync(full).mtimeMs };
-      } catch {
-        return null;
-      }
-    }).filter((e) => e !== null);
-    let removed = 0;
-    const survivors = [];
-    for (const e of entries) {
-      if (now - e.mtimeMs > maxAgeMs) {
-        try {
-          import_fs6.default.unlinkSync(e.full);
-          removed++;
-        } catch {
-        }
-      } else {
-        survivors.push(e);
-      }
-    }
-    if (survivors.length > maxFiles) {
-      survivors.sort((a, b) => a.mtimeMs - b.mtimeMs);
-      for (const e of survivors.slice(0, survivors.length - maxFiles)) {
-        try {
-          import_fs6.default.unlinkSync(e.full);
-          removed++;
-        } catch {
-        }
-      }
-    }
-    if (removed > 0) log4.debug(`pruned ${removed} old screenshot(s) from ${dir}`);
-    return removed;
-  } catch (err) {
-    log4.warn(`screenshot prune failed: ${err instanceof Error ? err.message : String(err)}`);
-    return 0;
-  }
-}
-var import_fs6, import_path5, log4, MAX_AGE_MS, MAX_FILES, PRUNE_THROTTLE_MS, lastPruneAt;
-var init_screenshot = __esm({
-  "src/lib/screenshot.ts"() {
-    "use strict";
-    import_fs6 = __toESM(require("fs"));
-    import_path5 = __toESM(require("path"));
-    init_logger();
-    log4 = createLogger("screenshot");
-    MAX_AGE_MS = parseInt(process.env.IFRAMER_SCREENSHOT_MAX_AGE_MS || String(24 * 60 * 60 * 1e3), 10);
-    MAX_FILES = parseInt(process.env.IFRAMER_SCREENSHOT_MAX_FILES || "500", 10);
-    PRUNE_THROTTLE_MS = 5 * 60 * 1e3;
-    lastPruneAt = 0;
-  }
-});
-
 // src/lib/session/sqlite-store.ts
 function createBunDb(dbPath) {
   const { Database } = require("bun:sqlite");
@@ -1605,18 +1196,18 @@ function createNodeDb(dbPath) {
     close: () => db.close()
   };
 }
-var import_path6, import_fs7, IS_BUN, SqliteStore;
+var import_path5, import_fs4, IS_BUN, SqliteStore;
 var init_sqlite_store = __esm({
   "src/lib/session/sqlite-store.ts"() {
     "use strict";
-    import_path6 = __toESM(require("path"));
-    import_fs7 = __toESM(require("fs"));
+    import_path5 = __toESM(require("path"));
+    import_fs4 = __toESM(require("fs"));
     IS_BUN = typeof globalThis.Bun !== "undefined";
     SqliteStore = class {
       db;
       constructor(dataDir) {
-        import_fs7.default.mkdirSync(dataDir, { recursive: true });
-        const dbPath = import_path6.default.join(dataDir, "iframer.db");
+        import_fs4.default.mkdirSync(dataDir, { recursive: true });
+        const dbPath = import_path5.default.join(dataDir, "iframer.db");
         this.db = IS_BUN ? createBunDb(dbPath) : createNodeDb(dbPath);
         this.db.run(`
       CREATE TABLE IF NOT EXISTS sessions (
@@ -1719,24 +1310,24 @@ function getPlatform() {
 function getChromeExecutablePath(installDir) {
   const platform = process.platform;
   if (platform === "darwin") {
-    const entries = import_fs8.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
+    const entries = import_fs5.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
     const dir = entries[0] || "chrome-mac-arm64";
-    return import_path7.default.join(installDir, dir, "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing");
+    return import_path6.default.join(installDir, dir, "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing");
   }
   if (platform === "linux") {
-    const entries = import_fs8.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
+    const entries = import_fs5.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
     const dir = entries[0] || "chrome-linux64";
-    return import_path7.default.join(installDir, dir, "chrome");
+    return import_path6.default.join(installDir, dir, "chrome");
   }
   if (platform === "win32") {
-    const entries = import_fs8.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
+    const entries = import_fs5.default.readdirSync(installDir).filter((e) => e.startsWith("chrome-"));
     const dir = entries[0] || "chrome-win64";
-    return import_path7.default.join(installDir, dir, "chrome.exe");
+    return import_path6.default.join(installDir, dir, "chrome.exe");
   }
   throw new Error(`Unsupported platform: ${platform}`);
 }
 async function downloadChrome(installDir = DEFAULT_INSTALL_DIR) {
-  log5.info("Downloading Chrome for Testing (first time only)...");
+  log3.info("Downloading Chrome for Testing (first time only)...");
   const res = await fetch(CHROME_VERSIONS_URL);
   if (!res.ok) throw new Error(`Failed to fetch Chrome versions: ${res.status}`);
   const data = await res.json();
@@ -1747,35 +1338,35 @@ async function downloadChrome(installDir = DEFAULT_INSTALL_DIR) {
   if (!download2) throw new Error(`No Chrome for Testing download for platform: ${platform}`);
   const url = download2.url;
   const version = channel.version;
-  log5.debug(`Version ${version} for ${platform}`);
-  log5.debug(`URL: ${url}`);
-  import_fs8.default.mkdirSync(installDir, { recursive: true });
-  const zipPath = import_path7.default.join(installDir, "chrome.zip");
+  log3.debug(`Version ${version} for ${platform}`);
+  log3.debug(`URL: ${url}`);
+  import_fs5.default.mkdirSync(installDir, { recursive: true });
+  const zipPath = import_path6.default.join(installDir, "chrome.zip");
   const dlRes = await fetch(url);
   if (!dlRes.ok) throw new Error(`Download failed: ${dlRes.status}`);
   const buf = Buffer.from(await dlRes.arrayBuffer());
-  import_fs8.default.writeFileSync(zipPath, buf);
-  log5.info(`Downloaded ${(buf.length / 1024 / 1024).toFixed(1)}MB`);
-  (0, import_child_process4.execSync)(`unzip -o -q "${zipPath}" -d "${installDir}"`, { stdio: "inherit" });
-  import_fs8.default.unlinkSync(zipPath);
+  import_fs5.default.writeFileSync(zipPath, buf);
+  log3.info(`Downloaded ${(buf.length / 1024 / 1024).toFixed(1)}MB`);
+  (0, import_child_process3.execSync)(`unzip -o -q "${zipPath}" -d "${installDir}"`, { stdio: "inherit" });
+  import_fs5.default.unlinkSync(zipPath);
   const execPath = getChromeExecutablePath(installDir);
-  if (!import_fs8.default.existsSync(execPath)) {
+  if (!import_fs5.default.existsSync(execPath)) {
     throw new Error(`Chrome executable not found after extraction: ${execPath}`);
   }
   if (process.platform !== "win32") {
-    import_fs8.default.chmodSync(execPath, 493);
+    import_fs5.default.chmodSync(execPath, 493);
   }
-  import_fs8.default.writeFileSync(import_path7.default.join(installDir, "version.json"), JSON.stringify({ version, platform, downloadedAt: (/* @__PURE__ */ new Date()).toISOString() }));
-  log5.info(`Installed at: ${execPath}`);
+  import_fs5.default.writeFileSync(import_path6.default.join(installDir, "version.json"), JSON.stringify({ version, platform, downloadedAt: (/* @__PURE__ */ new Date()).toISOString() }));
+  log3.info(`Installed at: ${execPath}`);
   return execPath;
 }
 function findChromeForTesting() {
   if (process.env.CHROME_EXECUTABLE) {
-    if (import_fs8.default.existsSync(process.env.CHROME_EXECUTABLE)) return process.env.CHROME_EXECUTABLE;
+    if (import_fs5.default.existsSync(process.env.CHROME_EXECUTABLE)) return process.env.CHROME_EXECUTABLE;
   }
   try {
     const execPath = getChromeExecutablePath(DEFAULT_INSTALL_DIR);
-    if (import_fs8.default.existsSync(execPath)) return execPath;
+    if (import_fs5.default.existsSync(execPath)) return execPath;
   } catch {
   }
   return null;
@@ -1791,22 +1382,13 @@ function findChrome() {
     "/usr/bin/google-chrome-stable",
     "/usr/bin/google-chrome",
     "/usr/bin/chromium-browser",
-    "/usr/bin/chromium",
-    // Playwright/Patchright installed browsers (Docker containers)
-    ...(() => {
-      try {
-        const dirs = import_fs8.default.readdirSync("/ms-playwright").filter((d) => d.startsWith("chromium-")).sort().reverse();
-        return dirs.map((d) => import_path7.default.join("/ms-playwright", d, "chrome-linux", "chrome"));
-      } catch {
-        return [];
-      }
-    })()
+    "/usr/bin/chromium"
   ] : [
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
     "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
   ];
   for (const p of systemPaths) {
-    if (import_fs8.default.existsSync(p)) return p;
+    if (import_fs5.default.existsSync(p)) return p;
   }
   return null;
 }
@@ -1819,27 +1401,27 @@ async function ensureChrome() {
   try {
     return await downloadChrome();
   } catch (err) {
-    log5.error(`Failed to download Chrome for Testing: ${err instanceof Error ? err.message : String(err)}`);
+    log3.error(`Failed to download Chrome for Testing: ${err instanceof Error ? err.message : String(err)}`);
     const system = findChrome();
     if (system) {
-      log5.warn(`Falling back to system Chrome: ${system}`);
+      log3.warn(`Falling back to system Chrome: ${system}`);
       return system;
     }
     throw new Error("No Chrome found. Download failed and no system Chrome available.");
   }
 }
-var import_fs8, import_path7, import_os3, import_child_process4, log5, CHROME_VERSIONS_URL, DEFAULT_INSTALL_DIR;
+var import_fs5, import_path6, import_os3, import_child_process3, log3, CHROME_VERSIONS_URL, DEFAULT_INSTALL_DIR;
 var init_chrome_downloader = __esm({
   "src/lib/browser/chrome-downloader.ts"() {
     "use strict";
-    import_fs8 = __toESM(require("fs"));
-    import_path7 = __toESM(require("path"));
+    import_fs5 = __toESM(require("fs"));
+    import_path6 = __toESM(require("path"));
     import_os3 = __toESM(require("os"));
-    import_child_process4 = require("child_process");
+    import_child_process3 = require("child_process");
     init_logger();
-    log5 = createLogger("chrome");
+    log3 = createLogger("chrome");
     CHROME_VERSIONS_URL = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json";
-    DEFAULT_INSTALL_DIR = import_path7.default.join(import_os3.default.homedir(), ".iframer", "chrome");
+    DEFAULT_INSTALL_DIR = import_path6.default.join(import_os3.default.homedir(), ".iframer", "chrome");
   }
 });
 
@@ -1861,14 +1443,14 @@ async function ensureBinary() {
   try {
     const info = cloak.binaryInfo();
     if (!info.installed) {
-      log6.info("Downloading CloakBrowser binary...");
+      log4.info("Downloading CloakBrowser binary...");
       await cloak.ensureBinary();
-      log6.info("CloakBrowser ready");
+      log4.info("CloakBrowser ready");
     }
     _available = true;
     return true;
   } catch (err) {
-    log6.warn(`CloakBrowser setup failed: ${err instanceof Error ? err.message : String(err)}`);
+    log4.warn(`CloakBrowser setup failed: ${err instanceof Error ? err.message : String(err)}`);
     _available = false;
     return false;
   }
@@ -1883,19 +1465,19 @@ async function launchCloakBrowser(options) {
       headless: options.headless,
       args: options.args
     });
-    log6.info(`CloakBrowser launched (headless=${options.headless})`);
+    log4.info(`CloakBrowser launched (headless=${options.headless})`);
     return browser;
   } catch (err) {
-    log6.warn(`CloakBrowser launch failed: ${err instanceof Error ? err.message : String(err)}`);
+    log4.warn(`CloakBrowser launch failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
-var log6, _available;
+var log4, _available;
 var init_cloak_browser = __esm({
   "src/lib/browser/cloak-browser.ts"() {
     "use strict";
     init_logger();
-    log6 = createLogger("cloak");
+    log4 = createLogger("cloak");
     _available = null;
   }
 });
@@ -1904,7 +1486,7 @@ var init_cloak_browser = __esm({
 function keyOf(mode, instanceId) {
   return `${mode}::${instanceId}`;
 }
-var import_patchright2, import_crypto2, log7, DEFAULT_IDLE_TIMEOUT, CLOSE_GRACE_MS, BUSY_MAX_MS, BLANK_IDLE_MS, DEFAULT_INSTANCE, sleep3, BrowserDaemon;
+var import_patchright2, import_crypto2, log5, DEFAULT_IDLE_TIMEOUT, CLOSE_GRACE_MS, BUSY_MAX_MS, BLANK_IDLE_MS, DEFAULT_INSTANCE, sleep3, BrowserDaemon;
 var init_daemon = __esm({
   "src/lib/browser/daemon.ts"() {
     "use strict";
@@ -1914,7 +1496,7 @@ var init_daemon = __esm({
     init_cloak_browser();
     init_logger();
     init_registry();
-    log7 = createLogger("daemon");
+    log5 = createLogger("daemon");
     DEFAULT_IDLE_TIMEOUT = 5 * 60 * 1e3;
     CLOSE_GRACE_MS = 5e3;
     BUSY_MAX_MS = 30 * 60 * 1e3;
@@ -1929,9 +1511,6 @@ var init_daemon = __esm({
         this.idleTimeout = idleTimeout;
       }
       async ensure(mode, instanceId = DEFAULT_INSTANCE, sessionProfile = instanceId) {
-        if (mode === "docker-headful") {
-          throw new Error("Docker mode doesn't use the daemon. Use the Docker API.");
-        }
         const key = keyOf(mode, instanceId);
         let instance = this.instances.get(key);
         if (instance) {
@@ -1942,11 +1521,11 @@ var init_daemon = __esm({
               try {
                 await page2.evaluate("1");
               } catch {
-                log7.info(`Page for ${mode} is dead, creating fresh context`);
+                log5.info(`Page for ${mode} is dead, creating fresh context`);
                 try {
                   await context2.close();
                 } catch (err) {
-                  log7.warn(`dead-page context close failed: ${err}`);
+                  log5.warn(`dead-page context close failed: ${err}`);
                 }
                 context2 = await instance.browser.newContext();
                 page2 = await context2.newPage();
@@ -1959,18 +1538,18 @@ var init_daemon = __esm({
             }
           } catch {
           }
-          log7.info(`Browser for ${key} disconnected (window closed?), relaunching...`);
+          log5.info(`Browser for ${key} disconnected (window closed?), relaunching...`);
           await this.stopMode(mode, instanceId);
         }
         const marker = `--iframer-key=${key}-${(0, import_crypto2.randomUUID)()}`;
         let browser;
         const cloakBrowser = await launchCloakBrowser({ headless: mode === "headless", args: [marker] });
         if (cloakBrowser) {
-          log7.info(`CloakBrowser ${mode} ready`);
+          log5.info(`CloakBrowser ${mode} ready`);
           browser = cloakBrowser;
         } else {
           const executablePath = await ensureChrome();
-          log7.info(`Falling back to Chrome for Testing in ${mode} mode: ${executablePath}`);
+          log5.info(`Falling back to Chrome for Testing in ${mode} mode: ${executablePath}`);
           browser = await import_patchright2.chromium.launch({
             executablePath,
             headless: mode === "headless",
@@ -1993,7 +1572,7 @@ var init_daemon = __esm({
             launchedAt: (/* @__PURE__ */ new Date()).toISOString()
           });
         } else {
-          log7.warn(`could not resolve Chrome PID for ${key} \u2014 force-kill unavailable for this instance`);
+          log5.warn(`could not resolve Chrome PID for ${key} \u2014 force-kill unavailable for this instance`);
         }
         const context = await browser.newContext();
         const page = await context.newPage();
@@ -2012,7 +1591,7 @@ var init_daemon = __esm({
         };
         this.instances.set(key, instance);
         this.resetIdleTimer(key);
-        log7.info(`Chrome ${key} ready (pid=${chromePid ?? "unknown"})`);
+        log5.info(`Chrome ${key} ready (pid=${chromePid ?? "unknown"})`);
         return { browser, context, page };
       }
       /** Mark an instance busy for the duration of a pipeline run. While busy,
@@ -2066,9 +1645,9 @@ var init_daemon = __esm({
             continue;
           }
           if (!blank) continue;
-          log7.info(`blank-orphan sweep: ${key} never left about:blank, stopping`);
+          log5.info(`blank-orphan sweep: ${key} never left about:blank, stopping`);
           stopped.push(key);
-          this.stopKey(key).catch((err) => log7.warn(`blank sweep stop failed for ${key}: ${err}`));
+          this.stopKey(key).catch((err) => log5.warn(`blank sweep stop failed for ${key}: ${err}`));
         }
         return stopped;
       }
@@ -2140,17 +1719,17 @@ var init_daemon = __esm({
         const timer = this.idleTimers.get(key);
         if (timer) clearTimeout(timer);
         this.idleTimers.delete(key);
-        log7.info(`Stopping Chrome ${key} (pid=${instance.chromePid ?? "unknown"})...`);
+        log5.info(`Stopping Chrome ${key} (pid=${instance.chromePid ?? "unknown"})...`);
         const politeClose = (async () => {
           try {
             await instance.context.close();
           } catch (err) {
-            log7.warn(`context.close failed for ${key}: ${err}`);
+            log5.warn(`context.close failed for ${key}: ${err}`);
           }
           try {
             await instance.browser.close();
           } catch (err) {
-            log7.warn(`browser.close failed for ${key}: ${err}`);
+            log5.warn(`browser.close failed for ${key}: ${err}`);
           }
         })();
         const closedInTime = await Promise.race([
@@ -2158,20 +1737,20 @@ var init_daemon = __esm({
           sleep3(CLOSE_GRACE_MS).then(() => false)
         ]);
         if (!closedInTime) {
-          log7.warn(`polite close timed out after ${CLOSE_GRACE_MS}ms for ${key}, force-killing`);
+          log5.warn(`polite close timed out after ${CLOSE_GRACE_MS}ms for ${key}, force-killing`);
         }
         if (instance.chromePid !== null) {
           const dead = await forceKillBrowser({ chromePid: instance.chromePid, marker: instance.marker });
           if (dead) {
             unregisterBrowser(instance.chromePid);
           } else {
-            log7.warn(`Chrome pid=${instance.chromePid} survived SIGKILL?! leaving registry record for reaper`);
+            log5.warn(`Chrome pid=${instance.chromePid} survived SIGKILL?! leaving registry record for reaper`);
           }
         } else if (!closedInTime) {
-          log7.warn(`no PID recorded for ${key} and polite close hung \u2014 this Chrome may leak until the next reap`);
+          log5.warn(`no PID recorded for ${key} and polite close hung \u2014 this Chrome may leak until the next reap`);
         }
         this.instances.delete(key);
-        log7.info(`Stopped Chrome ${key}`);
+        log5.info(`Stopped Chrome ${key}`);
       }
       /**
        * Stop browsers. By default skips instances that are mid-pipeline (active>0)
@@ -2195,12 +1774,12 @@ var init_daemon = __esm({
                 this.resetIdleTimer(key);
                 return;
               }
-              log7.warn(`${key} reported busy for ${Math.round(busyMs / 6e4)}m \u2014 treating active=${instance.active} as leaked, stopping`);
+              log5.warn(`${key} reported busy for ${Math.round(busyMs / 6e4)}m \u2014 treating active=${instance.active} as leaked, stopping`);
               instance.active = 0;
               instance.busySince = null;
             }
-            log7.info(`Idle timeout for ${key}, stopping...`);
-            this.stopKey(key).catch((err) => log7.warn(`idle stop failed for ${key}: ${err}`));
+            log5.info(`Idle timeout for ${key}, stopping...`);
+            this.stopKey(key).catch((err) => log5.warn(`idle stop failed for ${key}: ${err}`));
           }, this.idleTimeout)
         );
       }
@@ -2216,19 +1795,19 @@ var init_daemon = __esm({
 
 // src/lib/domain-modes.ts
 function defaultFile() {
-  return import_path8.default.join(getDataDir(), "domain-modes.json");
+  return import_path7.default.join(getDataDir(), "domain-modes.json");
 }
-var import_fs9, import_path8, log8, TTL_DAYS, ESCALATION_LADDER, DomainModeStore;
+var import_fs6, import_path7, log6, TTL_DAYS, ESCALATION_LADDER, DomainModeStore;
 var init_domain_modes = __esm({
   "src/lib/domain-modes.ts"() {
     "use strict";
-    import_fs9 = __toESM(require("fs"));
-    import_path8 = __toESM(require("path"));
+    import_fs6 = __toESM(require("fs"));
+    import_path7 = __toESM(require("path"));
     init_logger();
     init_paths();
-    log8 = createLogger("domain-modes");
+    log6 = createLogger("domain-modes");
     TTL_DAYS = 14;
-    ESCALATION_LADDER = ["headless", "docker-headful", "binary-headful"];
+    ESCALATION_LADDER = ["headless", "binary-headful"];
     DomainModeStore = class {
       data = {};
       filePath;
@@ -2307,8 +1886,8 @@ var init_domain_modes = __esm({
       }
       load() {
         try {
-          if (import_fs9.default.existsSync(this.filePath)) {
-            this.data = JSON.parse(import_fs9.default.readFileSync(this.filePath, "utf-8"));
+          if (import_fs6.default.existsSync(this.filePath)) {
+            this.data = JSON.parse(import_fs6.default.readFileSync(this.filePath, "utf-8"));
           }
         } catch {
           this.data = {};
@@ -2316,10 +1895,10 @@ var init_domain_modes = __esm({
       }
       save() {
         try {
-          import_fs9.default.mkdirSync(import_path8.default.dirname(this.filePath), { recursive: true });
-          import_fs9.default.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2));
+          import_fs6.default.mkdirSync(import_path7.default.dirname(this.filePath), { recursive: true });
+          import_fs6.default.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2));
         } catch (err) {
-          log8.error("Failed to save:", err);
+          log6.error("Failed to save:", err);
         }
       }
     };
@@ -2476,7 +2055,7 @@ function run(cmd, input) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = (0, import_child_process5.spawn)(cmd[0], cmd.slice(1));
+      child = (0, import_child_process4.spawn)(cmd[0], cmd.slice(1));
     } catch {
       resolve({ ok: false, out: "", err: `spawn ${cmd[0]} failed` });
       return;
@@ -2503,11 +2082,123 @@ async function clipboardRead() {
   }
   throw new Error(`No working clipboard tool found (${tools.map((t) => t[0]).join(", ")}). ${lastErr}`);
 }
-var import_child_process5;
+var import_child_process4;
 var init_clipboard = __esm({
   "src/lib/clipboard.ts"() {
     "use strict";
-    import_child_process5 = require("child_process");
+    import_child_process4 = require("child_process");
+  }
+});
+
+// src/lib/constants.ts
+var TIMING, CAPTCHA_GRID, THRESHOLDS, TIMEOUTS;
+var init_constants = __esm({
+  "src/lib/constants.ts"() {
+    "use strict";
+    TIMING = {
+      /** Mouse move settle delay */
+      MOUSE_MOVE: [50, 200],
+      /** Click down→up delay */
+      CLICK_HOLD: [30, 90],
+      /** Post-click settle */
+      POST_CLICK: [100, 300],
+      /** Per-character typing delay */
+      CHAR_DELAY: [30, 150],
+      /** Occasional word-boundary pause */
+      WORD_PAUSE: [200, 500],
+      /** Pre-action move range */
+      IDLE_MOUSE_X: [100, 400],
+      IDLE_MOUSE_Y: [100, 300],
+      /** Pre-checkbox random move */
+      PRE_CHECKBOX_X: [200, 600],
+      PRE_CHECKBOX_Y: [150, 400],
+      /** Pause after moving to checkbox area */
+      PRE_CHECKBOX_WAIT: [300, 800],
+      /** Wait after clicking reCAPTCHA checkbox */
+      POST_CHECKBOX_WAIT: 2500,
+      /** Wait after clicking verify button */
+      POST_VERIFY_WAIT: 2e3,
+      /** Wait between clicking captcha tiles */
+      TILE_CLICK_DELAY: [200, 500],
+      /** Time to wait for reCAPTCHA tile images to settle */
+      TILE_SETTLE: 800,
+      /** Delay before captcha auto-detection */
+      CAPTCHA_DETECT_WAIT: 1500,
+      /** Post-login navigation settle */
+      POST_LOGIN_WAIT: 1500,
+      /** Post-submit form delay */
+      POST_SUBMIT_WAIT: 500,
+      /** Post-submit form extended wait */
+      POST_SUBMIT_EXTENDED: 2e3,
+      /** Delay before navigating (human hesitation) */
+      PRE_NAVIGATE: [300, 700],
+      /** Per-digit input delay base */
+      DIGIT_DELAY_BASE: 80,
+      DIGIT_DELAY_RANGE: 120,
+      /** Post-click in forms */
+      POST_FORM_CLICK: 200,
+      /** Post-TOTP entry wait */
+      POST_TOTP_WAIT: 300,
+      /** Post-cookies inject wait */
+      POST_COOKIES_WAIT: 300,
+      /** Scroll step delay */
+      SCROLL_DELAY: 150,
+      /** Stale state check interval */
+      STALE_CHECK_INTERVAL: 2e3,
+      /** captureApi: grace period after the last step for a submit's XHR to fire */
+      CAPTURE_SETTLE: 300,
+      /** captureApi: max wait for in-flight requests to answer before stopping */
+      CAPTURE_PENDING_MAX: 3e3,
+      /** Post-failure probe ("does the selector exist right now?") budget */
+      FAILURE_PROBE: 3e3
+    };
+    CAPTCHA_GRID = {
+      /** Pixels from bframe top to grid start (reCAPTCHA) */
+      RECAPTCHA_HEADER_HEIGHT: 112,
+      /** Pixels from bframe top to grid start (hCaptcha) — slightly different */
+      HCAPTCHA_HEADER_HEIGHT: 110,
+      /** Default tile size when bframeBox is unavailable */
+      DEFAULT_TILE_SIZE: 125,
+      /** Grid padding (left+right total) */
+      GRID_PADDING: 24,
+      /** Grid left margin */
+      GRID_MARGIN: 12,
+      /** Verify button offset from bframe bottom */
+      VERIFY_BTN_BOTTOM_OFFSET: 35,
+      /** Verify button offset from bframe right */
+      VERIFY_BTN_RIGHT_OFFSET: 60
+    };
+    THRESHOLDS = {
+      /** Minimum character change to consider page "changed" */
+      STALE_CHAR_CHANGE: 100,
+      /** Minimum percentage change to consider page "changed" */
+      STALE_PERCENT_CHANGE: 0.05,
+      /** Minimum body text length to not be considered "empty" */
+      MIN_BODY_TEXT: 200,
+      /** Maximum response text length to capture */
+      MAX_RESPONSE_TEXT: 1e5
+    };
+    TIMEOUTS = {
+      DEFAULT_STALE: 2e4,
+      NAVIGATION: 6e4,
+      SELECTOR_WAIT: 1e4,
+      // Actionability wait for click. Under the 20s stale timer on purpose, so
+      // Playwright's own reason (not visible, covered by another element…) reaches
+      // the agent instead of a generic "no state change".
+      CLICK: 8e3,
+      TOTP_INPUT: 5e3,
+      API_REQUEST: 18e4,
+      HEALTH_CHECK: 3e3,
+      CHALLENGE_FRAME_WAIT: 5e3,
+      // New-tab following: after a click, how long to wait for a just-opened tab's
+      // 'page' event to arrive (only applies when no tab has registered yet), and
+      // how long to let the followed tab reach domcontentloaded before continuing.
+      TAB_FOLLOW_SETTLE: 400,
+      TAB_LOAD: 15e3,
+      // A new tab usually opens at about:blank then navigates to its real URL —
+      // wait this long for that first real navigation before judging it blank.
+      TAB_BLANK_RESOLVE: 3e3
+    };
   }
 });
 
@@ -2547,8 +2238,8 @@ async function humanMove(page, toX, toY) {
   const lastPos = mousePositions.get(page);
   const fromX = lastPos?.x ?? randRange(TIMING.IDLE_MOUSE_X);
   const fromY = lastPos?.y ?? randRange(TIMING.IDLE_MOUSE_Y);
-  const path14 = generatePath(fromX, fromY, toX, toY);
-  for (const point of path14) {
+  const path13 = generatePath(fromX, fromY, toX, toY);
+  for (const point of path13) {
     await mouse.move(point.x, point.y);
     await sleep4(rand(2, 12));
   }
@@ -2970,7 +2661,7 @@ async function navigate(page, step, ctx, monitor) {
       if (page.url() !== urlBefore) {
         await nav;
       } else {
-        log9.warn(`navigate: no commit after ${NAV_COMMIT_SUSPECT_MS}ms, falling back to location.assign`);
+        log7.warn(`navigate: no commit after ${NAV_COMMIT_SUSPECT_MS}ms, falling back to location.assign`);
         monitor?.reportActivity();
         await withBudget(page.evaluate((u) => {
           location.assign(u);
@@ -2987,17 +2678,16 @@ async function navigate(page, step, ctx, monitor) {
   } finally {
     page.off("dialog", onDialog);
   }
-  const stealthScript = contextStealthScripts.get(page.context()) ?? STEALTH_SCRIPT;
   try {
-    await page.evaluate(stealthScript);
+    await page.evaluate(STEALTH_SCRIPT);
   } catch (err) {
-    log9.warn(`stealth injection failed: ${err}`);
+    log7.warn(`stealth injection failed: ${err}`);
   }
   if (ctx.sessionData) {
     try {
       await injectStorage(page, ctx.sessionData);
     } catch (err) {
-      log9.warn(`storage injection after navigate failed: ${err}`);
+      log7.warn(`storage injection after navigate failed: ${err}`);
     }
   }
 }
@@ -3198,7 +2888,7 @@ async function download(page, step) {
   const status = resp.status();
   if (!resp.ok()) throw new Error(`download: HTTP ${status} for ${step.url}`);
   const buf = await resp.body();
-  const fs14 = await import("fs");
+  const fs12 = await import("fs");
   const pathMod = await import("path");
   const { getDataDir: getDataDir2 } = await Promise.resolve().then(() => (init_paths(), paths_exports));
   let outPath;
@@ -3212,8 +2902,8 @@ async function download(page, step) {
     }
     outPath = pathMod.join(getDataDir2(), "downloads", step.path || name);
   }
-  fs14.mkdirSync(pathMod.dirname(outPath), { recursive: true });
-  fs14.writeFileSync(outPath, buf);
+  fs12.mkdirSync(pathMod.dirname(outPath), { recursive: true });
+  fs12.writeFileSync(outPath, buf);
   return { path: outPath, size: buf.length, status };
 }
 async function typeCode(page, step, ctx) {
@@ -3229,7 +2919,7 @@ async function typeCode(page, step, ctx) {
   }
   return { typed: code.length };
 }
-var log9, NAV_COMMIT_SUSPECT_MS;
+var log7, NAV_COMMIT_SUSPECT_MS;
 var init_navigation = __esm({
   "src/lib/actions/handlers/navigation.ts"() {
     "use strict";
@@ -3242,7 +2932,7 @@ var init_navigation = __esm({
     init_budget();
     init_resolve_selector();
     init_reachability();
-    log9 = createLogger("actions");
+    log7 = createLogger("actions");
     NAV_COMMIT_SUSPECT_MS = 12e3;
   }
 });
@@ -3276,12 +2966,12 @@ async function find(page, step, ctx) {
   const elInfo = await element.evaluate((el) => {
     const tag = el.tagName.toLowerCase();
     const text = (el.textContent?.trim() || "").slice(0, 60);
-    const path14 = [];
+    const path13 = [];
     let current = el;
     while (current && current !== document.body && current !== document.documentElement) {
       let seg = current.tagName.toLowerCase();
       if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-        path14.unshift(`#${current.id}`);
+        path13.unshift(`#${current.id}`);
         break;
       }
       const parent = current.parentElement;
@@ -3293,10 +2983,10 @@ async function find(page, step, ctx) {
           seg += `:nth-of-type(${idx})`;
         }
       }
-      path14.unshift(seg);
+      path13.unshift(seg);
       current = parent;
     }
-    return { tag, text, selector: path14.join(" > ") };
+    return { tag, text, selector: path13.join(" > ") };
   });
   const ref = `@e${ctx.nextRefId++}`;
   const displayRole = step.role || elInfo.tag;
@@ -3318,6 +3008,80 @@ async function find(page, step, ctx) {
 var init_find = __esm({
   "src/lib/actions/handlers/find.ts"() {
     "use strict";
+  }
+});
+
+// src/lib/screenshot.ts
+function saveScreenshot(buffer, filename, screenshotDir, publicUrl) {
+  import_fs7.default.mkdirSync(screenshotDir, { recursive: true, mode: 448 });
+  const ext = import_path8.default.extname(filename);
+  const unique = `${import_path8.default.basename(filename, ext)}-${(0, import_crypto3.randomBytes)(8).toString("hex")}${ext}`;
+  import_fs7.default.writeFileSync(import_path8.default.join(screenshotDir, unique), buffer, { mode: 384 });
+  maybePrune(screenshotDir);
+  return `${publicUrl}/screenshots/${unique}`;
+}
+function maybePrune(dir) {
+  const now = Date.now();
+  if (now - lastPruneAt < PRUNE_THROTTLE_MS) return;
+  lastPruneAt = now;
+  pruneScreenshots(dir);
+}
+function pruneScreenshots(dir, opts = {}) {
+  const maxAgeMs = opts.maxAgeMs ?? MAX_AGE_MS;
+  const maxFiles = opts.maxFiles ?? MAX_FILES;
+  const now = opts.now ?? Date.now();
+  try {
+    const entries = import_fs7.default.readdirSync(dir).filter((f) => f.endsWith(".jpg") || f.endsWith(".jpeg") || f.endsWith(".png")).map((f) => {
+      const full = import_path8.default.join(dir, f);
+      try {
+        return { full, mtimeMs: import_fs7.default.statSync(full).mtimeMs };
+      } catch {
+        return null;
+      }
+    }).filter((e) => e !== null);
+    let removed = 0;
+    const survivors = [];
+    for (const e of entries) {
+      if (now - e.mtimeMs > maxAgeMs) {
+        try {
+          import_fs7.default.unlinkSync(e.full);
+          removed++;
+        } catch {
+        }
+      } else {
+        survivors.push(e);
+      }
+    }
+    if (survivors.length > maxFiles) {
+      survivors.sort((a, b) => a.mtimeMs - b.mtimeMs);
+      for (const e of survivors.slice(0, survivors.length - maxFiles)) {
+        try {
+          import_fs7.default.unlinkSync(e.full);
+          removed++;
+        } catch {
+        }
+      }
+    }
+    if (removed > 0) log8.debug(`pruned ${removed} old screenshot(s) from ${dir}`);
+    return removed;
+  } catch (err) {
+    log8.warn(`screenshot prune failed: ${err instanceof Error ? err.message : String(err)}`);
+    return 0;
+  }
+}
+var import_crypto3, import_fs7, import_path8, log8, MAX_AGE_MS, MAX_FILES, PRUNE_THROTTLE_MS, lastPruneAt;
+var init_screenshot = __esm({
+  "src/lib/screenshot.ts"() {
+    "use strict";
+    import_crypto3 = require("crypto");
+    import_fs7 = __toESM(require("fs"));
+    import_path8 = __toESM(require("path"));
+    init_logger();
+    log8 = createLogger("screenshot");
+    MAX_AGE_MS = parseInt(process.env.IFRAMER_SCREENSHOT_MAX_AGE_MS || String(24 * 60 * 60 * 1e3), 10);
+    MAX_FILES = parseInt(process.env.IFRAMER_SCREENSHOT_MAX_FILES || "500", 10);
+    PRUNE_THROTTLE_MS = 5 * 60 * 1e3;
+    lastPruneAt = 0;
   }
 });
 
@@ -3416,12 +3180,12 @@ async function takeSnapshot(page, ctx, options) {
       return textual && el.getAttribute("tabindex") === "-1";
     }
     function buildSelector(el) {
-      const path14 = [];
+      const path13 = [];
       let current = el;
       while (current && current !== document.body && current !== document.documentElement) {
         let seg = current.tagName.toLowerCase();
         if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-          path14.unshift(`#${current.id}`);
+          path13.unshift(`#${current.id}`);
           break;
         }
         const parent = current.parentElement;
@@ -3433,10 +3197,10 @@ async function takeSnapshot(page, ctx, options) {
             seg += `:nth-of-type(${idx})`;
           }
         }
-        path14.unshift(seg);
+        path13.unshift(seg);
         current = parent;
       }
-      return path14.join(" > ");
+      return path13.join(" > ");
     }
     function getName(el) {
       const ariaLabel = el.getAttribute("aria-label");
@@ -3573,12 +3337,12 @@ async function annotatedScreenshot(page, ctx) {
       return true;
     }
     function buildSelector(el) {
-      const path14 = [];
+      const path13 = [];
       let current = el;
       while (current && current !== document.body && current !== document.documentElement) {
         let seg = current.tagName.toLowerCase();
         if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-          path14.unshift(`#${current.id}`);
+          path13.unshift(`#${current.id}`);
           break;
         }
         const parent = current.parentElement;
@@ -3590,10 +3354,10 @@ async function annotatedScreenshot(page, ctx) {
             seg += `:nth-of-type(${idx})`;
           }
         }
-        path14.unshift(seg);
+        path13.unshift(seg);
         current = parent;
       }
-      return path14.join(" > ");
+      return path13.join(" > ");
     }
     function getName(el) {
       const ariaLabel = el.getAttribute("aria-label");
@@ -3711,12 +3475,74 @@ var init_screenshot2 = __esm({
   }
 });
 
-// src/lib/captcha/recaptcha.ts
-function getClient() {
+// src/lib/captcha/vision.ts
+function getCaptchaClient() {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set \u2014 required for captcha auto-solve");
   return new import_sdk.default({ apiKey });
 }
+function toCaptchaApiError(err) {
+  if (err instanceof import_sdk.default.APIConnectionError) {
+    const cause = err.cause instanceof Error ? `: ${err.cause.message}` : "";
+    return new CaptchaApiError(`Claude API call failed (no response): ${err.message}${cause}`);
+  }
+  if (err instanceof import_sdk.default.APIError) {
+    const body = err.error;
+    return new CaptchaApiError(`Claude API call failed (${err.status ?? "no response"}): ${body?.error?.message ?? err.message}`);
+  }
+  return new CaptchaApiError(`Claude API call failed: ${err instanceof Error ? err.message : String(err)}`);
+}
+async function askVision(client, params) {
+  try {
+    const response = await client.messages.create({ ...params, model: CAPTCHA_MODEL });
+    return response.content.flatMap((b) => b.type === "text" ? [b.text] : []).join("\n").trim();
+  } catch (err) {
+    throw toCaptchaApiError(err);
+  }
+}
+function parseChallengeAnswer(text, width, height) {
+  const candidates = text.match(/\{[^{}]*\}/g);
+  if (!candidates) return null;
+  const toPoint = (p) => {
+    if (!Array.isArray(p) || p.length !== 2) return null;
+    const [x, y] = p;
+    if (typeof x !== "number" || typeof y !== "number") return null;
+    return x >= 0 && y >= 0 && x <= width && y <= height ? { x, y } : null;
+  };
+  for (const raw of candidates.reverse()) {
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (Array.isArray(parsed.drag)) {
+      if (parsed.drag.length !== 2) return null;
+      const from = toPoint(parsed.drag[0]);
+      const to = toPoint(parsed.drag[1]);
+      return from && to ? { drag: { from, to } } : null;
+    }
+    if (Array.isArray(parsed.clicks)) {
+      if (parsed.clicks.length > MAX_CLICKS) return null;
+      const clicks = parsed.clicks.map(toPoint);
+      return clicks.every((c) => c !== null) ? { clicks } : null;
+    }
+  }
+  return null;
+}
+var import_sdk, CAPTCHA_MODEL, CaptchaApiError, MAX_CLICKS;
+var init_vision = __esm({
+  "src/lib/captcha/vision.ts"() {
+    "use strict";
+    import_sdk = __toESM(require("@anthropic-ai/sdk"));
+    CAPTCHA_MODEL = process.env.IFRAMER_CAPTCHA_MODEL || "claude-haiku-4-5-20251001";
+    CaptchaApiError = class extends Error {
+    };
+    MAX_CLICKS = 12;
+  }
+});
+
+// src/lib/captcha/recaptcha.ts
 function extractTarget(prompt2) {
   const lines = prompt2.split("\n").map((l) => l.trim()).filter(Boolean);
   for (let i = 0; i < lines.length; i++) {
@@ -3745,7 +3571,7 @@ async function screenshotFullGrid(page, challengeInfo) {
     const buf = await page.screenshot({ type: "jpeg", quality: 85, clip: gridClip });
     return buf.toString("base64");
   } catch (err) {
-    log10.error(`full grid screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
+    log9.error(`full grid screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -3780,40 +3606,33 @@ async function classifyTiles(client, fullGridBase64, tiles, target, rows, cols) 
     tiles.map(async (tile) => {
       const tileRow = Math.floor(tile.index / cols) + 1;
       const tileCol = tile.index % cols + 1;
-      try {
-        const response = await client.messages.create({
-          model: MODEL,
-          max_tokens: 10,
-          messages: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "image",
-                  source: { type: "base64", media_type: "image/jpeg", data: fullGridBase64 }
-                },
-                {
-                  type: "image",
-                  source: { type: "base64", media_type: "image/jpeg", data: tile.imageBase64 }
-                },
-                {
-                  type: "text",
-                  text: `Image 1 is a full picture divided into a ${rows}x${cols} grid. Image 2 is the tile at row ${tileRow}, column ${tileCol} of that grid.
+      const answer = await askVision(client, {
+        max_tokens: 256,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: { type: "base64", media_type: "image/jpeg", data: fullGridBase64 }
+              },
+              {
+                type: "image",
+                source: { type: "base64", media_type: "image/jpeg", data: tile.imageBase64 }
+              },
+              {
+                type: "text",
+                text: `Image 1 is a full picture divided into a ${rows}x${cols} grid. Image 2 is the tile at row ${tileRow}, column ${tileCol} of that grid.
 
 Does this tile contain a ${target}? Reply ONLY "yes" or "no".`
-                }
-              ]
-            }
-          ]
-        });
-        const answer = (response.content[0].text ?? "").toLowerCase().trim();
-        const match = answer.startsWith("yes");
-        if (match) log10.debug(`tile ${tile.index} (r${tileRow}c${tileCol}): YES`);
-        return { index: tile.index, match };
-      } catch (err) {
-        log10.error(`tile ${tile.index} classification failed: ${err instanceof Error ? err.message : String(err)}`);
-        return { index: tile.index, match: false };
-      }
+              }
+            ]
+          }
+        ]
+      });
+      const match = answer.toLowerCase().startsWith("yes");
+      if (match) log9.debug(`tile ${tile.index} (r${tileRow}c${tileCol}): YES`);
+      return { index: tile.index, match };
     })
   );
   return results.filter((r) => r.match).map((r) => r.index);
@@ -3834,7 +3653,7 @@ async function submitForm(page) {
       if (el) {
         const visible = await el.isVisible();
         if (visible) {
-          log10.info(`Submitting form via: ${selector}`);
+          log9.info(`Submitting form via: ${selector}`);
           await new Promise((r) => setTimeout(r, 500));
           await humanClick(page, selector);
           await new Promise((r) => setTimeout(r, 2e3));
@@ -3844,126 +3663,139 @@ async function submitForm(page) {
     } catch {
     }
   }
-  log10.info("No submit button found \u2014 skipping form submission");
+  log9.info("No submit button found \u2014 skipping form submission");
   return false;
 }
 async function solveRecaptcha(page, monitor) {
   const startTime = Date.now();
-  const client = getClient();
+  const client = getCaptchaClient();
   let rounds = 0;
-  const checkboxResult = await clickRecaptchaCheckbox(page);
-  if (checkboxResult.solved) {
-    const submitted = await submitForm(page);
-    return { solved: true, rounds: 0, durationMs: Date.now() - startTime, submitted };
-  }
-  if (!checkboxResult.challengeInfo) {
-    return { solved: false, rounds: 0, durationMs: Date.now() - startTime, reason: "No challenge appeared after clicking checkbox" };
-  }
-  let challengeInfo = checkboxResult.challengeInfo;
-  while (rounds < MAX_ROUNDS) {
-    if (Date.now() - startTime > MAX_DURATION_MS) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Timeout exceeded" };
+  try {
+    const checkboxResult = await clickRecaptchaCheckbox(page);
+    if (checkboxResult.solved) {
+      const submitted = await submitForm(page);
+      return { solved: true, rounds: 0, durationMs: Date.now() - startTime, submitted };
     }
-    rounds++;
-    monitor?.reportActivity();
-    if (!challengeInfo) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge info lost" };
+    if (!checkboxResult.challengeInfo) {
+      return { solved: false, rounds: 0, durationMs: Date.now() - startTime, reason: "No challenge appeared after clicking checkbox" };
     }
-    const target = extractTarget(challengeInfo.prompt);
-    log10.info(`Round ${rounds}: looking for "${target}" in ${challengeInfo.rows}x${challengeInfo.cols} grid`);
-    const [fullGridImage, tileImages] = await Promise.all([
-      screenshotFullGrid(page, challengeInfo),
-      screenshotTiles(page, challengeInfo)
-    ]);
-    if (!fullGridImage || tileImages.length === 0) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Failed to screenshot challenge" };
-    }
-    monitor?.reportActivity();
-    const matchingIndices = await classifyTiles(
-      client,
-      fullGridImage,
-      tileImages,
-      target,
-      challengeInfo.rows,
-      challengeInfo.cols
-    );
-    log10.info(`Round ${rounds}: matched tiles [${matchingIndices.join(", ")}]`);
-    monitor?.reportActivity();
-    if (matchingIndices.length > 0) {
-      await clickChallengeTiles(page, matchingIndices);
-      const isDynamic = challengeInfo.prompt.toLowerCase().includes("none left");
-      if (isDynamic) {
-        await new Promise((r) => setTimeout(r, TILE_SETTLE_MS));
-        const newInfo = await getChallengeInfo(page);
-        if (newInfo) {
-          const [newFullGrid, newTiles] = await Promise.all([
-            screenshotFullGrid(page, newInfo),
-            screenshotTiles(page, newInfo)
-          ]);
-          if (newFullGrid && newTiles.length > 0) {
-            const replacedTiles = newTiles.filter((t) => matchingIndices.includes(t.index));
-            if (replacedTiles.length > 0) {
-              monitor?.reportActivity();
-              const newMatches = await classifyTiles(
-                client,
-                newFullGrid,
-                replacedTiles,
-                target,
-                newInfo.rows,
-                newInfo.cols
-              );
-              if (newMatches.length > 0) {
-                log10.info(`Round ${rounds}: dynamic tiles matched [${newMatches.join(", ")}]`);
-                await clickChallengeTiles(page, newMatches);
-                await new Promise((r) => setTimeout(r, TILE_SETTLE_MS));
+    let challengeInfo = checkboxResult.challengeInfo;
+    while (rounds < MAX_ROUNDS) {
+      if (Date.now() - startTime > MAX_DURATION_MS) {
+        return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Timeout exceeded" };
+      }
+      rounds++;
+      monitor?.reportActivity();
+      if (!challengeInfo) {
+        return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge info lost" };
+      }
+      const target = extractTarget(challengeInfo.prompt);
+      log9.info(`Round ${rounds}: looking for "${target}" in ${challengeInfo.rows}x${challengeInfo.cols} grid`);
+      const [fullGridImage, tileImages] = await Promise.all([
+        screenshotFullGrid(page, challengeInfo),
+        screenshotTiles(page, challengeInfo)
+      ]);
+      if (!fullGridImage || tileImages.length === 0) {
+        return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Failed to screenshot challenge" };
+      }
+      monitor?.reportActivity();
+      const matchingIndices = await classifyTiles(
+        client,
+        fullGridImage,
+        tileImages,
+        target,
+        challengeInfo.rows,
+        challengeInfo.cols
+      );
+      log9.info(`Round ${rounds}: matched tiles [${matchingIndices.join(", ")}]`);
+      monitor?.reportActivity();
+      if (matchingIndices.length > 0) {
+        await clickChallengeTiles(page, matchingIndices);
+        const isDynamic = challengeInfo.prompt.toLowerCase().includes("none left");
+        if (isDynamic) {
+          await new Promise((r) => setTimeout(r, TILE_SETTLE_MS));
+          const newInfo = await getChallengeInfo(page);
+          if (newInfo) {
+            const [newFullGrid, newTiles] = await Promise.all([
+              screenshotFullGrid(page, newInfo),
+              screenshotTiles(page, newInfo)
+            ]);
+            if (newFullGrid && newTiles.length > 0) {
+              const replacedTiles = newTiles.filter((t) => matchingIndices.includes(t.index));
+              if (replacedTiles.length > 0) {
+                monitor?.reportActivity();
+                const newMatches = await classifyTiles(
+                  client,
+                  newFullGrid,
+                  replacedTiles,
+                  target,
+                  newInfo.rows,
+                  newInfo.cols
+                );
+                if (newMatches.length > 0) {
+                  log9.info(`Round ${rounds}: dynamic tiles matched [${newMatches.join(", ")}]`);
+                  await clickChallengeTiles(page, newMatches);
+                  await new Promise((r) => setTimeout(r, TILE_SETTLE_MS));
+                }
               }
             }
           }
         }
       }
+      const verifyResult = await clickChallengeVerify(page);
+      monitor?.reportActivity();
+      if (verifyResult.solved) {
+        log9.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
+        const submitted = await submitForm(page);
+        return { solved: true, rounds, durationMs: Date.now() - startTime, submitted };
+      }
+      challengeInfo = verifyResult.challengeInfo || null;
+      if (!challengeInfo) {
+        return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge disappeared after verify" };
+      }
+      log9.info(`Round ${rounds}: not solved, new challenge appeared`);
     }
-    const verifyResult = await clickChallengeVerify(page);
-    monitor?.reportActivity();
-    if (verifyResult.solved) {
-      log10.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
-      const submitted = await submitForm(page);
-      return { solved: true, rounds, durationMs: Date.now() - startTime, submitted };
+    return { solved: false, rounds, durationMs: Date.now() - startTime, reason: `Max rounds (${MAX_ROUNDS}) exceeded` };
+  } catch (err) {
+    if (err instanceof CaptchaApiError) {
+      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: err.message };
     }
-    challengeInfo = verifyResult.challengeInfo || null;
-    if (!challengeInfo) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Challenge disappeared after verify" };
-    }
-    log10.info(`Round ${rounds}: not solved, new challenge appeared`);
+    throw err;
   }
-  return { solved: false, rounds, durationMs: Date.now() - startTime, reason: `Max rounds (${MAX_ROUNDS}) exceeded` };
 }
-var import_sdk, log10, MAX_ROUNDS, MAX_DURATION_MS, TILE_SETTLE_MS, MODEL;
+var log9, MAX_ROUNDS, MAX_DURATION_MS, TILE_SETTLE_MS;
 var init_recaptcha = __esm({
   "src/lib/captcha/recaptcha.ts"() {
     "use strict";
-    import_sdk = __toESM(require("@anthropic-ai/sdk"));
     init_humanize();
     init_constants();
+    init_vision();
     init_logger();
-    log10 = createLogger("captcha-solver");
+    log9 = createLogger("captcha-solver");
     MAX_ROUNDS = 8;
     MAX_DURATION_MS = 45e3;
     TILE_SETTLE_MS = TIMING.TILE_SETTLE;
-    MODEL = "claude-haiku-4-5-20251001";
   }
 });
 
 // src/lib/captcha/hcaptcha.ts
-function getClient2() {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set \u2014 required for captcha auto-solve");
-  return new import_sdk2.default({ apiKey });
-}
 function rand2(min, max) {
   return Math.random() * (max - min) + min;
 }
 function sleep5(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+async function hasToken(page, waitMs = 0) {
+  const deadline = Date.now() + waitMs;
+  for (; ; ) {
+    const found = await page.evaluate(
+      () => Array.from(document.querySelectorAll('[name="h-captcha-response"]')).some(
+        (el) => el.value.length > 0
+      )
+    ).catch(() => false);
+    if (found || Date.now() >= deadline) return found;
+    await sleep5(250);
+  }
 }
 async function clickCheckbox(page) {
   const checkboxFrame = await page.waitForSelector(
@@ -3979,195 +3811,127 @@ async function clickCheckbox(page) {
   const cy = box.y + box.height * rand2(0.3, 0.7);
   await humanClickXY(page, cx, cy);
   await sleep5(2500);
-  const frame = await checkboxFrame.contentFrame();
-  if (frame) {
-    try {
-      const checked = await frame.evaluate(() => {
-        const cb = document.querySelector("#checkbox");
-        return cb?.getAttribute("aria-checked") === "true";
-      });
-      if (checked) return true;
-    } catch {
-    }
-  }
-  return false;
+  return hasToken(page);
 }
-async function getChallengeInfo2(page) {
-  const challengeFrame = await page.waitForSelector(
-    'iframe[title="hCaptcha challenge"], iframe[title*="hcaptcha challenge" i]',
-    { timeout: 8e3 }
-  ).catch(() => null);
+async function getChallenge(page) {
+  const challengeFrame = await page.waitForSelector(CHALLENGE_FRAME, { timeout: 8e3 }).catch(() => null);
   if (!challengeFrame) return null;
-  const frameBox = await challengeFrame.boundingBox();
-  if (!frameBox) return null;
   const frame = await challengeFrame.contentFrame();
   if (!frame) return null;
-  const info = await frame.evaluate(() => {
-    const promptEl = document.querySelector(
-      ".prompt-text, .task-instructions, [class*='prompt'], [class*='task-description']"
-    );
-    const prompt2 = promptEl ? promptEl.innerText.trim() : "";
-    const tileEls = document.querySelectorAll(
-      ".task-image, [class*='task-grid'] > *, [class*='challenge-container'] .image-wrapper, .image-wrapper"
-    );
-    const count = tileEls.length;
-    let rows = 3, cols = 3;
-    if (count === 16) {
-      rows = 4;
-      cols = 4;
-    } else if (count === 9) {
-      rows = 3;
-      cols = 3;
-    } else if (count === 6) {
-      rows = 2;
-      cols = 3;
-    }
-    return { prompt: prompt2, count, rows, cols };
-  }).catch(() => ({ prompt: "", count: 0, rows: 3, cols: 3 }));
-  if (!info.prompt && info.count === 0) return null;
-  const gridPadTop = 150;
-  const gridPadLeft = 20;
-  const gridPadRight = 20;
-  const gridPadBottom = 80;
-  const gridWidth = frameBox.width - gridPadLeft - gridPadRight;
-  const gridHeight = frameBox.height - gridPadTop - gridPadBottom;
-  const tileW = gridWidth / info.cols;
-  const tileH = gridHeight / info.rows;
-  const tiles = [];
-  for (let r = 0; r < info.rows; r++) {
-    for (let c = 0; c < info.cols; c++) {
-      tiles.push({
-        index: r * info.cols + c,
-        centerX: Math.round(frameBox.x + gridPadLeft + c * tileW + tileW / 2),
-        centerY: Math.round(frameBox.y + gridPadTop + r * tileH + tileH / 2)
-      });
-    }
-  }
-  const verifyBtnBox = await frame.evaluate(() => {
-    const btn = document.querySelector('.button-submit.button, [aria-label="Verify"], [aria-label="Skip Challenge"]');
-    if (!btn) return null;
-    const r = btn.getBoundingClientRect();
-    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-  }).catch(() => null);
-  const verifyButton = verifyBtnBox ? { x: Math.round(frameBox.x + verifyBtnBox.x), y: Math.round(frameBox.y + verifyBtnBox.y) } : { x: Math.round(frameBox.x + frameBox.width - 55), y: Math.round(frameBox.y + frameBox.height - 30) };
-  log11.info(`Round challenge: "${info.prompt}" (${info.rows}x${info.cols})`);
-  return { prompt: info.prompt, rows: info.rows, cols: info.cols, tiles, verifyButton, frameBox };
+  const prompt2 = await frame.evaluate(() => {
+    const el = document.querySelector(".prompt-text, .task-instructions, [class*='prompt'], [class*='task-description']");
+    return el ? el.innerText.trim() : "";
+  }).catch(() => "");
+  if (!prompt2) return null;
+  const target = await frame.$("canvas").catch(() => null) ?? challengeFrame;
+  const box = await target.boundingBox();
+  if (!box) return null;
+  log10.info(`Round challenge: "${prompt2}" (${Math.round(box.width)}x${Math.round(box.height)})`);
+  return { prompt: prompt2, target, box, frame };
 }
-async function screenshotChallenge(page, challenge) {
-  const { frameBox } = challenge;
-  try {
-    await sleep5(1e3);
-    const challengeEl = await page.$('iframe[title="hCaptcha challenge"], iframe[title*="hcaptcha challenge" i]').catch(() => null);
-    let buf;
-    if (challengeEl) {
-      buf = Buffer.from(await challengeEl.screenshot({ type: "jpeg", quality: 85 }));
-    } else {
-      buf = await page.screenshot({ type: "jpeg", quality: 85, clip: frameBox });
-    }
-    return buf.toString("base64");
-  } catch (err) {
-    log11.error(`screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
-    return null;
+async function askForAnswer(client, challenge) {
+  const buf = await challenge.target.screenshot({ type: "jpeg", quality: 85, scale: "css" });
+  const width = Math.round(challenge.box.width);
+  const height = Math.round(challenge.box.height);
+  const text = await askVision(client, {
+    max_tokens: 1024,
+    messages: [{
+      role: "user",
+      content: [
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: Buffer.from(buf).toString("base64") } },
+        {
+          type: "text",
+          text: `This image is ${width}x${height} pixels. The task shown with it: "${challenge.prompt}".
+Work out the answer, then end your reply with one line of JSON, using pixel coordinates in this image.
+To click: {"clicks":[[x,y],[x,y]]}
+To drag: {"drag":[[fromX,fromY],[toX,toY]]}
+If you can't tell: {"clicks":[]}`
+        }
+      ]
+    }]
+  });
+  const answer = parseChallengeAnswer(text, width, height);
+  if (!answer) log10.warn(`no usable answer in model reply: "${text.slice(0, 120)}"`);
+  return answer;
+}
+async function perform(page, challenge, answer) {
+  const { x, y } = challenge.box;
+  if ("drag" in answer) {
+    await humanMove(page, x + answer.drag.from.x, y + answer.drag.from.y);
+    await sleep5(rand2(100, 250));
+    await page.mouse.down();
+    await humanMove(page, x + answer.drag.to.x, y + answer.drag.to.y);
+    await sleep5(rand2(100, 250));
+    await page.mouse.up();
+    return;
+  }
+  for (const click2 of answer.clicks) {
+    await humanClickXY(page, x + click2.x, y + click2.y);
+    await sleep5(rand2(150, 400));
   }
 }
-async function classifyTiles2(client, screenshotBase64, challenge) {
-  const { prompt: prompt2, rows, cols } = challenge;
-  const total = rows * cols;
-  try {
-    const response = await client.messages.create({
-      model: MODEL2,
-      max_tokens: 30,
-      system: `Output ONLY a comma-separated list of tile numbers or "none". Valid examples: "0,3,5" or "2" or "none". Output nothing else.`,
-      messages: [{
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: screenshotBase64 } },
-          { type: "text", text: `Task: "${prompt2}". Tiles 0-${total - 1} left-to-right top-to-bottom in a ${rows}\xD7${cols} grid. Which tiles match? Reply ONLY with numbers or "none".` }
-        ]
-      }]
-    });
-    const text = (response.content[0].text ?? "").trim();
-    log11.debug(`classify response: "${text}"`);
-    if (text.toLowerCase().startsWith("none")) return [];
-    return text.split(/[,\s]+/).map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n) && n >= 0 && n < total);
-  } catch (err) {
-    log11.error(`classification failed: ${err instanceof Error ? err.message : String(err)}`);
-    return [];
-  }
-}
-async function isSolved(page) {
-  const el = await page.$('iframe[title="hCaptcha challenge"], iframe[title*="hcaptcha challenge" i]').catch(() => null);
-  if (!el) return true;
-  const visible = await el.isVisible().catch(() => false);
-  return !visible;
-}
-async function clickVerify(page, challenge) {
-  await humanClickXY(page, challenge.verifyButton.x, challenge.verifyButton.y);
+async function clickSubmit(page, challenge) {
+  const button = await challenge.frame.$(".button-submit").catch(() => null);
+  const box = button ? await button.boundingBox() : null;
+  if (!box) throw new Error("hCaptcha submit button not found");
+  await humanClickXY(page, box.x + box.width / 2, box.y + box.height / 2);
   await sleep5(2500);
-  return isSolved(page);
 }
 async function solveHCaptcha(page, monitor) {
   const startTime = Date.now();
-  const client = getClient2();
+  const client = getCaptchaClient();
+  const result = (solved, reason) => ({
+    solved,
+    rounds,
+    durationMs: Date.now() - startTime,
+    ...reason ? { reason } : {}
+  });
   let rounds = 0;
-  let solvedOnCheckbox = false;
   try {
-    solvedOnCheckbox = await clickCheckbox(page);
+    if (await clickCheckbox(page)) {
+      log10.info("Solved on checkbox click (no challenge)");
+      return result(true);
+    }
+    while (rounds < MAX_ROUNDS2) {
+      if (Date.now() - startTime > MAX_DURATION_MS2) return result(false, "Timeout exceeded");
+      rounds++;
+      monitor?.reportActivity();
+      const challenge = await getChallenge(page);
+      if (!challenge) {
+        if (await hasToken(page, 3e3)) return result(true);
+        return result(false, "The challenge closed without a token");
+      }
+      await sleep5(1e3);
+      const answer = await askForAnswer(client, challenge);
+      monitor?.reportActivity();
+      log10.info(`Round ${rounds}: ${answer ? JSON.stringify(answer) : "no answer"}`);
+      if (answer) await perform(page, challenge, answer);
+      await sleep5(rand2(500, 1e3));
+      await clickSubmit(page, challenge);
+      monitor?.reportActivity();
+      if (await hasToken(page)) {
+        log10.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
+        return result(true);
+      }
+      log10.info(`Round ${rounds}: not solved, retrying`);
+    }
+    return result(false, `Max rounds (${MAX_ROUNDS2}) exceeded`);
   } catch (err) {
-    return { solved: false, rounds: 0, durationMs: Date.now() - startTime, reason: err instanceof Error ? err.message : String(err) };
+    if (err instanceof CaptchaApiError) return result(false, err.message);
+    return result(false, err instanceof Error ? err.message : String(err));
   }
-  if (solvedOnCheckbox) {
-    log11.info("Solved on checkbox click (no challenge)");
-    return { solved: true, rounds: 0, durationMs: Date.now() - startTime };
-  }
-  while (rounds < MAX_ROUNDS2) {
-    if (Date.now() - startTime > MAX_DURATION_MS2) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Timeout exceeded" };
-    }
-    rounds++;
-    monitor?.reportActivity();
-    const challenge = await getChallengeInfo2(page);
-    if (!challenge) {
-      log11.info("Challenge frame gone \u2014 assuming solved");
-      return { solved: true, rounds, durationMs: Date.now() - startTime };
-    }
-    const screenshotBase64 = await screenshotChallenge(page, challenge);
-    if (!screenshotBase64) {
-      return { solved: false, rounds, durationMs: Date.now() - startTime, reason: "Failed to screenshot challenge" };
-    }
-    monitor?.reportActivity();
-    const matchingIndices = await classifyTiles2(client, screenshotBase64, challenge);
-    log11.info(`Round ${rounds}: clicking tiles [${matchingIndices.join(", ")}]`);
-    monitor?.reportActivity();
-    for (const idx of matchingIndices) {
-      const tile = challenge.tiles[idx];
-      if (!tile) continue;
-      await humanClickXY(page, tile.centerX + rand2(-5, 5), tile.centerY + rand2(-5, 5));
-      await sleep5(rand2(150, 400));
-    }
-    await sleep5(rand2(500, 1e3));
-    const solved = await clickVerify(page, challenge);
-    monitor?.reportActivity();
-    if (solved) {
-      log11.info(`Solved in ${rounds} rounds, ${Date.now() - startTime}ms`);
-      return { solved: true, rounds, durationMs: Date.now() - startTime };
-    }
-    log11.info(`Round ${rounds}: not solved, retrying`);
-    await sleep5(rand2(500, 1e3));
-  }
-  return { solved: false, rounds, durationMs: Date.now() - startTime, reason: `Max rounds (${MAX_ROUNDS2}) exceeded` };
 }
-var import_sdk2, log11, MAX_ROUNDS2, MAX_DURATION_MS2, MODEL2;
+var log10, MAX_ROUNDS2, MAX_DURATION_MS2, CHALLENGE_FRAME;
 var init_hcaptcha = __esm({
   "src/lib/captcha/hcaptcha.ts"() {
     "use strict";
-    import_sdk2 = __toESM(require("@anthropic-ai/sdk"));
     init_humanize();
+    init_vision();
     init_logger();
-    log11 = createLogger("hcaptcha-solver");
+    log10 = createLogger("hcaptcha-solver");
     MAX_ROUNDS2 = 8;
     MAX_DURATION_MS2 = 6e4;
-    MODEL2 = "claude-haiku-4-5-20251001";
+    CHALLENGE_FRAME = 'iframe[title="hCaptcha challenge"], iframe[title*="hcaptcha challenge" i]';
   }
 });
 
@@ -4223,7 +3987,15 @@ async function recaptchaAnswer(page, step) {
   return { solved: false, tiles: [] };
 }
 async function solveCaptcha(page, _step, _ctx, monitor) {
+  const startTime = Date.now();
   await page.waitForTimeout(TIMING.CAPTCHA_DETECT_WAIT);
+  const widget = await page.waitForSelector(
+    'iframe[src*="recaptcha/api2/anchor"], iframe[src*="recaptcha/enterprise/anchor"], iframe[title*="reCAPTCHA"], iframe[src*="hcaptcha.com"], iframe[title*="hCaptcha"]',
+    { timeout: 5e3 }
+  ).catch(() => null);
+  if (!widget) {
+    return { solved: false, noCaptcha: true, rounds: 0, durationMs: Date.now() - startTime, reason: "No captcha on this page" };
+  }
   const isHCaptcha = await page.evaluate(() => {
     const iframes = Array.from(document.querySelectorAll("iframe"));
     return iframes.some((f) => {
@@ -4232,13 +4004,17 @@ async function solveCaptcha(page, _step, _ctx, monitor) {
       return src.includes("hcaptcha.com") || title.includes("hcaptcha") || !!document.querySelector("[data-hcaptcha-widget-id]");
     });
   }).catch((err) => {
-    log12.warn(`captcha detection failed: ${err}`);
+    log11.warn(`captcha detection failed: ${err}`);
     return false;
   });
-  log12.info(`detected: ${isHCaptcha ? "hCaptcha" : "reCAPTCHA"}`);
-  return isHCaptcha ? await solveHCaptcha(page, monitor) : await solveRecaptcha(page, monitor);
+  log11.info(`detected: ${isHCaptcha ? "hCaptcha" : "reCAPTCHA"}`);
+  const result = isHCaptcha ? await solveHCaptcha(page, monitor) : await solveRecaptcha(page, monitor);
+  if (!result.solved) {
+    throw new Error(`Captcha not solved after ${result.rounds} round(s): ${result.reason ?? "unknown reason"}`);
+  }
+  return result;
 }
-var log12;
+var log11;
 var init_captcha = __esm({
   "src/lib/actions/handlers/captcha.ts"() {
     "use strict";
@@ -4247,7 +4023,7 @@ var init_captcha = __esm({
     init_hcaptcha();
     init_logger();
     init_constants();
-    log12 = createLogger("actions");
+    log11 = createLogger("actions");
   }
 });
 
@@ -4363,12 +4139,12 @@ function sanitizeDomain(input) {
   return normalized.replace(/[^a-z0-9.-]/g, "_");
 }
 function ensureDir() {
-  import_fs10.default.mkdirSync(getKnowledgeDir(), { recursive: true });
+  import_fs8.default.mkdirSync(getKnowledgeDir(), { recursive: true });
 }
 function readKnowledge(domain) {
   const p = getKnowledgePath(domain);
   try {
-    return import_fs10.default.readFileSync(p, "utf8");
+    return import_fs8.default.readFileSync(p, "utf8");
   } catch {
     return null;
   }
@@ -4382,7 +4158,7 @@ function listKnowledge() {
   const dir = getKnowledgeDir();
   let entries = [];
   try {
-    entries = import_fs10.default.readdirSync(dir);
+    entries = import_fs8.default.readdirSync(dir);
   } catch {
     return [];
   }
@@ -4391,8 +4167,8 @@ function listKnowledge() {
     if (!file.endsWith(".md")) continue;
     const full = import_path9.default.join(dir, file);
     try {
-      const stat = import_fs10.default.statSync(full);
-      const raw = import_fs10.default.readFileSync(full, "utf8");
+      const stat = import_fs8.default.statSync(full);
+      const raw = import_fs8.default.readFileSync(full, "utf8");
       const parsed = parseMarkdown(raw);
       results.push({
         domain: parsed?.domain ?? file.replace(/\.md$/, ""),
@@ -4411,7 +4187,7 @@ function clearKnowledge(domain) {
   if (domain) {
     const p = getKnowledgePath(domain);
     try {
-      import_fs10.default.unlinkSync(p);
+      import_fs8.default.unlinkSync(p);
       return { removed: 1 };
     } catch {
       return { removed: 0 };
@@ -4419,11 +4195,11 @@ function clearKnowledge(domain) {
   }
   let removed = 0;
   try {
-    const entries = import_fs10.default.readdirSync(dir);
+    const entries = import_fs8.default.readdirSync(dir);
     for (const f of entries) {
       if (f.endsWith(".md")) {
         try {
-          import_fs10.default.unlinkSync(import_path9.default.join(dir, f));
+          import_fs8.default.unlinkSync(import_path9.default.join(dir, f));
           removed++;
         } catch {
         }
@@ -4446,8 +4222,8 @@ function mergeKnowledge(domain, updates) {
     notes: dedupeNotes([...existing?.notes ?? [], ...updates.notes ?? []])
   };
   const md = renderMarkdown(merged);
-  import_fs10.default.writeFileSync(getKnowledgePath(domain), md, "utf8");
-  log13.info(`knowledge updated: ${merged.domain} (${merged.endpoints.length} endpoints)`);
+  import_fs8.default.writeFileSync(getKnowledgePath(domain), md, "utf8");
+  log12.info(`knowledge updated: ${merged.domain} (${merged.endpoints.length} endpoints)`);
 }
 function dedupeEndpoints(endpoints) {
   const seen = /* @__PURE__ */ new Map();
@@ -4604,15 +4380,15 @@ function extractBackticks(re, text) {
   const items = [...m[1].matchAll(/`([^`]+)`/g)].map((x) => x[1]);
   return items.length > 0 ? items : void 0;
 }
-var import_fs10, import_path9, log13;
+var import_fs8, import_path9, log12;
 var init_knowledge = __esm({
   "src/lib/knowledge.ts"() {
     "use strict";
-    import_fs10 = __toESM(require("fs"));
+    import_fs8 = __toESM(require("fs"));
     import_path9 = __toESM(require("path"));
     init_logger();
     init_paths();
-    log13 = createLogger("knowledge");
+    log12 = createLogger("knowledge");
   }
 });
 
@@ -4701,7 +4477,7 @@ async function login(page, step, ctx) {
   }
   const { credential, matchedDomain } = resolved;
   if (matchedDomain !== normalizeDomain(step.domain)) {
-    log14.info(`login: credentials for ${step.domain} resolved via parent domain ${matchedDomain}`);
+    log13.info(`login: credentials for ${step.domain} resolved via parent domain ${matchedDomain}`);
   }
   const beforeUrl = page.url();
   const hasExplicitSelectors = !!(step.usernameSelector || step.passwordSelector || step.submitSelector);
@@ -4734,7 +4510,7 @@ async function runExplicitFlow(page, step, ctx, credential) {
   }
 }
 async function runAutoDetect(page, step, ctx, credential, beforeUrl) {
-  log14.info(`login: auto-detecting form on ${beforeUrl}`);
+  log13.info(`login: auto-detecting form on ${beforeUrl}`);
   await page.waitForLoadState("domcontentloaded").catch(() => {
   });
   await page.waitForTimeout(500);
@@ -4744,7 +4520,7 @@ async function runAutoDetect(page, step, ctx, credential, beforeUrl) {
     return { url: location.href, title: document.title, pwdVisible };
   }, PASSWORD_SELECTOR).catch(() => ({ url: page.url(), title: "", pwdVisible: false }));
   if (!initialCheck.pwdVisible && !LOGIN_URL_RE.test(initialCheck.url)) {
-    log14.info(`login: already logged in (no password field, URL=${initialCheck.url})`);
+    log13.info(`login: already logged in (no password field, URL=${initialCheck.url})`);
     return {
       loggedIn: true,
       alreadyLoggedIn: true,
@@ -4764,7 +4540,7 @@ async function runAutoDetect(page, step, ctx, credential, beforeUrl) {
 async function runNoPasswordBranch(page, step, ctx, credential, beforeUrl) {
   const currentUrl = page.url();
   if (!LOGIN_URL_RE.test(currentUrl)) {
-    log14.info(`login: no password field and URL left login area (${currentUrl}) \u2014 treating as success`);
+    log13.info(`login: no password field and URL left login area (${currentUrl}) \u2014 treating as success`);
     return {
       loggedIn: true,
       alreadyLoggedIn: true,
@@ -4791,7 +4567,7 @@ async function runNoPasswordBranch(page, step, ctx, credential, beforeUrl) {
     const hasCloudflare = !!document.querySelector('[class*="cf-" i], iframe[src*="challenges.cloudflare"]');
     return { title: document.title, visibleText, inputCount, hiddenPassword, hasCaptcha, hasCloudflare };
   }).catch(() => ({ title: "", visibleText: "", inputCount: 0, hiddenPassword: false, hasCaptcha: false, hasCloudflare: false }));
-  log14.warn(`login: no visible password or email field on ${currentUrl} \u2014 title="${pageDiag.title}", inputs=${pageDiag.inputCount}`);
+  log13.warn(`login: no visible password or email field on ${currentUrl} \u2014 title="${pageDiag.title}", inputs=${pageDiag.inputCount}`);
   const indicators = [];
   if (pageDiag.hasCaptcha) indicators.push("CAPTCHA detected");
   if (pageDiag.hasCloudflare) indicators.push("Cloudflare challenge");
@@ -4799,12 +4575,12 @@ async function runNoPasswordBranch(page, step, ctx, credential, beforeUrl) {
   if (pageDiag.hiddenPassword) indicators.push("password field exists but is hidden/disabled");
   const indicatorStr = indicators.length > 0 ? ` (${indicators.join(", ")})` : "";
   throw new Error(
-    `login: no visible password or email field on ${currentUrl} after 5000ms${indicatorStr}. Page title: "${pageDiag.title}". The site may be showing a bot-detection wall, captcha, or an unsupported login flow. Retry with a stronger browser mode (binary-headful or docker-headful).`
+    `login: no visible password or email field on ${currentUrl} after 5000ms${indicatorStr}. Page title: "${pageDiag.title}". The site may be showing a bot-detection wall, captcha, or an unsupported login flow. Retry with a stronger browser mode (binary-headful).`
   );
 }
 async function runEmailFirstFlow(page, credential, beforeUrl, emailEl) {
   const currentUrl = page.url();
-  log14.info(`login: no password field but found email input \u2014 running email-first flow on ${currentUrl}`);
+  log13.info(`login: no password field but found email input \u2014 running email-first flow on ${currentUrl}`);
   await fillHandleNative(page, emailEl, credential.username);
   const submitEl = await findSubmitButton(page, {
     formAnchor: EMAIL_FORM_ANCHOR,
@@ -4818,7 +4594,7 @@ async function runEmailFirstFlow(page, credential, beforeUrl, emailEl) {
       await submitEl.evaluate((el) => el.click());
     });
   } else {
-    log14.warn("login: email-first flow, no submit button found \u2014 pressing Enter");
+    log13.warn("login: email-first flow, no submit button found \u2014 pressing Enter");
     await emailEl.press("Enter").catch(() => {
     });
   }
@@ -4832,7 +4608,7 @@ async function runEmailFirstFlow(page, credential, beforeUrl, emailEl) {
   ]);
   const laterPasswordHandle = await page.$(PASSWORD_SELECTOR);
   if (laterPasswordHandle && credential.password) {
-    log14.info("login: password field appeared after email submit \u2014 filling it");
+    log13.info("login: password field appeared after email submit \u2014 filling it");
     await fillHandleNative(page, laterPasswordHandle, credential.password);
     const laterSubmit = await page.$('button[type="submit"]:not([disabled])');
     if (laterSubmit) {
@@ -4871,7 +4647,7 @@ async function runPasswordFlow(page, credential, beforeUrl, passwordHandle) {
   if (usernameEl && credential.username) {
     await fillHandleNative(page, usernameEl, credential.username);
   } else if (!usernameEl) {
-    log14.warn("login: no username field detected, proceeding with password only");
+    log13.warn("login: no username field detected, proceeding with password only");
   }
   if (credential.password) {
     await fillHandleNative(page, passwordHandle, credential.password);
@@ -4888,7 +4664,7 @@ async function runPasswordFlow(page, credential, beforeUrl, passwordHandle) {
       await submitEl.evaluate((el) => el.click());
     });
   } else {
-    log14.warn("login: no submit button detected, pressing Enter in password field");
+    log13.warn("login: no submit button detected, pressing Enter in password field");
     await passwordHandle.press("Enter").catch(() => {
     });
   }
@@ -4906,13 +4682,13 @@ async function handleOtp(page, step, ctx, credential, beforeUrl) {
   let code = null;
   if (credential.totp_secret) {
     code = generateTOTP(credential.totp_secret);
-    log14.info(`login: generated TOTP from stored secret for ${step.domain}`);
+    log13.info(`login: generated TOTP from stored secret for ${step.domain}`);
   } else if (ctx.elicitOtp) {
-    log14.info(`login: prompting user for OTP for ${step.domain}`);
+    log13.info(`login: prompting user for OTP for ${step.domain}`);
     try {
       code = await ctx.elicitOtp(step.domain);
     } catch (err) {
-      log14.warn(`login: OTP elicitation failed: ${err instanceof Error ? err.message : String(err)}`);
+      log13.warn(`login: OTP elicitation failed: ${err instanceof Error ? err.message : String(err)}`);
     }
     if (!code) {
       throw new Error(`login: OTP required but user did not provide one for ${step.domain}`);
@@ -4939,7 +4715,7 @@ async function honestSignal(page, beforeUrl) {
   const loggedIn = afterUrl !== beforeUrl && !stillHasPasswordField;
   return { loggedIn, url: afterUrl, changedUrl: afterUrl !== beforeUrl, passwordFieldRemains: stillHasPasswordField };
 }
-var log14;
+var log13;
 var init_login = __esm({
   "src/lib/actions/handlers/login/index.ts"() {
     "use strict";
@@ -4952,7 +4728,7 @@ var init_login = __esm({
     init_constants();
     init_resolve_selector();
     init_selectors();
-    log14 = createLogger("actions");
+    log13 = createLogger("actions");
   }
 });
 
@@ -5179,7 +4955,7 @@ var init_detector = __esm({
             () => [
               'iframe[src*="recaptcha/api2/anchor"], iframe[title*="reCAPTCHA"]',
               'iframe[src*="recaptcha/api2/bframe"]',
-              '.g-recaptcha:not([data-size="invisible"]), [data-sitekey]:not([data-size="invisible"])'
+              '.g-recaptcha:not([data-size="invisible"]), [data-sitekey]:not([data-size="invisible"]):not(.h-captcha):not(.cf-turnstile)'
             ].some((sel) => {
               const el = document.querySelector(sel);
               if (!el) return false;
@@ -5202,7 +4978,8 @@ var init_detector = __esm({
             () => [
               'iframe[src*="hcaptcha.com"]',
               'iframe[title*="hCaptcha"]',
-              "[data-hcaptcha-widget-id]"
+              "[data-hcaptcha-widget-id]",
+              '.h-captcha:not([data-size="invisible"])'
             ].some((sel) => {
               const el = document.querySelector(sel);
               if (!el) return false;
@@ -5266,8 +5043,8 @@ var init_detector = __esm({
       }
     };
     defaultDetectors = [
-      new RecaptchaDetector(),
       new HCaptchaDetector(),
+      new RecaptchaDetector(),
       new CookieConsentDetector(),
       new LoginWallDetector()
     ];
@@ -5422,8 +5199,8 @@ function isLikelyId(segment) {
 function isRecord(x) {
   return typeof x === "object" && x !== null && !Array.isArray(x);
 }
-function parameterizePath(path14) {
-  const parts = path14.split("/");
+function parameterizePath(path13) {
+  const parts = path13.split("/");
   let idCount = 0;
   const parameterized = parts.map((part) => {
     if (part && isLikelyId(part)) {
@@ -5512,16 +5289,16 @@ function gqlActionFromBody(body) {
   return void 0;
 }
 function classifyRequest(req) {
-  const path14 = req.path;
-  const lowerPath = path14.toLowerCase();
+  const path13 = req.path;
+  const lowerPath = path13.toLowerCase();
   const ct = (req.requestHeaders["content-type"] || req.requestHeaders["Content-Type"] || "").toLowerCase();
   const body = req.requestBody;
   if (ct.includes("application/grpc")) {
-    return { protocol: "grpc-web", action: path14.replace(/^\//, "") };
+    return { protocol: "grpc-web", action: path13.replace(/^\//, "") };
   }
   const soapAction = req.requestHeaders["soapaction"] || req.requestHeaders["SOAPAction"];
   if (soapAction || ct.includes("text/xml") || ct.includes("application/soap+xml")) {
-    return { protocol: "soap", action: (soapAction || path14).replace(/^["/]|["/]$/g, "") };
+    return { protocol: "soap", action: (soapAction || path13).replace(/^["/]|["/]$/g, "") };
   }
   if (/\/graphql\b/.test(lowerPath) || hasGraphQLShape(body)) {
     return { protocol: "graphql", action: gqlActionFromBody(body) ?? "anonymous" };
@@ -5536,7 +5313,7 @@ function classifyRequest(req) {
     const friendly = gqlActionFromBody(body);
     if (friendly) return { protocol: "form-rpc", action: friendly };
   }
-  return { protocol: "rest", action: `${req.method} ${parameterizePath(path14)}` };
+  return { protocol: "rest", action: `${req.method} ${parameterizePath(path13)}` };
 }
 function inferVerb(protocol, action, method, responseBody) {
   const lower = action.toLowerCase();
@@ -5571,8 +5348,8 @@ function buildFunctionName(protocol, action, method, verb) {
   if (protocol === "rest") {
     const parts = action.split(" ");
     const httpMethod = parts[0];
-    const path14 = parts.slice(1).join(" ");
-    const segs = path14.split("/").filter((s) => s && !s.startsWith("{"));
+    const path13 = parts.slice(1).join(" ");
+    const segs = path13.split("/").filter((s) => s && !s.startsWith("{"));
     const verbPrefix = httpMethod === "GET" ? verb === "list" ? "list" : "get" : httpMethod === "POST" ? "create" : httpMethod === "PUT" ? "update" : httpMethod === "PATCH" ? "patch" : httpMethod === "DELETE" ? "delete" : httpMethod.toLowerCase();
     return camelCase(`${verbPrefix} ${segs.join(" ")}`) || camelCase(action);
   }
@@ -5907,12 +5684,12 @@ function safeUrl(p) {
     return "unknown";
   }
 }
-var log15, TabTracker;
+var log14, TabTracker;
 var init_tab_tracker = __esm({
   "src/lib/browser/tab-tracker.ts"() {
     "use strict";
     init_logger();
-    log15 = createLogger("tabs");
+    log14 = createLogger("tabs");
     TabTracker = class {
       constructor(context, initial) {
         this.context = context;
@@ -5931,14 +5708,14 @@ var init_tab_tracker = __esm({
         this.pages.push(p);
         this.newlyOpened.push(p);
         p.on("close", () => this.onClose(p));
-        log15.debug(`new tab opened: ${safeUrl(p)}`);
+        log14.debug(`new tab opened: ${safeUrl(p)}`);
       };
       onClose = (p) => {
         this.pages = this.pages.filter((x) => x !== p);
         this.newlyOpened = this.newlyOpened.filter((x) => x !== p);
         if (this.activePage === p) {
           this.activePage = this.pages[this.pages.length - 1] ?? p;
-          log15.debug(`active tab closed, fell back to: ${safeUrl(this.activePage)}`);
+          log14.debug(`active tab closed, fell back to: ${safeUrl(this.activePage)}`);
         }
       };
       /** The page the pipeline should currently drive. */
@@ -5981,7 +5758,7 @@ var init_tab_tracker = __esm({
         });
         this.activePage = target;
         const sw = { url, title: await target.title().catch(() => "") };
-        log15.info(`followed new tab \u2192 ${sw.url}`);
+        log14.info(`followed new tab \u2192 ${sw.url}`);
         return sw;
       }
       /** Drop pending new-tab opens without following them. Used when a step opened
@@ -6008,7 +5785,7 @@ function anchorsPath(domain) {
 function loadComponentMap(domain) {
   const norm = normalizeDomain(domain);
   try {
-    const raw = import_fs11.default.readFileSync(anchorsPath(norm), "utf8");
+    const raw = import_fs9.default.readFileSync(anchorsPath(norm), "utf8");
     const parsed = JSON.parse(raw);
     return {
       domain: parsed.domain || norm,
@@ -6026,8 +5803,8 @@ function loadAnchors(domain) {
   return map;
 }
 function write(cm) {
-  import_fs11.default.mkdirSync(getKnowledgeDir(), { recursive: true });
-  import_fs11.default.writeFileSync(anchorsPath(cm.domain), JSON.stringify(cm, null, 2), "utf8");
+  import_fs9.default.mkdirSync(getKnowledgeDir(), { recursive: true });
+  import_fs9.default.writeFileSync(anchorsPath(cm.domain), JSON.stringify(cm, null, 2), "utf8");
 }
 function recordAnchorResult(domain, name, ok, now) {
   try {
@@ -6044,11 +5821,11 @@ function recordAnchorResult(domain, name, ok, now) {
   } catch {
   }
 }
-var import_fs11, import_path10;
+var import_fs9, import_path10;
 var init_component_map = __esm({
   "src/lib/knowledge/component-map.ts"() {
     "use strict";
-    import_fs11 = __toESM(require("fs"));
+    import_fs9 = __toESM(require("fs"));
     import_path10 = __toESM(require("path"));
     init_knowledge();
   }
@@ -6064,6 +5841,7 @@ function safePageUrl(page) {
 }
 function classifyError(err, step) {
   if (err instanceof StaleStateError) return "stale-state";
+  if (step.type === "solve-captcha") return "captcha-unsolvable";
   const msg = err.message.toLowerCase();
   if (step.type === "login" && (msg.includes("no visible password field") || msg.includes("password field was not visible"))) {
     return "bot-blocked";
@@ -6071,7 +5849,6 @@ function classifyError(err, step) {
   if (msg.includes("timeout") || msg.includes("timed out")) return "timeout";
   if (msg.includes("not found") || msg.includes("no element") || msg.includes("waiting for selector")) return "element-not-found";
   if (msg.includes("navigation") || msg.includes("net::err")) return "navigation-failed";
-  if (step.type === "solve-captcha") return "captcha-unsolvable";
   return "action-failed";
 }
 async function refineError(page, step, ctx, errorType, message) {
@@ -6115,7 +5892,7 @@ function getSuggestion(errorType, step, message = "") {
     case "navigation-failed":
       return "Navigation failed. The URL may be unreachable, blocked, or require authentication.";
     case "captcha-unsolvable":
-      return "Automatic reCAPTCHA solving failed. The challenge may require human intervention.";
+      return "Automatic captcha solving failed. Ask a person to solve it in a binary-headful window, then continue from the same page.";
     case "timeout":
       return "Operation timed out. The page may be slow or the element may not appear.";
     default:
@@ -6376,7 +6153,7 @@ async function detectBlock(page) {
     const hasCfChallenge = await page.evaluate(() => {
       return !!document.querySelector('iframe[src*="challenges.cloudflare.com"]');
     }).catch((err) => {
-      log16.warn(`CF challenge check failed, assuming blocked: ${err}`);
+      log15.warn(`CF challenge check failed, assuming blocked: ${err}`);
       return true;
     });
     if (hasCfChallenge) {
@@ -6395,7 +6172,7 @@ async function detectBlock(page) {
       const hasCaptchaIframe = await page.evaluate(() => {
         return !!(document.querySelector('iframe[src*="recaptcha"]') || document.querySelector('iframe[src*="hcaptcha"]'));
       }).catch((err) => {
-        log16.warn(`captcha iframe check failed, assuming blocked: ${err}`);
+        log15.warn(`captcha iframe check failed, assuming blocked: ${err}`);
         return true;
       });
       if (hasCaptchaIframe) {
@@ -6409,17 +6186,17 @@ async function detectBlock(page) {
     }
     return { blocked: false };
   } catch (err) {
-    log16.warn(`page evaluation failed, assuming blocked: ${err}`);
+    log15.warn(`page evaluation failed, assuming blocked: ${err}`);
     return { blocked: true, reason: "evaluation-failed" };
   }
 }
-var log16;
+var log15;
 var init_block_detection = __esm({
   "src/lib/block-detection.ts"() {
     "use strict";
     init_constants();
     init_logger();
-    log16 = createLogger("block-detection");
+    log15 = createLogger("block-detection");
   }
 });
 
@@ -8748,7 +8525,7 @@ var require_websocket = __commonJS({
     var http2 = require("http");
     var net2 = require("net");
     var tls = require("tls");
-    var { randomBytes, createHash } = require("crypto");
+    var { randomBytes: randomBytes2, createHash } = require("crypto");
     var { Duplex, Readable } = require("stream");
     var { URL: URL2 } = require("url");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -9286,7 +9063,7 @@ var require_websocket = __commonJS({
         }
       }
       const defaultPort = isSecure ? 443 : 80;
-      const key = randomBytes(16).toString("base64");
+      const key = randomBytes2(16).toString("base64");
       const request = isSecure ? https.request : http2.request;
       const protocolSet = /* @__PURE__ */ new Set();
       let perMessageDeflate;
@@ -10207,18 +9984,18 @@ function getVersion() {
   ];
   for (const p of candidates) {
     try {
-      const v = JSON.parse(import_fs12.default.readFileSync(p, "utf8")).version;
+      const v = JSON.parse(import_fs10.default.readFileSync(p, "utf8")).version;
       if (v) return cached = v;
     } catch {
     }
   }
   return cached = "0.0.0";
 }
-var import_fs12, import_path11, cached;
+var import_fs10, import_path11, cached;
 var init_version = __esm({
   "src/lib/version.ts"() {
     "use strict";
-    import_fs12 = __toESM(require("fs"));
+    import_fs10 = __toESM(require("fs"));
     import_path11 = __toESM(require("path"));
     cached = null;
   }
@@ -10228,12 +10005,12 @@ var init_version = __esm({
 function cdpKey(clientId, tabId) {
   return `${clientId}:${tabId}`;
 }
-var import_crypto5, REQUEST_TIMEOUT_MS, HEARTBEAT_MS, CONNECT_GRACE_MS, NOT_CONNECTED_MESSAGE, ExtensionBridge, extensionBridge;
+var import_crypto6, REQUEST_TIMEOUT_MS, HEARTBEAT_MS, CONNECT_GRACE_MS, NOT_CONNECTED_MESSAGE, ExtensionBridge, extensionBridge;
 var init_bridge = __esm({
   "src/lib/extension/bridge.ts"() {
     "use strict";
     init_wrapper();
-    import_crypto5 = __toESM(require("crypto"));
+    import_crypto6 = __toESM(require("crypto"));
     init_crypto();
     init_version();
     REQUEST_TIMEOUT_MS = 18e4;
@@ -10295,7 +10072,7 @@ var init_bridge = __esm({
       }
       acceptClient(ws) {
         const client = {
-          clientId: import_crypto5.default.randomUUID(),
+          clientId: import_crypto6.default.randomUUID(),
           socket: ws,
           connectedAt: Date.now(),
           tabs: [],
@@ -10593,16 +10370,16 @@ var init_bridge = __esm({
 });
 
 // src/lib/extension/cdp-relay.ts
-var import_http, import_crypto7, log17, CdpRelay;
+var import_http, import_crypto8, log16, CdpRelay;
 var init_cdp_relay = __esm({
   "src/lib/extension/cdp-relay.ts"() {
     "use strict";
     import_http = __toESM(require("http"));
     init_wrapper();
-    import_crypto7 = require("crypto");
+    import_crypto8 = require("crypto");
     init_bridge();
     init_logger();
-    log17 = createLogger("cdp-relay");
+    log16 = createLogger("cdp-relay");
     CdpRelay = class {
       constructor(tabId, clientId, focus) {
         this.tabId = tabId;
@@ -10616,7 +10393,7 @@ var init_cdp_relay = __esm({
       wss = null;
       pw = null;
       port = 0;
-      path = `/cdp/${(0, import_crypto7.randomUUID)()}`;
+      path = `/cdp/${(0, import_crypto8.randomUUID)()}`;
       tabSessionId = "pw-tab-1";
       targetInfo = null;
       ownerClientId = "";
@@ -10662,11 +10439,11 @@ var init_cdp_relay = __esm({
             res.end();
           });
           this.httpServer.on("upgrade", (req) => {
-            if (process.env.IFRAMER_RELAY_DEBUG) log17.info(`[relay] upgrade request url=${req.url}`);
+            if (process.env.IFRAMER_RELAY_DEBUG) log16.info(`[relay] upgrade request url=${req.url}`);
           });
           this.wss = new import_websocket_server.default({ server: this.httpServer, path: this.path });
           this.wss.on("connection", (ws) => {
-            if (process.env.IFRAMER_RELAY_DEBUG) log17.info(`[relay] playwright connected`);
+            if (process.env.IFRAMER_RELAY_DEBUG) log16.info(`[relay] playwright connected`);
             if (this.pw) {
               ws.close(4e3, "relay already has a client");
               return;
@@ -10705,7 +10482,7 @@ var init_cdp_relay = __esm({
         }
       }
       async onPwMessage(data) {
-        if (process.env.IFRAMER_RELAY_DEBUG) log17.info(`[relay] raw pw msg (${data?.length ?? 0} bytes): ${data?.toString().slice(0, 120)}`);
+        if (process.env.IFRAMER_RELAY_DEBUG) log16.info(`[relay] raw pw msg (${data?.length ?? 0} bytes): ${data?.toString().slice(0, 120)}`);
         let msg;
         try {
           msg = JSON.parse(data.toString());
@@ -10713,7 +10490,7 @@ var init_cdp_relay = __esm({
           return;
         }
         const { id, sessionId, method, params } = msg;
-        if (process.env.IFRAMER_RELAY_DEBUG) log17.info(`[relay] pw\u2192 ${method} (id=${id}, sess=${sessionId || "-"})`);
+        if (process.env.IFRAMER_RELAY_DEBUG) log16.info(`[relay] pw\u2192 ${method} (id=${id}, sess=${sessionId || "-"})`);
         if (!method) return;
         try {
           const result = await this.handleCdpCommand(method, params, sessionId);
@@ -10826,7 +10603,7 @@ var init_cdp_relay = __esm({
           try {
             await extensionBridge.cdpDetach(this.ownerClientId, this.tabId);
           } catch (e) {
-            log17.warn(`cdp detach failed: ${e}`);
+            log16.warn(`cdp detach failed: ${e}`);
           }
         }
       }
@@ -10853,7 +10630,7 @@ function blankPipelineResult(pipeline, modeUsed, error) {
     finalState: { url: "", title: "" }
   };
 }
-var import_playwright_core, log18, PipelineExecutor;
+var import_playwright_core, log17, PipelineExecutor;
 var init_pipeline_executor = __esm({
   "src/lib/execution/pipeline-executor.ts"() {
     "use strict";
@@ -10861,7 +10638,6 @@ var init_pipeline_executor = __esm({
     import_playwright_core = require("playwright-core");
     init_daemon();
     init_pipeline();
-    init_session_manager();
     init_crypto();
     init_persistence();
     init_block_detection();
@@ -10871,7 +10647,7 @@ var init_pipeline_executor = __esm({
     init_errors();
     init_logger();
     init_cdp_relay();
-    log18 = createLogger("iframer");
+    log17 = createLogger("iframer");
     PipelineExecutor = class {
       constructor(deps) {
         this.deps = deps;
@@ -10946,10 +10722,8 @@ var init_pipeline_executor = __esm({
           if (domain) this.deps.domainModes.recordFailure(domain, failedMode, result.error?.message || "blocked");
           const nextMode = this.deps.domainModes.getNextMode(failedMode, availableModes);
           if (nextMode) {
-            log18.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
-            if (failedMode !== "docker-headful") {
-              await this.deps.daemon.stopMode(failedMode, instanceId);
-            }
+            log17.info(`Auto-escalating from ${failedMode} to ${nextMode} for ${domain}`);
+            await this.deps.daemon.stopMode(failedMode, instanceId);
             result = await this.executeWithMode(userId, token, pipeline, nextMode, instanceId);
             result.modeEscalated = true;
             result.modeUsed = nextMode;
@@ -10959,10 +10733,8 @@ var init_pipeline_executor = __esm({
               this.deps.domainModes.recordFailure(domain, nextMode, result.error?.message || "blocked");
               const thirdMode = this.deps.domainModes.getNextMode(nextMode, availableModes);
               if (thirdMode) {
-                log18.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
-                if (nextMode !== "docker-headful") {
-                  await this.deps.daemon.stopMode(nextMode, instanceId);
-                }
+                log17.info(`Auto-escalating from ${nextMode} to ${thirdMode} for ${domain}`);
+                await this.deps.daemon.stopMode(nextMode, instanceId);
                 result = await this.executeWithMode(userId, token, pipeline, thirdMode, instanceId);
                 result.modeEscalated = true;
                 result.modeUsed = thirdMode;
@@ -10978,9 +10750,6 @@ var init_pipeline_executor = __esm({
         return result;
       }
       async executeWithMode(userId, token, pipeline, mode, instanceId = DEFAULT_INSTANCE, respectful = false) {
-        if (mode === "docker-headful") {
-          return this.executeDocker(userId, token, pipeline, respectful);
-        }
         return this.executeLocal(userId, token, pipeline, mode, instanceId, respectful);
       }
       /** Execute against the user's real Chrome tab via the extension CDP relay,
@@ -11038,7 +10807,7 @@ var init_pipeline_executor = __esm({
             try {
               extractKnowledgeFromRun(pipeline, result, null, "extension");
             } catch (e) {
-              log18.warn(`knowledge update failed: ${getErrorMessage(e)}`);
+              log17.warn(`knowledge update failed: ${getErrorMessage(e)}`);
             }
           }
           return result;
@@ -11078,42 +10847,6 @@ var init_pipeline_executor = __esm({
           }
         }
       }
-      /** Execute via Docker session-manager. */
-      async executeDocker(userId, token, pipeline, respectful = false) {
-        let session = getSession(userId);
-        if (!session) {
-          const firstNav = pipeline.steps.find((s) => s.type === "navigate");
-          await this.deps.startSession(userId, token, firstNav ? { url: firstNav.url } : {});
-          session = getSession(userId);
-        }
-        resetTimeout(userId);
-        const ctx = this.deps.refStore.makeContext(userId, token);
-        const runner = new PipelineRunner(ctx, protectionHooks(false, respectful));
-        const result = await runner.run(session.page, pipeline);
-        if (result.ok) {
-          const blockResult = await detectBlock(session.page);
-          if (blockResult.blocked) {
-            const pageState = await capturePageState(session.page, ctx, { screenshot: true, namePrefix: "block" });
-            return {
-              ...result,
-              ok: false,
-              modeUsed: "docker-headful",
-              error: {
-                failedAtStep: result.completedSteps - 1,
-                failedStep: pipeline.steps[result.completedSteps - 1],
-                errorType: "bot-blocked",
-                message: `Page blocked by bot detection: ${blockResult.reason}`,
-                pageState,
-                suggestion: "The page is blocked by bot detection. Try a different browser mode.",
-                retryable: true
-              }
-            };
-          }
-        }
-        this.deps.refStore.sync(userId, ctx);
-        result.modeUsed = "docker-headful";
-        return result;
-      }
       /** Execute via local Chrome daemon (headless + binary-headful). */
       async executeLocal(userId, token, pipeline, mode, instanceId = DEFAULT_INSTANCE, respectful = false) {
         const startTime = Date.now();
@@ -11147,7 +10880,7 @@ var init_pipeline_executor = __esm({
             acquired = false;
             await this.deps.daemon.stopMode(mode, instanceId);
             const available = this.deps.availableModes();
-            const headed = available.includes("binary-headful") ? "binary-headful" : "docker-headful";
+            const headed = "binary-headful";
             if (!available.includes(headed)) throw new Error("A headed browser is required but unavailable.");
             await new Promise((resolve) => setTimeout(resolve, PROTECTED_INTERVAL_MS));
             const index = err.stepIndex;
@@ -11183,7 +10916,7 @@ var init_pipeline_executor = __esm({
                   errorType: "bot-blocked",
                   message: `Page blocked by bot detection: ${blockResult.reason}`,
                   pageState,
-                  suggestion: `The page was blocked in ${mode} mode. ${mode === "headless" ? "Try docker-headful mode." : mode === "docker-headful" ? "Try binary-headful mode." : "All modes exhausted."}`,
+                  suggestion: `The page was blocked in ${mode} mode. ${mode === "headless" ? "Try binary-headful mode." : "All modes exhausted."}`,
                   retryable: true
                 }
               };
@@ -11202,7 +10935,7 @@ var init_pipeline_executor = __esm({
             try {
               extractKnowledgeFromRun(pipeline, result, updatedSession, mode);
             } catch (err) {
-              log18.warn(`knowledge update failed: ${getErrorMessage(err)}`);
+              log17.warn(`knowledge update failed: ${getErrorMessage(err)}`);
             }
           }
           this.deps.refStore.sync(userId, ctx);
@@ -11431,20 +11164,14 @@ var CredentialStore;
 var init_credential_store = __esm({
   "src/lib/auth/credential-store.ts"() {
     "use strict";
-    init_session_manager();
     init_crypto();
     init_credential_resolver();
     init_knowledge();
-    init_humanize();
-    init_screenshot();
-    init_constants();
     CredentialStore = class {
-      constructor(store, config) {
+      constructor(store) {
         this.store = store;
-        this.config = config;
       }
       store;
-      config;
       async storeCredential(userId, token, credential) {
         const credKey = await deriveKey(token, "credentials");
         const normalizedDomain = normalizeDomain(credential.domain);
@@ -11467,41 +11194,6 @@ var init_credential_store = __esm({
       async deleteCredential(userId, domain) {
         await this.store.deleteCredential(userId, normalizeDomain(domain));
       }
-      async loginWithCredentials(userId, token, domain, selectors) {
-        const session = getSession(userId);
-        if (!session) return { ok: false, url: "", title: "", error: "No active interactive session. Start one first." };
-        const resolved = await resolveCredential(this.store, userId, token, domain);
-        if (!resolved) {
-          const stored = await this.store.listCredentialDomains(userId);
-          return { ok: false, url: "", title: "", error: `No credentials stored for ${normalizeDomain(domain)}. Stored: ${stored.join(", ") || "(none)"}` };
-        }
-        const { credential } = resolved;
-        const page = session.page;
-        resetTimeout(userId);
-        if (selectors.username && credential.username) {
-          await humanType(page, selectors.username, credential.username);
-          await page.waitForTimeout(TIMING.PRE_NAVIGATE[0] + Math.random() * (TIMING.PRE_NAVIGATE[1] - TIMING.PRE_NAVIGATE[0]));
-        }
-        if (selectors.password && credential.password) {
-          await humanType(page, selectors.password, credential.password);
-          await page.waitForTimeout(TIMING.PRE_NAVIGATE[0] + Math.random() * (TIMING.PRE_NAVIGATE[1] - TIMING.PRE_NAVIGATE[0]));
-        }
-        if (selectors.submit) {
-          await humanClick(page, selectors.submit);
-          await page.waitForLoadState("domcontentloaded").catch(() => {
-          });
-          await page.waitForTimeout(TIMING.POST_LOGIN_WAIT);
-        }
-        if (selectors.totp && credential.totp_secret) {
-          const totp = generateTOTP(credential.totp_secret);
-          await page.click(selectors.totp);
-          await page.keyboard.type(totp, { delay: 50 });
-          await page.waitForTimeout(TIMING.POST_TOTP_WAIT);
-        }
-        const buf = await page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
-        const screenshotUrl = saveScreenshot(buf, `login-${Date.now()}.jpg`, this.config.screenshotDir, this.config.publicUrl);
-        return { ok: true, url: page.url(), title: await page.title(), screenshotUrl };
-      }
     };
   }
 });
@@ -11511,22 +11203,18 @@ var iframer_exports = {};
 __export(iframer_exports, {
   Iframer: () => Iframer
 });
-var import_path12, import_url, log19, DEFAULT_SCREENSHOT_DIR, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3, Iframer;
+var log18, DEFAULT_PUBLIC_URL, DEFAULT_STALE_TIMEOUT_MS3, Iframer;
 var init_iframer = __esm({
   "src/lib/iframer.ts"() {
     "use strict";
-    import_path12 = __toESM(require("path"));
-    import_url = require("url");
-    init_session_manager();
+    init_paths();
     init_launcher();
     init_crypto();
     init_persistence();
-    init_screenshot();
     init_storage();
     init_daemon();
     init_domain_modes();
     init_cdp_launcher();
-    init_constants();
     init_logger();
     init_errors();
     init_config();
@@ -11535,15 +11223,13 @@ var init_iframer = __esm({
     init_fetch_service();
     init_capture_manager();
     init_credential_store();
-    log19 = createLogger("iframer");
-    DEFAULT_SCREENSHOT_DIR = import_path12.default.join(import_path12.default.dirname((0, import_url.fileURLToPath)(importMetaUrl)), "../../.screenshots");
-    DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3021}`;
+    log18 = createLogger("iframer");
+    DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3022}`;
     DEFAULT_STALE_TIMEOUT_MS3 = 2e4;
     Iframer = class {
       store;
       daemon;
       domainModes;
-      operatingMode;
       config;
       refStore;
       executor;
@@ -11552,25 +11238,23 @@ var init_iframer = __esm({
       credentials;
       constructor(config = {}) {
         this.config = {
-          screenshotDir: config.screenshotDir || DEFAULT_SCREENSHOT_DIR,
+          screenshotDir: config.screenshotDir || getScreenshotDir(),
           publicUrl: config.publicUrl || DEFAULT_PUBLIC_URL,
           staleTimeoutMs: config.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS3
         };
         this.store = createStore({ dataDir: config.dataDir });
         this.daemon = new BrowserDaemon(config.sessionTimeoutMs);
         this.domainModes = new DomainModeStore();
-        this.operatingMode = config.mode || "local";
         this.refStore = new RefStore(this.store, this.config);
         this.fetchService = new FetchService(this.store);
         this.captureManager = new CaptureManager(this.daemon);
-        this.credentials = new CredentialStore(this.store, this.config);
+        this.credentials = new CredentialStore(this.store);
         this.executor = new PipelineExecutor({
           daemon: this.daemon,
           store: this.store,
           domainModes: this.domainModes,
           refStore: this.refStore,
-          availableModes: () => this.getAvailableModes(),
-          startSession: (userId, token, options) => this.startSession(userId, token, options)
+          availableModes: () => this.getAvailableModes()
         });
       }
       // ─── Mode Detection ─────────────────────────────────────────────────
@@ -11578,7 +11262,6 @@ var init_iframer = __esm({
         const modes = ["headless"];
         const { binaryHeadful } = checkModeAvailability();
         if (binaryHeadful) modes.push("binary-headful");
-        if (this.operatingMode === "docker") modes.push("docker-headful");
         return modes;
       }
       async getModeAvailability() {
@@ -11588,10 +11271,6 @@ var init_iframer = __esm({
           "binary-headful": {
             available: binaryHeadful,
             reason: binaryHeadful ? void 0 : "No display available"
-          },
-          "docker-headful": {
-            available: this.operatingMode === "docker",
-            reason: this.operatingMode === "docker" ? void 0 : "Docker not configured"
           }
         };
       }
@@ -11603,36 +11282,7 @@ var init_iframer = __esm({
       execute(userId, token, pipeline, runtime) {
         return this.executor.execute(userId, token, pipeline, runtime);
       }
-      // ─── Interactive Sessions (Docker mode) ──────────────────────────
-      async startSession(userId, token, options = {}) {
-        const existing = getSession(userId);
-        if (existing) {
-          resetTimeout(userId);
-          return {
-            noVncUrl: `http://localhost:${existing.wsPort}/vnc.html?autoconnect=true`,
-            wsPort: existing.wsPort
-          };
-        }
-        const session = await startSession(userId);
-        const encryptionKey = await deriveKey(token);
-        const blob = await this.store.getSession(userId);
-        let sessionData = null;
-        if (blob && blob.length > 0) {
-          sessionData = JSON.parse(decrypt(blob, encryptionKey));
-          if (sessionData) await injectCookies(session.context, sessionData);
-        }
-        if (options.url) {
-          await session.page.goto(options.url, { waitUntil: "domcontentloaded", timeout: TIMEOUTS.NAVIGATION });
-          if (sessionData) await injectStorage(session.page, sessionData);
-        }
-        return {
-          noVncUrl: `http://localhost:${session.wsPort}/vnc.html?autoconnect=true`,
-          wsPort: session.wsPort
-        };
-      }
-      getSession(userId) {
-        return getSession(userId);
-      }
+      // ─── Sessions ────────────────────────────────────────────────────
       async stopSession(userId, token) {
         let sessionSaved = false;
         if (token) {
@@ -11646,16 +11296,9 @@ var init_iframer = __esm({
                 sessionSaved = true;
               }
             } catch (err) {
-              log19.warn(`stopSession: failed to extract daemon state for ${inst.mode}::${inst.instanceId}: ${getErrorMessage(err)}`);
+              log18.warn(`stopSession: failed to extract daemon state for ${inst.mode}::${inst.instanceId}: ${getErrorMessage(err)}`);
             }
           }
-        }
-        const dockerSessionData = await stopSession(userId);
-        if (dockerSessionData && token) {
-          const encryptionKey = await deriveKey(token);
-          const encrypted = encrypt(JSON.stringify(dockerSessionData), encryptionKey);
-          await this.store.setSession(userId, encrypted);
-          sessionSaved = true;
         }
         await this.daemon.stopAll();
         return { ok: true, sessionSaved };
@@ -11694,23 +11337,9 @@ var init_iframer = __esm({
       async restartBrowser() {
         const health = this.browserHealth();
         await this.daemon.stopAll(true);
-        await cleanupAllSessions();
         return {
           killed: health.modes,
           message: health.modes.length > 0 ? `Killed browser(s): ${health.modes.join(", ")}. Next execute call will launch a fresh instance.` : "No browsers were running. Next execute call will launch fresh."
-        };
-      }
-      // ─── Screenshots ─────────────────────────────────────────────────
-      async screenshot(userId) {
-        const session = getSession(userId);
-        if (!session) return null;
-        resetTimeout(userId);
-        const buf = await session.page.screenshot({ type: "jpeg", quality: 50, fullPage: false });
-        const screenshotUrl = saveScreenshot(buf, `screenshot-${Date.now()}.jpg`, this.config.screenshotDir, this.config.publicUrl);
-        return {
-          screenshotUrl,
-          url: session.page.url(),
-          title: await session.page.title()
         };
       }
       // ─── Credentials ─────────────────────────────────────────────────
@@ -11726,9 +11355,6 @@ var init_iframer = __esm({
       deleteCredential(userId, domain) {
         return this.credentials.deleteCredential(userId, domain);
       }
-      loginWithCredentials(userId, token, domain, selectors) {
-        return this.credentials.loginWithCredentials(userId, token, domain, selectors);
-      }
       // ─── Session Data ─────────────────────────────────────────────────
       async clearSession(userId) {
         await this.store.deleteSession(userId);
@@ -11737,7 +11363,6 @@ var init_iframer = __esm({
       async shutdown() {
         await this.daemon.stopAll(true);
         await closeBrowser();
-        await cleanupAllSessions();
         if ("close" in this.store && typeof this.store.close === "function") {
           this.store.close();
         }
@@ -11750,7 +11375,7 @@ var init_iframer = __esm({
 var require_native_host_setup = __commonJS({
   "src/lib/extension/native-host-setup.cjs"(exports2, module2) {
     "use strict";
-    var { spawn: spawn4 } = require("child_process");
+    var { spawn: spawn3 } = require("child_process");
     var HOST_NAME = "com.iframer.token";
     var WINDOWS_BROWSERS = [
       { browser: "Chrome", root: "Software\\Google\\Chrome" },
@@ -11817,7 +11442,7 @@ var require_native_host_setup = __commonJS({
           resolve(result);
         };
         try {
-          child = platform === "win32" ? spawn4("cmd.exe", ["/d", "/s", "/c", `"${wrapperPath}"`], { env, windowsVerbatimArguments: true, windowsHide: true }) : spawn4(wrapperPath, [], { env });
+          child = platform === "win32" ? spawn3("cmd.exe", ["/d", "/s", "/c", `"${wrapperPath}"`], { env, windowsVerbatimArguments: true, windowsHide: true }) : spawn3(wrapperPath, [], { env });
         } catch (e) {
           finish({ ok: false, error: e.message });
           return;
@@ -11984,44 +11609,41 @@ A captcha is blocking this run. Use the "recaptcha" step with an action:
   {type:"recaptcha", action:"click"}               \u2192 click the "I'm not a robot" checkbox
   {type:"recaptcha", action:"answer", tiles:[...]} \u2192 select tiles + verify + re-check (handles refreshing grids)
   {type:"recaptcha", action:"select"|"verify"}     \u2192 manual tile-select / submit, if you need finer control
-  {type:"recaptcha", action:"solve"}               \u2192 automatic vision solve (docker-headful)
-Or {type:"solve-captcha"} for one-shot auto-detect + solve.
+  {type:"recaptcha", action:"solve"}               \u2192 automatic vision solve (needs ANTHROPIC_API_KEY)
+Or {type:"solve-captcha"} for one-shot auto-detect + solve (needs ANTHROPIC_API_KEY).
 In binary-headful mode, prefer asking the user to solve it in the visible window.`;
   }
 });
 
 // bin/cli.js
-var fs13 = require("fs");
+var fs11 = require("fs");
 var os4 = require("os");
-var path13 = require("path");
+var path12 = require("path");
 var { execSync: execSync3 } = require("child_process");
 var readline = require("readline");
 var HOME_DIR = os4.homedir();
-var CONFIG_DIR = process.env.IFRAMER_DATA_DIR || path13.join(HOME_DIR, ".iframer");
-var CLAUDE_CONFIG_PATH = path13.join(HOME_DIR, ".claude.json");
-var CODEX_CONFIG_PATH = path13.join(HOME_DIR, ".codex", "config.toml");
-var DEFAULT_SERVER = process.env.IFRAMER_URL || "http://localhost:3021";
-var API_KEY = process.env.IFRAMER_SECRET;
-var USE_LOCAL = process.env.IFRAMER_MODE === "local" || !process.env.IFRAMER_URL;
+var CONFIG_DIR = process.env.IFRAMER_DATA_DIR || path12.join(HOME_DIR, ".iframer");
+var CLAUDE_CONFIG_PATH = path12.join(HOME_DIR, ".claude.json");
+var CODEX_CONFIG_PATH = path12.join(HOME_DIR, ".codex", "config.toml");
 var LOCAL_USER_ID = "iframer-local";
 function resolveLocalToken() {
   if (process.env.IFRAMER_SECRET) return process.env.IFRAMER_SECRET;
   const candidates = [
-    path13.join(CONFIG_DIR, "secret"),
-    path13.join(process.env.XDG_RUNTIME_DIR || os4.tmpdir(), "iframer-secret")
+    path12.join(CONFIG_DIR, "secret"),
+    path12.join(process.env.XDG_RUNTIME_DIR || os4.tmpdir(), "iframer-secret")
   ];
   for (const file of candidates) {
     try {
-      const existing = fs13.readFileSync(file, "utf8").trim();
+      const existing = fs11.readFileSync(file, "utf8").trim();
       if (existing) return existing;
     } catch {
     }
   }
   for (const file of candidates) {
     try {
-      fs13.mkdirSync(path13.dirname(file), { recursive: true });
+      fs11.mkdirSync(path12.dirname(file), { recursive: true });
       const secret = require("crypto").randomBytes(32).toString("hex");
-      fs13.writeFileSync(file, secret, { mode: 384 });
+      fs11.writeFileSync(file, secret, { mode: 384 });
       return secret;
     } catch {
     }
@@ -12031,16 +11653,6 @@ function resolveLocalToken() {
   );
 }
 var LOCAL_TOKEN = resolveLocalToken();
-function openBrowser(url) {
-  try {
-    if (process.platform === "darwin") execSync3(`open "${url}"`);
-    else if (process.platform === "win32") execSync3(`start "${url}"`);
-    else execSync3(`xdg-open "${url}"`);
-  } catch {
-    console.log(`  Open this URL in your browser:
-  ${url}`);
-  }
-}
 function prompt(question) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => {
@@ -12081,44 +11693,22 @@ function promptHidden(question) {
     stdin.on("data", onData);
   });
 }
-function authHeaders() {
-  const headers = { "Content-Type": "application/json" };
-  if (API_KEY) headers["x-api-key"] = API_KEY;
-  return headers;
-}
-async function apiPost(endpoint, body) {
-  const res = await fetch(`${DEFAULT_SERVER}${endpoint}`, {
-    method: "POST",
-    headers: authHeaders(),
-    body: body ? JSON.stringify(body) : void 0,
-    signal: AbortSignal.timeout(18e4)
-  });
-  return res.json();
-}
-async function apiGet(endpoint) {
-  const res = await fetch(`${DEFAULT_SERVER}${endpoint}`, { headers: authHeaders() });
-  return res.json();
-}
-async function apiDelete(endpoint) {
-  const res = await fetch(`${DEFAULT_SERVER}${endpoint}`, { method: "DELETE", headers: authHeaders() });
-  return res.json();
-}
 function resolveMcpRuntime() {
-  const mcpServerTS = path13.join(__dirname, "..", "src", "mcp", "server.ts");
-  const mcpServerCJS = path13.join(__dirname, "mcp-server.cjs");
+  const mcpServerTS = path12.join(__dirname, "..", "src", "mcp", "server.ts");
+  const mcpServerCJS = path12.join(__dirname, "mcp-server.cjs");
   let bunPath;
   try {
     bunPath = execSync3("which bun", { encoding: "utf8" }).trim();
   } catch {
   }
-  if (bunPath && fs13.existsSync(mcpServerTS)) {
+  if (bunPath && fs11.existsSync(mcpServerTS)) {
     return {
       command: bunPath,
       args: ["run", mcpServerTS],
       message: "  Using bun to run MCP server from source (no build needed)"
     };
   }
-  if (fs13.existsSync(mcpServerCJS)) {
+  if (fs11.existsSync(mcpServerCJS)) {
     return {
       command: "node",
       args: [mcpServerCJS],
@@ -12133,8 +11723,8 @@ function resolveIframerSecret() {
   let secret = process.env.IFRAMER_SECRET;
   if (secret) return secret;
   try {
-    const envPath = path13.join(__dirname, "..", ".env");
-    const envContent = fs13.readFileSync(envPath, "utf8");
+    const envPath = path12.join(__dirname, "..", ".env");
+    const envContent = fs11.readFileSync(envPath, "utf8");
     const match = envContent.match(/^IFRAMER_SECRET=(.+)$/m);
     if (match) secret = match[1].trim();
   } catch {
@@ -12143,22 +11733,22 @@ function resolveIframerSecret() {
 }
 function installSkill() {
   const candidates = [
-    path13.join(__dirname, "..", "skills", "iframer.md"),
-    path13.join(__dirname, "skills", "iframer.md")
+    path12.join(__dirname, "..", "skills", "iframer.md"),
+    path12.join(__dirname, "skills", "iframer.md")
   ];
   let source = null;
   for (const c of candidates) {
-    if (fs13.existsSync(c)) {
+    if (fs11.existsSync(c)) {
       source = c;
       break;
     }
   }
   if (!source) return false;
-  const destDir = path13.join(HOME_DIR, ".claude", "commands");
-  const dest = path13.join(destDir, "iframer.md");
+  const destDir = path12.join(HOME_DIR, ".claude", "commands");
+  const dest = path12.join(destDir, "iframer.md");
   try {
-    fs13.mkdirSync(destDir, { recursive: true });
-    fs13.copyFileSync(source, dest);
+    fs11.mkdirSync(destDir, { recursive: true });
+    fs11.copyFileSync(source, dest);
     return true;
   } catch (err) {
     console.error(`  Warning: could not install skill: ${err.message}`);
@@ -12166,10 +11756,10 @@ function installSkill() {
   }
 }
 function removeSkill() {
-  const dest = path13.join(HOME_DIR, ".claude", "commands", "iframer.md");
+  const dest = path12.join(HOME_DIR, ".claude", "commands", "iframer.md");
   try {
-    if (fs13.existsSync(dest)) {
-      fs13.unlinkSync(dest);
+    if (fs11.existsSync(dest)) {
+      fs11.unlinkSync(dest);
       return true;
     }
   } catch {
@@ -12178,8 +11768,8 @@ function removeSkill() {
 }
 function writeMachineSecret(secret) {
   try {
-    fs13.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs13.writeFileSync(path13.join(CONFIG_DIR, "secret"), secret, { mode: 384 });
+    fs11.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs11.writeFileSync(path12.join(CONFIG_DIR, "secret"), secret, { mode: 384 });
     return true;
   } catch (err) {
     console.error(`  Warning: could not write ~/.iframer/secret: ${err.message}`);
@@ -12188,7 +11778,7 @@ function writeMachineSecret(secret) {
 }
 function loadClaudeConfig() {
   try {
-    return JSON.parse(fs13.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    return JSON.parse(fs11.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
   } catch {
     return {};
   }
@@ -12197,13 +11787,13 @@ function installClaudeMcp(mcpName, mcpEntry) {
   const config = loadClaudeConfig();
   if (!config.mcpServers) config.mcpServers = {};
   config.mcpServers[mcpName] = mcpEntry;
-  fs13.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
+  fs11.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
   return CLAUDE_CONFIG_PATH;
 }
 function removeClaudeMcp(mcpName) {
   let config;
   try {
-    config = JSON.parse(fs13.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    config = JSON.parse(fs11.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
   } catch {
     return { removed: false, path: CLAUDE_CONFIG_PATH };
   }
@@ -12211,7 +11801,7 @@ function removeClaudeMcp(mcpName) {
     return { removed: false, path: CLAUDE_CONFIG_PATH };
   }
   delete config.mcpServers[mcpName];
-  fs13.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
+  fs11.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
   return { removed: true, path: CLAUDE_CONFIG_PATH };
 }
 function escapeTomlString(value) {
@@ -12258,10 +11848,10 @@ function renderCodexMcpBlock(mcpName, mcpEntry) {
   return lines.join("\n");
 }
 function installCodexMcp(mcpName, mcpEntry) {
-  fs13.mkdirSync(path13.dirname(CODEX_CONFIG_PATH), { recursive: true });
+  fs11.mkdirSync(path12.dirname(CODEX_CONFIG_PATH), { recursive: true });
   let content = "";
   try {
-    content = fs13.readFileSync(CODEX_CONFIG_PATH, "utf8");
+    content = fs11.readFileSync(CODEX_CONFIG_PATH, "utf8");
   } catch {
   }
   const existing = findCodexMcpSection(content, mcpName);
@@ -12270,7 +11860,7 @@ function installCodexMcp(mcpName, mcpEntry) {
   }
   const trimmed = content.trimEnd();
   const block = renderCodexMcpBlock(mcpName, mcpEntry);
-  fs13.writeFileSync(CODEX_CONFIG_PATH, trimmed ? `${trimmed}
+  fs11.writeFileSync(CODEX_CONFIG_PATH, trimmed ? `${trimmed}
 
 ${block}
 ` : `${block}
@@ -12280,7 +11870,7 @@ ${block}
 function removeCodexMcp(mcpName) {
   let content;
   try {
-    content = fs13.readFileSync(CODEX_CONFIG_PATH, "utf8");
+    content = fs11.readFileSync(CODEX_CONFIG_PATH, "utf8");
   } catch {
     return { removed: false, path: CODEX_CONFIG_PATH };
   }
@@ -12289,7 +11879,7 @@ function removeCodexMcp(mcpName) {
     return { removed: false, path: CODEX_CONFIG_PATH };
   }
   const next = [...existing.lines.slice(0, existing.start), ...existing.lines.slice(existing.end)].join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
-  fs13.writeFileSync(CODEX_CONFIG_PATH, next ? `${next}
+  fs11.writeFileSync(CODEX_CONFIG_PATH, next ? `${next}
 ` : "");
   return { removed: true, path: CODEX_CONFIG_PATH };
 }
@@ -12307,7 +11897,7 @@ async function executeViaWarmServer(steps, options) {
     if (info && isPidAlive2(info.pid)) {
       let ownVersion = null;
       try {
-        ownVersion = JSON.parse(fs13.readFileSync(path13.join(__dirname, "..", "package.json"), "utf8")).version;
+        ownVersion = JSON.parse(fs11.readFileSync(path12.join(__dirname, "..", "package.json"), "utf8")).version;
       } catch {
       }
       if (ownVersion && info.version !== ownVersion) {
@@ -12349,27 +11939,18 @@ async function getLocalIframer() {
   if (_iframer) return _iframer;
   try {
     const { Iframer: Iframer2 } = await Promise.resolve().then(() => (init_iframer(), iframer_exports));
-    const screenshotDir = path13.join(os4.tmpdir(), "iframer-screenshots");
-    fs13.mkdirSync(screenshotDir, { recursive: true });
+    const publicDir = path12.join(os4.tmpdir(), "iframer-screenshots");
+    const screenshotDir = path12.join(publicDir, "screenshots");
+    fs11.mkdirSync(screenshotDir, { recursive: true });
     _iframer = new Iframer2({
       screenshotDir,
-      publicUrl: `file://${screenshotDir}`,
-      mode: "local"
+      publicUrl: `file://${publicDir}`
     });
     return _iframer;
   } catch (err) {
     console.error(`  Failed to initialize local iframer: ${err.message}`);
-    console.error("  Make sure you're running with bun, or use Docker mode (IFRAMER_URL=http://localhost:3021).");
+    console.error("  Make sure you're running with bun.");
     process.exit(1);
-  }
-}
-async function isDockerRunning() {
-  try {
-    const res = await fetch(`${DEFAULT_SERVER}/health`, { signal: AbortSignal.timeout(3e3) });
-    const data = await res.json();
-    return data.ok === true;
-  } catch {
-    return false;
   }
 }
 function parseFlag(args2, flag, hasValue = true) {
@@ -12381,7 +11962,7 @@ function parseFlag(args2, flag, hasValue = true) {
 function hasFlag(args2, flag) {
   return args2.includes(flag);
 }
-var LAUNCH_MODES = ["headless", "binary-headful", "docker-headful"];
+var LAUNCH_MODES = ["headless", "binary-headful"];
 function parseModeFlag(args2) {
   const mode = parseFlag(args2, "--mode");
   if (!mode) return void 0;
@@ -12395,28 +11976,6 @@ function parseModeFlag(args2) {
   Unknown --mode "${mode}". Use one of: ${LAUNCH_MODES.join(", ")}.
 `);
   process.exit(1);
-}
-function handleResponse(data, screenshotPath) {
-  const { screenshot: screenshot2, tileScreenshots, ...rest } = data;
-  if (screenshot2 && screenshotPath) {
-    fs13.writeFileSync(screenshotPath, Buffer.from(screenshot2, "base64"));
-    rest._screenshotSaved = screenshotPath;
-  }
-  if (tileScreenshots && tileScreenshots.length > 0) {
-    const tileDir = "/tmp/browser-tiles";
-    fs13.mkdirSync(tileDir, { recursive: true });
-    const tilePaths = [];
-    for (const tile of tileScreenshots) {
-      if (tile.screenshot) {
-        const tilePath = `${tileDir}/tile-${tile.index}.png`;
-        fs13.writeFileSync(tilePath, Buffer.from(tile.screenshot, "base64"));
-        tilePaths.push(tilePath);
-      }
-    }
-    rest._tilesSaved = tilePaths;
-  }
-  console.log(JSON.stringify(rest, null, 2));
-  if (!data.ok) process.exit(1);
 }
 function printResult(data) {
   console.log(JSON.stringify(data, null, 2));
@@ -12476,7 +12035,7 @@ async function installChrome() {
 }
 function isMcpInstalled(mcpName) {
   try {
-    const config = JSON.parse(fs13.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    const config = JSON.parse(fs11.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
     return !!(config.mcpServers && config.mcpServers[mcpName]);
   } catch {
     return false;
@@ -12484,7 +12043,7 @@ function isMcpInstalled(mcpName) {
 }
 var EXTENSION_ID = "mjfdkiicioigljhenkgaldhihllfdpll";
 function extensionDir() {
-  return path13.join(__dirname, "..", "extension");
+  return path12.join(__dirname, "..", "extension");
 }
 function semverNewer(a, b) {
   const pa = String(a).split(".").map((n) => parseInt(n, 10) || 0);
@@ -12498,7 +12057,7 @@ function semverNewer(a, b) {
 async function reloadAndRestartServer(reloadExtension) {
   let info = null;
   try {
-    info = JSON.parse(fs13.readFileSync(path13.join(CONFIG_DIR, "server.json"), "utf8"));
+    info = JSON.parse(fs11.readFileSync(path12.join(CONFIG_DIR, "server.json"), "utf8"));
   } catch {
   }
   if (!info || !info.port) {
@@ -12527,34 +12086,34 @@ async function reloadAndRestartServer(reloadExtension) {
 var NM_HOST_NAME = "com.iframer.token";
 function nativeMessagingBrowserDirs() {
   if (process.platform === "darwin") {
-    const as = path13.join(HOME_DIR, "Library", "Application Support");
+    const as = path12.join(HOME_DIR, "Library", "Application Support");
     return [
-      { browser: "Chrome", dir: path13.join(as, "Google", "Chrome"), always: true },
-      { browser: "Chrome Beta", dir: path13.join(as, "Google", "Chrome Beta") },
-      { browser: "Chrome Canary", dir: path13.join(as, "Google", "Chrome Canary") },
-      { browser: "Chromium", dir: path13.join(as, "Chromium") },
-      { browser: "Brave", dir: path13.join(as, "BraveSoftware", "Brave-Browser") },
-      { browser: "Edge", dir: path13.join(as, "Microsoft Edge") },
-      { browser: "Vivaldi", dir: path13.join(as, "Vivaldi") },
-      { browser: "Arc", dir: path13.join(as, "Arc", "User Data") }
+      { browser: "Chrome", dir: path12.join(as, "Google", "Chrome"), always: true },
+      { browser: "Chrome Beta", dir: path12.join(as, "Google", "Chrome Beta") },
+      { browser: "Chrome Canary", dir: path12.join(as, "Google", "Chrome Canary") },
+      { browser: "Chromium", dir: path12.join(as, "Chromium") },
+      { browser: "Brave", dir: path12.join(as, "BraveSoftware", "Brave-Browser") },
+      { browser: "Edge", dir: path12.join(as, "Microsoft Edge") },
+      { browser: "Vivaldi", dir: path12.join(as, "Vivaldi") },
+      { browser: "Arc", dir: path12.join(as, "Arc", "User Data") }
     ];
   }
-  const cfg = process.env.XDG_CONFIG_HOME || path13.join(HOME_DIR, ".config");
+  const cfg = process.env.XDG_CONFIG_HOME || path12.join(HOME_DIR, ".config");
   return [
-    { browser: "Chrome", dir: path13.join(cfg, "google-chrome"), always: true },
-    { browser: "Chrome Beta", dir: path13.join(cfg, "google-chrome-beta") },
-    { browser: "Chromium", dir: path13.join(cfg, "chromium") },
-    { browser: "Brave", dir: path13.join(cfg, "BraveSoftware", "Brave-Browser") },
-    { browser: "Edge", dir: path13.join(cfg, "microsoft-edge") },
-    { browser: "Vivaldi", dir: path13.join(cfg, "vivaldi") }
+    { browser: "Chrome", dir: path12.join(cfg, "google-chrome"), always: true },
+    { browser: "Chrome Beta", dir: path12.join(cfg, "google-chrome-beta") },
+    { browser: "Chromium", dir: path12.join(cfg, "chromium") },
+    { browser: "Brave", dir: path12.join(cfg, "BraveSoftware", "Brave-Browser") },
+    { browser: "Edge", dir: path12.join(cfg, "microsoft-edge") },
+    { browser: "Vivaldi", dir: path12.join(cfg, "vivaldi") }
   ];
 }
 function extensionMarkerPath() {
-  return path13.join(CONFIG_DIR, "extension.json");
+  return path12.join(CONFIG_DIR, "extension.json");
 }
 function readExtensionMarker() {
   try {
-    return JSON.parse(fs13.readFileSync(extensionMarkerPath(), "utf8"));
+    return JSON.parse(fs11.readFileSync(extensionMarkerPath(), "utf8"));
   } catch {
     return null;
   }
@@ -12563,12 +12122,12 @@ function extensionInstalled() {
   return !!readExtensionMarker();
 }
 function writeExtensionMarker(flavor, browsers) {
-  fs13.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs13.writeFileSync(extensionMarkerPath(), JSON.stringify({ installed: true, flavor, browsers, installedAt: (/* @__PURE__ */ new Date()).toISOString() }, null, 2));
+  fs11.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs11.writeFileSync(extensionMarkerPath(), JSON.stringify({ installed: true, flavor, browsers, installedAt: (/* @__PURE__ */ new Date()).toISOString() }, null, 2));
 }
 function clearExtensionMarker() {
   try {
-    fs13.unlinkSync(extensionMarkerPath());
+    fs11.unlinkSync(extensionMarkerPath());
   } catch {
   }
 }
@@ -12580,27 +12139,27 @@ var EXTENSION_FLAVORS = {
 function installExtensionHost() {
   const setup = require_native_host_setup();
   resolveLocalToken();
-  const srcHost = path13.join(__dirname, "..", "extension", "native-host.cjs");
-  if (!fs13.existsSync(srcHost)) {
+  const srcHost = path12.join(__dirname, "..", "extension", "native-host.cjs");
+  if (!fs11.existsSync(srcHost)) {
     console.error(`  Host script not found: ${srcHost}`);
     process.exit(1);
   }
-  fs13.mkdirSync(CONFIG_DIR, { recursive: true });
-  const hostScript = path13.join(CONFIG_DIR, "extension-token-host.cjs");
-  fs13.copyFileSync(srcHost, hostScript);
+  fs11.mkdirSync(CONFIG_DIR, { recursive: true });
+  const hostScript = path12.join(CONFIG_DIR, "extension-token-host.cjs");
+  fs11.copyFileSync(srcHost, hostScript);
   const dataDir = process.env.IFRAMER_DATA_DIR || void 0;
   const isWindows = process.platform === "win32";
-  const wrapper = path13.join(CONFIG_DIR, isWindows ? "extension-token-host.bat" : "extension-token-host.sh");
+  const wrapper = path12.join(CONFIG_DIR, isWindows ? "extension-token-host.bat" : "extension-token-host.sh");
   if (isWindows) {
-    fs13.writeFileSync(wrapper, setup.windowsWrapper({ execPath: process.execPath, homeDir: HOME_DIR, dataDir }));
+    fs11.writeFileSync(wrapper, setup.windowsWrapper({ execPath: process.execPath, homeDir: HOME_DIR, dataDir }));
   } else {
-    fs13.writeFileSync(wrapper, setup.posixWrapper({ execPath: process.execPath, hostScript, dataDir }), { mode: 493 });
+    fs11.writeFileSync(wrapper, setup.posixWrapper({ execPath: process.execPath, hostScript, dataDir }), { mode: 493 });
   }
   const manifest = setup.hostManifest(wrapper, EXTENSION_ID);
   const installed = [];
   if (isWindows) {
-    const manifestPath = path13.join(CONFIG_DIR, `${NM_HOST_NAME}.json`);
-    fs13.writeFileSync(manifestPath, manifest);
+    const manifestPath = path12.join(CONFIG_DIR, `${NM_HOST_NAME}.json`);
+    fs11.writeFileSync(manifestPath, manifest);
     for (const { browser, root } of setup.WINDOWS_BROWSERS) {
       try {
         require("child_process").execFileSync(
@@ -12617,11 +12176,11 @@ function installExtensionHost() {
     return { installed, wrapper };
   }
   for (const { browser, dir, always } of nativeMessagingBrowserDirs()) {
-    if (!always && !fs13.existsSync(dir)) continue;
+    if (!always && !fs11.existsSync(dir)) continue;
     try {
-      const nmDir = path13.join(dir, "NativeMessagingHosts");
-      fs13.mkdirSync(nmDir, { recursive: true });
-      fs13.writeFileSync(path13.join(nmDir, `${NM_HOST_NAME}.json`), manifest);
+      const nmDir = path12.join(dir, "NativeMessagingHosts");
+      fs11.mkdirSync(nmDir, { recursive: true });
+      fs11.writeFileSync(path12.join(nmDir, `${NM_HOST_NAME}.json`), manifest);
       installed.push(browser);
     } catch (e) {
       console.error(`  ${browser}: failed (${e.message})`);
@@ -12643,10 +12202,10 @@ function removeExtensionHost() {
     }
   } else {
     for (const { browser, dir } of nativeMessagingBrowserDirs()) {
-      const file = path13.join(dir, "NativeMessagingHosts", `${NM_HOST_NAME}.json`);
+      const file = path12.join(dir, "NativeMessagingHosts", `${NM_HOST_NAME}.json`);
       try {
-        if (fs13.existsSync(file)) {
-          fs13.unlinkSync(file);
+        if (fs11.existsSync(file)) {
+          fs11.unlinkSync(file);
           removed.push(browser);
         }
       } catch {
@@ -12655,19 +12214,19 @@ function removeExtensionHost() {
   }
   for (const f of ["extension-token-host.cjs", "extension-token-host.sh", "extension-token-host.bat", `${NM_HOST_NAME}.json`]) {
     try {
-      fs13.unlinkSync(path13.join(CONFIG_DIR, f));
+      fs11.unlinkSync(path12.join(CONFIG_DIR, f));
     } catch {
     }
   }
   return removed;
 }
 async function removeChrome() {
-  const chromeDir = path13.join(CONFIG_DIR, "chrome");
-  if (!fs13.existsSync(chromeDir)) {
+  const chromeDir = path12.join(CONFIG_DIR, "chrome");
+  if (!fs11.existsSync(chromeDir)) {
     console.log("  Chrome for Testing not found, nothing to remove.");
     return;
   }
-  fs13.rmSync(chromeDir, { recursive: true, force: true });
+  fs11.rmSync(chromeDir, { recursive: true, force: true });
   console.log(`  Removed ${chromeDir}`);
 }
 async function main() {
@@ -12677,7 +12236,7 @@ async function main() {
     case "-v":
     case "version": {
       try {
-        console.log(JSON.parse(fs13.readFileSync(path13.join(__dirname, "..", "package.json"), "utf8")).version);
+        console.log(JSON.parse(fs11.readFileSync(path12.join(__dirname, "..", "package.json"), "utf8")).version);
       } catch (e) {
         console.error(`  Could not read the version: ${e.message}`);
         process.exit(1);
@@ -12686,10 +12245,15 @@ async function main() {
     }
     // ─── Status ──────────────────────────────────────────────────────
     case "status": {
-      const docker = await isDockerRunning();
-      console.log(`  Server: ${DEFAULT_SERVER}`);
-      console.log(`  Docker API: ${docker ? "running" : "not reachable"}`);
-      if (API_KEY) console.log("  Auth: IFRAMER_SECRET set");
+      let server = "not running";
+      try {
+        const info = JSON.parse(fs11.readFileSync(path12.join(CONFIG_DIR, "server.json"), "utf8"));
+        const res = await fetch(`http://127.0.0.1:${info.port}/health`, { signal: AbortSignal.timeout(1500) });
+        if (res.ok) server = `http://127.0.0.1:${info.port}`;
+      } catch {
+      }
+      console.log(`  Server: ${server}`);
+      if (process.env.IFRAMER_SECRET) console.log("  Auth: IFRAMER_SECRET set");
       try {
         const { findChromeForTesting: findChromeForTesting2, findChrome: findChrome2 } = await Promise.resolve().then(() => (init_chrome_downloader(), chrome_downloader_exports));
         const cft = findChromeForTesting2();
@@ -12700,7 +12264,7 @@ async function main() {
       }
       const hasDisplay2 = process.platform === "darwin" || process.platform === "win32" || !!process.env.DISPLAY;
       console.log(`  Display: ${hasDisplay2 ? "available" : "none ($DISPLAY not set)"}`);
-      console.log(`  Modes: headless${hasDisplay2 ? ", binary-headful" : ""}${docker ? ", docker-headful" : ""}`);
+      console.log(`  Modes: headless${hasDisplay2 ? ", binary-headful" : ""}`);
       break;
     }
     // ─── Instances (live browser windows) ───────────────────────────
@@ -12709,7 +12273,7 @@ async function main() {
       let instances = null;
       let serverUp = false;
       try {
-        const info = JSON.parse(fs13.readFileSync(path13.join(CONFIG_DIR, "server.json"), "utf8"));
+        const info = JSON.parse(fs11.readFileSync(path12.join(CONFIG_DIR, "server.json"), "utf8"));
         if (info && info.port) {
           serverUp = true;
           const res = await fetch(`http://127.0.0.1:${info.port}/instances`, {
@@ -12754,7 +12318,6 @@ async function main() {
     }
     // ─── Modes ───────────────────────────────────────────────────────
     case "modes": {
-      const docker = await isDockerRunning();
       const hasDisplay2 = process.platform === "darwin" || process.platform === "win32" || !!process.env.DISPLAY;
       let chromeInstalled = false;
       try {
@@ -12765,7 +12328,6 @@ async function main() {
       console.log("  Available browser modes:\n");
       console.log(`    headless          ${chromeInstalled ? "\u2713 available" : "\u2717 Chrome for Testing not installed"}`);
       console.log(`    binary-headful    ${chromeInstalled && hasDisplay2 ? "\u2713 available" : "\u2717 " + (!chromeInstalled ? "Chrome not installed" : "no display")}`);
-      console.log(`    docker-headful    ${docker ? "\u2713 available" : "\u2717 Docker not running at " + DEFAULT_SERVER}`);
       if (!chromeInstalled) {
         console.log("\n  Install Chrome for Testing:");
         console.log("    iframer install-chrome");
@@ -12872,7 +12434,7 @@ async function main() {
         console.error(`    iframer execute '[{"type":"navigate","url":"https://example.com"},{"type":"screenshot"}]'`);
         console.error("    iframer execute pipeline.json");
         console.error("\n  Options:");
-        console.error("    --mode <headless|binary-headful|docker-headful>");
+        console.error("    --mode <headless|binary-headful>");
         console.error("    --capture-api        Record XHR/fetch requests");
         console.error("    --continue-on-error  Don't stop on step failure");
         console.error("    --timeout <ms>       Stale state timeout (default: 20000)");
@@ -12885,8 +12447,8 @@ async function main() {
         const parsed = JSON.parse(input);
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
         if (!Array.isArray(parsed) && parsed.options) inputOptions = parsed.options;
-      } else if (fs13.existsSync(input)) {
-        const parsed = JSON.parse(fs13.readFileSync(input, "utf-8"));
+      } else if (fs11.existsSync(input)) {
+        const parsed = JSON.parse(fs11.readFileSync(input, "utf-8"));
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
         if (!Array.isArray(parsed) && parsed.options) inputOptions = parsed.options;
       } else {
@@ -12900,25 +12462,18 @@ async function main() {
       if (hasFlag(args, "--continue-on-error")) options.continueOnError = true;
       const timeout = parseFlag(args, "--timeout");
       if (timeout) options.staleTimeoutMs = parseInt(timeout);
-      const docker = await isDockerRunning();
       let result;
-      if (mode === "docker-headful" && docker) {
-        result = await apiPost("/execute", { steps, options });
-      } else if (USE_LOCAL || !docker) {
-        if (!hasFlag(args, "--in-process")) {
-          const warmOptions = { ...options };
-          if (!warmOptions.instanceId) {
-            warmOptions.instanceId = deriveCliInstanceId();
-            warmOptions.sessionProfile = "default";
-          }
-          result = await executeViaWarmServer(steps, warmOptions);
+      if (!hasFlag(args, "--in-process")) {
+        const warmOptions = { ...options };
+        if (!warmOptions.instanceId) {
+          warmOptions.instanceId = deriveCliInstanceId();
+          warmOptions.sessionProfile = "default";
         }
-        if (!result) {
-          const iframer = await getLocalIframer();
-          result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options });
-        }
-      } else {
-        result = await apiPost("/execute", { steps, options });
+        result = await executeViaWarmServer(steps, warmOptions);
+      }
+      if (!result) {
+        const iframer = await getLocalIframer();
+        result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options });
       }
       if (hasFlag(args, "--json")) {
         console.log(JSON.stringify(result, null, 2));
@@ -12930,10 +12485,10 @@ async function main() {
           try {
             const res = await fetch(shot, { signal: AbortSignal.timeout(1e4) });
             if (res.ok) {
-              const dir = path13.join(os4.tmpdir(), "iframer-screenshots", "screenshots");
-              fs13.mkdirSync(dir, { recursive: true });
-              const file = path13.join(dir, `state-${Date.now()}.jpg`);
-              fs13.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
+              const dir = path12.join(os4.tmpdir(), "iframer-screenshots", "screenshots");
+              fs11.mkdirSync(dir, { recursive: true });
+              const file = path12.join(dir, `state-${Date.now()}.jpg`);
+              fs11.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
               shot = `file://${file}`;
             }
           } catch {
@@ -12963,61 +12518,37 @@ Screenshot: ${shot}`);
       if (hasFlag(args, "--sessionless")) options.sessionless = true;
       const waitFor2 = parseFlag(args, "--wait-for");
       if (waitFor2) options.waitForSelector = waitFor2;
-      const docker = await isDockerRunning();
-      let result;
-      if (USE_LOCAL || !docker) {
-        const iframer = await getLocalIframer();
-        result = await iframer.fetch(LOCAL_USER_ID, LOCAL_TOKEN, options);
-      } else {
-        result = await apiPost("/fetch", options);
-      }
-      printResult(result);
+      const iframer = await getLocalIframer();
+      printResult(await iframer.fetch(LOCAL_USER_ID, LOCAL_TOKEN, options));
       break;
     }
     // ─── Screenshot ──────────────────────────────────────────────────
     case "screenshot": {
       const url = args[0];
-      const outPath = parseFlag(args, "--output") || parseFlag(args, "-o") || "/tmp/iframer-screenshot.jpg";
-      if (url && url.startsWith("http")) {
-        const mode = parseModeFlag(args) || "headless";
-        const annotate = hasFlag(args, "--annotate");
-        const docker = await isDockerRunning();
-        const steps = [
-          { type: "navigate", url, waitUntil: "networkidle" },
-          { type: "wait", ms: 2e3 },
-          { type: "screenshot", annotate }
-        ];
-        let result;
-        if (USE_LOCAL || !docker) {
-          const iframer = await getLocalIframer();
-          result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options: { mode } });
-        } else {
-          result = await apiPost("/execute", { steps, options: { mode } });
-        }
-        if (result.ok && result.finalState?.screenshotUrl) {
-          console.log(`  Screenshot: ${result.finalState.screenshotUrl}`);
-          if (annotate) {
-            const snapStep = result.results?.find((r) => r.step?.type === "screenshot");
-            if (snapStep?.result?.refs) {
-              console.log("\n  Refs:");
-              console.log(snapStep.result.refs);
-            }
+      if (!url || !url.startsWith("http")) {
+        console.error("  Usage: iframer screenshot <url> [--mode <mode>] [--annotate]");
+        process.exit(1);
+      }
+      const mode = parseModeFlag(args) || "headless";
+      const annotate = hasFlag(args, "--annotate");
+      const steps = [
+        { type: "navigate", url, waitUntil: "networkidle" },
+        { type: "wait", ms: 2e3 },
+        { type: "screenshot", annotate }
+      ];
+      const iframer = await getLocalIframer();
+      const result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options: { mode } });
+      if (result.ok && result.finalState?.screenshotUrl) {
+        console.log(`  Screenshot: ${result.finalState.screenshotUrl}`);
+        if (annotate) {
+          const snapStep = result.results?.find((r) => r.step?.type === "screenshot");
+          if (snapStep?.result?.refs) {
+            console.log("\n  Refs:");
+            console.log(snapStep.result.refs);
           }
-        } else {
-          printResult(result);
         }
       } else {
-        const res = await fetch(`${DEFAULT_SERVER}/interactive/screenshot?format=raw`, {
-          headers: authHeaders()
-        });
-        if (!res.ok) {
-          const data = await res.json();
-          console.error(`  Error: ${data.error}`);
-          process.exit(1);
-        }
-        const buffer = Buffer.from(await res.arrayBuffer());
-        fs13.writeFileSync(outPath, buffer);
-        console.log(outPath);
+        printResult(result);
       }
       break;
     }
@@ -13025,65 +12556,34 @@ Screenshot: ${shot}`);
     case "session": {
       const sub = args[0];
       if (sub === "stop") {
-        const docker = await isDockerRunning();
-        if (docker) {
-          const data = await apiPost("/interactive/stop", null);
-          if (!data.ok) {
-            console.error(`  Error: ${data.error}`);
-            process.exit(1);
-          }
-          console.log(`  Session stopped. State saved: ${data.sessionSaved}`);
-        } else {
-          let stopped = false;
-          try {
-            const info = JSON.parse(fs13.readFileSync(path13.join(CONFIG_DIR, "server.json"), "utf8"));
-            if (info && info.port) {
-              const res = await fetch(`http://127.0.0.1:${info.port}/interactive/stop`, {
-                method: "POST",
-                headers: { "x-api-key": LOCAL_TOKEN },
-                signal: AbortSignal.timeout(15e3)
-              });
-              if (res.ok) {
-                const data = await res.json();
-                console.log(`  Session stopped. State saved: ${data.sessionSaved}`);
-                stopped = true;
-              }
+        let stopped = false;
+        try {
+          const info = JSON.parse(fs11.readFileSync(path12.join(CONFIG_DIR, "server.json"), "utf8"));
+          if (info && info.port) {
+            const res = await fetch(`http://127.0.0.1:${info.port}/interactive/stop`, {
+              method: "POST",
+              headers: { "x-api-key": LOCAL_TOKEN },
+              signal: AbortSignal.timeout(15e3)
+            });
+            if (res.ok) {
+              const data = await res.json();
+              console.log(`  Session stopped. State saved: ${data.sessionSaved}`);
+              stopped = true;
             }
-          } catch {
           }
-          if (!stopped) {
-            const iframer = await getLocalIframer();
-            const result = await iframer.stopSession(LOCAL_USER_ID, LOCAL_TOKEN);
-            console.log(`  Session stopped. State saved: ${result.sessionSaved}`);
-          }
+        } catch {
+        }
+        if (!stopped) {
+          const iframer = await getLocalIframer();
+          const result = await iframer.stopSession(LOCAL_USER_ID, LOCAL_TOKEN);
+          console.log(`  Session stopped. State saved: ${result.sessionSaved}`);
         }
       } else if (sub === "clear") {
-        const docker = await isDockerRunning();
-        if (docker) {
-          const data = await apiDelete("/session");
-          if (!data.ok) {
-            console.error(`  Error: ${data.error}`);
-            process.exit(1);
-          }
-        } else {
-          const iframer = await getLocalIframer();
-          await iframer.clearSession(LOCAL_USER_ID);
-        }
+        const iframer = await getLocalIframer();
+        await iframer.clearSession(LOCAL_USER_ID);
         console.log("  Session data cleared.");
       } else if (sub === "status") {
-        const docker = await isDockerRunning();
-        if (docker) {
-          const data = await apiGet("/interactive/status");
-          if (!data.active) {
-            console.log("  No active session.");
-          } else {
-            console.log(`  Active session`);
-            console.log(`  noVNC: ${data.noVncUrl}`);
-            console.log(`  Started: ${data.createdAt}`);
-          }
-        } else {
-          console.log("  Local mode \u2014 no persistent sessions (sessions live within execute calls).");
-        }
+        console.log("  Sessions live within execute calls. Run `iframer instances` to see open browsers.");
       } else {
         console.error("  Usage: iframer session <stop|clear|status>");
         process.exit(1);
@@ -13126,33 +12626,13 @@ Screenshot: ${shot}`);
           console.error("  Must provide at least username or password.");
           process.exit(1);
         }
-        const docker = await isDockerRunning();
-        if (USE_LOCAL || !docker) {
-          const iframer = await getLocalIframer();
-          await iframer.storeCredential(LOCAL_USER_ID, LOCAL_TOKEN, body);
-        } else {
-          const data = await apiPost("/credentials", body);
-          if (!data.ok) {
-            console.error(`  Error: ${data.error}`);
-            process.exit(1);
-          }
-        }
+        const iframer = await getLocalIframer();
+        await iframer.storeCredential(LOCAL_USER_ID, LOCAL_TOKEN, body);
         console.log(`
   Credentials stored for ${domain}`);
       } else if (sub === "list") {
-        const docker = await isDockerRunning();
-        let domains;
-        if (USE_LOCAL || !docker) {
-          const iframer = await getLocalIframer();
-          domains = await iframer.listCredentials(LOCAL_USER_ID);
-        } else {
-          const data = await apiGet("/credentials");
-          if (!data.ok) {
-            console.error(`  Error: ${data.error}`);
-            process.exit(1);
-          }
-          domains = data.domains;
-        }
+        const iframer = await getLocalIframer();
+        const domains = await iframer.listCredentials(LOCAL_USER_ID);
         if (domains.length === 0) {
           console.log("  No credentials stored.");
         } else {
@@ -13165,17 +12645,8 @@ Screenshot: ${shot}`);
           console.error("  Usage: iframer credentials remove <domain>");
           process.exit(1);
         }
-        const docker = await isDockerRunning();
-        if (USE_LOCAL || !docker) {
-          const iframer = await getLocalIframer();
-          await iframer.deleteCredential(LOCAL_USER_ID, domain);
-        } else {
-          const data = await apiDelete(`/credentials/${encodeURIComponent(domain)}`);
-          if (!data.ok) {
-            console.error(`  Error: ${data.error}`);
-            process.exit(1);
-          }
-        }
+        const iframer = await getLocalIframer();
+        await iframer.deleteCredential(LOCAL_USER_ID, domain);
         console.log(`  Credentials for ${domain} removed.`);
       } else {
         console.error("  Usage: iframer credentials <add|list|remove>");
@@ -13202,8 +12673,8 @@ Screenshot: ${shot}`);
       } else if (input.startsWith("[") || input.startsWith("{")) {
         const parsed = JSON.parse(input);
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
-      } else if (fs13.existsSync(input)) {
-        const parsed = JSON.parse(fs13.readFileSync(input, "utf-8"));
+      } else if (fs11.existsSync(input)) {
+        const parsed = JSON.parse(fs11.readFileSync(input, "utf-8"));
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
       } else {
         console.error(`  Not a URL or file: ${input}`);
@@ -13212,18 +12683,12 @@ Screenshot: ${shot}`);
       const options = { captureApi: true };
       const mode = parseModeFlag(args);
       if (mode) options.mode = mode;
-      const docker = await isDockerRunning();
-      let result;
-      if (USE_LOCAL || !docker) {
-        const iframer = await getLocalIframer();
-        result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options });
-      } else {
-        result = await apiPost("/execute", { steps, options });
-      }
+      const iframer = await getLocalIframer();
+      const result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options });
       if (result.capturedApi && result.capturedApi.length > 0) {
         const outputDir = parseFlag(args, "--output") || `./${result.capturedApi[0].domain}`;
-        fs13.mkdirSync(outputDir, { recursive: true });
-        fs13.writeFileSync(path13.join(outputDir, "captured-api.json"), JSON.stringify(result.capturedApi, null, 2));
+        fs11.mkdirSync(outputDir, { recursive: true });
+        fs11.writeFileSync(path12.join(outputDir, "captured-api.json"), JSON.stringify(result.capturedApi, null, 2));
         console.log(`  Captured ${result.capturedApi.reduce((sum, api) => sum + api.endpoints.length, 0)} endpoints`);
         console.log(`  Saved to: ${outputDir}/captured-api.json`);
         for (const api of result.capturedApi) {
@@ -13239,175 +12704,16 @@ Screenshot: ${shot}`);
       }
       break;
     }
-    // ─── Interactive (Docker only) ───────────────────────────────────
-    case "interactive": {
-      const sub = args[0];
-      if (sub === "stop") {
-        const data = await apiPost("/interactive/stop", null);
-        if (!data.ok) {
-          console.error(`  Error: ${data.error}`);
-          process.exit(1);
-        }
-        console.log("  Interactive session stopped. Session saved.");
-      } else if (sub === "status") {
-        const data = await apiGet("/interactive/status");
-        if (!data.ok) {
-          console.error(`  Error: ${data.error}`);
-          process.exit(1);
-        }
-        if (!data.active) {
-          console.log("  No active interactive session.");
-        } else {
-          console.log(`  Active session`);
-          console.log(`  noVNC: ${data.noVncUrl}`);
-          console.log(`  Started: ${data.createdAt}`);
-        }
-      } else if (sub) {
-        const data = await apiPost("/interactive/start", { url: sub });
-        if (!data.ok) {
-          console.error(`  Error: ${data.error}`);
-          process.exit(1);
-        }
-        console.log(`
-  Interactive session started!`);
-        console.log(`  noVNC: ${data.noVncUrl}
-`);
-        console.log(`  Stop with: iframer interactive stop`);
-        openBrowser(data.noVncUrl);
-      } else {
-        console.error("  Usage: iframer interactive <url|stop|status>");
-        process.exit(1);
-      }
-      break;
-    }
-    // ─── Watch ───────────────────────────────────────────────────────
-    case "watch": {
-      console.log("  Watching for interactive session...\n");
-      const poll = async () => {
-        try {
-          const data = await apiGet("/interactive/status");
-          if (data.ok && data.active) return data.noVncUrl;
-        } catch {
-        }
-        return null;
-      };
-      let vncUrl = await poll();
-      if (vncUrl) {
-        console.log(`  Session active! Opening noVNC viewer...`);
-        console.log(`  ${vncUrl}
-`);
-        openBrowser(vncUrl);
-      }
-      let lastUrl = vncUrl;
-      const interval = setInterval(async () => {
-        const url = await poll();
-        if (url && url !== lastUrl) {
-          console.log(`  New session detected! Opening noVNC viewer...`);
-          console.log(`  ${url}
-`);
-          openBrowser(url);
-        }
-        lastUrl = url;
-      }, 2e3);
-      process.on("SIGINT", () => {
-        clearInterval(interval);
-        console.log("\n  Stopped watching.");
-        process.exit(0);
-      });
-      await new Promise(() => {
-      });
-      break;
-    }
-    // ─── Act (legacy — send action to Docker session) ────────────────
-    case "act": {
-      const actionType = args[0];
-      if (!actionType) {
-        console.error(`  Usage: iframer act <action-type> [options]
-
-  Actions:
-    click <selector>                Click an element
-    human-click <selector>          Click with human-like mouse movement
-    human-click <x> <y>             Click at coordinates with human-like movement
-    human-type <selector> <text>    Type with human-like keystroke timing
-    navigate <url>                  Navigate to a URL
-    scroll [deltaY]                 Scroll the page
-    wait <ms>                       Wait for milliseconds
-    evaluate <expression>           Evaluate JavaScript
-    wait-for-selector <selector>    Wait for element to appear
-    keyboard <key>                  Press a keyboard key
-
-  reCAPTCHA:
-    recaptcha-click                 Click the reCAPTCHA checkbox
-    recaptcha-select <tiles...>     Click tiles by index (e.g. 0 2 5)
-    recaptcha-verify                Click the verify button
-    recaptcha-info                  Get challenge info without clicking`);
-        process.exit(1);
-      }
-      let action = {};
-      const screenshotPath = "/tmp/browser-act.png";
-      switch (actionType) {
-        case "click":
-          action = { type: "click", selector: args[1] };
-          break;
-        case "human-click":
-          if (args[1] && !isNaN(args[1]) && args[2] && !isNaN(args[2])) {
-            action = { type: "human-click", x: parseFloat(args[1]), y: parseFloat(args[2]) };
-          } else {
-            action = { type: "human-click", selector: args[1] };
-          }
-          break;
-        case "human-type":
-          action = { type: "human-type", selector: args[1], value: args.slice(2).join(" ") };
-          break;
-        case "navigate":
-          action = { type: "navigate", url: args[1], waitUntil: args[2] || "networkidle" };
-          break;
-        case "scroll":
-          action = { type: "scroll", deltaY: args[1] ? parseInt(args[1]) : void 0 };
-          break;
-        case "wait":
-          action = { type: "wait", ms: parseInt(args[1]) || 1e3 };
-          break;
-        case "evaluate":
-          action = { type: "evaluate", expression: args.slice(1).join(" ") };
-          break;
-        case "wait-for-selector":
-          action = { type: "wait-for-selector", selector: args[1], timeout: args[2] ? parseInt(args[2]) : void 0 };
-          break;
-        case "keyboard":
-          action = { type: "keyboard", key: args[1] };
-          break;
-        case "recaptcha-click":
-          action = { type: "recaptcha-click" };
-          break;
-        case "recaptcha-select":
-          action = { type: "recaptcha-select", tiles: args.slice(1).map(Number) };
-          break;
-        case "recaptcha-verify":
-          action = { type: "recaptcha-verify" };
-          break;
-        case "recaptcha-info":
-          action = { type: "recaptcha-info" };
-          break;
-        default:
-          console.error(`  Unknown action: ${actionType}`);
-          process.exit(1);
-      }
-      const data = await apiPost("/interactive/act", { action });
-      handleResponse(data, screenshotPath);
-      break;
-    }
     // ─── Install MCP ─────────────────────────────────────────────────
     case "install-mcp": {
       const runtime = resolveMcpRuntime();
       console.log(runtime.message);
-      const isDev = args.includes("--dev");
-      const mcpName = isDev ? "iframer-dev" : "iframer";
+      const mcpName = "iframer";
       let secret = resolveIframerSecret();
       let secretSource = secret ? "env/.env" : null;
       if (!secret) {
         try {
-          secret = fs13.readFileSync(path13.join(CONFIG_DIR, "secret"), "utf8").trim();
+          secret = fs11.readFileSync(path12.join(CONFIG_DIR, "secret"), "utf8").trim();
           if (secret) secretSource = "~/.iframer/secret";
         } catch {
         }
@@ -13419,15 +12725,12 @@ Screenshot: ${shot}`);
       writeMachineSecret(secret);
       const mcpEntry = { command: runtime.command, args: runtime.args };
       mcpEntry.env = { IFRAMER_SECRET: secret };
-      if (!isDev) mcpEntry.env.IFRAMER_MODE = "local";
       const claudeConfigPath = installClaudeMcp(mcpName, mcpEntry);
       const codexConfigPath = installCodexMcp(mcpName, mcpEntry);
       const skillInstalled = installSkill();
       console.log(`
   ${mcpName} MCP installed!`);
       console.log(`  Encryption key: ${secretSource} \u2192 ~/.iframer/secret`);
-      if (!isDev) console.log("  Mode: local (headless + binary-headful, no Docker needed)");
-      else console.log("  Mode: docker (connects to Docker container)");
       console.log(`  Claude Code config written to: ${claudeConfigPath}`);
       console.log(`  Codex config written to: ${codexConfigPath}`);
       if (skillInstalled) console.log("  Skill /iframer installed for Claude Code");
@@ -13450,10 +12753,10 @@ Screenshot: ${shot}`);
     }
     // ─── Telemetry report ────────────────────────────────────────────
     case "telemetry": {
-      const file = path13.join(CONFIG_DIR, "telemetry.jsonl");
+      const file = path12.join(CONFIG_DIR, "telemetry.jsonl");
       if (args.includes("--clear")) {
         try {
-          fs13.unlinkSync(file);
+          fs11.unlinkSync(file);
         } catch {
         }
         console.log("  Telemetry log cleared.");
@@ -13461,13 +12764,13 @@ Screenshot: ${shot}`);
       }
       let lines;
       try {
-        lines = fs13.readFileSync(file, "utf8").trim().split("\n").filter(Boolean);
+        lines = fs11.readFileSync(file, "utf8").trim().split("\n").filter(Boolean);
       } catch {
         console.log("  No telemetry recorded yet. It logs automatically as agents use iframer");
         console.log("  (new MCP sessions only \u2014 restart a session if it predates telemetry).");
         break;
       }
-      const sessions2 = /* @__PURE__ */ new Map();
+      const sessions = /* @__PURE__ */ new Map();
       for (const line of lines) {
         let r;
         try {
@@ -13475,10 +12778,10 @@ Screenshot: ${shot}`);
         } catch {
           continue;
         }
-        let s = sessions2.get(r.session);
+        let s = sessions.get(r.session);
         if (!s) {
           s = { calls: 0, tokens: 0, defTokens: 0, tools: /* @__PURE__ */ new Map(), first: r.ts, last: r.ts };
-          sessions2.set(r.session, s);
+          sessions.set(r.session, s);
         }
         s.last = r.ts;
         if (r.kind === "definitions") s.defTokens = r.estTokens || 0;
@@ -13494,7 +12797,7 @@ Screenshot: ${shot}`);
       const fmt = (n) => n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n);
       let grandCalls = 0, grandTokens = 0;
       const toolTotals = /* @__PURE__ */ new Map();
-      for (const s of sessions2.values()) {
+      for (const s of sessions.values()) {
         grandCalls += s.calls;
         grandTokens += s.tokens;
         for (const [name, t] of s.tools) {
@@ -13507,7 +12810,7 @@ Screenshot: ${shot}`);
       console.log(`
   iframer MCP token telemetry (estimated at ~4 chars/token, local only)
 `);
-      console.log(`  All time: ${sessions2.size} session(s), ${grandCalls} call(s), ~${fmt(grandTokens)} tokens of tool traffic`);
+      console.log(`  All time: ${sessions.size} session(s), ${grandCalls} call(s), ~${fmt(grandTokens)} tokens of tool traffic`);
       console.log(`
   Per tool (all time):`);
       for (const [name, t] of [...toolTotals.entries()].sort((a, b) => b[1].tokens - a[1].tokens)) {
@@ -13515,7 +12818,7 @@ Screenshot: ${shot}`);
       }
       console.log(`
   Recent sessions:`);
-      const recent = [...sessions2.entries()].slice(-5);
+      const recent = [...sessions.entries()].slice(-5);
       for (const [id, s] of recent) {
         console.log(`    ${id.padEnd(20)} ${String(s.calls).padStart(4)} calls  ~${fmt(s.tokens).padStart(7)} tokens (+~${fmt(s.defTokens)} definitions overhead, once per session)`);
       }
@@ -13586,11 +12889,11 @@ Screenshot: ${shot}`);
     // ─── Update (npm as the extension update channel) ────────────────
     case "update": {
       const checkOnly = args.includes("--check");
-      const pkgRoot = path13.join(__dirname, "..");
-      const isDev = fs13.existsSync(path13.join(pkgRoot, ".git"));
+      const pkgRoot = path12.join(__dirname, "..");
+      const isDev = fs11.existsSync(path12.join(pkgRoot, ".git"));
       let installed = "unknown";
       try {
-        installed = JSON.parse(fs13.readFileSync(path13.join(pkgRoot, "package.json"), "utf8")).version;
+        installed = JSON.parse(fs11.readFileSync(path12.join(pkgRoot, "package.json"), "utf8")).version;
       } catch {
       }
       let latest = null;
@@ -13669,7 +12972,7 @@ Screenshot: ${shot}`);
 
   Pipeline:
     execute <pipeline.json|json>    Run a pipeline of browser steps
-      --mode <mode>                 Force browser mode (headless, binary-headful, docker-headful)
+      --mode <mode>                 Force browser mode (headless, binary-headful)
       --capture-api                 Record XHR/fetch requests during execution
       --continue-on-error           Don't stop on step failure
       --timeout <ms>                Stale state timeout (default: 20000)
@@ -13685,7 +12988,6 @@ Screenshot: ${shot}`);
     screenshot <url> [options]      Take a screenshot of a URL
       --mode <mode>                 Browser mode
       --annotate                    Overlay element badges with refs
-      -o, --output <path>           Output file path
     reverse-engineer <url|file>     Capture API calls a site makes
       --output <dir>                Save directory
       --typed                       Generate TypeScript
@@ -13725,17 +13027,10 @@ Screenshot: ${shot}`);
     install chromium                Download Chrome for Testing
     status                          Show system status
 
-  Docker (interactive):
-    interactive <url>               Open a live headful browser session (Docker only)
-    interactive stop                Stop Docker session
-    interactive status              Check Docker session
-    watch                           Auto-open noVNC when session starts
-    act <action> [args...]          Send action to Docker session
-
   Setup:
     install                         Install everything (Chromium + MCP)
     install chromium                Download Chrome for Testing
-    install mcp [--dev]             Register iframer MCP in Claude Code and Codex
+    install mcp                     Register iframer MCP in Claude Code and Codex
     install extension chrome        Install the (optional) browser extension for Chrome/Chromium
     extension path                  Print the extension folder to load in chrome://extensions
     extension token                 Print the pairing token (only needed to pair by hand)
@@ -13744,13 +13039,13 @@ Screenshot: ${shot}`);
     version, --version, -v          Print the installed version
     remove                          Remove everything (Chromium + MCP)
     remove chromium                 Delete downloaded Chrome for Testing
-    remove mcp [--dev]              Unregister iframer MCP from Claude Code and Codex
+    remove mcp                      Unregister iframer MCP from Claude Code and Codex
     remove extension                Remove the extension pairing host
 
   Environment:
-    IFRAMER_URL                     Docker API URL (default: http://localhost:3021)
-    IFRAMER_SECRET                  Auth token (must match Docker .env)
-    IFRAMER_MODE                    Force "local" or "docker" mode
+    IFRAMER_SECRET                  Encryption and pairing secret (default: ~/.iframer/secret)
+    IFRAMER_DATA_DIR                Data directory (default: ~/.iframer)
+    ANTHROPIC_API_KEY               Needed by the solve-captcha step
 `);
       break;
   }
