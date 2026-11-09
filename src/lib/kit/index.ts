@@ -47,10 +47,16 @@ export const KIT_TARGETS: KitTarget[] = ["t3", "playwright-mcp", "any"];
 
 /** Puts a hidden file input on the page for the upload step. */
 const MAKE_INPUT = `(()=>{let i=document.createElement('input');i.type='file';i.id='__ifk_in';i.style.display='none';document.documentElement.append(i);return 1})()`;
+/**
+ * sessionStorage, or the same storage through a hidden blank iframe on sites
+ * that delete window.sessionStorage (Discord). Must match store() in page-kit.ts.
+ */
+const SS = `(window.sessionStorage||(document.getElementById('__ifk_ss')||(f=>(f.id='__ifk_ss',f.style.display='none',document.documentElement.append(f),f))(document.createElement('iframe'))).contentWindow.sessionStorage)`;
 /** Moves the uploaded file into sessionStorage so later reinstalls are one short eval. */
-const stash = (key: string) => `document.getElementById('__ifk_in').files[0].text().then(t=>{sessionStorage.${key}=t;document.getElementById('__ifk_in').remove();return t.length})`;
+const stash = (key: string) => `document.getElementById('__ifk_in').files[0].text().then(t=>{${SS}.${key}=t;document.getElementById('__ifk_in').remove();return t.length})`;
 const STASH = stash("__ifk");
-const INSTALL = `eval(sessionStorage.__ifk)`;
+const INSTALL = `eval(${SS}.__ifk)`;
+const INSTALL_CLIENT = `eval(${SS}.__ifkApi)`;
 const STATUS = `window.__ifk?window.__ifk.summary():'NOT_INSTALLED'`;
 
 export function kitInstructions(target: KitTarget, kitPath: string, clientPath?: string): string {
@@ -83,9 +89,9 @@ export function kitInstructions(target: KitTarget, kitPath: string, clientPath?:
         `a. preview_evaluate: ${MAKE_INPUT}`,
         `b. preview_act: action=upload, selector=#__ifk_in, paths=["${clientPath}"]`,
         `c. preview_evaluate: ${stash("__ifkApi")}`,
-        `d. preview_evaluate: eval(sessionStorage.__ifkApi)   -> list of function names`,
+        `d. preview_evaluate: ${INSTALL_CLIENT}   -> list of function names`,
         `e. preview_evaluate: window.__ifkApi.<functionName>(...)`,
-        `After a page load: eval(sessionStorage.__ifk); eval(sessionStorage.__ifkApi)`,
+        `After a page load: ${INSTALL} then ${INSTALL_CLIENT}`,
       ] : []),
       ...common,
     ].join("\n");

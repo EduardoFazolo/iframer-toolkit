@@ -107,7 +107,8 @@ describe("kit source + instructions", () => {
   test("T3 steps use upload + sessionStorage + top-level eval", () => {
     const t = kitInstructions("t3", "/k/iframer-kit.js");
     expect(t).toContain(`paths=["/k/iframer-kit.js"]`);
-    expect(t).toContain("eval(sessionStorage.__ifk)");
+    expect(t).toContain("eval((window.sessionStorage||");
+    expect(t).toContain("__ifk_ss"); // fallback for sites that delete sessionStorage
     expect(t).toContain("iframer ingest --latest");
   });
 });

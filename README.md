@@ -214,6 +214,21 @@ Quick actions:
     --typed                        Generate TypeScript
     --mode <mode>                  Browser mode
 
+Capture in a browser iframer doesn't control (T3 Code, Playwright MCP, ...):
+  kit                              Write the in-page kit, print the agent's tool calls
+    --for <t3|playwright-mcp|any>  Which browser tool's steps to print (default: t3)
+    --mode passive                 No patching: URLs + form posts only
+    --host-filter <regex>          Only record matching hosts (e.g. 'discord\.com$')
+    --client <path>                Also print steps to load a generated client.js
+    --print                        Print the kit source instead (tools without upload)
+  ingest <file|-|--latest>         Capture -> api.json + client.js + knowledge cache
+    --latest                       Newest capture in T3 Code's downloads or ~/Downloads
+    --typed                        Also write client.d.ts
+    --out <dir>                    Output directory (default: ./<host>-api/)
+    --keep                         Keep the capture file (default: deleted)
+    --no-knowledge                 Don't update ~/.iframer/knowledge
+    --json                         One-line JSON summary
+
 Browser windows:
   instances                        List live browser windows (instanceId → current page)
   windows                          Alias of instances
@@ -328,6 +343,7 @@ iframer ingest --latest --typed # finds the capture in T3's downloads -> ./<host
 - **Output:** `api.json` (endpoint map with coverage), `client.js` (in-page client over `window.__ifk.call`), `client.d.ts` with `--typed`, and the domain's knowledge file.
 - **Replay stays in the page:** HttpOnly cookies are invisible to page JS, so generated calls run through the tab. Same-origin only, GET unless approved, 50 calls per session, and a hard stop on 403, 429 or a captcha page.
 - **Not complete:** worker requests, redirect hops, cross-origin iframes and Set-Cookie are invisible to the kit, and every report says so.
+- **Survives the page:** after a full page load the agent re-runs one short `eval` and the capture continues. Works on sites that delete `window.sessionStorage` (Discord).
 - **Other tools:** `--for playwright-mcp` or `--for any`. Tools without file upload can evaluate `iframer kit --print` instead, which costs about 17 KB per page load.
 
 ## Captcha solving

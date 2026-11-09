@@ -195,6 +195,21 @@ try {
     await t.context.close();
   }
 
+  // ── Site that deletes window.sessionStorage (Discord) ─────────────────
+  {
+    const t = await openTab();
+    await t.page.goto(`${base}/no-storage`, { waitUntil: "load" });
+    const gone = await t.evaluate(`typeof window.sessionStorage`);
+    const r = await bridgeInstall(t);
+    await t.evaluate(`window.go().then(r=>r.status)`);
+    await t.page.waitForTimeout(400);
+    await t.page.click("#nav");
+    await t.page.waitForLoadState("load");
+    const re = await t.evaluate(INSTALL);
+    check("works when the page deletes sessionStorage, and restores after navigating", gone === "undefined" && r?.installed === true && re?.restored >= 1, { gone, r, re });
+    await t.context.close();
+  }
+
   // ── Same-origin iframe ────────────────────────────────────────────────
   {
     const t = await openTab();

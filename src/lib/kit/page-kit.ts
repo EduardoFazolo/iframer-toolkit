@@ -35,12 +35,30 @@ export function pageKit(opts) {
   var MAX_BODY = opts.maxBody || 200000;
   var MAX_CALLS = opts.maxCalls || 50;
 
+  // Some sites (Discord) delete window.sessionStorage to protect tokens. A blank
+  // same-origin iframe still exposes the same storage; the install steps use the
+  // same fallback, so both sides read and write the same place.
+  function store() {
+    try { if (w.sessionStorage) return w.sessionStorage; } catch (e) {}
+    try {
+      var f = document.getElementById("__ifk_ss");
+      if (!f) {
+        f = document.createElement("iframe");
+        f.id = "__ifk_ss";
+        f.style.display = "none";
+        document.documentElement.appendChild(f);
+      }
+      return f.contentWindow.sessionStorage;
+    } catch (e) { return null; }
+  }
+  var ss = store();
+
   var m = {};   // "METHOD origin/path/{id}" -> endpoint record (shapes only)
   var po = {};  // "origin/path/{id}" -> status, from resource timing (no method, no payload)
   var budget = { calls: 0, stopped: null };
   var restored = 0;
   try {
-    var saved = JSON.parse(sessionStorage.getItem(KEY) || "null");
+    var saved = JSON.parse(ss.getItem(KEY) || "null");
     if (saved && saved.v === VERSION) {
       m = saved.m || {};
       po = saved.po || {};
@@ -125,7 +143,7 @@ export function pageKit(opts) {
 
   var persistTimer = null;
   function persist() {
-    try { sessionStorage.setItem(KEY, JSON.stringify({ v: VERSION, m: m, po: po, budget: budget })); } catch (e) {}
+    try { ss.setItem(KEY, JSON.stringify({ v: VERSION, m: m, po: po, budget: budget })); } catch (e) {}
   }
   function persistSoon() {
     if (persistTimer) return;
@@ -280,6 +298,7 @@ export function pageKit(opts) {
 
   // Same-origin iframes get the same hooks. Cross-origin ones are skipped silently.
   function attachFrame(f) {
+    if (f.id === "__ifk_ss") return;
     try {
       var fw = f.contentWindow;
       if (!fw || !fw.document) return;
@@ -430,7 +449,7 @@ export function pageKit(opts) {
       try { obs && obs.disconnect(); } catch (e) {}
       try { w.removeEventListener("pagehide", persist); } catch (e) {}
       try { w.__ifkHooked = false; } catch (e) {}
-      try { sessionStorage.removeItem(KEY); sessionStorage.removeItem("__ifk"); } catch (e) {}
+      try { ss.removeItem(KEY); ss.removeItem("__ifk"); ss.removeItem("__ifkApi"); } catch (e) {}
       delete w.__ifk;
       return { stopped: true };
     },

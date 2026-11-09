@@ -1109,7 +1109,7 @@ var init_crypto = __esm({
 // src/lib/session/persistence.ts
 async function extractSession(context, page) {
   const cookies = await context.cookies();
-  const { localStorage, sessionStorage: sessionStorage2 } = await page.evaluate(() => {
+  const { localStorage, sessionStorage } = await page.evaluate(() => {
     const ls = {};
     const ss = {};
     for (let i = 0; i < window.localStorage.length; i++) {
@@ -1126,7 +1126,7 @@ async function extractSession(context, page) {
   return {
     cookies,
     localStorage: { [origin]: localStorage },
-    sessionStorage: { [origin]: sessionStorage2 },
+    sessionStorage: { [origin]: sessionStorage },
     extractedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
 }
@@ -11128,7 +11128,7 @@ var init_capture_manager = __esm({
         const { context, page } = await this.daemon.ensure(mode, instanceId);
         const cookies = urls && urls.length > 0 ? await context.cookies(urls) : await context.cookies();
         const localStorage = {};
-        const sessionStorage2 = {};
+        const sessionStorage = {};
         try {
           const stores = await page.evaluate(() => {
             const ls = {};
@@ -11144,15 +11144,15 @@ var init_capture_manager = __esm({
             return { origin: window.location.origin, ls, ss };
           });
           localStorage[stores.origin] = stores.ls;
-          sessionStorage2[stores.origin] = stores.ss;
+          sessionStorage[stores.origin] = stores.ss;
         } catch {
         }
         return {
           ok: true,
           cookies,
           localStorage,
-          sessionStorage: sessionStorage2,
-          message: `${cookies.length} cookies, ${Object.values(localStorage).reduce((n, s) => n + Object.keys(s).length, 0)} localStorage keys, ${Object.values(sessionStorage2).reduce((n, s) => n + Object.keys(s).length, 0)} sessionStorage keys.`
+          sessionStorage,
+          message: `${cookies.length} cookies, ${Object.values(localStorage).reduce((n, s) => n + Object.keys(s).length, 0)} localStorage keys, ${Object.values(sessionStorage).reduce((n, s) => n + Object.keys(s).length, 0)} sessionStorage keys.`
         };
       }
     };
@@ -11633,12 +11633,31 @@ function pageKit(opts) {
   }
   var MAX_BODY = opts.maxBody || 2e5;
   var MAX_CALLS = opts.maxCalls || 50;
+  function store() {
+    try {
+      if (w.sessionStorage) return w.sessionStorage;
+    } catch (e) {
+    }
+    try {
+      var f = document.getElementById("__ifk_ss");
+      if (!f) {
+        f = document.createElement("iframe");
+        f.id = "__ifk_ss";
+        f.style.display = "none";
+        document.documentElement.appendChild(f);
+      }
+      return f.contentWindow.sessionStorage;
+    } catch (e) {
+      return null;
+    }
+  }
+  var ss = store();
   var m = {};
   var po = {};
   var budget = { calls: 0, stopped: null };
   var restored = 0;
   try {
-    var saved = JSON.parse(sessionStorage.getItem(KEY) || "null");
+    var saved = JSON.parse(ss.getItem(KEY) || "null");
     if (saved && saved.v === VERSION) {
       m = saved.m || {};
       po = saved.po || {};
@@ -11742,7 +11761,7 @@ function pageKit(opts) {
   var persistTimer = null;
   function persist() {
     try {
-      sessionStorage.setItem(KEY, JSON.stringify({ v: VERSION, m, po, budget }));
+      ss.setItem(KEY, JSON.stringify({ v: VERSION, m, po, budget }));
     } catch (e) {
     }
   }
@@ -11935,6 +11954,7 @@ function pageKit(opts) {
     }
   }
   function attachFrame(f) {
+    if (f.id === "__ifk_ss") return;
     try {
       var fw = f.contentWindow;
       if (!fw || !fw.document) return;
@@ -12121,8 +12141,9 @@ function pageKit(opts) {
       } catch (e) {
       }
       try {
-        sessionStorage.removeItem(KEY);
-        sessionStorage.removeItem("__ifk");
+        ss.removeItem(KEY);
+        ss.removeItem("__ifk");
+        ss.removeItem("__ifkApi");
       } catch (e) {
       }
       delete w.__ifk;
@@ -12291,6 +12312,9 @@ function buildApiMap(report) {
     pathOnly: report.pathOnly
   };
 }
+function takesBody(ep) {
+  return ep.request !== void 0 || ep.method === "POST" || ep.method === "PUT" || ep.method === "PATCH";
+}
 function renderClient(map) {
   const lines = [];
   const skipped = [];
@@ -12325,7 +12349,7 @@ function renderClient(map) {
       params.push(name);
       return `" + encodeURIComponent(${name}) + "`;
     }).replace(/ \+ ""$/, "").replace(/^"" \+ /, "");
-    const hasBody = ep.method !== "GET" && ep.method !== "HEAD";
+    const hasBody = takesBody(ep);
     if (hasBody) params.push("body");
     params.push("query", "opts");
     const optsExpr = hasBody ? `Object.assign({ json: body }, opts)` : `opts`;
@@ -12368,7 +12392,7 @@ function renderTypes(map) {
   for (const ep of map.endpoints) {
     if (ep.kind === "ws" || ep.kind === "sse" || ep.kind === "beacon" || ep.origin !== map.origin) continue;
     const ids = (ep.path.match(/\{id\}/g) || []).map((_, i) => `${i ? `id${i + 1}` : "id"}: string | number`);
-    const hasBody = ep.method !== "GET" && ep.method !== "HEAD";
+    const hasBody = takesBody(ep);
     const req = ep.request?.json !== void 0 ? tsType(ep.request.json, "  ") : ep.request?.form || ep.request?.multipart ? "Record<string, string>" : "unknown";
     const res = ep.response && typeof ep.response === "object" && !Array.isArray(ep.response) && "contentType" in ep.response && "bytes" in ep.response ? "unknown" : tsType(ep.response, "  ");
     const params = [...ids, ...hasBody ? [`body: ${req}`] : [], `query?: Record<string, string>`, `opts?: IfkOpts`];
@@ -12483,9 +12507,9 @@ function kitInstructions(target, kitPath, clientPath) {
         `a. preview_evaluate: ${MAKE_INPUT}`,
         `b. preview_act: action=upload, selector=#__ifk_in, paths=["${clientPath}"]`,
         `c. preview_evaluate: ${stash("__ifkApi")}`,
-        `d. preview_evaluate: eval(sessionStorage.__ifkApi)   -> list of function names`,
+        `d. preview_evaluate: ${INSTALL_CLIENT}   -> list of function names`,
         `e. preview_evaluate: window.__ifkApi.<functionName>(...)`,
-        `After a page load: eval(sessionStorage.__ifk); eval(sessionStorage.__ifkApi)`
+        `After a page load: ${INSTALL} then ${INSTALL_CLIENT}`
       ] : [],
       ...common
     ].join("\n");
@@ -12528,7 +12552,7 @@ function drainFallback() {
     `until next is null, write the joined chunks to a file, then \`iframer ingest <file>\`.`
   ].join("\n");
 }
-var import_fs12, import_path13, KIT_TARGETS, MAKE_INPUT, stash, STASH, INSTALL, STATUS;
+var import_fs12, import_path13, KIT_TARGETS, MAKE_INPUT, SS, stash, STASH, INSTALL, INSTALL_CLIENT, STATUS;
 var init_kit = __esm({
   "src/lib/kit/index.ts"() {
     "use strict";
@@ -12539,9 +12563,11 @@ var init_kit = __esm({
     init_capture();
     KIT_TARGETS = ["t3", "playwright-mcp", "any"];
     MAKE_INPUT = `(()=>{let i=document.createElement('input');i.type='file';i.id='__ifk_in';i.style.display='none';document.documentElement.append(i);return 1})()`;
-    stash = (key) => `document.getElementById('__ifk_in').files[0].text().then(t=>{sessionStorage.${key}=t;document.getElementById('__ifk_in').remove();return t.length})`;
+    SS = `(window.sessionStorage||(document.getElementById('__ifk_ss')||(f=>(f.id='__ifk_ss',f.style.display='none',document.documentElement.append(f),f))(document.createElement('iframe'))).contentWindow.sessionStorage)`;
+    stash = (key) => `document.getElementById('__ifk_in').files[0].text().then(t=>{${SS}.${key}=t;document.getElementById('__ifk_in').remove();return t.length})`;
     STASH = stash("__ifk");
-    INSTALL = `eval(sessionStorage.__ifk)`;
+    INSTALL = `eval(${SS}.__ifk)`;
+    INSTALL_CLIENT = `eval(${SS}.__ifkApi)`;
     STATUS = `window.__ifk?window.__ifk.summary():'NOT_INSTALLED'`;
   }
 });

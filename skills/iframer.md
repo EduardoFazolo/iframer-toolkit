@@ -173,7 +173,7 @@ When you already drive a browser through your own tools (a T3 Code preview tab, 
 ```
 1. iframer kit --for t3          # or --for playwright-mcp / --for any. Prints the exact tool calls.
 2. Follow the printed install steps (upload the kit file, stash it, top-level eval). Never paste the kit's source.
-3. Drive the site with your normal tools. After EVERY full page load: eval(sessionStorage.__ifk)
+3. Drive the site with your normal tools. After EVERY full page load, re-run the printed eval step (step 4).
 4. window.__ifk.dump(), then: iframer ingest --latest --typed
    -> ./<host>-api/api.json, client.js, client.d.ts, plus the knowledge cache. The capture file is deleted.
 ```

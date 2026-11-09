@@ -71,6 +71,12 @@ export function startFixture() {
       };
       if (p === "/app.js") { res.writeHead(200, { "content-type": "text/javascript" }); return res.end(APP_JS); }
       if (p === "/worker.js") { res.writeHead(200, { "content-type": "text/javascript" }); return res.end(WORKER_JS); }
+      if (p === "/no-storage") {
+        // Like Discord: the page removes window.sessionStorage before anything else runs.
+        res.writeHead(200, { "content-type": "text/html", "content-security-policy": POLICIES.strict });
+        return res.end(`<!doctype html><title>no storage</title><a id="nav" href="/no-storage">again</a><script src="/no-storage.js"></script>`);
+      }
+      if (p === "/no-storage.js") { res.writeHead(200, { "content-type": "text/javascript" }); return res.end(`Object.defineProperty(window,'sessionStorage',{value:undefined,configurable:true});window.go=()=>fetch('/api/no-storage/5');`); }
       if (p === "/frame-host") {
         res.writeHead(200, { "content-type": "text/html", "content-security-policy": POLICIES.strict.replace("frame-src 'none'", "frame-src 'self'") });
         return res.end(`<!doctype html><title>frame host</title><iframe id="fr" src="/frame-inner"></iframe>`);
