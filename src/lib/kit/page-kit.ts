@@ -52,10 +52,20 @@ export function pageKit(opts) {
     } catch (e) { return null; }
   }
   var ss = store();
+  // localStorage, through the same blank iframe when the site deleted it.
+  function lstore() {
+    try { if (w.localStorage) return w.localStorage; } catch (e) {}
+    try { store(); return document.getElementById("__ifk_ss").contentWindow.localStorage; } catch (e) { return null; }
+  }
 
   var m = {};   // "METHOD origin/path/{id}" -> endpoint record (shapes only)
   var po = {};  // "origin/path/{id}" -> status, from resource timing (no method, no payload)
   var budget = { calls: 0, stopped: null };
+  // Identity: auth header name -> where the page keeps its value
+  // ({from:"localStorage"|"sessionStorage"|"cookie"|"memory", key, path, prefix}).
+  // Names only. The values live in authMem, in memory, and never leave the page.
+  var authSrc = {};
+  var authMem = {};
   var restored = 0;
   try {
     var saved = JSON.parse(ss.getItem(KEY) || "null");
@@ -63,6 +73,7 @@ export function pageKit(opts) {
       m = saved.m || {};
       po = saved.po || {};
       if (saved.budget) budget = saved.budget;
+      if (saved.authSrc) authSrc = saved.authSrc;
       restored = Object.keys(m).length;
     }
   } catch (e) {}
@@ -143,11 +154,89 @@ export function pageKit(opts) {
 
   var persistTimer = null;
   function persist() {
-    try { ss.setItem(KEY, JSON.stringify({ v: VERSION, m: m, po: po, budget: budget })); } catch (e) {}
+    try { ss.setItem(KEY, JSON.stringify({ v: VERSION, m: m, po: po, budget: budget, authSrc: authSrc })); } catch (e) {}
   }
   function persistSoon() {
     if (persistTimer) return;
     persistTimer = setTimeout(function () { persistTimer = null; persist(); }, 300);
+  }
+
+  // Finds where the page keeps an auth header's value, by name only.
+  function findIn(st, from, needle) {
+    if (!st) return null;
+    for (var i = 0; i < st.length; i++) {
+      var k = st.key(i);
+      if (!k || k.indexOf("__ifk") === 0) continue;
+      var v = st.getItem(k);
+      if (!v || v.indexOf(needle) < 0) continue;
+      if (v === needle) return { from: from, key: k };
+      try {
+        var j = JSON.parse(v);
+        if (j === needle) return { from: from, key: k, json: true };
+        var path = findPath(j, needle, 0);
+        if (path) return { from: from, key: k, path: path };
+      } catch (e) {}
+    }
+    return null;
+  }
+  function findPath(o, needle, d) {
+    if (!o || typeof o !== "object" || d > 4) return null;
+    for (var k in o) {
+      if (o[k] === needle) return [k];
+      var p = findPath(o[k], needle, d + 1);
+      if (p) return [k].concat(p);
+    }
+    return null;
+  }
+  function sourceOf(value) {
+    var pre = (/^(bearer|token|basic|jwt)\s+/i.exec(value) || [""])[0];
+    var raw = value.slice(pre.length);
+    if (raw.length < 8) return null;
+    var hit = findIn(lstore(), "localStorage", raw) || findIn(ss, "sessionStorage", raw);
+    if (!hit) {
+      try {
+        document.cookie.split(/;\s*/).forEach(function (c) {
+          var i = c.indexOf("=");
+          if (!hit && i > 0 && decodeURIComponent(c.slice(i + 1)) === raw) hit = { from: "cookie", key: c.slice(0, i) };
+        });
+      } catch (e) {}
+    }
+    hit = hit || { from: "memory" };
+    if (pre) hit.prefix = pre;
+    return hit;
+  }
+  function learnAuth(name, value, u) {
+    if (typeof value !== "string" || name === "cookie" || u.origin !== location.origin) return;
+    authMem[name] = value;
+    var cur = authSrc[name];
+    if (!cur || cur.from === "memory") {
+      var s = sourceOf(value);
+      if (s) authSrc[name] = s;
+    }
+  }
+  // Rebuilds the auth headers for a replay from where the page keeps them.
+  function readAuth() {
+    var out = {};
+    Object.keys(authSrc).forEach(function (name) {
+      var s = authSrc[name], v = null;
+      try {
+        if (s.from === "localStorage" || s.from === "sessionStorage") {
+          var st = s.from === "localStorage" ? lstore() : ss;
+          v = st && st.getItem(s.key);
+          if (v != null && (s.json || s.path)) {
+            v = JSON.parse(v);
+            (s.path || []).forEach(function (k) { v = v == null ? v : v[k]; });
+          }
+        } else if (s.from === "cookie") {
+          document.cookie.split(/;\s*/).forEach(function (c) {
+            if (c.indexOf(s.key + "=") === 0) v = decodeURIComponent(c.slice(s.key.length + 1));
+          });
+        }
+      } catch (e) { v = null; }
+      if (typeof v !== "string" || !v) v = authMem[name] ? authMem[name].slice((s.prefix || "").length) : null;
+      if (v) out[name] = (s.prefix || "") + v;
+    });
+    return out;
   }
 
   function rec(kind, method, url, headers, body, status, ct, text, base) {
@@ -165,7 +254,10 @@ export function pageKit(opts) {
       });
       Object.keys(headers || {}).forEach(function (h) {
         var l = h.toLowerCase();
-        if (AUTH_H.test(l)) { if (e.auth.indexOf(l) < 0) e.auth.push(l); }
+        if (AUTH_H.test(l)) {
+          if (e.auth.indexOf(l) < 0) e.auth.push(l);
+          learnAuth(l, headers[h], u);
+        }
         else if (!NOISE_H.test(l) && !NOISE_H_PREFIX.test(l) && e.headers.indexOf(l) < 0) e.headers.push(l);
       });
       if (body !== undefined && !e.req) e.req = bodyShape(body);
@@ -205,7 +297,8 @@ export function pageKit(opts) {
           var url = isReq ? input.url : input;
           var hs = {};
           var src = (init && init.headers) || (isReq && input.headers);
-          if (src) new win.Headers(src).forEach(function (_, k) { hs[k] = 1; });
+          // Values kept only for auth headers, and only in memory (see learnAuth).
+          if (src) new win.Headers(src).forEach(function (v, k) { hs[k] = AUTH_H.test(k) ? v : 1; });
           var b = init && init.body;
           var at = base();
           p.then(function (res) {
@@ -231,8 +324,8 @@ export function pageKit(opts) {
         };
       });
       patch(X, "setRequestHeader", function (oSet) {
-        return function (k) {
-          try { if (this.__ifkI) this.__ifkI.h[k] = 1; } catch (e) {}
+        return function (k, v) {
+          try { if (this.__ifkI) this.__ifkI.h[k] = AUTH_H.test(k) ? v : 1; } catch (e) {}
           return oSet.apply(this, arguments);
         };
       });
@@ -371,6 +464,9 @@ export function pageKit(opts) {
         complete: false,
         blindSpots: ["HttpOnly cookies", "Set-Cookie", "browser-added headers", "worker traffic", "document POST responses", "redirect hops", "cross-origin iframes"],
       },
+      // What a replay needs besides the browser's own cookies: header names and
+      // where the page keeps their values. Never the values.
+      auth: { cookies: "browser session (sent automatically, HttpOnly included)", headers: authSrc },
       endpoints: m,
       pathOnly: pathOnly,
     };
@@ -424,6 +520,15 @@ export function pageKit(opts) {
       if (budget.calls >= MAX_CALLS) { budget.stopped = "budget of " + MAX_CALLS + " calls"; persist(); return Promise.resolve({ error: "stopped", reason: budget.stopped }); }
       budget.calls++;
       var init = { method: method, credentials: "include", headers: o.headers || {} };
+      // Same identity as the page: attach the auth headers it uses, unless given or {auth:false}.
+      var used = [];
+      if (u.origin === location.origin && o.auth !== false) {
+        var a = readAuth();
+        Object.keys(a).forEach(function (h) {
+          var has = Object.keys(init.headers).some(function (k) { return k.toLowerCase() === h; });
+          if (!has) { init.headers[h] = a[h]; used.push(h); }
+        });
+      }
       if (o.json !== undefined) {
         init.body = JSON.stringify(o.json);
         init.headers["content-type"] = "application/json";
@@ -432,6 +537,13 @@ export function pageKit(opts) {
       return origFetch.call(w, u.href, init).then(function (r) {
         return r.text().then(function (t) {
           var out = { status: r.status };
+          if (used.length) out.auth = used;
+          if (r.status === 401) {
+            var missing = Object.keys(authSrc).filter(function (h) { return used.indexOf(h) < 0; });
+            out.hint = missing.length
+              ? "no value for " + missing.join(", ") + ": use the site once so it sends its token, then retry"
+              : (Object.keys(authSrc).length ? "auth headers were sent; the session may have expired" : "no auth header seen yet: use the site once while the kit records");
+          }
           var wall = looksLikeWall(r.status, t);
           if (wall) { budget.stopped = wall; out.stopped = wall; }
           persist();

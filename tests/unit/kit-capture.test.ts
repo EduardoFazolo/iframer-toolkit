@@ -3,7 +3,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import {
-  buildApiMap, kitInstructions, kitSource, parseCapture, renderClient, renderTypes, scanCapture, findLatestCapture,
+  buildApiMap, redactCapture, kitInstructions, kitSource, parseCapture, renderClient, renderTypes, scanCapture, findLatestCapture,
   type CaptureReport,
 } from "../../src/lib/kit/index";
 
@@ -50,6 +50,45 @@ describe("scanCapture", () => {
   test("flags values inside shapes and keys", () => {
     const f = scanCapture(report({ [`GET ${O}/api/x`]: ep({ res: { "person@example.com": "string", note: "+1 415 555 0199" } }) }));
     expect(f.map((x) => x.kind).sort()).toEqual(["email", "phone"]);
+  });
+});
+
+describe("redactCapture", () => {
+  test("separates private values from the reusable API", () => {
+    const r = report({
+      [`GET https://od-a1b2c3d4e5f6a7b8c9d0e1f2.dnnr.io/v1/someone@example.com/feed`]: ep({ res: { "person@example.com": { id: "number" } } }),
+      [`GET ${O}/api/k/a8f3K29dLq0vX7bN4mZ2pR6tY1`]: ep({ n: 2 }),
+      [`GET ${O}/api/k/Zz9f3K29dLq0vX7bN4mZ2pR6tY`]: ep({ n: 3, status: [404] }),
+      [`GET ${O}/api/file-a8f3K29dLq0vX7bN4mZ2pR6tY1.json`]: ep(),
+    }, [`${O}/api/t/eyJhbGciOiJIUzI1NiJ9`]);
+    const { report: clean, redacted } = redactCapture(r);
+    expect(scanCapture(clean)).toEqual([]);
+    expect(Object.keys(clean.endpoints).sort()).toEqual([
+      `GET ${O}/api/file-{id}.json`,
+      `GET ${O}/api/k/{id}`,
+      `GET https://x.dnnr.io/v1/{id}/feed`,
+    ]);
+    expect(clean.endpoints[`GET ${O}/api/k/{id}`]).toMatchObject({ n: 5, status: [200, 404], redacted: ["token"] });
+    expect(clean.endpoints[`GET https://x.dnnr.io/v1/{id}/feed`].res).toEqual({ "{key}": { id: "number" } });
+    expect(clean.pathOnly).toEqual([`${O}/api/t/{id}`]);
+    expect(redacted.length).toBeGreaterThanOrEqual(4);
+    expect(buildApiMap(clean).endpoints.find((e) => e.path === "/api/k/{id}")?.privateValues).toEqual(["token"]);
+  });
+  test("short host labels are not tokens", () => {
+    const r = report({ [`GET https://od-a1b2c3.dnnr.io/api/feed`]: ep() });
+    expect(scanCapture(r)).toEqual([]);
+  });
+});
+
+describe("identity", () => {
+  test("api.json says which auth headers a call needs and where they live", () => {
+    const r = { ...report({ [`GET ${O}/api/me`]: ep({ auth: ["authorization"] }) }), auth: { headers: {
+      authorization: { from: "localStorage" as const, key: "session", path: ["user", "token"], prefix: "Bearer " },
+      "x-csrf-token": { from: "memory" as const },
+    } } };
+    const id = buildApiMap(r).identity;
+    expect(id.headers[0]).toEqual({ name: "authorization", source: `localStorage["session -> user.token"] with "Bearer " prefix; __ifk.call attaches it automatically` });
+    expect(id.headers[1].source).toContain("page memory");
   });
 });
 

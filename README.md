@@ -227,6 +227,7 @@ Capture in a browser iframer doesn't control (T3 Code, Playwright MCP, ...):
     --out <dir>                    Output directory (default: ./<host>-api/)
     --keep                         Keep the capture file (default: deleted)
     --no-knowledge                 Don't update ~/.iframer/knowledge
+    --strict                       Refuse on any secret-looking value instead of replacing it
     --json                         One-line JSON summary
 
 Browser windows:
@@ -339,7 +340,8 @@ iframer ingest --latest --typed # finds the capture in T3's downloads -> ./<host
 ```
 
 - **Small for the agent:** the kit and the capture move as files, so neither lands in the agent's context. On the 40-endpoint test site, the whole install-capture-export round was about 550 tokens of tool calls.
-- **Shapes, not values:** paths are templated (`/users/{id}`), bodies and responses become type shapes, headers become names. `ingest` scans the result and refuses it if anything looks like a token, email or phone number.
+- **Shapes, not values:** paths are templated (`/users/{id}`), bodies and responses become type shapes, headers become names. `ingest` then swaps anything left that looks like a token, email or phone number for a placeholder, keeps the endpoint, and marks it with `privateValues`. `--strict` refuses the capture instead.
+- **Identity, without the values:** the kit learns which auth headers the page sends and where it keeps each value (a localStorage key, a field inside it, a cookie, or page memory). api.json records that under `identity`, and `__ifk.call` rebuilds the headers from there for every replay, so the generated client acts as the logged-in user.
 - **Output:** `api.json` (endpoint map with coverage), `client.js` (in-page client over `window.__ifk.call`), `client.d.ts` with `--typed`, and the domain's knowledge file.
 - **Replay stays in the page:** HttpOnly cookies are invisible to page JS, so generated calls run through the tab. Same-origin only, GET unless approved, 50 calls per session, and a hard stop on 403, 429 or a captcha page.
 - **Not complete:** worker requests, redirect hops, cross-origin iframes and Set-Cookie are invisible to the kit, and every report says so.

@@ -11652,9 +11652,23 @@ function pageKit(opts) {
     }
   }
   var ss = store();
+  function lstore() {
+    try {
+      if (w.localStorage) return w.localStorage;
+    } catch (e) {
+    }
+    try {
+      store();
+      return document.getElementById("__ifk_ss").contentWindow.localStorage;
+    } catch (e) {
+      return null;
+    }
+  }
   var m = {};
   var po = {};
   var budget = { calls: 0, stopped: null };
+  var authSrc = {};
+  var authMem = {};
   var restored = 0;
   try {
     var saved = JSON.parse(ss.getItem(KEY) || "null");
@@ -11662,6 +11676,7 @@ function pageKit(opts) {
       m = saved.m || {};
       po = saved.po || {};
       if (saved.budget) budget = saved.budget;
+      if (saved.authSrc) authSrc = saved.authSrc;
       restored = Object.keys(m).length;
     }
   } catch (e) {
@@ -11761,7 +11776,7 @@ function pageKit(opts) {
   var persistTimer = null;
   function persist() {
     try {
-      ss.setItem(KEY, JSON.stringify({ v: VERSION, m, po, budget }));
+      ss.setItem(KEY, JSON.stringify({ v: VERSION, m, po, budget, authSrc }));
     } catch (e) {
     }
   }
@@ -11771,6 +11786,87 @@ function pageKit(opts) {
       persistTimer = null;
       persist();
     }, 300);
+  }
+  function findIn(st, from, needle) {
+    if (!st) return null;
+    for (var i = 0; i < st.length; i++) {
+      var k = st.key(i);
+      if (!k || k.indexOf("__ifk") === 0) continue;
+      var v = st.getItem(k);
+      if (!v || v.indexOf(needle) < 0) continue;
+      if (v === needle) return { from, key: k };
+      try {
+        var j = JSON.parse(v);
+        if (j === needle) return { from, key: k, json: true };
+        var path15 = findPath(j, needle, 0);
+        if (path15) return { from, key: k, path: path15 };
+      } catch (e) {
+      }
+    }
+    return null;
+  }
+  function findPath(o, needle, d) {
+    if (!o || typeof o !== "object" || d > 4) return null;
+    for (var k in o) {
+      if (o[k] === needle) return [k];
+      var p = findPath(o[k], needle, d + 1);
+      if (p) return [k].concat(p);
+    }
+    return null;
+  }
+  function sourceOf(value) {
+    var pre = (/^(bearer|token|basic|jwt)\s+/i.exec(value) || [""])[0];
+    var raw = value.slice(pre.length);
+    if (raw.length < 8) return null;
+    var hit = findIn(lstore(), "localStorage", raw) || findIn(ss, "sessionStorage", raw);
+    if (!hit) {
+      try {
+        document.cookie.split(/;\s*/).forEach(function(c) {
+          var i = c.indexOf("=");
+          if (!hit && i > 0 && decodeURIComponent(c.slice(i + 1)) === raw) hit = { from: "cookie", key: c.slice(0, i) };
+        });
+      } catch (e) {
+      }
+    }
+    hit = hit || { from: "memory" };
+    if (pre) hit.prefix = pre;
+    return hit;
+  }
+  function learnAuth(name, value, u) {
+    if (typeof value !== "string" || name === "cookie" || u.origin !== location.origin) return;
+    authMem[name] = value;
+    var cur = authSrc[name];
+    if (!cur || cur.from === "memory") {
+      var s = sourceOf(value);
+      if (s) authSrc[name] = s;
+    }
+  }
+  function readAuth() {
+    var out = {};
+    Object.keys(authSrc).forEach(function(name) {
+      var s = authSrc[name], v = null;
+      try {
+        if (s.from === "localStorage" || s.from === "sessionStorage") {
+          var st = s.from === "localStorage" ? lstore() : ss;
+          v = st && st.getItem(s.key);
+          if (v != null && (s.json || s.path)) {
+            v = JSON.parse(v);
+            (s.path || []).forEach(function(k) {
+              v = v == null ? v : v[k];
+            });
+          }
+        } else if (s.from === "cookie") {
+          document.cookie.split(/;\s*/).forEach(function(c) {
+            if (c.indexOf(s.key + "=") === 0) v = decodeURIComponent(c.slice(s.key.length + 1));
+          });
+        }
+      } catch (e) {
+        v = null;
+      }
+      if (typeof v !== "string" || !v) v = authMem[name] ? authMem[name].slice((s.prefix || "").length) : null;
+      if (v) out[name] = (s.prefix || "") + v;
+    });
+    return out;
   }
   function rec(kind, method, url, headers, body, status, ct, text, base) {
     try {
@@ -11789,6 +11885,7 @@ function pageKit(opts) {
         var l = h.toLowerCase();
         if (AUTH_H.test(l)) {
           if (e.auth.indexOf(l) < 0) e.auth.push(l);
+          learnAuth(l, headers[h], u);
         } else if (!NOISE_H.test(l) && !NOISE_H_PREFIX.test(l) && e.headers.indexOf(l) < 0) e.headers.push(l);
       });
       if (body !== void 0 && !e.req) e.req = bodyShape(body);
@@ -11837,8 +11934,8 @@ function pageKit(opts) {
           var url = isReq ? input.url : input;
           var hs = {};
           var src = init && init.headers || isReq && input.headers;
-          if (src) new win.Headers(src).forEach(function(_, k) {
-            hs[k] = 1;
+          if (src) new win.Headers(src).forEach(function(v, k) {
+            hs[k] = AUTH_H.test(k) ? v : 1;
           });
           var b = init && init.body;
           var at = base();
@@ -11872,9 +11969,9 @@ function pageKit(opts) {
         };
       });
       patch(X, "setRequestHeader", function(oSet) {
-        return function(k) {
+        return function(k, v) {
           try {
-            if (this.__ifkI) this.__ifkI.h[k] = 1;
+            if (this.__ifkI) this.__ifkI.h[k] = AUTH_H.test(k) ? v : 1;
           } catch (e) {
           }
           return oSet.apply(this, arguments);
@@ -12034,6 +12131,9 @@ function pageKit(opts) {
         complete: false,
         blindSpots: ["HttpOnly cookies", "Set-Cookie", "browser-added headers", "worker traffic", "document POST responses", "redirect hops", "cross-origin iframes"]
       },
+      // What a replay needs besides the browser's own cookies: header names and
+      // where the page keeps their values. Never the values.
+      auth: { cookies: "browser session (sent automatically, HttpOnly included)", headers: authSrc },
       endpoints: m,
       pathOnly
     };
@@ -12089,6 +12189,19 @@ function pageKit(opts) {
       }
       budget.calls++;
       var init = { method, credentials: "include", headers: o.headers || {} };
+      var used = [];
+      if (u.origin === location.origin && o.auth !== false) {
+        var a = readAuth();
+        Object.keys(a).forEach(function(h) {
+          var has = Object.keys(init.headers).some(function(k) {
+            return k.toLowerCase() === h;
+          });
+          if (!has) {
+            init.headers[h] = a[h];
+            used.push(h);
+          }
+        });
+      }
       if (o.json !== void 0) {
         init.body = JSON.stringify(o.json);
         init.headers["content-type"] = "application/json";
@@ -12097,6 +12210,13 @@ function pageKit(opts) {
       return origFetch.call(w, u.href, init).then(function(r) {
         return r.text().then(function(t) {
           var out = { status: r.status };
+          if (used.length) out.auth = used;
+          if (r.status === 401) {
+            var missing = Object.keys(authSrc).filter(function(h) {
+              return used.indexOf(h) < 0;
+            });
+            out.hint = missing.length ? "no value for " + missing.join(", ") + ": use the site once so it sends its token, then retry" : Object.keys(authSrc).length ? "auth headers were sent; the session may have expired" : "no auth header seen yet: use the site once while the kit records";
+          }
           var wall = looksLikeWall(r.status, t);
           if (wall) {
             budget.stopped = wall;
@@ -12223,7 +12343,7 @@ function scanString(s, where, out) {
   if (TYPE_NAMES.has(s)) return;
   for (const [kind, re] of DETECTORS) {
     if (kind === "token") {
-      for (const part of s.split(/[/\s?&=#]/)) {
+      for (const part of splitWords(s)) {
         if (part.includes("{")) continue;
         if (re.test(part)) {
           out.push({ where, kind, sample: mask(part) });
@@ -12258,6 +12378,123 @@ function scanCapture(report) {
   }
   report.pathOnly.forEach((p, i) => scanString(p, `pathOnly[${i}]`, out));
   return out;
+}
+function splitWords(s) {
+  const m = s.match(/^(?:[A-Z]+ )?https?:\/\/([^/]+)(.*)$/);
+  if (!m) return s.split(/[/\s?&=#:;,]/);
+  return [...m[1].split(/[.:]/), ...m[2].split(/[/\s?&=#:;,]/)];
+}
+function redactUrl(s) {
+  const kinds = [];
+  const hit = (part) => {
+    if (!part || part.includes("{")) return null;
+    let d = part;
+    try {
+      d = decodeURIComponent(part);
+    } catch {
+    }
+    for (const [kind, re] of DETECTORS) if (re.test(d)) return kind;
+    return null;
+  };
+  const fixSeg = (seg) => {
+    let found = false;
+    const parts = seg.split(/([^A-Za-z0-9_%@+])/).map((p) => {
+      const kk = hit(p);
+      if (kk) {
+        kinds.push(kk);
+        found = true;
+        return PLACEHOLDER;
+      }
+      return p;
+    });
+    if (found) return parts.join("");
+    const k = hit(seg);
+    if (k) {
+      kinds.push(k);
+      return PLACEHOLDER;
+    }
+    return seg;
+  };
+  const m = s.match(/^((?:[A-Z]+ )?https?:\/\/)([^/]+)(.*)$/);
+  if (!m) return { s: s.split("/").map(fixSeg).join("/"), kinds };
+  const host = m[2].split(".").map((l) => {
+    const k = hit(l);
+    if (k) {
+      kinds.push(k);
+      return "x";
+    }
+    return l;
+  }).join(".");
+  return { s: m[1] + host + m[3].split("/").map(fixSeg).join("/"), kinds };
+}
+function redactShape(v, kinds) {
+  if (typeof v === "string") {
+    if (TYPE_NAMES.has(v)) return v;
+    const f = [];
+    scanString(v, "", f);
+    if (f.length) {
+      kinds.push(f[0].kind);
+      return "string";
+    }
+    return v;
+  }
+  if (Array.isArray(v)) return v.map((x) => redactShape(x, kinds));
+  if (v && typeof v === "object") {
+    const o = {};
+    for (const [k, x] of Object.entries(v)) {
+      const f = [];
+      scanString(k, "", f);
+      const key = f.length ? "{key}" : k;
+      if (f.length) kinds.push(f[0].kind);
+      if (!(key in o)) o[key] = redactShape(x, kinds);
+    }
+    return o;
+  }
+  return v;
+}
+function redactCapture(report) {
+  const redacted = [];
+  const endpoints = {};
+  for (const [key, ep] of Object.entries(report.endpoints)) {
+    const kinds = [];
+    const { s: newKey, kinds: keyKinds } = redactUrl(key);
+    kinds.push(...keyKinds);
+    const clean = { ...ep };
+    clean.query = union((ep.query || []).map((q) => {
+      const f = [];
+      scanString(q, "", f);
+      if (f.length) kinds.push(f[0].kind);
+      return f.length ? "{key}" : q;
+    }));
+    clean.headers = (ep.headers || []).filter((h) => {
+      const f = [];
+      scanString(h, "", f);
+      if (f.length) kinds.push(f[0].kind);
+      return !f.length;
+    });
+    if (ep.req !== void 0) clean.req = redactShape(ep.req, kinds);
+    if (ep.res !== void 0) clean.res = redactShape(ep.res, kinds);
+    for (const k of new Set(kinds)) redacted.push({ where: newKey, kind: k, sample: "replaced" });
+    if (kinds.length) clean.redacted = union(ep.redacted, kinds);
+    const prev = endpoints[newKey];
+    endpoints[newKey] = prev ? {
+      ...prev,
+      n: prev.n + clean.n,
+      status: union(prev.status, clean.status),
+      query: union(prev.query, clean.query),
+      headers: union(prev.headers, clean.headers),
+      auth: union(prev.auth, clean.auth),
+      req: prev.req ?? clean.req,
+      res: prev.res ?? clean.res,
+      ...prev.redacted || clean.redacted ? { redacted: union(prev.redacted, clean.redacted) } : {}
+    } : clean;
+  }
+  const pathOnly = union(report.pathOnly.map((p) => {
+    const r = redactUrl(p);
+    for (const k of new Set(r.kinds)) redacted.push({ where: r.s, kind: k, sample: "replaced" });
+    return r.s;
+  }));
+  return { report: { ...report, endpoints, pathOnly }, redacted };
 }
 function splitKey(key) {
   const sp = key.indexOf(" ");
@@ -12300,17 +12537,28 @@ function buildApiMap(report) {
       authHeaders: ep.auth,
       request: ep.req,
       response: ep.res,
-      functionName: fn
+      functionName: fn,
+      ...ep.redacted?.length ? { privateValues: ep.redacted } : {}
     };
   });
   return {
     origin: report.origin,
     capturedAt: report.capturedAt,
     coverage: report.coverage,
+    identity: {
+      cookies: report.auth?.cookies ?? "browser session (sent automatically, HttpOnly included)",
+      headers: Object.entries(report.auth?.headers ?? {}).map(([name, src]) => ({ name, source: describeAuthSource(src) }))
+    },
     replay: "in-page only: load the kit, then the client, and call window.__ifkApi.<fn>() through the agent's evaluate tool. HttpOnly cookies never leave the browser, so the same calls fail from curl.",
     endpoints,
     pathOnly: report.pathOnly
   };
+}
+function describeAuthSource(s) {
+  const pre = s.prefix ? ` with "${s.prefix.trim()} " prefix` : "";
+  if (s.from === "memory") return `kept in page memory${pre}; __ifk.call reuses it after the site sends it once`;
+  const at = s.path?.length ? `${s.key} -> ${s.path.join(".")}` : s.key;
+  return `${s.from}["${at}"]${pre}; __ifk.call attaches it automatically`;
 }
 function takesBody(ep) {
   return ep.request !== void 0 || ep.method === "POST" || ep.method === "PUT" || ep.method === "PATCH";
@@ -12422,7 +12670,7 @@ function describeEndpoint(ep) {
   if (ep.authHeaders.length) parts.push(`auth ${ep.authHeaders.join(",")}`);
   return parts.filter(Boolean).join("; ");
 }
-var import_fs11, import_os4, import_path12, CaptureError, TYPE_NAMES, DETECTORS, VERB;
+var import_fs11, import_os4, import_path12, CaptureError, TYPE_NAMES, DETECTORS, PLACEHOLDER, union, VERB;
 var init_capture = __esm({
   "src/lib/kit/capture.ts"() {
     "use strict";
@@ -12439,6 +12687,8 @@ var init_capture = __esm({
       ["phone", /\+?\d[\d ().-]{8,}\d/],
       ["token", /(?=[A-Za-z0-9_\-.]*\d)(?=[A-Za-z0-9_\-.]*[A-Za-z])^[A-Za-z0-9_\-.]{24,}$/]
     ];
+    PLACEHOLDER = "{id}";
+    union = (a = [], b = []) => [.../* @__PURE__ */ new Set([...a, ...b])];
     VERB = { GET: "get", HEAD: "head", POST: "create", PUT: "update", PATCH: "update", DELETE: "delete" };
   }
 });
@@ -12449,6 +12699,7 @@ __export(kit_exports, {
   CaptureError: () => CaptureError,
   KIT_TARGETS: () => KIT_TARGETS,
   buildApiMap: () => buildApiMap,
+  describeAuthSource: () => describeAuthSource,
   describeEndpoint: () => describeEndpoint,
   downloadDirs: () => downloadDirs,
   findLatestCapture: () => findLatestCapture,
@@ -12456,6 +12707,7 @@ __export(kit_exports, {
   kitInstructions: () => kitInstructions,
   kitSource: () => kitSource,
   parseCapture: () => parseCapture,
+  redactCapture: () => redactCapture,
   renderClient: () => renderClient,
   renderTypes: () => renderTypes,
   scanCapture: () => scanCapture,
@@ -13704,6 +13956,7 @@ Screenshot: ${shot}`);
         console.error("    --typed              Also write client.d.ts");
         console.error("    --keep               Keep the capture file (default: deleted after ingest)");
         console.error("    --no-knowledge       Don't update ~/.iframer/knowledge");
+        console.error("    --strict             Refuse the capture on any secret-looking value instead of replacing it");
         console.error("    --json               One-line JSON summary");
         process.exit(1);
       }
@@ -13723,6 +13976,8 @@ Screenshot: ${shot}`);
         console.error(`  ${e.message}`);
         process.exit(1);
       }
+      let redacted = [];
+      if (!hasFlag(args, "--strict")) ({ report, redacted } = kit.redactCapture(report));
       const findings = kit.scanCapture(report);
       if (findings.length) {
         removeInput();
@@ -13764,16 +14019,23 @@ Screenshot: ${shot}`);
           })),
           notes: [
             `In-page capture: ${c2.seen} seen, ${c2.withPayload} with payload, ${c2.pathOnly} path only. Not complete: ${c2.blindSpots.join(", ")}.`,
-            "Replay in the page (window.__ifk.call): HttpOnly cookies never leave the browser."
+            "Replay in the page (window.__ifk.call): HttpOnly cookies never leave the browser.",
+            ...map.identity.headers.map((h) => `Auth header ${h.name}: ${h.source}.`),
+            ...redacted.length ? [`Private values replaced with placeholders in ${new Set(redacted.map((r) => r.where)).size} endpoint(s); see privateValues in api.json and pass them per call.`] : []
           ]
         });
       }
       removeInput();
       const c = report.coverage;
       if (json) {
-        console.log(JSON.stringify({ ok: true, origin: report.origin, endpoints: map.endpoints.length, coverage: { seen: c.seen, withPayload: c.withPayload, pathOnly: c.pathOnly }, files: written, inputDeleted: !fromStdin && !hasFlag(args, "--keep") }));
+        console.log(JSON.stringify({ ok: true, origin: report.origin, endpoints: map.endpoints.length, coverage: { seen: c.seen, withPayload: c.withPayload, pathOnly: c.pathOnly }, redacted: redacted.map((r) => ({ kind: r.kind, at: r.where })), files: written, inputDeleted: !fromStdin && !hasFlag(args, "--keep") }));
       } else {
         console.log(`  ${report.origin}: ${map.endpoints.length} endpoints (${c.withPayload} with payload, ${c.pathOnly} path only). Not complete.`);
+        for (const h of map.identity.headers) console.log(`  Identity: ${h.name} <- ${h.source}`);
+        if (redacted.length) {
+          console.log(`  Replaced ${redacted.length} secret-looking value(s) with placeholders ({id}, {key}, "string"):`);
+          for (const r of redacted.slice(0, 10)) console.log(`    ${r.kind} at ${r.where}`);
+        }
         for (const e of map.endpoints.slice(0, 40)) console.log(`    ${e.method.padEnd(6)} ${e.origin === map.origin ? e.path : e.origin + e.path}  -> ${e.functionName}`);
         if (map.endpoints.length > 40) console.log(`    \u2026 ${map.endpoints.length - 40} more in api.json`);
         console.log(`  Wrote: ${written.join(", ")}`);
@@ -14082,6 +14344,7 @@ Screenshot: ${shot}`);
       --out <dir>                   Output directory (default: ./<host>-api/)
       --keep                        Keep the capture file (default: deleted)
       --no-knowledge                Don't update ~/.iframer/knowledge
+      --strict                      Refuse on any secret-looking value instead of replacing it
       --json                        One-line JSON summary
 
   Session:

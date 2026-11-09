@@ -1334,6 +1334,7 @@ async function main() {
         console.error("    --typed              Also write client.d.ts");
         console.error("    --keep               Keep the capture file (default: deleted after ingest)");
         console.error("    --no-knowledge       Don't update ~/.iframer/knowledge");
+        console.error("    --strict             Refuse the capture on any secret-looking value instead of replacing it");
         console.error("    --json               One-line JSON summary");
         process.exit(1);
       }
@@ -1352,6 +1353,10 @@ async function main() {
         process.exit(1);
       }
 
+      // Swap secret-looking values for placeholders and keep the rest.
+      // --strict keeps the old behavior: refuse the whole capture.
+      let redacted = [];
+      if (!hasFlag(args, "--strict")) ({ report, redacted } = kit.redactCapture(report));
       const findings = kit.scanCapture(report);
       if (findings.length) {
         // Fail closed: the capture held something value-like, so it is not safe to keep around.
@@ -1393,6 +1398,8 @@ async function main() {
           notes: [
             `In-page capture: ${c.seen} seen, ${c.withPayload} with payload, ${c.pathOnly} path only. Not complete: ${c.blindSpots.join(", ")}.`,
             "Replay in the page (window.__ifk.call): HttpOnly cookies never leave the browser.",
+            ...map.identity.headers.map((h) => `Auth header ${h.name}: ${h.source}.`),
+            ...(redacted.length ? [`Private values replaced with placeholders in ${new Set(redacted.map((r) => r.where)).size} endpoint(s); see privateValues in api.json and pass them per call.`] : []),
           ],
         });
       }
@@ -1400,9 +1407,14 @@ async function main() {
 
       const c = report.coverage;
       if (json) {
-        console.log(JSON.stringify({ ok: true, origin: report.origin, endpoints: map.endpoints.length, coverage: { seen: c.seen, withPayload: c.withPayload, pathOnly: c.pathOnly }, files: written, inputDeleted: !fromStdin && !hasFlag(args, "--keep") }));
+        console.log(JSON.stringify({ ok: true, origin: report.origin, endpoints: map.endpoints.length, coverage: { seen: c.seen, withPayload: c.withPayload, pathOnly: c.pathOnly }, redacted: redacted.map((r) => ({ kind: r.kind, at: r.where })), files: written, inputDeleted: !fromStdin && !hasFlag(args, "--keep") }));
       } else {
         console.log(`  ${report.origin}: ${map.endpoints.length} endpoints (${c.withPayload} with payload, ${c.pathOnly} path only). Not complete.`);
+        for (const h of map.identity.headers) console.log(`  Identity: ${h.name} <- ${h.source}`);
+        if (redacted.length) {
+          console.log(`  Replaced ${redacted.length} secret-looking value(s) with placeholders ({id}, {key}, "string"):`);
+          for (const r of redacted.slice(0, 10)) console.log(`    ${r.kind} at ${r.where}`);
+        }
         for (const e of map.endpoints.slice(0, 40)) console.log(`    ${e.method.padEnd(6)} ${e.origin === map.origin ? e.path : e.origin + e.path}  -> ${e.functionName}`);
         if (map.endpoints.length > 40) console.log(`    … ${map.endpoints.length - 40} more in api.json`);
         console.log(`  Wrote: ${written.join(", ")}`);
@@ -1728,6 +1740,7 @@ async function main() {
       --out <dir>                   Output directory (default: ./<host>-api/)
       --keep                        Keep the capture file (default: deleted)
       --no-knowledge                Don't update ~/.iframer/knowledge
+      --strict                      Refuse on any secret-looking value instead of replacing it
       --json                        One-line JSON summary
 
   Session:

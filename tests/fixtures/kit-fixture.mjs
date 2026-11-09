@@ -9,6 +9,7 @@ export const SECRETS = {
   phone: "+1-415-555-0199",
   confirmation: "CONF-99X7-SEEDED",
   cookie: "SEEDEDSESSIONCOOKIE42",
+  lsToken: "SEEDEDLSTOKEN_9f8e7d6c5b4a",
 };
 
 export const POLICIES = {
@@ -35,7 +36,10 @@ function record(name, i) {
 const APP_JS = `
 fetch('/api/boot').catch(()=>{});
 const w = new Worker('/worker.js');
+// Like most SPAs: the session token lives in localStorage, nested in JSON.
+localStorage.setItem('session', JSON.stringify({ user: { token: ${JSON.stringify(SECRETS.lsToken)} } }));
 window.runFlow = async function () {
+  await fetch('/api/me', { headers: { Authorization: 'Bearer ' + JSON.parse(localStorage.getItem('session')).user.token } });
   const auth = { Authorization: ${JSON.stringify(SECRETS.bearer)}, 'x-app-version': '4.2.0' };
   await fetch('/api/items/123?limit=5&token=${SECRETS.token}', { headers: auth, credentials: 'include' });
   await fetch('/api/orders', { method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
@@ -86,6 +90,7 @@ export function startFixture() {
         return res.end(`<!doctype html><title>inner</title><button id="inner">inner</button><script src="/inner.js"></script>`);
       }
       if (p === "/inner.js") { res.writeHead(200, { "content-type": "text/javascript" }); return res.end(`document.getElementById('inner').onclick=()=>fetch('/api/from-frame/77',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({note:'x'})});`); }
+      if (p === "/api/me") return req.headers.authorization === "Bearer " + SECRETS.lsToken ? json(200, { id: 7, name: "Seeded Person" }) : json(401, { error: "no token" });
       if (p === "/api/users-by-email") return json(200, { [SECRETS.email]: { id: 1, role: "admin" }, ["other.person@example.com"]: { id: 2, role: "user" } });
       if (p === "/api/wall") { res.writeHead(200, { "content-type": "text/html" }); return res.end("<div class='cf-chl'>Are you a robot?</div>"); }
       if (p === "/favicon.ico") { res.writeHead(204); return res.end(); }

@@ -133,6 +133,7 @@ try {
   check("pre-install call reported as path only", pathOnly.includes("/api/boot"), pathOnly);
   check("coverage never claims completeness", report.coverage.complete === false && report.coverage.blindSpots.length > 0);
   check("POST body recorded as a shape", report.endpoints[`POST ${base}/api/orders`]?.req?.json?.contact?.email === "string", report.endpoints[`POST ${base}/api/orders`]);
+  check("learns where the auth token lives (names only)", JSON.stringify(report.auth?.headers?.authorization) === JSON.stringify({ from: "localStorage", key: "session", path: ["user", "token"], prefix: "Bearer " }), report.auth);
   check("auth headers kept as names only", report.endpoints[`GET ${base}/api/items/{id}`]?.auth?.includes("authorization"));
   check("form submit recorded", Object.keys(report.endpoints).some((k) => k.startsWith(`POST ${base}/submit`)));
   check("email + code in path become {id}", keys.includes("GET /api/people/{id}/{id}"), keys.filter((k) => k.includes("people")));
@@ -172,6 +173,11 @@ try {
   check("client loads and lists functions", Array.isArray(fns) && fns.includes("getItems"), fns);
   const priv = await tab.evaluate(`window.__ifk.call('GET','/api/private')`);
   check("in-page replay carries the HttpOnly cookie", priv?.status === 200, priv);
+  // Fresh page after navigations: the token comes back from where the page keeps it.
+  const me = await tab.evaluate(`window.__ifk.call('GET','/api/me')`);
+  check("replay attaches the page's auth header on its own", me?.status === 200 && me.auth?.includes("authorization"), me);
+  const noAuth = await tab.evaluate(`window.__ifk.call('GET','/api/me',{auth:false})`);
+  check("{auth:false} skips it, and a 401 explains why", noAuth?.status === 401 && typeof noAuth.hint === "string", noAuth);
   const item = await tab.evaluate(`window.__ifkApi.getItems(5, {limit: 1})`);
   check("generated GET works", item?.status === 200 && Array.isArray(item.data?.data), item?.status);
   const write = await tab.evaluate(`window.__ifkApi.createOrders({sku:'x'})`);
@@ -253,14 +259,23 @@ try {
     await t.context.close();
   }
 
-  // ── Privacy gate refuses a leaky capture ──────────────────────────────
+  // ── Private values are separated out, the API is kept ──────────────────
   {
+    const leaky = () => JSON.stringify({ kind: "iframer-capture", v: 1, origin: base, coverage: { seen: 2, withPayload: 1, pathOnly: 0, blindSpots: [] }, endpoints: {
+      [`GET ${base}/api/u/${SECRETS.email}`]: { kind: "fetch", n: 1, status: [200], query: [], headers: [], auth: [] },
+      [`GET https://od-a1b2c3d4e5f6a7b8c9d0e1f2.cdn.test/v1/${SECRETS.lsToken}/feed`]: { kind: "fetch", n: 1, status: [200], query: [], headers: [], auth: [], res: { [SECRETS.email]: "string" } },
+    }, pathOnly: [] });
     const bad = path.join(tmp, "bad");
-    fs.writeFileSync(bad, JSON.stringify({ kind: "iframer-capture", v: 1, origin: base, coverage: { seen: 1, withPayload: 1, pathOnly: 0, blindSpots: [] }, endpoints: { [`GET ${base}/api/u/${SECRETS.email}`]: { kind: "fetch", n: 1, status: [200], query: [], headers: [], auth: [] } }, pathOnly: [] }));
+    fs.writeFileSync(bad, leaky());
+    const out = execFileSync("bun", [path.join(ROOT, "bin/cli.js"), "ingest", bad, "--out", path.join(tmp, "bad-out"), "--no-knowledge", "--json"], { encoding: "utf8" });
+    const sum = JSON.parse(out.trim().split("\n").pop());
+    const api = fs.readFileSync(path.join(tmp, "bad-out", "api.json"), "utf8");
+    check("ingest keeps the API and swaps private values for placeholders", sum.ok === true && sum.redacted.length >= 3 && api.includes("/api/u/{id}") && api.includes("/v1/{id}/feed") && !Object.values(SECRETS).some((v) => api.includes(v)) && !api.includes("od-a1b2"), { sum, api: api.slice(0, 400) });
+    fs.writeFileSync(bad, leaky());
     let code = 0;
-    try { execFileSync("bun", [path.join(ROOT, "bin/cli.js"), "ingest", bad, "--out", path.join(tmp, "bad-out"), "--no-knowledge"], { stdio: "pipe" }); }
+    try { execFileSync("bun", [path.join(ROOT, "bin/cli.js"), "ingest", bad, "--out", path.join(tmp, "strict-out"), "--no-knowledge", "--strict"], { stdio: "pipe" }); }
     catch (e) { code = e.status; }
-    check("ingest refuses a capture with an email in it", code === 2 && !fs.existsSync(path.join(tmp, "bad-out")) && !fs.existsSync(bad), { code });
+    check("--strict still refuses", code === 2 && !fs.existsSync(path.join(tmp, "strict-out")), { code });
   }
 
   // ── --latest finds the newest capture in a T3-style downloads folder ──

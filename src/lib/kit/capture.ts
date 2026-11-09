@@ -24,6 +24,17 @@ export interface CaptureEndpoint {
   auth: string[];
   req?: { json?: Shape; form?: Record<string, string>; multipart?: Record<string, string>; text?: number; binary?: number; unknown?: boolean };
   res?: Shape | { contentType: string; bytes: number };
+  /** Kinds of private values ingest swapped for placeholders (token, email, ...). */
+  redacted?: string[];
+}
+
+/** Where the page keeps an auth header's value. Names only, never the value. */
+export interface AuthSource {
+  from: "localStorage" | "sessionStorage" | "cookie" | "memory";
+  key?: string;
+  json?: boolean;
+  path?: string[];
+  prefix?: string;
 }
 
 export interface CaptureReport {
@@ -33,6 +44,7 @@ export interface CaptureReport {
   capturedAt?: string;
   kit?: { mode: string; hostFilter: string | null };
   coverage: { seen: number; withPayload: number; pathOnly: number; complete?: boolean; blindSpots: string[] };
+  auth?: { cookies?: string; headers?: Record<string, AuthSource> };
   endpoints: Record<string, CaptureEndpoint>;
   pathOnly: string[];
 }
@@ -129,8 +141,8 @@ function scanString(s: string, where: string, out: PrivacyFinding[]) {
   if (TYPE_NAMES.has(s)) return;
   for (const [kind, re] of DETECTORS) {
     if (kind === "token") {
-      // Check each path segment / word, not the whole string.
-      for (const part of s.split(/[/\s?&=#]/)) {
+      // Check each path segment / host label / word, not the whole string.
+      for (const part of splitWords(s)) {
         if (part.includes("{")) continue;
         if (re.test(part)) { out.push({ where, kind, sample: mask(part) }); return; }
       }
@@ -168,6 +180,110 @@ export function scanCapture(report: CaptureReport): PrivacyFinding[] {
   return out;
 }
 
+/** Path segments, host labels and words. Dots split host labels; a file name like a.json stays one part. */
+function splitWords(s: string): string[] {
+  const m = s.match(/^(?:[A-Z]+ )?https?:\/\/([^/]+)(.*)$/);
+  if (!m) return s.split(/[/\s?&=#:;,]/);
+  return [...m[1].split(/[.:]/), ...m[2].split(/[/\s?&=#:;,]/)];
+}
+
+const PLACEHOLDER = "{id}";
+
+/** Replaces value-like parts of a URL-ish string with {id}. Returns the new string and what was replaced. */
+function redactUrl(s: string): { s: string; kinds: string[] } {
+  const kinds: string[] = [];
+  const hit = (part: string): string | null => {
+    if (!part || part.includes("{")) return null;
+    let d = part;
+    try { d = decodeURIComponent(part); } catch {}
+    for (const [kind, re] of DETECTORS) if (re.test(d)) return kind;
+    return null;
+  };
+  const fixSeg = (seg: string): string => {
+    // Value inside a segment, like "file-<token>.json": keep the readable parts.
+    let found = false;
+    const parts = seg.split(/([^A-Za-z0-9_%@+])/).map((p) => {
+      const kk = hit(p);
+      if (kk) { kinds.push(kk); found = true; return PLACEHOLDER; }
+      return p;
+    });
+    if (found) return parts.join("");
+    const k = hit(seg);
+    if (k) { kinds.push(k); return PLACEHOLDER; }
+    return seg;
+  };
+  const m = s.match(/^((?:[A-Z]+ )?https?:\/\/)([^/]+)(.*)$/);
+  if (!m) return { s: s.split("/").map(fixSeg).join("/"), kinds };
+  const host = m[2].split(".").map((l) => {
+    const k = hit(l);
+    if (k) { kinds.push(k); return "x"; } // keep it a valid host; it's never called cross-origin anyway
+    return l;
+  }).join(".");
+  return { s: m[1] + host + m[3].split("/").map(fixSeg).join("/"), kinds };
+}
+
+function redactShape(v: unknown, kinds: string[]): unknown {
+  if (typeof v === "string") {
+    if (TYPE_NAMES.has(v)) return v;
+    const f: PrivacyFinding[] = [];
+    scanString(v, "", f);
+    if (f.length) { kinds.push(f[0].kind); return "string"; }
+    return v;
+  }
+  if (Array.isArray(v)) return v.map((x) => redactShape(x, kinds));
+  if (v && typeof v === "object") {
+    const o: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v)) {
+      const f: PrivacyFinding[] = [];
+      scanString(k, "", f);
+      const key = f.length ? "{key}" : k;
+      if (f.length) kinds.push(f[0].kind);
+      if (!(key in o)) o[key] = redactShape(x, kinds);
+    }
+    return o;
+  }
+  return v;
+}
+
+const union = <T>(a: T[] = [], b: T[] = []) => [...new Set([...a, ...b])];
+
+/**
+ * Swaps anything secret-looking for a placeholder instead of refusing the
+ * capture: path pieces and host labels become {id}, keys become {key}, string
+ * values become "string". Endpoints that collapse into the same key merge.
+ * Run scanCapture after this; anything left means redaction failed.
+ */
+export function redactCapture(report: CaptureReport): { report: CaptureReport; redacted: PrivacyFinding[] } {
+  const redacted: PrivacyFinding[] = [];
+  const endpoints: CaptureReport["endpoints"] = {};
+  for (const [key, ep] of Object.entries(report.endpoints)) {
+    const kinds: string[] = [];
+    const { s: newKey, kinds: keyKinds } = redactUrl(key);
+    kinds.push(...keyKinds);
+    const clean = { ...ep };
+    clean.query = union((ep.query || []).map((q) => { const f: PrivacyFinding[] = []; scanString(q, "", f); if (f.length) kinds.push(f[0].kind); return f.length ? "{key}" : q; }));
+    clean.headers = (ep.headers || []).filter((h) => { const f: PrivacyFinding[] = []; scanString(h, "", f); if (f.length) kinds.push(f[0].kind); return !f.length; });
+    if (ep.req !== undefined) clean.req = redactShape(ep.req, kinds) as typeof ep.req;
+    if (ep.res !== undefined) clean.res = redactShape(ep.res, kinds) as typeof ep.res;
+    for (const k of new Set(kinds)) redacted.push({ where: newKey, kind: k, sample: "replaced" });
+    if (kinds.length) clean.redacted = union(ep.redacted, kinds);
+    const prev = endpoints[newKey];
+    endpoints[newKey] = prev ? {
+      ...prev, n: prev.n + clean.n,
+      status: union(prev.status, clean.status), query: union(prev.query, clean.query),
+      headers: union(prev.headers, clean.headers), auth: union(prev.auth, clean.auth),
+      req: prev.req ?? clean.req, res: prev.res ?? clean.res,
+      ...(prev.redacted || clean.redacted ? { redacted: union(prev.redacted, clean.redacted) } : {}),
+    } : clean;
+  }
+  const pathOnly = union(report.pathOnly.map((p) => {
+    const r = redactUrl(p);
+    for (const k of new Set(r.kinds)) redacted.push({ where: r.s, kind: k, sample: "replaced" });
+    return r.s;
+  }));
+  return { report: { ...report, endpoints, pathOnly }, redacted };
+}
+
 // ─── Artifacts ─────────────────────────────────────────────────────────────
 
 export interface EndpointSpec {
@@ -183,6 +299,8 @@ export interface EndpointSpec {
   request?: CaptureEndpoint["req"];
   response?: CaptureEndpoint["res"];
   functionName: string;
+  /** Private values seen in this endpoint, now placeholders: pass them per call. */
+  privateValues?: string[];
 }
 
 export interface ApiMap {
@@ -190,6 +308,8 @@ export interface ApiMap {
   capturedAt?: string;
   coverage: CaptureReport["coverage"];
   replay: string;
+  /** What a call needs to act as the logged-in user. Values are never stored. */
+  identity: { cookies: string; headers: Array<{ name: string; source: string }> };
   endpoints: EndpointSpec[];
   pathOnly: string[];
 }
@@ -236,16 +356,28 @@ export function buildApiMap(report: CaptureReport): ApiMap {
         method, origin, path: p, kind: ep.kind, calls: ep.n,
         status: ep.status, query: ep.query, headers: ep.headers, authHeaders: ep.auth,
         request: ep.req, response: ep.res, functionName: fn,
+        ...(ep.redacted?.length ? { privateValues: ep.redacted } : {}),
       };
     });
   return {
     origin: report.origin,
     capturedAt: report.capturedAt,
     coverage: report.coverage,
+    identity: {
+      cookies: report.auth?.cookies ?? "browser session (sent automatically, HttpOnly included)",
+      headers: Object.entries(report.auth?.headers ?? {}).map(([name, src]) => ({ name, source: describeAuthSource(src) })),
+    },
     replay: "in-page only: load the kit, then the client, and call window.__ifkApi.<fn>() through the agent's evaluate tool. HttpOnly cookies never leave the browser, so the same calls fail from curl.",
     endpoints,
     pathOnly: report.pathOnly,
   };
+}
+
+export function describeAuthSource(s: AuthSource): string {
+  const pre = s.prefix ? ` with "${s.prefix.trim()} " prefix` : "";
+  if (s.from === "memory") return `kept in page memory${pre}; __ifk.call reuses it after the site sends it once`;
+  const at = s.path?.length ? `${s.key} -> ${s.path.join(".")}` : s.key;
+  return `${s.from}["${at}"]${pre}; __ifk.call attaches it automatically`;
 }
 
 /** Body param only where the method usually carries one, or one was seen. */

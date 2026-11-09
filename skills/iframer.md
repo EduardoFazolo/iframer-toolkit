@@ -182,7 +182,8 @@ When you already drive a browser through your own tools (a T3 Code preview tab, 
 - Writes need `{approved:true}`: ask the user first. Replays stop for good on 403, 429 or a captcha page. Do not retry or work around it.
 - Sites that detect tampering: `iframer kit --mode passive` (no patching; URLs and form posts only).
 - Report coverage as the kit states it. It is never complete: workers, redirect hops and cross-origin iframes are invisible.
-- `ingest` refuses (exit 2) if anything value-like slipped into the capture. Don't edit the file to force it through; tell the user what was found.
+- Private values are separated from the API, not a reason to stop. `ingest` swaps anything token-, email- or phone-like for a placeholder (`{id}` in paths, `{key}` for keys) and lists what it replaced. Endpoints that had one carry `privateValues` in api.json: pass that value per call.
+- Identity: api.json `identity` (and the knowledge file) says which auth headers the site sends and where the page keeps each value, e.g. `localStorage["session -> user.token"]`. `__ifk.call` attaches them on its own, cookies included. If a call returns 401 with a `hint`, use the site once so it sends its token, then retry.
 
 ### Handle captchas
 
