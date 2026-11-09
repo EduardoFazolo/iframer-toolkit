@@ -33,6 +33,33 @@ function record(name, i) {
   };
 }
 
+// ── Fake Next.js App Router app: /[communitySlug]/dashboard/... ──────────
+// Server Action ids change on every "deploy" (GET /__deploy); export names don't.
+const ACTION_IDS = ["7f3a9c1e2b4d6f8a0c1e3b5d7f9a1c3e5b7d9f1a", "40d2e8b6a4c2e0f8d6b4a2c0e8f6d4b2a0c8e6f4"];
+let deploy = 0;
+const actionId = () => ACTION_IDS[deploy % 2];
+const NEXT_TREE = '0:{"b":"build1","f":[["",{"children":[["communitySlug","acme","d"],{"children":["dashboard",{"children":["__PAGE__",{}]}]}]}]]}\n';
+const nextAppJs = () => `
+self.__next_f = self.__next_f || [];
+self.__next_f.push([1, ${JSON.stringify(NEXT_TREE)}]);
+window.runNext = async function () {
+  await fetch('/acme/dashboard/campaigns?_rsc=x1', { headers: { RSC: '1' } });
+  await fetch(location.pathname, { method: 'POST', headers: { 'next-action': ${JSON.stringify(actionId())}, accept: 'text/x-component', 'content-type': 'text/plain;charset=UTF-8' }, body: JSON.stringify([{ communitySlug: 'acme' }]) });
+};`;
+const nextActionsJs = () =>
+  `var s={createServerReference:function(){return function(){}},callServer:0,findSourceMapURL:0};` +
+  `window.getRestaurantsRef=(0,s.createServerReference)(${JSON.stringify(actionId())},s.callServer,void 0,s.findSourceMapURL,"getRestaurants");`;
+// RSC flight rows: an import (I), a text row with a byte length (T, multibyte on purpose), and the element tree.
+const campaignsFlight = () => {
+  const note = "Café night ✓";
+  return [
+    `1:I["123",["static/chunks/c.js"],"CampaignsTable"]`,
+    `2:T${Buffer.byteLength(note).toString(16)},${note}`,
+    `0:["$","div",null,{"children":[["$","$L1",null,{"campaigns":[{"id":11,"title":"Spring","active":true,"note":"$2"}],"community":"acme"}]]}]`,
+    ``,
+  ].join("\n");
+};
+
 const APP_JS = `
 fetch('/api/boot').catch(()=>{});
 const w = new Worker('/worker.js');
@@ -73,6 +100,24 @@ export function startFixture() {
         res.writeHead(code, { "content-type": "application/json", ...extra });
         res.end(JSON.stringify(body));
       };
+      if (p === "/__deploy") { deploy++; return json(200, { deploy }); }
+      if (p === "/_next/static/chunks/app.js") { res.writeHead(200, { "content-type": "text/javascript", "cache-control": "no-store" }); return res.end(nextAppJs()); }
+      if (p === "/_next/static/chunks/actions.js") { res.writeHead(200, { "content-type": "text/javascript", "cache-control": "no-store" }); return res.end(nextActionsJs()); }
+      if (p === "/acme/dashboard" && req.method === "GET") {
+        res.writeHead(200, { "content-type": "text/html", "content-security-policy": POLICIES.strict, "set-cookie": `sid=${SECRETS.cookie}; HttpOnly; Path=/; SameSite=Lax` });
+        return res.end(`<!doctype html><title>dashboard</title><script src="/_next/static/chunks/app.js"></script><script src="/_next/static/chunks/actions.js"></script>`);
+      }
+      if (p === "/acme/dashboard/campaigns") {
+        if (req.headers.rsc !== "1") { res.writeHead(200, { "content-type": "text/html" }); return res.end("<!doctype html><div>campaigns page</div>"); }
+        res.writeHead(200, { "content-type": "text/x-component" });
+        return res.end(campaignsFlight());
+      }
+      if (p === "/acme/dashboard" && req.method === "POST" && req.headers["next-action"]) {
+        if (req.headers["next-action"] !== actionId()) { res.writeHead(404, { "content-type": "text/plain" }); return res.end("Server action not found."); }
+        const [arg] = JSON.parse(raw || "[]");
+        res.writeHead(200, { "content-type": "text/x-component" });
+        return res.end(`0:{"a":"$@1","f":"","b":"build1"}\n1:[{"id":1,"name":"Bistro ü","city":"Wichita","community":${JSON.stringify(arg?.communitySlug ?? null)}}]\n`);
+      }
       if (p === "/app.js") { res.writeHead(200, { "content-type": "text/javascript" }); return res.end(APP_JS); }
       if (p === "/worker.js") { res.writeHead(200, { "content-type": "text/javascript" }); return res.end(WORKER_JS); }
       if (p === "/no-storage") {

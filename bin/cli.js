@@ -1291,6 +1291,16 @@ async function main() {
 
     // ─── In-page capture kit (any agent browser, T3 Code first) ─────
 
+    case "refresh": {
+      // Rewrites files copied out of the package: the in-page kit and the /iframer skill.
+      const kit = await import("../src/lib/kit/index.ts");
+      const kitPath = kit.writeKit({});
+      const skill = installSkill();
+      console.log(`  Kit: ${kitPath}`);
+      console.log(skill ? "  Skill: ~/.claude/commands/iframer.md" : "  Skill: not found in the package, skipped");
+      break;
+    }
+
     case "kit": {
       const kit = await import("../src/lib/kit/index.ts");
       const target = parseFlag(args, "--for") || "t3";
@@ -1657,6 +1667,10 @@ async function main() {
         console.error("    sudo npm install -g iframer-toolkit@latest");
         process.exit(1);
       }
+      // The new version's files: rewrite the in-page kit and the /iframer skill
+      // so agents don't keep uploading the old ones. Runs the NEW binary.
+      try { require("child_process").execSync("iframer refresh", { stdio: "inherit" }); }
+      catch { console.error("  Could not refresh the kit and skill. Run: iframer refresh"); }
       console.log();
       const hasExt = extensionInstalled();
       await reloadAndRestartServer(hasExt);
@@ -1785,6 +1799,7 @@ async function main() {
     extension path                  Print the extension folder to load in chrome://extensions
     extension token                 Print the pairing token (only needed to pair by hand)
     update                        Update iframer via npm; reload the extension too if it's installed
+    refresh                       Rewrite the in-page kit and the /iframer skill from this version (update does it)
     update --check                  Report whether a newer version is available (no install)
     version, --version, -v          Print the installed version
     remove                          Remove everything (Chromium + MCP)

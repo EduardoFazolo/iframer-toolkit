@@ -268,6 +268,7 @@ Setup:
   extension path                   Print the extension folder to load in chrome://extensions
   extension token                  Print the pairing token (only needed to pair by hand)
   update [--check]                 Update iframer via npm (--check: report only)
+  refresh                          Rewrite the in-page kit and the /iframer skill (update runs it)
   remove [chromium|mcp|extension]  Remove everything, or one piece
 
 Browser:
@@ -344,6 +345,7 @@ iframer ingest --latest --typed # finds the capture in T3's downloads -> ./<host
 - **Identity, without the values:** the kit learns which auth headers the page sends and where it keeps each value (a localStorage key, a field inside it, a cookie, or page memory). api.json records that under `identity`, and `__ifk.call` rebuilds the headers from there for every replay, so the generated client acts as the logged-in user.
 - **Output:** `api.json` (endpoint map with coverage), `client.js` (in-page client over `window.__ifk.call`), `client.d.ts` with `--typed`, and the domain's knowledge file.
 - **Replay stays in the page:** HttpOnly cookies are invisible to page JS, so generated calls run through the tab. Same-origin only, GET unless approved, 50 calls per session, and a hard stop on 403, 429 or a captcha page.
+- **Next.js:** dynamic route segments are named from the app's own route data, so `/wichitalife/dashboard` is saved as `/{communitySlug}/dashboard` and the client takes `communitySlug` as an argument. RSC responses (`text/x-component`) become data: the props the server passed to each client component, or a Server Action's return value. Server Actions are saved by export name and called with `window.__ifk.action(name, [args], {approved:true})`. The id is looked up again in the page's JS on every call, so it keeps working after a deploy.
 - **Not complete:** worker requests, redirect hops, cross-origin iframes and Set-Cookie are invisible to the kit, and every report says so.
 - **Survives the page:** after a full page load the agent re-runs one short `eval` and the capture continues. Works on sites that delete `window.sessionStorage` (Discord).
 - **Other tools:** `--for playwright-mcp` or `--for any`. Tools without file upload can evaluate `iframer kit --print` instead, which costs about 17 KB per page load.

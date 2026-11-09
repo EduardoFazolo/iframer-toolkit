@@ -191,6 +191,65 @@ try {
   check("stop() removes hooks and state", stopped[0] === "undefined" && stopped[1] === true && stopped[2] === null, stopped);
   await tab.context.close();
 
+  // ── Next.js: route params, RSC data, Server Actions across a deploy ──
+  {
+    const t = await openTab();
+    await t.page.goto(`${base}/acme/dashboard`, { waitUntil: "load" });
+    // An older kit is already in the tab: installing must replace it, not no-op.
+    await t.evaluate(fs.readFileSync(KIT, "utf8").replace(/"build":"[^"]+"/, '"build":"oldbuild1"'));
+    const r = await bridgeInstall(t);
+    check("replaces an older kit already in the tab", r?.installed === true && r.replaced === "oldbuild1" && r.again === false, r);
+    check("detects Next.js", r?.nextjs === true, r);
+    await t.evaluate(`window.runNext().then(()=>1)`);
+    await t.page.waitForTimeout(600);
+    const rep = JSON.parse(await t.evaluate(`window.__ifk.drain(0, 1e8).chunk`));
+    const keys = Object.keys(rep.endpoints).map((k) => k.replace(base, ""));
+    check("route segment named from Next.js's own route data", keys.includes("GET /{communitySlug}/dashboard/campaigns"), keys);
+    const camp = rep.endpoints[`GET ${base}/{communitySlug}/dashboard/campaigns`];
+    check("RSC response becomes component data shapes", camp?.res?.rsc?.components?.CampaignsTable?.campaigns?.[0]?.title === "string" && camp.res.rsc.components.CampaignsTable.campaigns[0].note === "string", camp?.res);
+    const act = rep.endpoints[`POST ${base}/{communitySlug}/dashboard#getRestaurants`];
+    check("Server Action recorded under its export name, with its return shape", act?.next?.name === "getRestaurants" && act?.res?.rsc?.action?.[0]?.city === "string", keys);
+    check("no route values or data values in the export", !/acme|Bistro|Spring|Wichita/.test(JSON.stringify(rep)));
+
+    const cap = path.join(tmp, "next-capture");
+    fs.writeFileSync(cap, JSON.stringify(rep));
+    const outN = path.join(tmp, "next-out");
+    execFileSync("bun", [path.join(ROOT, "bin/cli.js"), "ingest", cap, "--out", outN, "--typed", "--no-knowledge", "--json"], { encoding: "utf8" });
+    const client = fs.readFileSync(path.join(outN, "client.js"), "utf8");
+    check("client takes the route param by name and asks for RSC", client.includes("getDashboardCampaigns: function (communitySlug, query, opts)") && client.includes("rsc: true"), client.split("\n").filter((l) => l.includes(": function")));
+    check("client calls the Server Action by name", client.includes(`getRestaurants: function (args, opts) { return a("getRestaurants", args, opts); }`));
+    const tsc = path.join(ROOT, "node_modules/.bin/tsc");
+    if (fs.existsSync(tsc)) {
+      try { execFileSync(tsc, ["--ignoreConfig", "--noEmit", "--strict", "--lib", "es2020,dom", path.join(outN, "client.d.ts")], { encoding: "utf8" }); check("Next client.d.ts type-checks", true); }
+      catch (e) { check("Next client.d.ts type-checks", false, e.stdout || e.message); }
+    }
+
+    const loadClient = async () => {
+      await t.evaluate(MAKE_INPUT);
+      await t.page.locator("#__ifk_in").setInputFiles([path.join(outN, "client.js")]);
+      await t.evaluate(kit.kitInstructions("t3", KIT, "x").split("\n").find((l) => l.startsWith("c. preview_evaluate: ")).replace("c. preview_evaluate: ", ""));
+      return t.evaluate(`eval(sessionStorage.__ifkApi)`);
+    };
+    await loadClient();
+    const c = await t.evaluate(`window.__ifkApi.getDashboardCampaigns('acme')`);
+    check("RSC replay returns page data, not HTML", c?.data?.components?.CampaignsTable?.campaigns?.[0]?.title === "Spring" && c.data.components.CampaignsTable.campaigns[0].note === "Café night ✓", c);
+    const html = await t.evaluate(`window.__ifk.call('GET','/acme/dashboard/campaigns')`);
+    check("plain GET on a Next page explains the RSC header", html?.hint?.includes("rsc:true"), html);
+    const noOk = await t.evaluate(`window.__ifkApi.getRestaurants([{communitySlug:'acme'}])`);
+    check("Server Action needs approval", noOk?.error === "write needs approval", noOk);
+    const a1 = await t.evaluate(`window.__ifkApi.getRestaurants([{communitySlug:'acme'}],{approved:true})`);
+    check("Server Action replay returns its value", a1?.status === 200 && a1.data?.[0]?.name === "Bistro ü" && a1.data[0].community === "acme", a1);
+
+    await fetch(`${base}/__deploy`);
+    await t.page.reload({ waitUntil: "load" });
+    await t.evaluate(INSTALL);
+    await t.evaluate(`eval(sessionStorage.__ifkApi)`);
+    const a2 = await t.evaluate(`window.__ifkApi.getRestaurants([{communitySlug:'acme'}],{approved:true})`);
+    check("Server Action still works after a deploy changes its id", a2?.status === 200 && a2.data?.[0]?.name === "Bistro ü" && a2.actionId !== a1.actionId, { a1: a1?.actionId, a2 });
+    await fetch(`${base}/__deploy`); // back to the first id for any later run
+    await t.context.close();
+  }
+
   // ── Bot wall stops replays ────────────────────────────────────────────
   {
     const t = await openTab();

@@ -140,7 +140,7 @@ describe("kit source + instructions", () => {
   test("kit is one self-contained expression with options baked in", () => {
     const src = kitSource({ mode: "passive", hostFilter: "example" });
     expect(src.startsWith("(function pageKit(")).toBe(true);
-    expect(src).toContain(`({"mode":"passive","hostFilter":"example"})`);
+    expect(src).toMatch(/\(\{"mode":"passive","hostFilter":"example","build":"[0-9a-f]{10}"\}\);/);
     expect(src).not.toMatch(/\beval\(|new Function/);
   });
   test("T3 steps use upload + sessionStorage + top-level eval", () => {

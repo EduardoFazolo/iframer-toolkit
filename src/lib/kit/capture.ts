@@ -26,6 +26,8 @@ export interface CaptureEndpoint {
   res?: Shape | { contentType: string; bytes: number };
   /** Kinds of private values ingest swapped for placeholders (token, email, ...). */
   redacted?: string[];
+  /** Next.js Server Action: its id (a public build hash, changes per deploy) and export name. */
+  next?: { action: string; name?: string };
 }
 
 /** Where the page keeps an auth header's value. Names only, never the value. */
@@ -174,7 +176,7 @@ export function scanCapture(report: CaptureReport): PrivacyFinding[] {
   for (const [key, ep] of Object.entries(report.endpoints)) {
     const where = `endpoints["${key.length > 80 ? key.slice(0, 80) + "…" : key}"]`;
     scanString(key, where, out);
-    walkValues(ep, where, out);
+    walkValues({ ...ep, next: undefined }, where, out); // action ids are public build hashes
   }
   report.pathOnly.forEach((p, i) => scanString(p, `pathOnly[${i}]`, out));
   return out;
@@ -299,6 +301,10 @@ export interface EndpointSpec {
   request?: CaptureEndpoint["req"];
   response?: CaptureEndpoint["res"];
   functionName: string;
+  /** Next.js: send with the RSC header to get page data instead of HTML. */
+  rsc?: boolean;
+  /** Next.js Server Action, called by export name through window.__ifk.action. */
+  action?: { name?: string; id: string };
   /** Private values seen in this endpoint, now placeholders: pass them per call. */
   privateValues?: string[];
 }
@@ -318,7 +324,7 @@ function splitKey(key: string): { method: string; origin: string; path: string }
   const sp = key.indexOf(" ");
   const method = key.slice(0, sp);
   const rest = key.slice(sp + 1);
-  const m = rest.match(/^(https?:\/\/[^/]+)(\/.*)?$/);
+  const m = rest.split("#")[0].match(/^(https?:\/\/[^/]+)(\/.*)?$/);
   return { method, origin: m ? m[1] : "", path: m?.[2] || "/" };
 }
 
@@ -348,7 +354,7 @@ export function buildApiMap(report: CaptureReport): ApiMap {
     .map(([key, ep]) => ({ key, ep, ...splitKey(key) }))
     .sort((a, b) => (a.path === b.path ? a.method.localeCompare(b.method) : a.path.localeCompare(b.path)))
     .map(({ ep, method, origin, path: p }) => {
-      let fn = functionNameFor(method, p, ep.res, ep.kind);
+      let fn = ep.next?.name || (ep.next ? "action" + (pascal(p.split("/").filter((x) => x && !x.startsWith("{")).slice(-2).join(" ")) || "Root") : functionNameFor(method, p, ep.res, ep.kind));
       const n = used.get(fn) ?? 0;
       used.set(fn, n + 1);
       if (n) fn += n + 1;
@@ -357,6 +363,8 @@ export function buildApiMap(report: CaptureReport): ApiMap {
         status: ep.status, query: ep.query, headers: ep.headers, authHeaders: ep.auth,
         request: ep.req, response: ep.res, functionName: fn,
         ...(ep.redacted?.length ? { privateValues: ep.redacted } : {}),
+        ...((ep.headers || []).includes("rsc") || (ep.query || []).includes("_rsc") ? { rsc: true } : {}),
+        ...(ep.next ? { action: { name: ep.next.name, id: ep.next.action } } : {}),
       };
     });
   return {
@@ -380,6 +388,19 @@ export function describeAuthSource(s: AuthSource): string {
   return `${s.from}["${at}"]${pre}; __ifk.call attaches it automatically`;
 }
 
+/** Function parameter names for a templated path: {id} -> id, id2...; {communitySlug} -> communitySlug. */
+function pathParams(p: string): string[] {
+  const used = new Set<string>();
+  return (p.match(/\{([^}]+)\}/g) || []).map((m) => {
+    let base = m.slice(1, -1).replace(/[^A-Za-z0-9_$]/g, "_");
+    if (!/^[A-Za-z_$]/.test(base)) base = "p_" + base;
+    let name = base, n = 2;
+    while (used.has(name)) name = `${base}${n++}`;
+    used.add(name);
+    return name;
+  });
+}
+
 /** Body param only where the method usually carries one, or one was seen. */
 function takesBody(ep: EndpointSpec): boolean {
   return ep.request !== undefined || ep.method === "POST" || ep.method === "PUT" || ep.method === "PATCH";
@@ -398,6 +419,10 @@ export function renderClient(map: ApiMap): string {
   lines.push(`    if (!window.__ifk) return Promise.resolve({ error: "NOT_INSTALLED: eval(sessionStorage.__ifk) first" });`);
   lines.push(`    return window.__ifk.call(m, p, o);`);
   lines.push(`  }`);
+  lines.push(`  function a(name, args, o) {`);
+  lines.push(`    if (!window.__ifk) return Promise.resolve({ error: "NOT_INSTALLED: eval(sessionStorage.__ifk) first" });`);
+  lines.push(`    return window.__ifk.action(name, args, o);`);
+  lines.push(`  }`);
   lines.push(`  function q(query) {`);
   lines.push(`    if (!query) return "";`);
   lines.push(`    var s = new URLSearchParams(query).toString();`);
@@ -407,19 +432,21 @@ export function renderClient(map: ApiMap): string {
   for (const ep of map.endpoints) {
     if (ep.kind === "ws" || ep.kind === "sse" || ep.kind === "beacon") { skipped.push(`${ep.kind} ${ep.path}`); continue; }
     if (ep.origin !== map.origin) { skipped.push(`${ep.method} ${ep.origin}${ep.path} (cross-origin)`); continue; }
-    let ids = 0;
-    const params: string[] = [];
-    const urlExpr = JSON.stringify(ep.path).replace(/\{id\}/g, () => {
-      const name = ids++ === 0 ? "id" : `id${ids}`;
-      params.push(name);
-      return `" + encodeURIComponent(${name}) + "`;
-    }).replace(/ \+ ""$/, "").replace(/^"" \+ /, "");
+    if (ep.action) {
+      const ref = JSON.stringify(ep.action.name || ep.action.id);
+      lines.push(`    // Next.js Server Action at ${ep.path}. args: array of the action's arguments. Needs {approved:true}.`);
+      lines.push(`    ${ep.functionName}: function (args, opts) { return a(${ref}, args, opts); },`);
+      continue;
+    }
+    const params = pathParams(ep.path);
+    let i = 0;
+    const urlExpr = JSON.stringify(ep.path).replace(/\{[^}]+\}/g, () => `" + encodeURIComponent(${params[i++]}) + "`)
+      .replace(/ \+ ""$/, "").replace(/^"" \+ /, "");
     const hasBody = takesBody(ep);
     if (hasBody) params.push("body");
     params.push("query", "opts");
-    const optsExpr = hasBody
-      ? `Object.assign({ json: body }, opts)`
-      : `opts`;
+    const base = [hasBody ? "json: body" : "", ep.rsc ? "rsc: true" : ""].filter(Boolean).join(", ");
+    const optsExpr = base ? `Object.assign({ ${base} }, opts)` : `opts`;
     const doc = [
       ep.query.length ? `query: ${ep.query.join(", ")}` : "",
       ep.status.length ? `seen ${ep.status.join("/")}` : "",
@@ -456,11 +483,18 @@ function tsType(s: unknown, indent = "  "): string {
 export function renderTypes(map: ApiMap): string {
   const out: string[] = [`// Generated by \`iframer ingest\` from ${map.origin}. Shapes come from one sample each: fields may be optional.`];
   out.push(`type IfkResult<T> = Promise<{ status?: number; data?: T; text?: string; truncated?: number; error?: string; stopped?: string }>;`);
-  out.push(`type IfkOpts = { approved?: boolean; headers?: Record<string, string>; maxBytes?: number };`);
+  out.push(`type IfkOpts = { approved?: boolean; headers?: Record<string, string>; maxBytes?: number; full?: boolean; rsc?: boolean; auth?: boolean };`);
   out.push(`interface IfkApi {`);
   for (const ep of map.endpoints) {
     if (ep.kind === "ws" || ep.kind === "sse" || ep.kind === "beacon" || ep.origin !== map.origin) continue;
-    const ids = (ep.path.match(/\{id\}/g) || []).map((_, i) => `${i ? `id${i + 1}` : "id"}: string | number`);
+    if (ep.action) {
+      const args = ep.request?.json !== undefined ? tsType(ep.request.json, "  ") : "unknown[]";
+      const r = (ep.response as any)?.rsc?.action;
+      out.push(`  /** Next.js Server Action ${ep.action.name || ep.action.id.slice(0, 8)} at ${ep.path} */`);
+      out.push(`  ${ep.functionName}(args: ${args}, opts?: IfkOpts): IfkResult<${r !== undefined ? tsType(r, "  ") : "unknown"}>;`);
+      continue;
+    }
+    const ids = pathParams(ep.path).map((n) => `${n}: string | number`);
     const hasBody = takesBody(ep);
     const req = ep.request?.json !== undefined ? tsType(ep.request.json, "  ")
       : ep.request?.form || ep.request?.multipart ? "Record<string, string>" : "unknown";
@@ -489,7 +523,7 @@ function shortShape(s: unknown, depth = 0): string {
 
 /** One-line description for the knowledge file. */
 export function describeEndpoint(ep: EndpointSpec): string {
-  const parts = [ep.kind, ep.status.length ? `status ${ep.status.join("/")}` : ""];
+  const parts = [ep.action ? `Next.js Server Action ${ep.action.name || ep.action.id.slice(0, 8)}` : ep.kind, ep.rsc ? "RSC (page data)" : "", ep.status.length ? `status ${ep.status.join("/")}` : ""];
   if (ep.request?.json !== undefined) parts.push(`body ${shortShape(ep.request.json)}`);
   else if (ep.request?.form) parts.push(`form ${Object.keys(ep.request.form).join(",")}`);
   if (ep.response !== undefined) parts.push(`returns ${shortShape(ep.response)}`);

@@ -11621,10 +11621,12 @@ function pageKit(opts) {
   var w = window;
   var VERSION = 1;
   var KEY = "__ifk_state";
-  if (w.__ifk && w.__ifk.version === VERSION) {
+  var BUILD = opts.build || "dev";
+  if (w.__ifk && w.__ifk.version === VERSION && w.__ifk.build === BUILD) {
     var s0 = w.__ifk.summary();
     return { installed: true, again: true, version: VERSION, seen: s0.seen };
   }
+  var replaced = null;
   var mode = opts.mode === "passive" ? "passive" : "hook";
   var hostRe = null;
   try {
@@ -11652,6 +11654,20 @@ function pageKit(opts) {
     }
   }
   var ss = store();
+  if (w.__ifk && w.__ifk.stop) {
+    replaced = w.__ifk.build || "old";
+    try {
+      var keep = {};
+      [KEY, "__ifk", "__ifkApi"].forEach(function(k) {
+        keep[k] = ss && ss.getItem(k);
+      });
+      w.__ifk.stop();
+      Object.keys(keep).forEach(function(k) {
+        if (keep[k] != null) ss.setItem(k, keep[k]);
+      });
+    } catch (e) {
+    }
+  }
   function lstore() {
     try {
       if (w.localStorage) return w.localStorage;
@@ -11669,6 +11685,8 @@ function pageKit(opts) {
   var budget = { calls: 0, stopped: null };
   var authSrc = {};
   var authMem = {};
+  var rp = {};
+  var acts = {};
   var restored = 0;
   try {
     var saved = JSON.parse(ss.getItem(KEY) || "null");
@@ -11677,6 +11695,7 @@ function pageKit(opts) {
       po = saved.po || {};
       if (saved.budget) budget = saved.budget;
       if (saved.authSrc) authSrc = saved.authSrc;
+      if (saved.acts) acts = saved.acts;
       restored = Object.keys(m).length;
     }
   } catch (e) {
@@ -11702,8 +11721,221 @@ function pageKit(opts) {
   }
   function tpl(p) {
     return p.split("/").map(function(s) {
+      var d = s;
+      try {
+        d = decodeURIComponent(s);
+      } catch (e) {
+      }
+      if (s && rp.hasOwnProperty(d)) return "{" + rp[d] + "}";
       return isValueLike(s) ? "{id}" : s;
     }).join("/");
+  }
+  var PARAM_RE = /\["([A-Za-z_][\w-]{0,40})","([^"\\\/]{1,80})","(?:d|c|oc|ci|dc)"/g;
+  function learnParams(text) {
+    if (!text || text.indexOf('","d"') < 0 && text.indexOf('","c"') < 0 && text.indexOf('","oc"') < 0) return;
+    PARAM_RE.lastIndex = 0;
+    var x;
+    while (x = PARAM_RE.exec(text)) if (!rp.hasOwnProperty(x[2])) rp[x[2]] = x[1];
+  }
+  var nextIdx = 0;
+  function scanNext() {
+    try {
+      var f = w.__next_f;
+      if (f && f.length > nextIdx) {
+        for (var i = nextIdx; i < f.length; i++) if (f[i] && typeof f[i][1] === "string") learnParams(f[i][1]);
+        nextIdx = f.length;
+      }
+    } catch (e) {
+    }
+    try {
+      var q = w.__NEXT_DATA__ && w.__NEXT_DATA__.query;
+      if (q) Object.keys(q).forEach(function(k) {
+        if (typeof q[k] === "string" && !rp.hasOwnProperty(q[k])) rp[q[k]] = k;
+      });
+    } catch (e) {
+    }
+  }
+  function learnFromBody(b, u) {
+    if (typeof b !== "string" || b.length > 2e4) return;
+    var j;
+    try {
+      j = JSON.parse(b);
+    } catch (e) {
+      return;
+    }
+    var segs = {};
+    (u.pathname + "/" + location.pathname).split("/").forEach(function(s) {
+      if (s) {
+        try {
+          segs[decodeURIComponent(s)] = 1;
+        } catch (e) {
+        }
+      }
+    });
+    (function walk(v, d) {
+      if (!v || typeof v !== "object" || d > 3) return;
+      Object.keys(v).forEach(function(k) {
+        var x = v[k];
+        if (typeof x === "string" && x.length > 1 && segs[x] && /(id|slug|key|handle|code|name)$/i.test(k) && !rp.hasOwnProperty(x)) rp[x] = k;
+        else walk(x, d + 1);
+      });
+    })(j, 0);
+  }
+  function parseFlight(t) {
+    var rows = {};
+    try {
+      var b = new TextEncoder().encode(t), dec = new TextDecoder(), i = 0, n = b.length;
+      while (i < n) {
+        var c = i;
+        while (c < n && b[c] !== 58 && b[c] !== 10) c++;
+        if (c >= n) break;
+        if (b[c] === 10) {
+          i = c + 1;
+          continue;
+        }
+        var id = dec.decode(b.subarray(i, c));
+        var j = c + 1;
+        if (b[j] === 84) {
+          var cm = j + 1;
+          while (cm < n && b[cm] !== 44) cm++;
+          var len = parseInt(dec.decode(b.subarray(j + 1, cm)), 16) || 0;
+          rows[id] = { text: dec.decode(b.subarray(cm + 1, cm + 1 + len)) };
+          i = cm + 1 + len;
+          if (b[i] === 10) i++;
+          continue;
+        }
+        var nl = j;
+        while (nl < n && b[nl] !== 10) nl++;
+        var p = dec.decode(b.subarray(j, nl));
+        i = nl + 1;
+        if (!/^[0-9a-f]+$/i.test(id)) continue;
+        var tag = (/^[A-Z]+/.exec(p) || [""])[0];
+        try {
+          rows[id] = { tag, v: JSON.parse(p.slice(tag.length)) };
+        } catch (e) {
+        }
+      }
+    } catch (e) {
+    }
+    return rows;
+  }
+  function flightData(rows) {
+    function resolve(v, d) {
+      if (d > 30) return null;
+      if (typeof v === "string") {
+        if (v === "$undefined") return void 0;
+        if (/^\$D/.test(v)) return v.slice(2);
+        var r = /^\$@?([0-9a-f]+)$/.exec(v);
+        if (r && rows[r[1]] && rows[r[1]].v !== void 0) return resolve(rows[r[1]].v, d + 1);
+        if (r && rows[r[1]] && rows[r[1]].text !== void 0) return rows[r[1]].text;
+        return v.charAt(0) === "$" && v.charAt(1) === "$" ? v.slice(1) : v;
+      }
+      if (Array.isArray(v)) return v.map(function(x) {
+        return resolve(x, d + 1);
+      });
+      if (v && typeof v === "object") {
+        var o = {};
+        Object.keys(v).forEach(function(k) {
+          o[k] = resolve(v[k], d + 1);
+        });
+        return o;
+      }
+      return v;
+    }
+    var r0 = rows["0"] && rows["0"].v;
+    if (r0 && typeof r0 === "object" && !Array.isArray(r0) && typeof r0.a === "string" && /^\$@/.test(r0.a)) {
+      return { action: resolve(r0.a, 0) };
+    }
+    var names = {};
+    Object.keys(rows).forEach(function(id) {
+      var r = rows[id];
+      if (r.tag !== "I" || !r.v) return;
+      var nm = Array.isArray(r.v) ? r.v[2] : r.v.name;
+      names["$L" + id] = nm && nm !== "default" && nm !== "*" ? nm : "Component" + id;
+    });
+    var comps = {}, seen = 0;
+    function walk(v, d) {
+      if (d > 60 || seen > 400 || !v || typeof v !== "object") return;
+      if (Array.isArray(v)) {
+        if (v[0] === "$" && typeof v[1] === "string" && v.length === 4) {
+          var props = v[3];
+          if (props && typeof props === "object" && names[v[1]]) {
+            var data = {}, has = false;
+            Object.keys(props).forEach(function(k) {
+              if (k !== "children") {
+                data[k] = resolve(props[k], 0);
+                has = true;
+              }
+            });
+            if (has) {
+              seen++;
+              (comps[names[v[1]]] = comps[names[v[1]]] || []).push(data);
+            }
+          }
+          if (props && typeof props === "object") walk(props.children, d + 1);
+          return;
+        }
+        v.forEach(function(x) {
+          walk(x, d + 1);
+        });
+        return;
+      }
+      Object.keys(v).forEach(function(k) {
+        walk(v[k], d + 1);
+      });
+    }
+    Object.keys(rows).forEach(function(id) {
+      if (!rows[id].tag && rows[id].v !== void 0) walk(rows[id].v, 0);
+    });
+    Object.keys(comps).forEach(function(k) {
+      if (comps[k].length === 1) comps[k] = comps[k][0];
+    });
+    return { components: comps };
+  }
+  function isFlight(ct) {
+    return /text\/x-component/i.test(ct || "");
+  }
+  var ACT_RE = /\(\s*"([0-9a-f]{40,44})"\s*,[^"()]{0,200}?,\s*"([A-Za-z_$][\w$]*)"\s*\)/g;
+  var actScan = null;
+  function scanActions(fresh) {
+    if (actScan && !fresh) return actScan;
+    var srcs = {};
+    try {
+      [].slice.call(document.scripts).forEach(function(sc) {
+        if (sc.src) srcs[sc.src] = 1;
+      });
+    } catch (e) {
+    }
+    try {
+      performance.getEntriesByType("resource").forEach(function(r) {
+        if (r.initiatorType === "script" || /\.js(\?|$)/.test(r.name)) srcs[r.name] = 1;
+      });
+    } catch (e) {
+    }
+    var found = {};
+    actScan = Promise.all(Object.keys(srcs).filter(function(s) {
+      var u = abs(s);
+      return u && u.origin === location.origin && /\/_next\//.test(u.pathname);
+    }).map(function(s) {
+      return origFetch.call(w, s, { cache: fresh ? "no-cache" : "default" }).then(function(r) {
+        return r.text();
+      }).then(function(t) {
+        ACT_RE.lastIndex = 0;
+        var x;
+        while (x = ACT_RE.exec(t)) {
+          found[x[1]] = x[2];
+          acts[x[1]] = x[2];
+        }
+      }, function() {
+      });
+    })).then(function() {
+      persistSoon();
+      return found;
+    });
+    return actScan;
+  }
+  function actionLabel(id) {
+    return acts[id] || id.slice(0, 8);
   }
   function abs(u, base) {
     try {
@@ -11768,6 +12000,13 @@ function pageKit(opts) {
       } catch (e) {
       }
     }
+    if (isFlight(ct)) {
+      learnParams(text);
+      try {
+        return { rsc: shape(flightData(parseFlight(text))) };
+      } catch (e) {
+      }
+    }
     return { contentType: (ct || "").split(";")[0], bytes: text.length };
   }
   function cap(t) {
@@ -11776,7 +12015,7 @@ function pageKit(opts) {
   var persistTimer = null;
   function persist() {
     try {
-      ss.setItem(KEY, JSON.stringify({ v: VERSION, m, po, budget, authSrc }));
+      ss.setItem(KEY, JSON.stringify({ v: VERSION, m, po, budget, authSrc, acts }));
     } catch (e) {
     }
   }
@@ -11873,8 +12112,19 @@ function pageKit(opts) {
       var u = abs(url, base);
       if (!u || !/^https?:$/.test(u.protocol)) return;
       if (hostRe && !hostRe.test(u.host)) return;
-      var k = String(method || "GET").toUpperCase() + " " + u.origin + tpl(u.pathname);
+      scanNext();
+      if (text !== void 0 && isFlight(ct)) learnParams(text);
+      learnFromBody(body, u);
+      var act = null;
+      Object.keys(headers || {}).forEach(function(h) {
+        if (h.toLowerCase() === "next-action" && typeof headers[h] === "string") act = headers[h];
+      });
+      var k = String(method || "GET").toUpperCase() + " " + u.origin + tpl(u.pathname) + (act ? "#" + actionLabel(act) : "");
       var e = m[k] || (m[k] = { kind, n: 0, status: [], query: [], headers: [], auth: [] });
+      if (act) {
+        e.next = { action: act };
+        if (!acts[act]) scanActions(true);
+      }
       e.n++;
       if (status != null && e.status.indexOf(status) < 0) e.status.push(status);
       u.searchParams.forEach(function(_, q) {
@@ -11935,18 +12185,18 @@ function pageKit(opts) {
           var hs = {};
           var src = init && init.headers || isReq && input.headers;
           if (src) new win.Headers(src).forEach(function(v, k) {
-            hs[k] = AUTH_H.test(k) ? v : 1;
+            hs[k] = AUTH_H.test(k) || /^next-action$/i.test(k) ? v : 1;
           });
           var b = init && init.body;
           var at = base();
-          p.then(function(res) {
+          p.then(function(res2) {
             try {
-              var ct = res.headers.get("content-type");
-              if (/event-stream|octet|video|audio|image/i.test(ct || "")) return rec("fetch", method, url, hs, b, res.status, ct, void 0, at);
-              res.clone().text().then(function(t) {
-                rec("fetch", method, url, hs, b, res.status, ct, cap(t), at);
+              var ct = res2.headers.get("content-type");
+              if (/event-stream|octet|video|audio|image/i.test(ct || "")) return rec("fetch", method, url, hs, b, res2.status, ct, void 0, at);
+              res2.clone().text().then(function(t) {
+                rec("fetch", method, url, hs, b, res2.status, ct, cap(t), at);
               }, function() {
-                rec("fetch", method, url, hs, b, res.status, ct, void 0, at);
+                rec("fetch", method, url, hs, b, res2.status, ct, void 0, at);
               });
             } catch (e) {
             }
@@ -11971,7 +12221,7 @@ function pageKit(opts) {
       patch(X, "setRequestHeader", function(oSet) {
         return function(k, v) {
           try {
-            if (this.__ifkI) this.__ifkI.h[k] = AUTH_H.test(k) ? v : 1;
+            if (this.__ifkI) this.__ifkI.h[k] = AUTH_H.test(k) || /^next-action$/i.test(k) ? v : 1;
           } catch (e) {
           }
           return oSet.apply(this, arguments);
@@ -12107,10 +12357,43 @@ function pageKit(opts) {
   } catch (e) {
   }
   w.addEventListener("pagehide", persist);
+  function retpl(s) {
+    var x = /^(https?:\/\/[^\/]+)(\/.*)?$/.exec(s);
+    return x ? x[1] + tpl(x[2] || "/") : s;
+  }
+  function rekey() {
+    scanNext();
+    var m2 = {};
+    Object.keys(m).forEach(function(k) {
+      var e = m[k], sp = k.indexOf(" "), rest = k.slice(sp + 1).split("#")[0];
+      var nk = k.slice(0, sp) + " " + retpl(rest) + (e.next ? "#" + actionLabel(e.next.action) : "");
+      if (e.next && acts[e.next.action]) e.next.name = acts[e.next.action];
+      var p = m2[nk];
+      if (!p) {
+        m2[nk] = e;
+        return;
+      }
+      p.n += e.n;
+      ["status", "query", "headers", "auth"].forEach(function(f) {
+        (e[f] || []).forEach(function(x) {
+          if (p[f].indexOf(x) < 0) p[f].push(x);
+        });
+      });
+      if (!p.req) p.req = e.req;
+      if (!p.res) p.res = e.res;
+    });
+    m = m2;
+    var po2 = {};
+    Object.keys(po).forEach(function(k) {
+      po2[retpl(k)] = po[k];
+    });
+    po = po2;
+  }
   function report() {
+    rekey();
     var hooked = {};
     Object.keys(m).forEach(function(k) {
-      hooked[k.slice(k.indexOf(" ") + 1)] = 1;
+      hooked[k.slice(k.indexOf(" ") + 1).split("#")[0]] = 1;
     });
     var pathOnly = Object.keys(po).filter(function(p) {
       return !hooked[p];
@@ -12145,6 +12428,7 @@ function pageKit(opts) {
   }
   w.__ifk = {
     version: VERSION,
+    build: BUILD,
     mode,
     summary: function() {
       var c = report().coverage;
@@ -12189,6 +12473,9 @@ function pageKit(opts) {
       }
       budget.calls++;
       var init = { method, credentials: "include", headers: o.headers || {} };
+      if ((o.rsc || /[?&]_rsc=/.test(String(path15))) && !Object.keys(init.headers).some(function(k) {
+        return k.toLowerCase() === "rsc";
+      })) init.headers.rsc = "1";
       var used = [];
       if (u.origin === location.origin && o.auth !== false) {
         var a = readAuth();
@@ -12223,7 +12510,20 @@ function pageKit(opts) {
             out.stopped = wall;
           }
           persist();
-          if (t.length > maxBytes) {
+          var ct = r.headers.get("content-type");
+          if (isFlight(ct)) {
+            learnParams(t);
+            var data = flightData(parseFlight(t));
+            if (data.action !== void 0) data = data.action;
+            var size = JSON.stringify(data === void 0 ? null : data).length;
+            if (size > maxBytes && !o.full) {
+              out.shape = shape(data);
+              out.bytes = size;
+              out.hint = "big result, shown as its shape. Pass {full:true} and pick fields in the same evaluate: .then(r => r.data...)";
+            } else out.data = data;
+            return out;
+          }
+          if (t.length > maxBytes && !o.full) {
             out.truncated = t.length;
             t = t.slice(0, maxBytes);
           }
@@ -12231,11 +12531,43 @@ function pageKit(opts) {
             out.data = JSON.parse(t);
           } catch (e) {
             out.text = t.slice(0, 2e3);
+            if (/html/i.test(ct || "")) out.hint = "got HTML, not data. On Next.js pages pass {rsc:true}";
           }
           return out;
         });
       }, function(e) {
         return { error: String(e && e.message || e) };
+      });
+    },
+    // Calls a Next.js Server Action by export name (or id). The id is looked up
+    // in the current page's chunks first, so it survives deploys.
+    action: function(nameOrId, args2, o) {
+      o = o || {};
+      if (budget.stopped) return Promise.resolve({ error: "stopped", reason: budget.stopped });
+      if (!o.approved) return Promise.resolve({ error: "write needs approval", hint: "a Server Action runs server code and may change data: ask the user, then pass {approved:true}" });
+      var self = this;
+      return scanActions(true).then(function(found) {
+        var id = null;
+        Object.keys(found).forEach(function(k) {
+          if (found[k] === nameOrId || k === nameOrId) id = k;
+        });
+        if (!id) Object.keys(acts).forEach(function(k) {
+          if (acts[k] === nameOrId) id = k;
+        });
+        if (!id && /^[0-9a-f]{40,44}$/.test(nameOrId)) id = nameOrId;
+        if (!id) return { error: "action not found", hint: "open a page that uses " + nameOrId + ", re-run the install eval, then retry" };
+        var body = JSON.stringify(Array.isArray(args2) ? args2 : args2 === void 0 ? [] : [args2]);
+        return self.call("POST", o.path || location.pathname + location.search, {
+          approved: true,
+          full: o.full,
+          maxBytes: o.maxBytes,
+          headers: { "next-action": id, accept: "text/x-component", "content-type": "text/plain;charset=UTF-8" },
+          body
+        }).then(function(r) {
+          if (r && r.status === 404) r.hint = "Server Action id not accepted (new deploy?): reload the page, re-run the install eval, retry";
+          if (r) r.actionId = id.slice(0, 8);
+          return r;
+        });
       });
     },
     // Removes every hook and forgets the capture.
@@ -12271,7 +12603,12 @@ function pageKit(opts) {
     }
   };
   persist();
-  return { installed: true, again: false, version: VERSION, mode, restored };
+  scanNext();
+  if (w.__next_f || w.__NEXT_DATA__) scanActions(false);
+  var res = { installed: true, again: false, version: VERSION, build: BUILD, mode, restored };
+  if (replaced) res.replaced = replaced;
+  if (w.__next_f || w.__NEXT_DATA__) res.nextjs = true;
+  return res;
 }
 var init_page_kit = __esm({
   "src/lib/kit/page-kit.ts"() {
@@ -12374,7 +12711,7 @@ function scanCapture(report) {
   for (const [key, ep] of Object.entries(report.endpoints)) {
     const where = `endpoints["${key.length > 80 ? key.slice(0, 80) + "\u2026" : key}"]`;
     scanString(key, where, out);
-    walkValues(ep, where, out);
+    walkValues({ ...ep, next: void 0 }, where, out);
   }
   report.pathOnly.forEach((p, i) => scanString(p, `pathOnly[${i}]`, out));
   return out;
@@ -12500,7 +12837,7 @@ function splitKey(key) {
   const sp = key.indexOf(" ");
   const method = key.slice(0, sp);
   const rest = key.slice(sp + 1);
-  const m = rest.match(/^(https?:\/\/[^/]+)(\/.*)?$/);
+  const m = rest.split("#")[0].match(/^(https?:\/\/[^/]+)(\/.*)?$/);
   return { method, origin: m ? m[1] : "", path: m?.[2] || "/" };
 }
 function pascal(s) {
@@ -12521,7 +12858,7 @@ function functionNameFor(method, p, res, kind) {
 function buildApiMap(report) {
   const used = /* @__PURE__ */ new Map();
   const endpoints = Object.entries(report.endpoints).map(([key, ep]) => ({ key, ep, ...splitKey(key) })).sort((a, b) => a.path === b.path ? a.method.localeCompare(b.method) : a.path.localeCompare(b.path)).map(({ ep, method, origin, path: p }) => {
-    let fn = functionNameFor(method, p, ep.res, ep.kind);
+    let fn = ep.next?.name || (ep.next ? "action" + (pascal(p.split("/").filter((x) => x && !x.startsWith("{")).slice(-2).join(" ")) || "Root") : functionNameFor(method, p, ep.res, ep.kind));
     const n = used.get(fn) ?? 0;
     used.set(fn, n + 1);
     if (n) fn += n + 1;
@@ -12538,7 +12875,9 @@ function buildApiMap(report) {
       request: ep.req,
       response: ep.res,
       functionName: fn,
-      ...ep.redacted?.length ? { privateValues: ep.redacted } : {}
+      ...ep.redacted?.length ? { privateValues: ep.redacted } : {},
+      ...(ep.headers || []).includes("rsc") || (ep.query || []).includes("_rsc") ? { rsc: true } : {},
+      ...ep.next ? { action: { name: ep.next.name, id: ep.next.action } } : {}
     };
   });
   return {
@@ -12560,6 +12899,17 @@ function describeAuthSource(s) {
   const at = s.path?.length ? `${s.key} -> ${s.path.join(".")}` : s.key;
   return `${s.from}["${at}"]${pre}; __ifk.call attaches it automatically`;
 }
+function pathParams(p) {
+  const used = /* @__PURE__ */ new Set();
+  return (p.match(/\{([^}]+)\}/g) || []).map((m) => {
+    let base = m.slice(1, -1).replace(/[^A-Za-z0-9_$]/g, "_");
+    if (!/^[A-Za-z_$]/.test(base)) base = "p_" + base;
+    let name = base, n = 2;
+    while (used.has(name)) name = `${base}${n++}`;
+    used.add(name);
+    return name;
+  });
+}
 function takesBody(ep) {
   return ep.request !== void 0 || ep.method === "POST" || ep.method === "PUT" || ep.method === "PATCH";
 }
@@ -12574,6 +12924,10 @@ function renderClient(map) {
   lines.push(`  function c(m, p, o) {`);
   lines.push(`    if (!window.__ifk) return Promise.resolve({ error: "NOT_INSTALLED: eval(sessionStorage.__ifk) first" });`);
   lines.push(`    return window.__ifk.call(m, p, o);`);
+  lines.push(`  }`);
+  lines.push(`  function a(name, args, o) {`);
+  lines.push(`    if (!window.__ifk) return Promise.resolve({ error: "NOT_INSTALLED: eval(sessionStorage.__ifk) first" });`);
+  lines.push(`    return window.__ifk.action(name, args, o);`);
   lines.push(`  }`);
   lines.push(`  function q(query) {`);
   lines.push(`    if (!query) return "";`);
@@ -12590,17 +12944,20 @@ function renderClient(map) {
       skipped.push(`${ep.method} ${ep.origin}${ep.path} (cross-origin)`);
       continue;
     }
-    let ids = 0;
-    const params = [];
-    const urlExpr = JSON.stringify(ep.path).replace(/\{id\}/g, () => {
-      const name = ids++ === 0 ? "id" : `id${ids}`;
-      params.push(name);
-      return `" + encodeURIComponent(${name}) + "`;
-    }).replace(/ \+ ""$/, "").replace(/^"" \+ /, "");
+    if (ep.action) {
+      const ref = JSON.stringify(ep.action.name || ep.action.id);
+      lines.push(`    // Next.js Server Action at ${ep.path}. args: array of the action's arguments. Needs {approved:true}.`);
+      lines.push(`    ${ep.functionName}: function (args, opts) { return a(${ref}, args, opts); },`);
+      continue;
+    }
+    const params = pathParams(ep.path);
+    let i = 0;
+    const urlExpr = JSON.stringify(ep.path).replace(/\{[^}]+\}/g, () => `" + encodeURIComponent(${params[i++]}) + "`).replace(/ \+ ""$/, "").replace(/^"" \+ /, "");
     const hasBody = takesBody(ep);
     if (hasBody) params.push("body");
     params.push("query", "opts");
-    const optsExpr = hasBody ? `Object.assign({ json: body }, opts)` : `opts`;
+    const base = [hasBody ? "json: body" : "", ep.rsc ? "rsc: true" : ""].filter(Boolean).join(", ");
+    const optsExpr = base ? `Object.assign({ ${base} }, opts)` : `opts`;
     const doc = [
       ep.query.length ? `query: ${ep.query.join(", ")}` : "",
       ep.status.length ? `seen ${ep.status.join("/")}` : ""
@@ -12635,11 +12992,18 @@ ${indent}}`;
 function renderTypes(map) {
   const out = [`// Generated by \`iframer ingest\` from ${map.origin}. Shapes come from one sample each: fields may be optional.`];
   out.push(`type IfkResult<T> = Promise<{ status?: number; data?: T; text?: string; truncated?: number; error?: string; stopped?: string }>;`);
-  out.push(`type IfkOpts = { approved?: boolean; headers?: Record<string, string>; maxBytes?: number };`);
+  out.push(`type IfkOpts = { approved?: boolean; headers?: Record<string, string>; maxBytes?: number; full?: boolean; rsc?: boolean; auth?: boolean };`);
   out.push(`interface IfkApi {`);
   for (const ep of map.endpoints) {
     if (ep.kind === "ws" || ep.kind === "sse" || ep.kind === "beacon" || ep.origin !== map.origin) continue;
-    const ids = (ep.path.match(/\{id\}/g) || []).map((_, i) => `${i ? `id${i + 1}` : "id"}: string | number`);
+    if (ep.action) {
+      const args2 = ep.request?.json !== void 0 ? tsType(ep.request.json, "  ") : "unknown[]";
+      const r = ep.response?.rsc?.action;
+      out.push(`  /** Next.js Server Action ${ep.action.name || ep.action.id.slice(0, 8)} at ${ep.path} */`);
+      out.push(`  ${ep.functionName}(args: ${args2}, opts?: IfkOpts): IfkResult<${r !== void 0 ? tsType(r, "  ") : "unknown"}>;`);
+      continue;
+    }
+    const ids = pathParams(ep.path).map((n) => `${n}: string | number`);
     const hasBody = takesBody(ep);
     const req = ep.request?.json !== void 0 ? tsType(ep.request.json, "  ") : ep.request?.form || ep.request?.multipart ? "Record<string, string>" : "unknown";
     const res = ep.response && typeof ep.response === "object" && !Array.isArray(ep.response) && "contentType" in ep.response && "bytes" in ep.response ? "unknown" : tsType(ep.response, "  ");
@@ -12663,7 +13027,7 @@ function shortShape(s, depth = 0) {
   return "?";
 }
 function describeEndpoint(ep) {
-  const parts = [ep.kind, ep.status.length ? `status ${ep.status.join("/")}` : ""];
+  const parts = [ep.action ? `Next.js Server Action ${ep.action.name || ep.action.id.slice(0, 8)}` : ep.kind, ep.rsc ? "RSC (page data)" : "", ep.status.length ? `status ${ep.status.join("/")}` : ""];
   if (ep.request?.json !== void 0) parts.push(`body ${shortShape(ep.request.json)}`);
   else if (ep.request?.form) parts.push(`form ${Object.keys(ep.request.form).join(",")}`);
   if (ep.response !== void 0) parts.push(`returns ${shortShape(ep.response)}`);
@@ -12719,7 +13083,9 @@ function kitSource(opts = {}) {
   if (opts.hostFilter) clean.hostFilter = opts.hostFilter;
   if (opts.maxBody) clean.maxBody = opts.maxBody;
   if (opts.maxCalls) clean.maxCalls = opts.maxCalls;
-  return `(${pageKit.toString()})(${JSON.stringify(clean)});
+  const fn = pageKit.toString();
+  const build = import_crypto13.default.createHash("sha1").update(fn).digest("hex").slice(0, 10);
+  return `(${fn})(${JSON.stringify({ ...clean, build })});
 `;
 }
 function kitDir() {
@@ -12736,6 +13102,7 @@ function kitInstructions(target, kitPath, clientPath) {
     `Rules:`,
     `- After EVERY full page load, run \`${INSTALL}\` again. It restores what was captured. Check with \`${STATUS}\`.`,
     `- Drive the site with your normal tools while it records. Only shapes are kept, never values.`,
+    `- Next.js sites: page data comes back from \`window.__ifk.call('GET','/path',{rsc:true})\` as {components:{Name:props}}. Server Actions: \`window.__ifk.action('exportName',[args],{approved:true})\` (the id is looked up again after deploys).`,
     `- Replay: \`window.__ifk.call('GET','/path')\` runs in the page with the user's cookies. Writes need {approved:true}, so ask the user first. It stops on 403, 429 or a captcha page: do not retry.`,
     `- Coverage is never complete: workers, redirect hops, HttpOnly cookies and cross-origin iframes are invisible to the kit.`,
     `- Done: \`window.__ifk.stop()\` removes the hooks.`
@@ -12804,10 +13171,11 @@ function drainFallback() {
     `until next is null, write the joined chunks to a file, then \`iframer ingest <file>\`.`
   ].join("\n");
 }
-var import_fs12, import_path13, KIT_TARGETS, MAKE_INPUT, SS, stash, STASH, INSTALL, INSTALL_CLIENT, STATUS;
+var import_crypto13, import_fs12, import_path13, KIT_TARGETS, MAKE_INPUT, SS, stash, STASH, INSTALL, INSTALL_CLIENT, STATUS;
 var init_kit = __esm({
   "src/lib/kit/index.ts"() {
     "use strict";
+    import_crypto13 = __toESM(require("crypto"));
     import_fs12 = __toESM(require("fs"));
     import_path13 = __toESM(require("path"));
     init_paths();
@@ -13914,6 +14282,14 @@ Screenshot: ${shot}`);
       break;
     }
     // ─── In-page capture kit (any agent browser, T3 Code first) ─────
+    case "refresh": {
+      const kit = await Promise.resolve().then(() => (init_kit(), kit_exports));
+      const kitPath = kit.writeKit({});
+      const skill = installSkill();
+      console.log(`  Kit: ${kitPath}`);
+      console.log(skill ? "  Skill: ~/.claude/commands/iframer.md" : "  Skill: not found in the package, skipped");
+      break;
+    }
     case "kit": {
       const kit = await Promise.resolve().then(() => (init_kit(), kit_exports));
       const target = parseFlag(args, "--for") || "t3";
@@ -14266,6 +14642,11 @@ Screenshot: ${shot}`);
         console.error("    sudo npm install -g iframer-toolkit@latest");
         process.exit(1);
       }
+      try {
+        require("child_process").execSync("iframer refresh", { stdio: "inherit" });
+      } catch {
+        console.error("  Could not refresh the kit and skill. Run: iframer refresh");
+      }
       console.log();
       const hasExt = extensionInstalled();
       await reloadAndRestartServer(hasExt);
@@ -14389,6 +14770,7 @@ Screenshot: ${shot}`);
     extension path                  Print the extension folder to load in chrome://extensions
     extension token                 Print the pairing token (only needed to pair by hand)
     update                        Update iframer via npm; reload the extension too if it's installed
+    refresh                       Rewrite the in-page kit and the /iframer skill from this version (update does it)
     update --check                  Report whether a newer version is available (no install)
     version, --version, -v          Print the installed version
     remove                          Remove everything (Chromium + MCP)

@@ -182,6 +182,8 @@ When you already drive a browser through your own tools (a T3 Code preview tab, 
 - Writes need `{approved:true}`: ask the user first. Replays stop for good on 403, 429 or a captcha page. Do not retry or work around it.
 - Sites that detect tampering: `iframer kit --mode passive` (no patching; URLs and form posts only).
 - Report coverage as the kit states it. It is never complete: workers, redirect hops and cross-origin iframes are invisible.
+- Next.js sites: route segments come out named (`/{communitySlug}/...`) from the app's own route data. Page data: `window.__ifk.call('GET', path, {rsc:true})` (the generated client sets it) returns `{components: {Name: props}}`, not HTML. Server Actions: `window.__ifk.action('exportName', [args], {approved:true})`, or the client function of the same name. If a result is big you get its shape: pass `{full:true}` and pick fields in the same evaluate.
+- After `iframer update`, the kit file is rewritten. Installing it in a tab that still runs an older kit replaces it and keeps the capture.
 - Private values are separated from the API, not a reason to stop. `ingest` swaps anything token-, email- or phone-like for a placeholder (`{id}` in paths, `{key}` for keys) and lists what it replaced. Endpoints that had one carry `privateValues` in api.json: pass that value per call.
 - Identity: api.json `identity` (and the knowledge file) says which auth headers the site sends and where the page keeps each value, e.g. `localStorage["session -> user.token"]`. `__ifk.call` attaches them on its own, cookies included. If a call returns 401 with a `hint`, use the site once so it sends its token, then retry.
 

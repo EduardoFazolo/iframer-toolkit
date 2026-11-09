@@ -4,6 +4,7 @@
  * page; T3 Code's preview tabs get a file-based route that keeps both the kit
  * and the capture out of the agent's context.
  */
+import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { getDataDir } from "../paths";
@@ -16,6 +17,7 @@ export interface KitOptions {
   hostFilter?: string;
   maxBody?: number;
   maxCalls?: number;
+  build?: string;
 }
 
 /** The kit as one evaluable expression. Its completion value is the install result. */
@@ -25,7 +27,10 @@ export function kitSource(opts: KitOptions = {}): string {
   if (opts.hostFilter) clean.hostFilter = opts.hostFilter;
   if (opts.maxBody) clean.maxBody = opts.maxBody;
   if (opts.maxCalls) clean.maxCalls = opts.maxCalls;
-  return `(${pageKit.toString()})(${JSON.stringify(clean)});\n`;
+  const fn = pageKit.toString();
+  // Build id: a tab running a different kit swaps it out on install instead of keeping the old one.
+  const build = crypto.createHash("sha1").update(fn).digest("hex").slice(0, 10);
+  return `(${fn})(${JSON.stringify({ ...clean, build })});\n`;
 }
 
 export function kitDir(): string {
@@ -65,6 +70,7 @@ export function kitInstructions(target: KitTarget, kitPath: string, clientPath?:
     `Rules:`,
     `- After EVERY full page load, run \`${INSTALL}\` again. It restores what was captured. Check with \`${STATUS}\`.`,
     `- Drive the site with your normal tools while it records. Only shapes are kept, never values.`,
+    `- Next.js sites: page data comes back from \`window.__ifk.call('GET','/path',{rsc:true})\` as {components:{Name:props}}. Server Actions: \`window.__ifk.action('exportName',[args],{approved:true})\` (the id is looked up again after deploys).`,
     `- Replay: \`window.__ifk.call('GET','/path')\` runs in the page with the user's cookies. Writes need {approved:true}, so ask the user first. It stops on 403, 429 or a captcha page: do not retry.`,
     `- Coverage is never complete: workers, redirect hops, HttpOnly cookies and cross-origin iframes are invisible to the kit.`,
     `- Done: \`window.__ifk.stop()\` removes the hooks.`,
