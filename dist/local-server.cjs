@@ -939,6 +939,10 @@ var SqliteStore = class {
     const row = this.db.queryGet("SELECT blob FROM sessions WHERE user_id = ?", userId);
     return row ? Buffer.from(row.blob) : null;
   }
+  /** Keys of every stored browser session (one per user/profile). */
+  listSessionKeys() {
+    return this.db.queryAll("SELECT user_id FROM sessions").map((r) => r.user_id);
+  }
   async setSession(userId, blob) {
     this.db.run("INSERT OR REPLACE INTO sessions (user_id, blob) VALUES (?, ?)", userId, blob);
   }
@@ -5493,6 +5497,11 @@ async function detectBlock(page) {
 }
 
 // src/lib/knowledge/extract-from-run.ts
+function sameDomain(hostOrOrigin, root) {
+  const h = hostOrOrigin.replace(/^[a-z]+:\/\//i, "").split(/[:/]/)[0].replace(/^\./, "").replace(/^www\./, "").toLowerCase();
+  const r = root.replace(/^www\./, "").toLowerCase();
+  return h === r || h.endsWith("." + r) || r.endsWith("." + h);
+}
 function extractKnowledgeFromRun(pipeline, result, sessionData, mode) {
   const firstNav = pipeline.steps.find((s) => s.type === "navigate");
   if (!firstNav || firstNav.type !== "navigate") return;
@@ -5510,19 +5519,19 @@ function extractKnowledgeFromRun(pipeline, result, sessionData, mode) {
   const sessionStorageKeys = [];
   if (sessionData) {
     for (const c of sessionData.cookies ?? []) {
-      if (c.domain.endsWith(domainRoot) || domainRoot.endsWith(c.domain.replace(/^\./, ""))) {
+      if (sameDomain(c.domain, domainRoot)) {
         if (!cookieNames.includes(c.name)) cookieNames.push(c.name);
       }
     }
     for (const [origin, store] of Object.entries(sessionData.localStorage ?? {})) {
-      if (origin.includes(domainRoot)) {
+      if (sameDomain(origin, domainRoot)) {
         for (const k of Object.keys(store)) {
           if (!localStorageKeys.includes(k)) localStorageKeys.push(k);
         }
       }
     }
     for (const [origin, store] of Object.entries(sessionData.sessionStorage ?? {})) {
-      if (origin.includes(domainRoot)) {
+      if (sameDomain(origin, domainRoot)) {
         for (const k of Object.keys(store)) {
           if (!sessionStorageKeys.includes(k)) sessionStorageKeys.push(k);
         }
@@ -5542,7 +5551,7 @@ function extractKnowledgeFromRun(pipeline, result, sessionData, mode) {
   const endpoints = [];
   const replayHeaders = /* @__PURE__ */ new Set();
   for (const api of result.capturedApi ?? []) {
-    if (!api.domain.includes(domainRoot) && !domainRoot.includes(api.domain.replace(/^www\./, ""))) continue;
+    if (!sameDomain(api.domain, domainRoot)) continue;
     if (api.auth?.authorization) replayHeaders.add("Authorization");
     for (const name of Object.keys(api.auth?.tokens ?? {})) replayHeaders.add(name);
     for (const ep of api.endpoints ?? []) {

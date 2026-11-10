@@ -214,21 +214,28 @@ Quick actions:
     --typed                        Generate TypeScript
     --mode <mode>                  Browser mode
 
-Capture in a browser iframer doesn't control (T3 Code, Playwright MCP, ...):
+Reverse engineer from a browser iframer doesn't control (T3 Code, Playwright MCP, ...).
+The browser only maps the site; the output is a local folder with a Node client:
   kit                              Write the in-page kit, print the agent's tool calls
     --for <t3|playwright-mcp|any>  Which browser tool's steps to print (default: t3)
     --mode passive                 No patching: URLs + form posts only
     --host-filter <regex>          Only record matching hosts (e.g. 'discord\.com$')
-    --client <path>                Also print steps to load a generated client.js
+    --max-calls <n>                Replay calls allowed per tab session (default: 500)
+    --max-result <n>               Chars a call returns before switching to an overview (default: 4000)
+    --hard-max <n>                 Chars a call can ever return, even with {full:true} (default: 30000)
     --print                        Print the kit source instead (tools without upload)
-  ingest <file|-|--latest>         Capture -> api.json + client.js + knowledge cache
+  ingest <file|-|--latest>         Capture -> folder: index.txt, api.json, auth.json, client.mjs (Node)
     --latest                       Newest capture in T3 Code's downloads or ~/Downloads
-    --typed                        Also write client.d.ts
-    --out <dir>                    Output directory (default: ./<host>-api/)
+    --out <dir>                    Output folder (default: ~/.iframer/apis/<host>/)
+    --all                          Keep third-party hosts and framework assets
     --keep                         Keep the capture file (default: deleted)
     --no-knowledge                 Don't update ~/.iframer/knowledge
     --strict                       Refuse on any secret-looking value instead of replacing it
     --json                         One-line JSON summary
+  schema <host> <path>             Captured structure of a page: lists of records + keys
+  auth <host> [--out <dir>]        Session for client.mjs -> <dir>/.env, from a logged-in browser on this machine
+  run <host> [recipe] [args]       Same as node <dir>/client.mjs [recipe] [args]
+  recipe <host> [name] ...         Save a learned task as a function of client.mjs (iframer --help)
 
 Browser windows:
   instances                        List live browser windows (instanceId → current page)
@@ -268,7 +275,7 @@ Setup:
   extension path                   Print the extension folder to load in chrome://extensions
   extension token                  Print the pairing token (only needed to pair by hand)
   update [--check]                 Update iframer via npm (--check: report only)
-  refresh                          Rewrite the in-page kit and the /iframer skill (update runs it)
+  refresh                          Rewrite the in-page kit, the /iframer skill and every client.mjs (update runs it)
   remove [chromium|mcp|extension]  Remove everything, or one piece
 
 Browser:
@@ -332,23 +339,34 @@ iframer-toolkit --clear-cache figma.com     # wipe one domain
 
 ## Bring your own browser: T3 Code and other agent browsers
 
-If your agent already has a browser (a T3 Code preview tab, Playwright MCP, Chrome DevTools MCP), iframer can reverse engineer the site inside it, on the session you're already logged into, without launching anything.
+Agent browsers like T3 Code's preview tabs or Playwright MCP can't see network traffic. iframer's in-page kit records the page's own API calls (shapes, never values) while the agent uses the site. The output is a local folder with the API map and `client.mjs`, a Node client that calls the API directly, with no browser. It's built for Next.js apps (RSC payloads, Server Actions) and works on plain JSON APIs too.
 
 ```bash
-iframer kit --for t3            # writes ~/.iframer/kit/iframer-kit.js, prints the agent's tool calls
-# agent: upload the kit into the tab, eval it, use the site, then window.__ifk.dump()
-iframer ingest --latest --typed # finds the capture in T3's downloads -> ./<host>-api/
+iframer kit --for t3                  # writes ~/.iframer/kit/iframer-kit.js, prints the agent's 4 install calls
+iframer ingest --latest --out ./api   # capture -> ./api: index.txt, api.json, auth.json, client.mjs, .env.example
+                                      # (the session is taken from your logged-in browser -> ./api/.env)
+node ./api/client.mjs                 # what it can do, which auth is missing
+iframer recipe <host> <name> …        # save a learned task as a function of client.mjs
+node ./api/client.mjs <name> '{"team":"core"}'
 ```
 
-- **Small for the agent:** the kit and the capture move as files, so neither lands in the agent's context. On the 40-endpoint test site, the whole install-capture-export round was about 550 tokens of tool calls.
-- **Shapes, not values:** paths are templated (`/users/{id}`), bodies and responses become type shapes, headers become names. `ingest` then swaps anything left that looks like a token, email or phone number for a placeholder, keeps the endpoint, and marks it with `privateValues`. `--strict` refuses the capture instead.
-- **Identity, without the values:** the kit learns which auth headers the page sends and where it keeps each value (a localStorage key, a field inside it, a cookie, or page memory). api.json records that under `identity`, and `__ifk.call` rebuilds the headers from there for every replay, so the generated client acts as the logged-in user.
-- **Output:** `api.json` (endpoint map with coverage), `client.js` (in-page client over `window.__ifk.call`), `client.d.ts` with `--typed`, and the domain's knowledge file.
-- **Replay stays in the page:** HttpOnly cookies are invisible to page JS, so generated calls run through the tab. Same-origin only, GET unless approved, 50 calls per session, and a hard stop on 403, 429 or a captcha page.
-- **Next.js:** dynamic route segments are named from the app's own route data, so `/wichitalife/dashboard` is saved as `/{communitySlug}/dashboard` and the client takes `communitySlug` as an argument. RSC responses (`text/x-component`) become data: the props the server passed to each client component, or a Server Action's return value. Server Actions are saved by export name and called with `window.__ifk.action(name, [args], {approved:true})`. The id is looked up again in the page's JS on every call, so it keeps working after a deploy.
-- **Not complete:** worker requests, redirect hops, cross-origin iframes and Set-Cookie are invisible to the kit, and every report says so.
-- **Survives the page:** after a full page load the agent re-runs one short `eval` and the capture continues. Works on sites that delete `window.sessionStorage` (Discord).
-- **Other tools:** `--for playwright-mcp` or `--for any`. Tools without file upload can evaluate `iframer kit --print` instead, which costs about 17 KB per page load.
+Without `--out`, everything goes to `~/.iframer/apis/<host>/`.
+
+How an agent uses it:
+
+1. **Map.** Install the kit in the tab, use the site, `window.__ifk.dump()`, then `iframer ingest`. The tab isn't needed after this.
+2. **Auth, automatic.** `ingest` takes the session from a browser on this machine that is logged in to the site (T3 Code tabs, iframer's own browser, then Chrome, Brave, Edge, Arc), checks it on a captured page that needs a login, and writes it to `.env`. When it expires, `client.mjs` re-reads it the same way and retries once. `iframer auth <host>` does it by hand; `--from-file` sets values by hand (an API key, or a machine with no logged-in browser). Auth headers the site sends (`Authorization`, `x-api-key`, ...) go in the same file, named after the header (`AUTHORIZATION`, `X_API_KEY`).
+3. **Learn (about 2 calls).** `node client.mjs get <path> --rsc --schema` lists every list of records on the page with its keys and one masked sample. Then verify: `--find Comp --pick 'items.{id,status}' --where status=open --group owner` returns `{count, by}`, not the list.
+4. **Save and repeat.** `iframer recipe <host> <name> --path /{team}/board --rsc --find … --pick … --format "d => …"` adds `<name>` to `client.mjs`. Run it with `node client.mjs <name> '{"team":"core"}'`, or `import { <name> } from "./client.mjs"` in your own script.
+
+What it guarantees:
+
+- **No silent wrong answers.** A `find` that matches two different kinds of object is refused with both candidates. A recipe locks to the shape it learned and returns `matched a different list` or `shape changed: missing x` instead of a plausible 0. A filter with no list to run on is an error.
+- **Small answers.** CLI results over 4,000 chars come back cut, with the page's schema; `--full` stops at 30,000.
+- **Next.js specifics.** Route segments named from the app's route data (`/{org}/{project}/issues`), RSC flight parsing including React's path references, server-rendered HTML as `--nodes a`, Server Actions called by export name (`node client.mjs action <name> --approved`, recipes `--action`) with the id re-found after deploys, inline actions via `--action-prop`.
+- **Safe defaults.** Same-site requests only. Actions need `--approved`. Stops on 403, 429 or a captcha; retries GETs on 5xx; reports "session expired" on a login redirect or 401, with the `iframer auth` command to refresh it. The `.env` is never printed, and is gitignored.
+- **Not complete.** Worker traffic, redirect hops, cross-origin iframes, and calls a page makes before the kit is installed are invisible to it.
+- **Bot walls.** For sites that block requests from Node, `iframer recipe … --in-page` builds the same recipes as a bundle that runs inside a logged-in tab. It's a fallback, not the default.
 
 ## Captcha solving
 
@@ -427,9 +445,10 @@ bun run start   # bun run index.ts
 # Rebuild the distributable bundles (dist/cli.js, dist/mcp-server.cjs, dist/local-server.cjs)
 bun run build
 
-# Install the locally-built package globally for testing
-npm pack
-npm install -g ./iframer-toolkit-*.tgz
+# Use the working tree as the global `iframer` (no publishing): link the dev launcher.
+# It rebuilds dist/ and refreshes the kit, the skill and every client.mjs whenever the source changed.
+ln -sfn "$PWD" "$(npm prefix -g)/lib/node_modules/iframer-toolkit"
+ln -sfn ../lib/node_modules/iframer-toolkit/bin/iframer-dev "$(npm prefix -g)/bin/iframer"
 ```
 
 `prepublishOnly` runs `bun run build` automatically, so `npm publish` always ships a fresh bundle.

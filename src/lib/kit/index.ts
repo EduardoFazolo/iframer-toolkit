@@ -9,14 +9,21 @@ import fs from "fs";
 import path from "path";
 import { getDataDir } from "../paths";
 import { pageKit } from "./page-kit";
+import { recipeCore } from "./recipe-core";
 
 export * from "./capture";
+export * from "./recipes";
+export * from "./session-env";
 
 export interface KitOptions {
   mode?: "hook" | "passive";
   hostFilter?: string;
   maxBody?: number;
   maxCalls?: number;
+  /** Chars a call returns by default before switching to an overview (4000). */
+  maxResult?: number;
+  /** Chars a call can ever return, even with {full:true} (30000). */
+  hardMax?: number;
   build?: string;
 }
 
@@ -27,10 +34,13 @@ export function kitSource(opts: KitOptions = {}): string {
   if (opts.hostFilter) clean.hostFilter = opts.hostFilter;
   if (opts.maxBody) clean.maxBody = opts.maxBody;
   if (opts.maxCalls) clean.maxCalls = opts.maxCalls;
+  if (opts.maxResult) clean.maxResult = opts.maxResult;
+  if (opts.hardMax) clean.hardMax = opts.hardMax;
   const fn = pageKit.toString();
+  const core = recipeCore.toString();
   // Build id: a tab running a different kit swaps it out on install instead of keeping the old one.
-  const build = crypto.createHash("sha1").update(fn).digest("hex").slice(0, 10);
-  return `(${fn})(${JSON.stringify({ ...clean, build })});\n`;
+  const build = crypto.createHash("sha1").update(fn).update(core).digest("hex").slice(0, 10);
+  return `(${fn})(${JSON.stringify({ ...clean, build })}, (${core})());\n`;
 }
 
 export function kitDir(): string {
@@ -61,18 +71,18 @@ const SS = `(window.sessionStorage||(document.getElementById('__ifk_ss')||(f=>(f
 const stash = (key: string) => `document.getElementById('__ifk_in').files[0].text().then(t=>{${SS}.${key}=t;document.getElementById('__ifk_in').remove();return t.length})`;
 const STASH = stash("__ifk");
 const INSTALL = `eval(${SS}.__ifk)`;
-const INSTALL_CLIENT = `eval(${SS}.__ifkApi)`;
 const STATUS = `window.__ifk?window.__ifk.summary():'NOT_INSTALLED'`;
 
-export function kitInstructions(target: KitTarget, kitPath: string, clientPath?: string): string {
+export function kitInstructions(target: KitTarget, kitPath: string): string {
   const common = [
     ``,
     `Rules:`,
-    `- After EVERY full page load, run \`${INSTALL}\` again. It restores what was captured. Check with \`${STATUS}\`.`,
-    `- Drive the site with your normal tools while it records. Only shapes are kept, never values.`,
-    `- Next.js sites: page data comes back from \`window.__ifk.call('GET','/path',{rsc:true})\` as {components:{Name:props}}. Server Actions: \`window.__ifk.action('exportName',[args],{approved:true})\` (the id is looked up again after deploys).`,
-    `- Replay: \`window.__ifk.call('GET','/path')\` runs in the page with the user's cookies. Writes need {approved:true}, so ask the user first. It stops on 403, 429 or a captcha page: do not retry.`,
-    `- Coverage is never complete: workers, redirect hops, HttpOnly cookies and cross-origin iframes are invisible to the kit.`,
+    `- The tab is only for mapping the site. The result is local: \`iframer ingest\` writes a folder (--out <dir>, default ~/.iframer/apis/<host>/) with the API map and client.mjs, a Node client that runs without a browser.`,
+    `- After EVERY full page load, run \`${INSTALL}\` again. It restores what was captured. Check with \`${STATUS}\`. Calls the page makes while loading, before the kit is back, are not recorded: navigate inside the app (click links) so they happen again.`,
+    `- Drive the site with your normal tools while it records. Only shapes are kept, never values. Next.js page data (RSC) and Server Action ids are recorded too.`,
+    `- Quick look without leaving the tab: \`window.__ifk.call('GET','/path',{rsc:true,schema:true})\`. Writes need the user's OK first. Stop on 403, 429 or a captcha page.`,
+    `- Coverage is never complete: workers, redirect hops and cross-origin iframes are invisible to the kit.`,
+    `- After ingest: \`iframer auth <host> --out <dir>\` saves the session into the folder's .env, then \`node <dir>/client.mjs\` lists what it can do.`,
     `- Done: \`window.__ifk.stop()\` removes the hooks.`,
   ];
 
@@ -89,16 +99,6 @@ export function kitInstructions(target: KitTarget, kitPath: string, clientPath?:
       `Export:`,
       `5. preview_evaluate: window.__ifk.dump()`,
       `6. Run: iframer ingest --latest   (finds the newest capture in T3's downloads; or pass preview_status.downloads[].path)`,
-      ...(clientPath ? [
-        ``,
-        `Use the generated client (after the kit is installed):`,
-        `a. preview_evaluate: ${MAKE_INPUT}`,
-        `b. preview_act: action=upload, selector=#__ifk_in, paths=["${clientPath}"]`,
-        `c. preview_evaluate: ${stash("__ifkApi")}`,
-        `d. preview_evaluate: ${INSTALL_CLIENT}   -> list of function names`,
-        `e. preview_evaluate: window.__ifkApi.<functionName>(...)`,
-        `After a page load: ${INSTALL} then ${INSTALL_CLIENT}`,
-      ] : []),
       ...common,
     ].join("\n");
   }
@@ -134,6 +134,28 @@ export function kitInstructions(target: KitTarget, kitPath: string, clientPath?:
     ``,
     drainFallback(),
     ...common,
+  ].join("\n");
+}
+
+/** localStorage, or the same storage through a hidden blank iframe (sites that delete it). */
+const LS = `(window.localStorage||(document.getElementById('__ifk_ss')||(f=>(f.id='__ifk_ss',f.style.display='none',document.documentElement.append(f),f))(document.createElement('iframe'))).contentWindow.localStorage)`;
+/** One call per run: loads the stored bundle (survives reloads and new tabs) and runs the recipe. */
+export const recipeRun = (name: string, args = "{...}") => `(eval(localStorage.__ifkR),__ifkRecipes.${name}(${args}))`;
+/** Same, for sites that delete window.localStorage (reads it through a blank iframe). */
+export const recipeRunFallback = (name: string, args = "{...}") => `(eval(${LS}.__ifkR),__ifkRecipes.${name}(${args}))`;
+
+/** Fallback for sites that block non-browser clients: load the in-page bundle into a T3 tab and run one. */
+export function recipeInstructions(bundle: string, names: string[]): string {
+  return [
+    `In-page fallback (only for sites that block requests from Node). Load once per site (kept in the site's localStorage: survives reloads and new tabs; repeat only when the bundle changes):`,
+    `1. preview_evaluate: ${MAKE_INPUT}`,
+    `2. preview_act: action=upload, selector=#__ifk_in, paths=["${bundle}"]`,
+    `3. preview_evaluate: document.getElementById('__ifk_in').files[0].text().then(t=>{${LS}.__ifkR=t;document.getElementById('__ifk_in').remove();return t.length})`,
+    ``,
+    `Run: ONE call, one short line back:`,
+    ...names.map((n) => `   preview_evaluate: ${recipeRun(n)}`),
+    ``,
+    `If the site deletes localStorage ("localStorage is not defined"): ${recipeRunFallback(names[0] || "<name>")}`,
   ].join("\n");
 }
 

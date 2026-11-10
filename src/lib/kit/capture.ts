@@ -24,6 +24,8 @@ export interface CaptureEndpoint {
   auth: string[];
   req?: { json?: Shape; form?: Record<string, string>; multipart?: Record<string, string>; text?: number; binary?: number; unknown?: boolean };
   res?: Shape | { contentType: string; bytes: number };
+  /** The recorded response shape came from a 2xx. */
+  resOk?: boolean;
   /** Kinds of private values ingest swapped for placeholders (token, email, ...). */
   redacted?: string[];
   /** Next.js Server Action: its id (a public build hash, changes per deploy) and export name. */
@@ -47,6 +49,8 @@ export interface CaptureReport {
   kit?: { mode: string; hostFilter: string | null };
   coverage: { seen: number; withPayload: number; pathOnly: number; complete?: boolean; blindSpots: string[] };
   auth?: { cookies?: string; headers?: Record<string, AuthSource> };
+  /** Static route segment names from the app's route data: never templated. */
+  routes?: { static?: string[] };
   endpoints: Record<string, CaptureEndpoint>;
   pathOnly: string[];
 }
@@ -60,8 +64,7 @@ export function parseCapture(raw: string): CaptureReport {
   } catch {
     throw new CaptureError("not JSON: expected a file written by the kit's dump() or the joined drain() chunks");
   }
-  // v1 spike files predate the kind marker; accept them by shape.
-  if (data?.kind !== "iframer-capture" && !(data?.v === 1 && data?.endpoints && data?.coverage)) {
+  if (data?.kind !== "iframer-capture") {
     throw new CaptureError("not an iframer capture (missing kind: \"iframer-capture\")");
   }
   if (data.v !== 1) throw new CaptureError(`unsupported capture version ${data.v}; update iframer`);
@@ -140,7 +143,7 @@ function mask(s: string): string {
 
 /** Strings in an endpoint key / path that are value-like. */
 function scanString(s: string, where: string, out: PrivacyFinding[]) {
-  if (TYPE_NAMES.has(s)) return;
+  if (TYPE_NAMES.has(s) || s.split("|").every((t) => TYPE_NAMES.has(t))) return;
   for (const [kind, re] of DETECTORS) {
     if (kind === "token") {
       // Check each path segment / host label / word, not the whole string.
@@ -190,12 +193,13 @@ function splitWords(s: string): string[] {
 }
 
 const PLACEHOLDER = "{id}";
+let STATICS = new Set<string>();
 
 /** Replaces value-like parts of a URL-ish string with {id}. Returns the new string and what was replaced. */
 function redactUrl(s: string): { s: string; kinds: string[] } {
   const kinds: string[] = [];
   const hit = (part: string): string | null => {
-    if (!part || part.includes("{")) return null;
+    if (!part || part.includes("{") || STATICS.has(part)) return null;
     let d = part;
     try { d = decodeURIComponent(part); } catch {}
     for (const [kind, re] of DETECTORS) if (re.test(d)) return kind;
@@ -257,6 +261,7 @@ const union = <T>(a: T[] = [], b: T[] = []) => [...new Set([...a, ...b])];
  */
 export function redactCapture(report: CaptureReport): { report: CaptureReport; redacted: PrivacyFinding[] } {
   const redacted: PrivacyFinding[] = [];
+  STATICS = new Set(report.routes?.static ?? []);
   const endpoints: CaptureReport["endpoints"] = {};
   for (const [key, ep] of Object.entries(report.endpoints)) {
     const kinds: string[] = [];
@@ -372,10 +377,10 @@ export function buildApiMap(report: CaptureReport): ApiMap {
     capturedAt: report.capturedAt,
     coverage: report.coverage,
     identity: {
-      cookies: report.auth?.cookies ?? "browser session (sent automatically, HttpOnly included)",
+      cookies: report.auth?.cookies ?? "session cookies, HttpOnly included (COOKIE in .env)",
       headers: Object.entries(report.auth?.headers ?? {}).map(([name, src]) => ({ name, source: describeAuthSource(src) })),
     },
-    replay: "in-page only: load the kit, then the client, and call window.__ifkApi.<fn>() through the agent's evaluate tool. HttpOnly cookies never leave the browser, so the same calls fail from curl.",
+    replay: "client.mjs next to this file (Node, no browser). Session: .env (iframer auth <host>). In-page fallback for sites that block Node: window.__ifk.call, or iframer recipe --in-page.",
     endpoints,
     pathOnly: report.pathOnly,
   };
@@ -386,128 +391,6 @@ export function describeAuthSource(s: AuthSource): string {
   if (s.from === "memory") return `kept in page memory${pre}; __ifk.call reuses it after the site sends it once`;
   const at = s.path?.length ? `${s.key} -> ${s.path.join(".")}` : s.key;
   return `${s.from}["${at}"]${pre}; __ifk.call attaches it automatically`;
-}
-
-/** Function parameter names for a templated path: {id} -> id, id2...; {communitySlug} -> communitySlug. */
-function pathParams(p: string): string[] {
-  const used = new Set<string>();
-  return (p.match(/\{([^}]+)\}/g) || []).map((m) => {
-    let base = m.slice(1, -1).replace(/[^A-Za-z0-9_$]/g, "_");
-    if (!/^[A-Za-z_$]/.test(base)) base = "p_" + base;
-    let name = base, n = 2;
-    while (used.has(name)) name = `${base}${n++}`;
-    used.add(name);
-    return name;
-  });
-}
-
-/** Body param only where the method usually carries one, or one was seen. */
-function takesBody(ep: EndpointSpec): boolean {
-  return ep.request !== undefined || ep.method === "POST" || ep.method === "PUT" || ep.method === "PATCH";
-}
-
-/** In-page client: thin wrappers over window.__ifk.call, same origin only. */
-export function renderClient(map: ApiMap): string {
-  const lines: string[] = [];
-  const skipped: string[] = [];
-  lines.push(`// Generated by \`iframer ingest\` from ${map.origin}${map.capturedAt ? ` (${map.capturedAt.slice(0, 10)})` : ""}.`);
-  lines.push(`// Runs IN the page, after the iframer kit, so the browser attaches the session`);
-  lines.push(`// cookies. Load it like the kit (file -> sessionStorage -> top-level eval).`);
-  lines.push(`// Writes (non-GET) need {approved:true}: ask the user first.`);
-  lines.push(`(function () {`);
-  lines.push(`  function c(m, p, o) {`);
-  lines.push(`    if (!window.__ifk) return Promise.resolve({ error: "NOT_INSTALLED: eval(sessionStorage.__ifk) first" });`);
-  lines.push(`    return window.__ifk.call(m, p, o);`);
-  lines.push(`  }`);
-  lines.push(`  function a(name, args, o) {`);
-  lines.push(`    if (!window.__ifk) return Promise.resolve({ error: "NOT_INSTALLED: eval(sessionStorage.__ifk) first" });`);
-  lines.push(`    return window.__ifk.action(name, args, o);`);
-  lines.push(`  }`);
-  lines.push(`  function q(query) {`);
-  lines.push(`    if (!query) return "";`);
-  lines.push(`    var s = new URLSearchParams(query).toString();`);
-  lines.push(`    return s ? "?" + s : "";`);
-  lines.push(`  }`);
-  lines.push(`  window.__ifkApi = {`);
-  for (const ep of map.endpoints) {
-    if (ep.kind === "ws" || ep.kind === "sse" || ep.kind === "beacon") { skipped.push(`${ep.kind} ${ep.path}`); continue; }
-    if (ep.origin !== map.origin) { skipped.push(`${ep.method} ${ep.origin}${ep.path} (cross-origin)`); continue; }
-    if (ep.action) {
-      const ref = JSON.stringify(ep.action.name || ep.action.id);
-      lines.push(`    // Next.js Server Action at ${ep.path}. args: array of the action's arguments. Needs {approved:true}.`);
-      lines.push(`    ${ep.functionName}: function (args, opts) { return a(${ref}, args, opts); },`);
-      continue;
-    }
-    const params = pathParams(ep.path);
-    let i = 0;
-    const urlExpr = JSON.stringify(ep.path).replace(/\{[^}]+\}/g, () => `" + encodeURIComponent(${params[i++]}) + "`)
-      .replace(/ \+ ""$/, "").replace(/^"" \+ /, "");
-    const hasBody = takesBody(ep);
-    if (hasBody) params.push("body");
-    params.push("query", "opts");
-    const base = [hasBody ? "json: body" : "", ep.rsc ? "rsc: true" : ""].filter(Boolean).join(", ");
-    const optsExpr = base ? `Object.assign({ ${base} }, opts)` : `opts`;
-    const doc = [
-      ep.query.length ? `query: ${ep.query.join(", ")}` : "",
-      ep.status.length ? `seen ${ep.status.join("/")}` : "",
-    ].filter(Boolean).join("; ");
-    lines.push(`    // ${ep.method} ${ep.path}${doc ? `  (${doc})` : ""}`);
-    lines.push(`    ${ep.functionName}: function (${params.join(", ")}) { return c(${JSON.stringify(ep.method)}, ${urlExpr} + q(query), ${optsExpr}); },`);
-  }
-  lines.push(`  };`);
-  lines.push(`  return Object.keys(window.__ifkApi);`);
-  lines.push(`})();`);
-  if (skipped.length) lines.push(`// Not wrapped: ${skipped.join("; ")}`);
-  return lines.join("\n") + "\n";
-}
-
-function tsType(s: unknown, indent = "  "): string {
-  if (typeof s === "string") {
-    if (s === "null") return "null";
-    if (["string", "number", "boolean"].includes(s)) return s;
-    return "unknown";
-  }
-  if (Array.isArray(s)) return s.length ? `Array<${tsType(s[0], indent)}>` : "unknown[]";
-  if (s && typeof s === "object") {
-    const entries = Object.entries(s as Record<string, unknown>);
-    if (!entries.length) return "Record<string, unknown>";
-    const inner = indent + "  ";
-    const body = entries.map(([k, v]) =>
-      k === "{key}" ? `${inner}[key: string]: ${tsType(v, inner)};` : `${inner}${/^[A-Za-z_$][\w$]*$/.test(k) ? k : JSON.stringify(k)}?: ${tsType(v, inner)};`);
-    return `{\n${body.join("\n")}\n${indent}}`;
-  }
-  return "unknown";
-}
-
-/** Type declarations for window.__ifkApi, inferred from the captured shapes. */
-export function renderTypes(map: ApiMap): string {
-  const out: string[] = [`// Generated by \`iframer ingest\` from ${map.origin}. Shapes come from one sample each: fields may be optional.`];
-  out.push(`type IfkResult<T> = Promise<{ status?: number; data?: T; text?: string; truncated?: number; error?: string; stopped?: string }>;`);
-  out.push(`type IfkOpts = { approved?: boolean; headers?: Record<string, string>; maxBytes?: number; full?: boolean; rsc?: boolean; auth?: boolean };`);
-  out.push(`interface IfkApi {`);
-  for (const ep of map.endpoints) {
-    if (ep.kind === "ws" || ep.kind === "sse" || ep.kind === "beacon" || ep.origin !== map.origin) continue;
-    if (ep.action) {
-      const args = ep.request?.json !== undefined ? tsType(ep.request.json, "  ") : "unknown[]";
-      const r = (ep.response as any)?.rsc?.action;
-      out.push(`  /** Next.js Server Action ${ep.action.name || ep.action.id.slice(0, 8)} at ${ep.path} */`);
-      out.push(`  ${ep.functionName}(args: ${args}, opts?: IfkOpts): IfkResult<${r !== undefined ? tsType(r, "  ") : "unknown"}>;`);
-      continue;
-    }
-    const ids = pathParams(ep.path).map((n) => `${n}: string | number`);
-    const hasBody = takesBody(ep);
-    const req = ep.request?.json !== undefined ? tsType(ep.request.json, "  ")
-      : ep.request?.form || ep.request?.multipart ? "Record<string, string>" : "unknown";
-    const res = ep.response && typeof ep.response === "object" && !Array.isArray(ep.response) && "contentType" in (ep.response as object) && "bytes" in (ep.response as object)
-      ? "unknown" : tsType(ep.response, "  ");
-    const params = [...ids, ...(hasBody ? [`body: ${req}`] : []), `query?: Record<string, string>`, `opts?: IfkOpts`];
-    out.push(`  /** ${ep.method} ${ep.path} */`);
-    out.push(`  ${ep.functionName}(${params.join(", ")}): IfkResult<${res}>;`);
-  }
-  out.push(`}`);
-  out.push(`declare global { interface Window { __ifkApi: IfkApi } }`);
-  out.push(`export {};`);
-  return out.join("\n") + "\n";
 }
 
 function shortShape(s: unknown, depth = 0): string {
@@ -529,4 +412,138 @@ export function describeEndpoint(ep: EndpointSpec): string {
   if (ep.response !== undefined) parts.push(`returns ${shortShape(ep.response)}`);
   if (ep.authHeaders.length) parts.push(`auth ${ep.authHeaders.join(",")}`);
   return parts.filter(Boolean).join("; ");
+}
+
+// ─── Cleanup before building the map ───────────────────────────────────────
+
+function mergeEp(p: CaptureEndpoint, e: CaptureEndpoint): CaptureEndpoint {
+  return {
+    ...p, n: p.n + e.n,
+    status: union(p.status, e.status), query: union(p.query, e.query),
+    headers: union(p.headers, e.headers), auth: union(p.auth, e.auth),
+    req: p.req ?? e.req, res: p.res ?? e.res,
+    ...(p.redacted || e.redacted ? { redacted: union(p.redacted, e.redacted) } : {}),
+  };
+}
+
+/** Same site: equal hosts, or the same last two labels (www.x.io and api.x.io). */
+function sameSite(a: string, b: string): boolean {
+  const h = (o: string) => { try { return new URL(o).hostname; } catch { return o; } };
+  const x = h(a), y = h(b);
+  return x === y || x.split(".").slice(-2).join(".") === y.split(".").slice(-2).join(".");
+}
+
+const NOISE_PATH = /^\/(_next\/(static|image|webpack-hmr)|_vercel\/|__nextjs|favicon|robots\.txt|sitemap)/;
+
+/**
+ * Drops what isn't the site's API (third-party hosts, framework assets),
+ * merges Server Actions posted from several pages, and merges paths that
+ * differ only where another endpoint has a named param ({communitySlug}).
+ */
+export function cleanCapture(report: CaptureReport, opts: { all?: boolean } = {}): { report: CaptureReport; dropped: string[] } {
+  const dropped: string[] = [];
+  let eps = Object.entries(report.endpoints);
+  if (!opts.all) {
+    eps = eps.filter(([k]) => {
+      const { origin, path: p } = splitKey(k);
+      const keep = sameSite(origin, report.origin) && !NOISE_PATH.test(p);
+      if (!keep) dropped.push(k);
+      return keep;
+    });
+  }
+  // One entry per Server Action id.
+  const byAction = new Map<string, string>();
+  const out: Record<string, CaptureEndpoint> = {};
+  for (const [k, ep] of eps) {
+    const id = ep.next?.action;
+    if (id && byAction.has(id)) { const first = byAction.get(id)!; out[first] = mergeEp(out[first], ep); continue; }
+    if (id) byAction.set(id, k);
+    out[k] = out[k] ? mergeEp(out[k], ep) : ep;
+  }
+  const statics = new Set(report.routes?.static ?? []);
+  // Named params, by position, from paths that already have them.
+  const named = new Map<string, string>(); // "METHOD|segcount|i" -> {name}
+  const segs = (k: string) => { const s = splitKey(k); return { ...s, parts: s.path.split("#")[0].split("/") }; };
+  for (const k of Object.keys(out)) {
+    const { method, parts } = segs(k);
+    parts.forEach((p, i) => { if (/^\{[A-Za-z_$][\w$]*\}$/.test(p) && p !== "{id}") named.set(`${method}|${parts.length}|${i}`, p); });
+  }
+  const result: Record<string, CaptureEndpoint> = {};
+  for (const [k, ep] of Object.entries(out)) {
+    const { method, origin, parts } = segs(k);
+    const frag = k.includes("#") ? k.slice(k.indexOf("#")) : "";
+    let changed = false;
+    const np = parts.map((p, i) => {
+      const nm = named.get(`${method}|${parts.length}|${i}`);
+      if (!nm || p === nm || p.startsWith("{") || statics.has(p)) return p;
+      // Only when the rest of the path matches an endpoint that has the param there.
+      const sib = [...parts]; sib[i] = nm;
+      const sibKey = `${method} ${origin}${sib.join("/")}${frag}`;
+      if (!(sibKey in out)) return p;
+      changed = true;
+      return nm;
+    });
+    const nk = changed ? `${method} ${origin}${np.join("/")}${frag}` : k;
+    result[nk] = result[nk] ? mergeEp(result[nk], ep) : ep;
+  }
+  const pathOnly = opts.all ? report.pathOnly : report.pathOnly.filter((p) => sameSite(p, report.origin) && !NOISE_PATH.test(splitKey(`GET ${p}`).path));
+  const withPayload = Object.values(result).filter((e) => e.req || e.res).length;
+  const coverage = { ...report.coverage, seen: Object.keys(result).length + pathOnly.length, withPayload, pathOnly: pathOnly.length };
+  return { report: { ...report, endpoints: result, pathOnly, coverage }, dropped };
+}
+
+/** One line per endpoint, for agents: name, method, path, what it returns. */
+const hasList = (v: unknown, d = 0): boolean => d < 6 && !!v && typeof v === "object" && (Array.isArray(v) || Object.values(v as object).some((x) => hasList(x, d + 1)));
+
+export function renderIndex(map: ApiMap): string {
+  const lines = [`# ${map.origin}: ${map.endpoints.length} endpoints. Call from Node: node client.mjs get <path> [--rsc] [--schema] (session in .env: iframer auth). Details: api.json`];
+  for (const e of map.endpoints) {
+    const what = e.action ? `action ${e.action.name || e.action.id.slice(0, 8)}` : `${e.method} ${e.origin === map.origin ? e.path : e.origin + e.path}`;
+    const r: any = e.response;
+    // Components holding lists first: that's where page data is.
+    const comps = r?.rsc?.components && r?.rsc?.action === undefined
+      ? Object.fromEntries(Object.entries(r.rsc.components).sort(([, a], [, b]) => Number(hasList(b)) - Number(hasList(a))))
+      : undefined;
+    let ret = r !== undefined ? shortShape(r?.rsc?.action ?? comps ?? r) : "";
+    if (ret.length > 90) ret = ret.slice(0, 87) + "...";
+    const html = r?.rsc?.nodes;
+    if (html) ret += `${ret ? " " : ""}+html(${html}): --nodes tag`;
+    lines.push(`${e.functionName}  ${what}${e.rsc ? " [rsc]" : ""}${ret ? `  -> ${ret}` : ""}`);
+  }
+  return lines.join("\n") + "\n";
+}
+
+/**
+ * The captured structure of one endpoint as paste-able paths, one line each
+ * (shapes only: types, no values or lengths). Same layout as {schema:true}.
+ */
+export function schemaFromMap(map: ApiMap, target: string, budget = 1500): string | null {
+  const want = target.replace(/^https?:\/\/[^/]+/, "").split("?")[0];
+  const matches = (tplPath: string) => tplPath === want || new RegExp("^" + tplPath.replace(/[.*+?^$()|[\]\\]/g, "\\$&").replace(/\\\{[^}]+\\\}|\{[^}]+\}/g, "[^/]+(?:/[^/]+)*?") + "$").test(want);
+  const eps = map.endpoints.filter((e) => e.origin === map.origin && matches(e.path));
+  if (!eps.length) return null;
+  const lines: string[] = [];
+  // Same rule as {schema:true}: lists of records with their keys (shapes only here).
+  const walk = (p: string, v: unknown, d: number) => {
+    if (d > 8 || v == null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      const item = v[0];
+      if (!item || typeof item !== "object" || Array.isArray(item)) return;
+      lines.push(`${p}[] {${Object.keys(item).join(",")}}`);
+      for (const [k, x] of Object.entries(item)) walk(`${p}[].${k}`, x, d + 1);
+      return;
+    }
+    for (const [k, x] of Object.entries(v as object)) walk(p ? `${p}.${k}` : k, x, d + 1);
+  };
+  for (const e of eps) {
+    const r: any = e.response;
+    lines.push(`# ${e.action ? `action ${e.action.name || e.action.id.slice(0, 8)}` : `${e.method} ${e.path}`}${e.rsc ? " [rsc]" : ""}`);
+    if (r?.rsc?.components) {
+      for (const [n, c] of Object.entries(r.rsc.components)) walk(n, Array.isArray(c) ? (c as unknown[])[0] : c, 0);
+      if (r.rsc.nodes) lines.push(`nodes: ${r.rsc.nodes}  -> {nodes:'tag'}`);
+    } else walk("", r?.rsc?.action ?? r, 0);
+  }
+  let out = "", used = 0;
+  for (const l of lines) { if (used + l.length + 1 > budget) { out += `# +more: --budget 4000\n`; break; } out += l + "\n"; used += l.length + 1; }
+  return out;
 }

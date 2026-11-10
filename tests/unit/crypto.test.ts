@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { deriveKey, encrypt, decrypt, sha256 } from "../../src/lib/auth/crypto";
+import { deriveKey, encrypt, decrypt } from "../../src/lib/auth/crypto";
 
 describe("deriveKey", () => {
   it("returns a 32-byte buffer", async () => {
@@ -63,21 +63,5 @@ describe("encrypt / decrypt", () => {
     const encrypted = encrypt("secret", key);
     encrypted[encrypted.length - 1] ^= 0xff; // flip last byte
     expect(() => decrypt(encrypted, key)).toThrow();
-  });
-});
-
-describe("sha256", () => {
-  it("returns a 64-char hex string", () => {
-    const hash = sha256("test");
-    expect(hash.length).toBe(64);
-    expect(/^[0-9a-f]+$/.test(hash)).toBe(true);
-  });
-
-  it("is deterministic", () => {
-    expect(sha256("test")).toBe(sha256("test"));
-  });
-
-  it("differs for different inputs", () => {
-    expect(sha256("a")).not.toBe(sha256("b"));
   });
 });

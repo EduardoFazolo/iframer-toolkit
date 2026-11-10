@@ -42,6 +42,8 @@ const NEXT_TREE = '0:{"b":"build1","f":[["",{"children":[["communitySlug","acme"
 const nextAppJs = () => `
 self.__next_f = self.__next_f || [];
 self.__next_f.push([1, ${JSON.stringify(NEXT_TREE)}]);
+// Client navigation like Next's router: fetches the page's RSC data, no reload.
+window.next = { router: { push: function (p) { return fetch(p, { headers: { RSC: '1' } }); } } };
 window.runNext = async function () {
   await fetch('/acme/dashboard/campaigns?_rsc=x1', { headers: { RSC: '1' } });
   await fetch(location.pathname, { method: 'POST', headers: { 'next-action': ${JSON.stringify(actionId())}, accept: 'text/x-component', 'content-type': 'text/plain;charset=UTF-8' }, body: JSON.stringify([{ communitySlug: 'acme' }]) });
@@ -141,6 +143,7 @@ export function startFixture() {
       if (p === "/favicon.ico") { res.writeHead(204); return res.end(); }
       if (p === "/submit" && req.method === "POST") { res.writeHead(303, { location: "/page2?csp=" + (url.searchParams.get("csp") || "strict") }); return res.end(); }
       if (p === "/api/redirect-me") { res.writeHead(302, { location: "/api/redirect-target" }); return res.end(); }
+      if (p === "/api/big") return json(200, { data: Array.from({ length: 300 }, (_, i) => record("big", i + 1)), page: { total: 300 } });
       if (p === "/api/rate-limited") return json(429, { error: "slow down" });
       if (p === "/api/private") return cookieOk ? json(200, { ok: true, secretData: "only-with-cookie" }) : json(401, { error: "no session" });
       if (p.startsWith("/api/")) {

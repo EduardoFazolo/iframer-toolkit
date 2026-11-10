@@ -142,7 +142,7 @@ try {
   // ── Ingest through the real CLI ───────────────────────────────────────
   const outDir = path.join(tmp, "out");
   const dataDir = path.join(tmp, "data");
-  const cliOut = execFileSync("bun", [path.join(ROOT, "bin/cli.js"), "ingest", file, "--out", outDir, "--typed", "--json"], {
+  const cliOut = execFileSync("bun", [path.join(ROOT, "bin/cli.js"), "ingest", file, "--out", outDir, "--json", "--no-session"], {
     env: { ...process.env, IFRAMER_DATA_DIR: dataDir }, encoding: "utf8",
   });
   const summary = JSON.parse(cliOut.trim().split("\n").pop());
@@ -150,27 +150,11 @@ try {
   check("ingest deletes the capture file", !fs.existsSync(file));
   const knowledge = fs.readFileSync(path.join(dataDir, "knowledge", "127.0.0.1.md"), "utf8");
   check("knowledge file written without values", knowledge.includes("/api/orders") && !Object.values(SECRETS).some((v) => knowledge.includes(v)));
-  for (const f of ["api.json", "client.js", "client.d.ts"]) {
+  for (const f of ["api.json", "index.txt"]) {
     const body = fs.readFileSync(path.join(outDir, f), "utf8");
     check(`${f} has no seeded secret`, !Object.values(SECRETS).some((v) => body.includes(v)));
   }
-  const tsc = path.join(ROOT, "node_modules/.bin/tsc");
-  if (fs.existsSync(tsc)) {
-    try {
-      execFileSync(tsc, ["--ignoreConfig", "--noEmit", "--strict", "--lib", "es2020,dom", path.join(outDir, "client.d.ts")], { encoding: "utf8" });
-      check("client.d.ts type-checks", true);
-    } catch (e) { check("client.d.ts type-checks", false, e.stdout || e.message); }
-  }
-
-  // ── Generated client runs in the page and replays with the cookie ─────
-  const clientPath = path.join(outDir, "client.js");
-  const clientSteps = kit.kitInstructions("t3", KIT, clientPath).split("\n");
-  const stashClient = clientSteps.find((l) => l.startsWith("c. preview_evaluate: ")).replace("c. preview_evaluate: ", "");
-  await tab.evaluate(MAKE_INPUT);
-  await tab.page.locator("#__ifk_in").setInputFiles([clientPath]);
-  await tab.evaluate(stashClient);
-  const fns = await tab.evaluate(`eval(sessionStorage.__ifkApi)`);
-  check("client loads and lists functions", Array.isArray(fns) && fns.includes("getItems"), fns);
+  // ── Replays in the page with the cookie ───────────────────────────────
   const priv = await tab.evaluate(`window.__ifk.call('GET','/api/private')`);
   check("in-page replay carries the HttpOnly cookie", priv?.status === 200, priv);
   // Fresh page after navigations: the token comes back from where the page keeps it.
@@ -178,9 +162,18 @@ try {
   check("replay attaches the page's auth header on its own", me?.status === 200 && me.auth?.includes("authorization"), me);
   const noAuth = await tab.evaluate(`window.__ifk.call('GET','/api/me',{auth:false})`);
   check("{auth:false} skips it, and a 401 explains why", noAuth?.status === 401 && typeof noAuth.hint === "string", noAuth);
-  const item = await tab.evaluate(`window.__ifkApi.getItems(5, {limit: 1})`);
-  check("generated GET works", item?.status === 200 && Array.isArray(item.data?.data), item?.status);
-  const write = await tab.evaluate(`window.__ifkApi.createOrders({sku:'x'})`);
+  const item = await tab.evaluate(`window.__ifk.call('GET','/api/items/5')`);
+  check("GET replay works", item?.status === 200 && Array.isArray(item.data?.data), item?.status);
+  // Small answers: big results become an overview, pick keeps only what's asked, full has a hard cap.
+  const big = await tab.evaluate(`window.__ifk.call('GET','/api/big')`);
+  check("big result returns an overview, not the data", big?.data === undefined && big?.bytes > 100000 && big.overview?.data?.startsWith("array(300)") && JSON.stringify(big).length < 1000, { size: JSON.stringify(big).length, big });
+  const fullBig = await tab.evaluate(`window.__ifk.call('GET','/api/big',{full:true})`);
+  check("{full:true} can't pass the hard cap", fullBig?.data === undefined && fullBig.hint?.includes("hard cap"), fullBig?.hint);
+  const picked = await tab.evaluate(`window.__ifk.call('GET','/api/big',{pick:'data.{id,status}',full:true})`);
+  check("pick keeps only the asked fields, mapping over arrays", picked?.data?.length === 300 && JSON.stringify(picked.data[0]) === '{"id":1,"status":"active"}', picked?.data?.[0] ?? picked);
+  const counted = await tab.evaluate(`window.__ifk.call('GET','/api/big',{pick:['data.length','page.total']})`);
+  check("pick with several paths and length", counted?.data?.["data.length"] === 300 && counted.data["page.total"] === 300, counted);
+  const write = await tab.evaluate(`window.__ifk.call('POST','/api/orders',{json:{sku:'x'}})`);
   check("writes refused without approval", write?.error === "write needs approval", write);
   const cross = await tab.evaluate(`window.__ifk.call('GET','https://example.com/x')`);
   check("cross-origin replay refused", cross?.error === "cross-origin", cross);
@@ -214,38 +207,64 @@ try {
     const cap = path.join(tmp, "next-capture");
     fs.writeFileSync(cap, JSON.stringify(rep));
     const outN = path.join(tmp, "next-out");
-    execFileSync("bun", [path.join(ROOT, "bin/cli.js"), "ingest", cap, "--out", outN, "--typed", "--no-knowledge", "--json"], { encoding: "utf8" });
-    const client = fs.readFileSync(path.join(outN, "client.js"), "utf8");
-    check("client takes the route param by name and asks for RSC", client.includes("getDashboardCampaigns: function (communitySlug, query, opts)") && client.includes("rsc: true"), client.split("\n").filter((l) => l.includes(": function")));
-    check("client calls the Server Action by name", client.includes(`getRestaurants: function (args, opts) { return a("getRestaurants", args, opts); }`));
-    const tsc = path.join(ROOT, "node_modules/.bin/tsc");
-    if (fs.existsSync(tsc)) {
-      try { execFileSync(tsc, ["--ignoreConfig", "--noEmit", "--strict", "--lib", "es2020,dom", path.join(outN, "client.d.ts")], { encoding: "utf8" }); check("Next client.d.ts type-checks", true); }
-      catch (e) { check("Next client.d.ts type-checks", false, e.stdout || e.message); }
-    }
-
-    const loadClient = async () => {
-      await t.evaluate(MAKE_INPUT);
-      await t.page.locator("#__ifk_in").setInputFiles([path.join(outN, "client.js")]);
-      await t.evaluate(kit.kitInstructions("t3", KIT, "x").split("\n").find((l) => l.startsWith("c. preview_evaluate: ")).replace("c. preview_evaluate: ", ""));
-      return t.evaluate(`eval(sessionStorage.__ifkApi)`);
-    };
-    await loadClient();
-    const c = await t.evaluate(`window.__ifkApi.getDashboardCampaigns('acme')`);
+    execFileSync("bun", [path.join(ROOT, "bin/cli.js"), "ingest", cap, "--out", outN, "--no-knowledge", "--json", "--no-session"], { encoding: "utf8" });
+    const idx = fs.readFileSync(path.join(outN, "index.txt"), "utf8");
+    check("index names the route param and the Server Action", idx.includes("GET /{communitySlug}/dashboard/campaigns [rsc]") && idx.includes("action getRestaurants"), idx);
+    const P = "'/acme/dashboard/campaigns'";
+    const c = await t.evaluate(`window.__ifk.call('GET',${P},{rsc:true})`);
     check("RSC replay returns page data, not HTML", c?.data?.components?.CampaignsTable?.campaigns?.[0]?.title === "Spring" && c.data.components.CampaignsTable.campaigns[0].note === "Café night ✓", c);
+    const one = await t.evaluate(`window.__ifk.call('GET',${P},{rsc:true, component:'CampaignsTable', pick:'campaigns.{id,title}'})`);
+    check("RSC: one component, picked fields", JSON.stringify(one?.data) === '[{"id":11,"title":"Spring"}]', one);
+    const nope = await t.evaluate(`window.__ifk.call('GET',${P},{rsc:true, component:'Nope'})`);
+    check("RSC: unknown component lists the real ones", nope?.error?.includes("Nope") && nope.components?.includes("CampaignsTable"), nope);
+    const found = await t.evaluate(`window.__ifk.call('GET',${P},{rsc:true, find:'campaigns.title', pick:'campaigns.{id,title}'})`);
+    check("find by shape, not by component name", JSON.stringify(found?.data) === '[{"id":11,"title":"Spring"}]', found);
+    const ov = await t.evaluate(`window.__ifk.call('GET',${P},{rsc:true, maxBytes:50})`);
+    check("too big: components listed biggest first with their keys", ov?.data === undefined && ov.overview?.CampaignsTable?.keys?.includes("campaigns") && ov.hint?.includes("find"), ov);
+    const walk = await t.evaluate(`window.__ifk.walk(['/acme/dashboard/campaigns','/acme/dashboard/campaigns'],{waitMs:100})`);
+    await t.page.waitForTimeout(600);
+    const ws = await t.evaluate(`window.__ifk.walkStatus()`);
+    check("walk runs in the background through the router, walkStatus reports", walk?.started && walk.via === "next.router.push" && ws?.done === true && ws.i === 2, { walk, ws });
+    const sum = await t.evaluate(`window.__ifk.summary()`);
+    check("summary has counts and the 500-call budget", sum?.seen > 0 && sum.maxCalls === 500, sum);
+    const sch = await t.evaluate(`window.__ifk.call('GET',${P},{rsc:true, schema:true})`);
+    check("schema lists the records list with its keys", sch?.schema?.includes("CampaignsTable.campaigns[1]") && sch.schema.includes("title"), sch);
     const html = await t.evaluate(`window.__ifk.call('GET','/acme/dashboard/campaigns')`);
     check("plain GET on a Next page explains the RSC header", html?.hint?.includes("rsc:true"), html);
-    const noOk = await t.evaluate(`window.__ifkApi.getRestaurants([{communitySlug:'acme'}])`);
+    const noOk = await t.evaluate(`window.__ifk.action('getRestaurants',[{communitySlug:'acme'}])`);
     check("Server Action needs approval", noOk?.error === "write needs approval", noOk);
-    const a1 = await t.evaluate(`window.__ifkApi.getRestaurants([{communitySlug:'acme'}],{approved:true})`);
+    const a1 = await t.evaluate(`window.__ifk.action('getRestaurants',[{communitySlug:'acme'}],{approved:true})`);
     check("Server Action replay returns its value", a1?.status === 200 && a1.data?.[0]?.name === "Bistro ü" && a1.data[0].community === "acme", a1);
 
     await fetch(`${base}/__deploy`);
     await t.page.reload({ waitUntil: "load" });
     await t.evaluate(INSTALL);
-    await t.evaluate(`eval(sessionStorage.__ifkApi)`);
-    const a2 = await t.evaluate(`window.__ifkApi.getRestaurants([{communitySlug:'acme'}],{approved:true})`);
+    const a2 = await t.evaluate(`window.__ifk.action('getRestaurants',[{communitySlug:'acme'}],{approved:true})`);
     check("Server Action still works after a deploy changes its id", a2?.status === 200 && a2.data?.[0]?.name === "Bistro ü" && a2.actionId !== a1.actionId, { a1: a1?.actionId, a2 });
+    // ── In-page recipes (fallback for sites that block Node): one short line, in a tab without the kit ──
+    const rdata = path.join(tmp, "rdata");
+    const host = `127.0.0.1:${port}`;
+    const cli = (...a) => execFileSync("bun", [path.join(ROOT, "bin/cli.js"), "recipe", host, ...a], { env: { ...process.env, IFRAMER_DATA_DIR: rdata }, encoding: "utf8" });
+    cli("campaignTitles", "--path", "/{communitySlug}/dashboard/campaigns", "--rsc", "--find", "campaigns.title", "--format", "d => d.campaigns.map(c => c.title).join(', ')", "--describe", "campaign titles");
+    let refused = 0;
+    try { cli("restaurants", "--action", "getRestaurants", "--args", '[{"communitySlug":"{communitySlug}"}]'); } catch (e) { refused = e.status; }
+    check("action recipe needs --approved", refused === 1);
+    cli("restaurants", "--action", "getRestaurants", "--args", '[{"communitySlug":"{communitySlug}"}]', "--approved", "--read-only", "--in-page", "--format", "d => d.length + ' restaurants: ' + d.map(r => r.name).join(', ')");
+    const listed = cli();
+    check("recipe list is one line each", /campaignTitles: campaign titles/.test(listed) && /restaurants\n/.test(listed + "\n"), listed);
+    const bundleSrc = fs.readFileSync(path.join(rdata, "apis", host, "recipes.js"), "utf8");
+    check("bundle doesn't use the kit", !bundleSrc.includes("__ifk."));
+    const r2 = await openTab();
+    await r2.page.goto(`${base}/acme/dashboard`, { waitUntil: "load" });
+    const names = await r2.evaluate(bundleSrc);
+    const line = await r2.evaluate(`window.__ifkRecipes.campaignTitles({communitySlug:'acme'})`);
+    const line2 = await r2.evaluate(`window.__ifkRecipes.restaurants({communitySlug:'acme'})`);
+    const miss = await r2.evaluate(`window.__ifkRecipes.campaignTitles({})`);
+    check("RSC recipe returns one line, no kit in the tab", line === "Spring" && (await r2.evaluate("typeof window.__ifk")) === "undefined", { names, line });
+    check("Server Action recipe returns one line", line2 === "1 restaurants: Bistro ü", line2);
+    check("missing arg is a short error", miss === "error: missing arg communitySlug", miss);
+    await r2.context.close();
+
     await fetch(`${base}/__deploy`); // back to the first id for any later run
     await t.context.close();
   }
@@ -326,13 +345,13 @@ try {
     }, pathOnly: [] });
     const bad = path.join(tmp, "bad");
     fs.writeFileSync(bad, leaky());
-    const out = execFileSync("bun", [path.join(ROOT, "bin/cli.js"), "ingest", bad, "--out", path.join(tmp, "bad-out"), "--no-knowledge", "--json"], { encoding: "utf8" });
+    const out = execFileSync("bun", [path.join(ROOT, "bin/cli.js"), "ingest", bad, "--out", path.join(tmp, "bad-out"), "--no-knowledge", "--json", "--all", "--no-session"], { encoding: "utf8" });
     const sum = JSON.parse(out.trim().split("\n").pop());
     const api = fs.readFileSync(path.join(tmp, "bad-out", "api.json"), "utf8");
     check("ingest keeps the API and swaps private values for placeholders", sum.ok === true && sum.redacted.length >= 3 && api.includes("/api/u/{id}") && api.includes("/v1/{id}/feed") && !Object.values(SECRETS).some((v) => api.includes(v)) && !api.includes("od-a1b2"), { sum, api: api.slice(0, 400) });
     fs.writeFileSync(bad, leaky());
     let code = 0;
-    try { execFileSync("bun", [path.join(ROOT, "bin/cli.js"), "ingest", bad, "--out", path.join(tmp, "strict-out"), "--no-knowledge", "--strict"], { stdio: "pipe" }); }
+    try { execFileSync("bun", [path.join(ROOT, "bin/cli.js"), "ingest", bad, "--out", path.join(tmp, "strict-out"), "--no-knowledge", "--strict", "--no-session"], { stdio: "pipe" }); }
     catch (e) { code = e.status; }
     check("--strict still refuses", code === 2 && !fs.existsSync(path.join(tmp, "strict-out")), { code });
   }

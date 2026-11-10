@@ -164,28 +164,35 @@ execute: steps: [{ type: "click", selector: "@e3" }, { type: "screenshot" }]
      options: { staleTimeoutMs: 60000, continueOnError: true }
 ```
 
-The more interactions (scroll, click tabs, navigate sub-pages), the more API calls get captured. Results feed into the knowledge cache automatically.
+The more interactions (scroll, click tabs, navigate sub-pages), the more API calls get captured. Results feed into the knowledge cache automatically. Write the client into the output folder as the tool's save instructions say: local files that run from Node, never code that needs a browser tab.
 
 ### Reverse-engineer inside a browser iframer doesn't control (T3 Code, Playwright MCP, ...)
 
-When you already drive a browser through your own tools (a T3 Code preview tab, Playwright MCP, Chrome DevTools MCP), don't launch iframer's browser: load the in-page kit into that tab. It records the page's own calls on the user's real session and exports shapes, never values. Use the CLI for this, not the MCP tools.
+The result of reverse engineering is always LOCAL files: an API map, auth config, and `client.mjs`, a Node client that runs with no browser. Save to the folder the user names (`--out <dir>`), else `~/.iframer/apis/<host>/`. The browser is only for mapping the site.
 
 ```
-1. iframer kit --for t3          # or --for playwright-mcp / --for any. Prints the exact tool calls.
-2. Follow the printed install steps (upload the kit file, stash it, top-level eval). Never paste the kit's source.
-3. Drive the site with your normal tools. After EVERY full page load, re-run the printed eval step (step 4).
-4. window.__ifk.dump(), then: iframer ingest --latest --typed
-   -> ./<host>-api/api.json, client.js, client.d.ts, plus the knowledge cache. The capture file is deleted.
+1. Map:   iframer kit --for t3   -> install in the tab (re-run the eval after every full page load), use the site
+          window.__ifk.dump(), then: iframer ingest --latest [--out <dir>]
+          -> <dir>/index.txt (read this), api.json, auth.json, client.mjs, .env.example, .gitignore
+2. Auth:  automatic. ingest takes the session from the browser that is logged in to the site (T3 Code tabs,
+          iframer's own browser, Chrome-family), checks it on a page that needs a login, and writes <dir>/.env
+          (0600, gitignored). client.mjs refreshes it the same way when it expires. Never ask the user to paste a
+          cookie: if no browser is logged in, ask them to log in in the tab, then run iframer auth <host>.
+3. Learn: node <dir>/client.mjs                                     what it knows, which auth is missing
+          node <dir>/client.mjs get /{param}/page --rsc --schema    lists of records + keys + 1 masked sample
+          node <dir>/client.mjs get /path --rsc --find Comp --pick 'items.{id,status}' --where 'status=open' --group owner
+4. Save:  iframer recipe <host> <name> --path /{param}/page --rsc --find … --pick … --where … --format "d => '…'"
+5. Run:   node <dir>/client.mjs <name> '{"param":"x"}'     one line back
+          or in a script: import { <name>, get, page, action } from "<dir>/client.mjs"
 ```
 
-- Replays run IN the page: `window.__ifk.call('GET','/path')`, or load the generated `client.js` (`iframer kit --for t3 --client ./<host>-api/client.js` prints the steps). HttpOnly cookies never leave the browser, so curl replays fail.
-- Writes need `{approved:true}`: ask the user first. Replays stop for good on 403, 429 or a captcha page. Do not retry or work around it.
-- Sites that detect tampering: `iframer kit --mode passive` (no patching; URLs and form posts only).
-- Report coverage as the kit states it. It is never complete: workers, redirect hops and cross-origin iframes are invisible.
-- Next.js sites: route segments come out named (`/{communitySlug}/...`) from the app's own route data. Page data: `window.__ifk.call('GET', path, {rsc:true})` (the generated client sets it) returns `{components: {Name: props}}`, not HTML. Server Actions: `window.__ifk.action('exportName', [args], {approved:true})`, or the client function of the same name. If a result is big you get its shape: pass `{full:true}` and pick fields in the same evaluate.
-- After `iframer update`, the kit file is rewritten. Installing it in a tab that still runs an older kit replaces it and keeps the capture.
-- Private values are separated from the API, not a reason to stop. `ingest` swaps anything token-, email- or phone-like for a placeholder (`{id}` in paths, `{key}` for keys) and lists what it replaced. Endpoints that had one carry `privateValues` in api.json: pass that value per call.
-- Identity: api.json `identity` (and the knowledge file) says which auth headers the site sends and where the page keeps each value, e.g. `localStorage["session -> user.token"]`. `__ifk.call` attaches them on its own, cookies included. If a call returns 401 with a `hint`, use the site once so it sends its token, then retry.
+- Query options (CLI flags and recipes): `find` (a key path that must exist, `a,b` = both keys, a component name, or `a|b` variants), `pick` (`list.path.{field,nested.field}`), `where` (`x>0`, `a=b`, `a!=b`, `t~text`, joined by `&`), `group`, `count`, `limit`, `nodes` (`a`, `li|tr`) for server-rendered HTML. Order: pick's list path, where, pick's fields, group/count/limit.
+- `find` must name one kind of object. Ambiguous matches are refused with both candidates and their item counts: add a key only the right one has. Recipes lock to the shape they first matched and return `matched a different list` / `shape changed: missing x` instead of a wrong number. Never work around these.
+- Server Actions: `node client.mjs action <name> '[args]' --approved`; recipes `--action <name> --approved` (`--read-only` if it only reads). Ids are re-found after deploys. Writes always need the user's OK first.
+- `--run "async (core, a) => …"` recipes for multi-step flows: `core.get(path,{rsc})`, `core.action(name,args)`, `core.find/pick/answer`, `core.need(obj, paths)` to fail loud.
+- "session expired": client.mjs already tried to refresh it from the logged-in browser. Ask the user to log in to the site in the tab, then `iframer auth <host>`. 429/captcha: stop.
+- Calls the page makes while loading happen before the kit is back: navigate inside the app (click links) so the kit records them. Mapping many pages: `window.__ifk.walk([paths])`, `window.__ifk.walkWait()`, then dump and ingest.
+- In-page fallback, ONLY for sites that block requests from Node (bot walls): `window.__ifk.call('GET', path, {rsc:true, schema:true})` in the tab, and `iframer recipe … --in-page` prints how to load and run recipes there. Not the default.
 
 ### Handle captchas
 

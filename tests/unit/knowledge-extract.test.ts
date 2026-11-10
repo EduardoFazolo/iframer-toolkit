@@ -51,11 +51,7 @@ describe("extractKnowledgeFromRun", () => {
     expect(k!.auth.type).toBe("cookies+localStorage");
   });
 
-  // KNOWN BUG (documented current behavior, fix belongs in a separate PR):
-  // domain matching uses endsWith/includes with no label boundary, so a cookie
-  // for a look-alike domain like `evil-figma.com` is wrongly attributed to
-  // `figma.com`. Correct check: `d === root || d.endsWith("." + root)`.
-  test("KNOWN BUG: look-alike domain cookie leaks into the root's knowledge", () => {
+  test("a look-alike domain's cookie never lands in the real domain's knowledge", () => {
     const session: SessionData = {
       cookies: [
         { name: "evil", value: "z", domain: "evil-figma.com", path: "/", expires: -1, httpOnly: false, secure: false, sameSite: "Lax" },
@@ -67,7 +63,6 @@ describe("extractKnowledgeFromRun", () => {
     extractKnowledgeFromRun(navPipeline("https://figma.com/"), okResult(), session, "headless");
 
     const k = parseKnowledge("figma.com");
-    // Asserts the CURRENT (buggy) behavior so a future boundary-fix flips this test on purpose.
-    expect(k!.auth.cookieNames).toContain("evil");
+    expect(k?.auth?.cookieNames ?? []).not.toContain("evil");
   });
 });

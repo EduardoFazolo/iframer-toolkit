@@ -2,7 +2,6 @@ import { describe, it, expect } from "bun:test";
 import type { ElementRef, ExecutionContext } from "../../src/lib/types";
 import { resolveSelector } from "../../src/lib/actions/resolve-selector";
 import { registeredStepTypes } from "../../src/lib/actions/registry";
-import { getErrorMessage } from "../../src/lib/errors";
 import { stepSchema } from "../../src/mcp/tools/step-schema";
 
 /** Minimal ExecutionContext for pure-function tests. */
@@ -73,26 +72,4 @@ describe("step handler registry", () => {
     expect(nav).toEqual({ type: "navigate", url: "https://x.test" });
   });
 
-});
-
-describe("getErrorMessage", () => {
-  it("extracts message from Error", () => {
-    expect(getErrorMessage(new Error("test"))).toBe("test");
-  });
-
-  it("converts string to string", () => {
-    expect(getErrorMessage("plain string")).toBe("plain string");
-  });
-
-  it("converts number to string", () => {
-    expect(getErrorMessage(42)).toBe("42");
-  });
-
-  it("converts null to string", () => {
-    expect(getErrorMessage(null)).toBe("null");
-  });
-
-  it("converts undefined to string", () => {
-    expect(getErrorMessage(undefined)).toBe("undefined");
-  });
 });

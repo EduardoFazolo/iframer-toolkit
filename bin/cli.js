@@ -1296,9 +1296,178 @@ async function main() {
       const kit = await import("../src/lib/kit/index.ts");
       const kitPath = kit.writeKit({});
       const skill = installSkill();
+      const bundles = kit.rebuildAllBundles();
       console.log(`  Kit: ${kitPath}`);
+      if (bundles.length) console.log(`  Clients rebuilt: ${bundles.length} file(s) (client.mjs per site, plus in-page bundles where made)`);
       console.log(skill ? "  Skill: ~/.claude/commands/iframer.md" : "  Skill: not found in the package, skipped");
       break;
+    }
+
+    case "schema": {
+      // Captured structure of one page/endpoint as find/pick paths (shapes only, no values).
+      const kit = await import("../src/lib/kit/index.ts");
+      const host = args[0] && !args[0].startsWith("--") ? kit.normalizeHost(args[0]) : null;
+      const target = args[1] && !args[1].startsWith("--") ? args[1] : null;
+      if (!host || !target) { console.error("  Usage: iframer schema <host> <path> [--budget 1200]"); process.exit(1); }
+      let map;
+      try { map = JSON.parse(fs.readFileSync(path.join(kit.apisDir(host), "api.json"), "utf8")); }
+      catch { console.error(`  No capture for ${host}. Map it first: iframer kit, then iframer ingest.`); process.exit(1); }
+      const out = kit.schemaFromMap(map, target, parseInt(parseFlag(args, "--budget") || "1200", 10));
+      if (!out) { console.error(`  ${target} isn't in the capture. In the page: window.__ifk.call('GET','${target}',{rsc:true,schema:true})`); process.exit(1); }
+      process.stdout.write(out);
+      break;
+    }
+
+    case "recipe": {
+      const kit = await import("../src/lib/kit/index.ts");
+      const host = args[0] && !args[0].startsWith("--") ? kit.normalizeHost(args[0]) : null;
+      const name = args[1] && !args[1].startsWith("--") ? args[1] : null;
+      if (!host) {
+        console.error("  Usage: iframer recipe <host> <name> --path P [--rsc] [--find F] [--pick P] [--where W] [--group G] [--count] [--limit N] [--format F]");
+        console.error("         iframer recipe <host> <name> --action <exportName> --args '<json>' --approved [--read-only]");
+        console.error("         iframer recipe <host> <name> --rm");
+        console.error("         iframer recipe <host>                  (list, one line each)");
+        console.error("    Saved into client.mjs (Node): node <dir>/client.mjs <name> '{...}'");
+        console.error("    --in-page            Also build the in-page bundle, for sites that block requests from Node");
+        process.exit(1);
+      }
+      const clients = () => kit.outputDirs(host).filter((d) => fs.existsSync(path.join(d, "client.mjs"))).map((d) => path.join(d, "client.mjs"));
+      if (!name) {
+        const all = kit.listRecipes(host);
+        if (!all.length) { console.log(`  No recipes for ${host}.`); break; }
+        for (const r of all) console.log(`  ${r.name}${r.description ? `: ${r.description}` : ""}${r.writes ? "  [writes]" : ""}`);
+        for (const c of clients()) console.log(`  Client: ${c}`);
+        break;
+      }
+      if (hasFlag(args, "--rm")) {
+        console.log(kit.removeRecipe(host, name) ? `  Removed ${name}.` : `  No recipe ${name}.`);
+        break;
+      }
+      const action = parseFlag(args, "--action");
+      const actionProp = parseFlag(args, "--action-prop");
+      if ((action || actionProp) && !hasFlag(args, "--approved")) {
+        console.error("  Server Action recipes run server code without asking each time. Get the user's OK, then add --approved.");
+        process.exit(1);
+      }
+      let actionArgs;
+      const rawArgs = parseFlag(args, "--args");
+      if (rawArgs) { try { actionArgs = JSON.parse(rawArgs); } catch { console.error("  --args must be JSON"); process.exit(1); } }
+      const spec = {
+        name, host,
+        path: parseFlag(args, "--path") || undefined,
+        rsc: hasFlag(args, "--rsc") || undefined,
+        action: action || undefined,
+        actionProp: actionProp || undefined,
+        args: actionArgs,
+        find: parseFlag(args, "--find") || undefined,
+        pick: parseFlag(args, "--pick") || undefined,
+        format: parseFlag(args, "--format") || undefined,
+        run: parseFlag(args, "--run") || undefined,
+        nodes: parseFlag(args, "--nodes") || undefined,
+        where: parseFlag(args, "--where") || undefined,
+        group: parseFlag(args, "--group") || undefined,
+        count: hasFlag(args, "--count") || undefined,
+        limit: parseFlag(args, "--limit") ? parseInt(parseFlag(args, "--limit"), 10) : undefined,
+        description: parseFlag(args, "--describe") || undefined,
+        writes: action || actionProp ? !hasFlag(args, "--read-only") : undefined,
+      };
+      try {
+        kit.saveRecipe(spec);
+      } catch (e) { console.error(`  ${e.message}`); process.exit(1); }
+      const vars = [...new Set([...(spec.path || "").matchAll(/\{([A-Za-z_$][\w$]*)\}/g), ...JSON.stringify(spec.args ?? "").matchAll(/\{([A-Za-z_$][\w$]*)\}/g)].map((m) => m[1]))];
+      const runLine = (c) => `node ${c} ${name}${vars.length ? ` '${JSON.stringify(Object.fromEntries(vars.map((v) => [v, "…"])))}'` : ""}`;
+      if (hasFlag(args, "--in-page")) {
+        const bundle = kit.writeBundle(host);
+        if (hasFlag(args, "--quiet")) { console.log(`saved ${name}. Run: ${runLine(clients()[0])}  In-page add (1 call): ${kit.addSnippet(spec)}`); break; }
+        console.log(`  Saved ${name}. Run: ${runLine(clients()[0])}\n`);
+        console.log(kit.recipeInstructions(bundle, kit.listRecipes(host).map((r) => r.name)));
+        break;
+      }
+      if (hasFlag(args, "--quiet")) { console.log(`saved ${name}. Run: ${runLine(clients()[0])}`); break; }
+      console.log(`  Saved ${name}.`);
+      for (const c of clients()) console.log(`  Run: ${runLine(c)}`);
+      break;
+    }
+
+    case "auth": {
+      // The session client.mjs needs, written to <dir>/.env (0600, gitignored). Values are never printed.
+      // Default: taken from a browser on this machine that is already logged in (T3 Code tabs, iframer's
+      // own browser, Chrome-family), tested against a captured page. No user step.
+      const kit = await import("../src/lib/kit/index.ts");
+      const host = args[0] && !args[0].startsWith("--") ? kit.normalizeHost(args[0]) : null;
+      if (!host) {
+        console.error("  Usage: iframer auth <host> [--out <dir>]   save a logged-in session for client.mjs into <dir>/.env");
+        console.error("    (default)            Find it in a browser on this machine that is logged in to the site");
+        console.error("    --no-keychain        Skip browsers whose cookies need the OS keychain (no prompt)");
+        console.error("    --from-file <f>      Cookie header or KEY=value lines from a file (e.g. an API key)");
+        console.error("    --auto               One quiet line, no keychain prompt, exit 1 if nothing works (client.mjs uses this)");
+        process.exit(1);
+      }
+      const dir = path.resolve(parseFlag(args, "--out") || kit.apisDir(host));
+      const auto = hasFlag(args, "--auto");
+      const say = (m) => { if (!auto) console.log(m); };
+      const wanted = Object.keys(kit.readAuth(host, dir)).map(kit.envName);
+      const from = parseFlag(args, "--from-file");
+      const vals = {};
+      let source = "";
+      if (from) {
+        // Manual values, e.g. an API key header the browser doesn't hold: a Cookie header or KEY=value lines.
+        const t = fs.readFileSync(path.resolve(from), "utf8").trim();
+        if (/^[A-Za-z_]\w*=/.test(t) && t.split(/\r?\n/).every((l) => !l.trim() || /^\s*(#|[A-Za-z_]\w*=)/.test(l))) {
+          for (const l of t.split(/\r?\n/)) { const m = /^\s*([A-Za-z_]\w*)=(.*)$/.exec(l); if (m) vals[m[1]] = m[2].trim().replace(/^(['"])(.*)\1$/, "$2"); }
+        } else if (t) vals.COOKIE = t.replace(/^cookie:\s*/i, "");
+        if (!Object.keys(vals).length) { console.error("  Nothing saved."); process.exit(1); }
+        source = from;
+        say(`  Saved ${Object.keys(vals).join(", ")} to ${kit.writeEnv(dir, vals)} (from ${source}). Values not shown.`);
+      } else {
+        // iframer's own browser sessions are one more source (it keeps HttpOnly cookies too).
+        const extra = [];
+        try {
+          const { getDataDir } = await import("../src/lib/paths.ts");
+          const { SqliteStore } = await import("../src/lib/session/sqlite-store.ts");
+          const { deriveKey, decrypt } = await import("../src/lib/auth/crypto.ts");
+          const store = new SqliteStore(getDataDir());
+          const key = await deriveKey(LOCAL_TOKEN);
+          const bare = host.split(":")[0].replace(/^www\./, "");
+          const now = Date.now() / 1000;
+          for (const id of store.listSessionKeys()) {
+            if (id !== LOCAL_USER_ID && !id.startsWith(LOCAL_USER_ID + "::")) continue;
+            let data;
+            try { data = JSON.parse(decrypt(await store.getSession(id), key)); } catch { continue; }
+            const jar = (data.cookies || []).filter((c) => { const d = c.domain.replace(/^\./, ""); return (bare === d || bare.endsWith("." + d) || d.endsWith("." + bare)) && (!c.expires || c.expires < 0 || c.expires > now); });
+            if (jar.length) extra.push({ source: `iframer browser (${id.split("::")[1] || "default"})`, cookies: jar.map((c) => ({ name: c.name, value: c.value, domain: c.domain, path: c.path || "/" })), lastUsed: Date.parse(data.extractedAt || 0) || 0 });
+          }
+          store.close();
+        } catch {}
+        const r = await kit.refreshSession(host, dir, { extra, keychain: !hasFlag(args, "--no-keychain") && !auto });
+        if (!r.ok) {
+          if (auto) console.log(`auth: ${r.note}`); else console.error(`  ${r.note}.`);
+          process.exit(1);
+        }
+        source = r.source;
+        if (auto) { console.log(`auth: session from ${r.source}`); break; }
+        say(`  Saved COOKIE to ${r.envFile} (from ${r.source}). Values not shown.`);
+      }
+      const cur = {};
+      try { for (const l of fs.readFileSync(path.join(dir, ".env"), "utf8").split(/\r?\n/)) { const m = /^([A-Za-z_]\w*)=(.*)$/.exec(l); if (m) cur[m[1]] = m[2]; } } catch {}
+      const missing = wanted.filter((v) => !cur[v]);
+      if (missing.length) say(`  Still missing: ${missing.join(", ")} (headers the site sends; add them to .env)`);
+      if (fs.existsSync(path.join(dir, "client.mjs"))) say(`  Check: node ${path.join(dir, "client.mjs")}`);
+      break;
+    }
+
+    case "run": {
+      // Shortcut for node <dir>/client.mjs <recipe> [args].
+      const kit = await import("../src/lib/kit/index.ts");
+      const host = args[0] && !args[0].startsWith("--") ? kit.normalizeHost(args[0]) : null;
+      if (!host) { console.error("  Usage: iframer run <host> [recipe] ['{\"arg\":\"x\"}']   (same as node <dir>/client.mjs ...)"); process.exit(1); }
+      const out = parseFlag(args, "--out");
+      const client = out ? path.join(path.resolve(out), "client.mjs") : kit.clientPath(host);
+      if (!fs.existsSync(client)) { console.error(`  No client at ${client}. Map the site first: iframer kit, then iframer ingest.`); process.exit(1); }
+      const { spawnSync } = await import("child_process");
+      const rest = args.slice(1).filter((a, i, all) => a !== "--out" && all[i - 1] !== "--out");
+      const r = spawnSync(process.execPath, [client, ...rest], { stdio: "inherit" });
+      process.exit(r.status ?? 1);
     }
 
     case "kit": {
@@ -1313,15 +1482,15 @@ async function main() {
         console.error("  --mode must be hook (default) or passive (no patching, URLs + forms only)");
         process.exit(1);
       }
-      const opts = { mode, hostFilter: parseFlag(args, "--host-filter") };
+      const num = (f) => { const v = parseFlag(args, f); if (v === undefined || v === null) return undefined; const n = parseInt(v, 10); if (!(n > 0)) { console.error(`  ${f} needs a positive number`); process.exit(1); } return n; };
+      const opts = { mode, hostFilter: parseFlag(args, "--host-filter"), maxCalls: num("--max-calls"), maxResult: num("--max-result"), hardMax: num("--hard-max") };
       if (hasFlag(args, "--print")) {
         process.stdout.write(kit.kitSource(opts));
         break;
       }
       const outFile = parseFlag(args, "--out");
       const kitPath = kit.writeKit(opts, outFile ? path.resolve(outFile) : undefined);
-      const client = parseFlag(args, "--client");
-      console.log(kit.kitInstructions(target, kitPath, client ? path.resolve(client) : undefined));
+      console.log(kit.kitInstructions(target, kitPath));
       break;
     }
 
@@ -1340,8 +1509,9 @@ async function main() {
       if (!input) {
         console.error("  Usage: iframer ingest <capture file | - | --latest>");
         console.error("    --latest             Newest capture in T3 Code's downloads or ~/Downloads");
-        console.error("    --out <dir>          Output directory (default: ./<host>-api/)");
-        console.error("    --typed              Also write client.d.ts");
+        console.error("    --out <dir>          Output folder for the map + client.mjs (default: ~/.iframer/apis/<host>/)");
+        console.error("    --all                Keep third-party hosts and framework assets");
+        console.error("    --no-session         Don't look for a logged-in session in this machine's browsers");
         console.error("    --keep               Keep the capture file (default: deleted after ingest)");
         console.error("    --no-knowledge       Don't update ~/.iframer/knowledge");
         console.error("    --strict             Refuse the capture on any secret-looking value instead of replacing it");
@@ -1380,15 +1550,30 @@ async function main() {
         process.exit(2);
       }
 
+      // Keep the site's own API: drop third-party hosts and framework assets,
+      // merge actions posted from several pages and paths that differ by a named param.
+      let dropped = [];
+      ({ report, dropped } = kit.cleanCapture(report, { all: hasFlag(args, "--all") }));
       const map = kit.buildApiMap(report);
       const host = new URL(report.origin).host;
-      const outDir = path.resolve(parseFlag(args, "--out") || `./${host.replace(/[^a-z0-9.-]/gi, "_")}-api`);
+      // Never the current directory: it may be a repo that must not hold API maps.
+      const outDir = path.resolve(parseFlag(args, "--out") || kit.apisDir(host));
       fs.mkdirSync(outDir, { recursive: true });
       const written = [];
       const write = (name, body) => { const p = path.join(outDir, name); fs.writeFileSync(p, body); written.push(p); };
+      write("index.txt", kit.renderIndex(map));
+      // Auth header sources (names + where the page keeps them, no values) for recipes.
+      write("auth.json", JSON.stringify(report.auth?.headers ?? {}, null, 2) + "\n");
       write("api.json", JSON.stringify(map, null, 2) + "\n");
-      write("client.js", kit.renderClient(map));
-      if (hasFlag(args, "--typed")) write("client.d.ts", kit.renderTypes(map));
+      // The map always lands in the host folder too, so recipes and auth find it.
+      const hostDir = path.resolve(kit.apisDir(host));
+      if (outDir !== hostDir) {
+        fs.mkdirSync(hostDir, { recursive: true });
+        for (const f of ["index.txt", "auth.json", "api.json"]) fs.copyFileSync(path.join(outDir, f), path.join(hostDir, f));
+        kit.addOutputDir(host, outDir);
+      }
+      // client.mjs (Node, no browser) + .env.example + .gitignore, in every folder for the host.
+      for (const f of kit.writeOutputs(host)) if (f.startsWith(outDir + path.sep) && !written.includes(f)) written.push(f);
 
       if (!hasFlag(args, "--no-knowledge")) {
         const { mergeKnowledge } = await import("../src/lib/knowledge.ts");
@@ -1396,18 +1581,18 @@ async function main() {
         const c = report.coverage;
         mergeKnowledge(host, {
           lastMode: `kit-${report.kit?.mode || "hook"}`,
-          browserRequired: true,
+          browserRequired: false,
           auth: { type: authHeaders.length ? "session cookies + headers" : "session cookies", headers: authHeaders.length ? authHeaders : undefined },
           endpoints: map.endpoints.map((e) => ({
             method: e.method,
             path: e.origin === map.origin ? e.path : `${e.origin}${e.path}`,
             description: kit.describeEndpoint(e),
-            example: e.origin === map.origin ? `window.__ifk.call(${JSON.stringify(e.method)}, ${JSON.stringify(e.path)})` : undefined,
+            example: e.origin === map.origin ? `node ${path.join(outDir, "client.mjs")} get ${e.path}${e.rsc ? " --rsc" : ""}` : undefined,
             firstSeen: report.capturedAt,
           })),
           notes: [
             `In-page capture: ${c.seen} seen, ${c.withPayload} with payload, ${c.pathOnly} path only. Not complete: ${c.blindSpots.join(", ")}.`,
-            "Replay in the page (window.__ifk.call): HttpOnly cookies never leave the browser.",
+            `Local client: ${path.join(outDir, "client.mjs")} (Node). Session in .env next to it: iframer auth ${host}${outDir !== path.resolve(kit.apisDir(host)) ? ` --out ${outDir}` : ""}.`,
             ...map.identity.headers.map((h) => `Auth header ${h.name}: ${h.source}.`),
             ...(redacted.length ? [`Private values replaced with placeholders in ${new Set(redacted.map((r) => r.where)).size} endpoint(s); see privateValues in api.json and pass them per call.`] : []),
           ],
@@ -1415,9 +1600,17 @@ async function main() {
       }
       removeInput();
 
+      // The session for the client: taken from the browser that is logged in (no prompt), unless .env has one.
+      let sessionLine = `  Session: ${path.join(outDir, ".env")} (kept)`;
+      if (hasFlag(args, "--no-session")) sessionLine = `  Session: skipped (iframer auth ${host} when needed)`;
+      else if (!fs.existsSync(path.join(outDir, ".env"))) {
+        const s = await kit.refreshSession(host, outDir, { keychain: false });
+        sessionLine = s.ok ? `  Session: from ${s.source} -> ${s.envFile} (values not shown)` : `  Session: ${s.note}: iframer auth ${host}${outDir !== path.resolve(kit.apisDir(host)) ? ` --out ${outDir}` : ""}`;
+      }
+
       const c = report.coverage;
       if (json) {
-        console.log(JSON.stringify({ ok: true, origin: report.origin, endpoints: map.endpoints.length, coverage: { seen: c.seen, withPayload: c.withPayload, pathOnly: c.pathOnly }, redacted: redacted.map((r) => ({ kind: r.kind, at: r.where })), files: written, inputDeleted: !fromStdin && !hasFlag(args, "--keep") }));
+        console.log(JSON.stringify({ ok: true, origin: report.origin, session: sessionLine.trim(), endpoints: map.endpoints.length, dropped: dropped.length, index: path.join(outDir, "index.txt"), coverage: { seen: c.seen, withPayload: c.withPayload, pathOnly: c.pathOnly }, redacted: redacted.map((r) => ({ kind: r.kind, at: r.where })), files: written, inputDeleted: !fromStdin && !hasFlag(args, "--keep") }));
       } else {
         console.log(`  ${report.origin}: ${map.endpoints.length} endpoints (${c.withPayload} with payload, ${c.pathOnly} path only). Not complete.`);
         for (const h of map.identity.headers) console.log(`  Identity: ${h.name} <- ${h.source}`);
@@ -1425,10 +1618,14 @@ async function main() {
           console.log(`  Replaced ${redacted.length} secret-looking value(s) with placeholders ({id}, {key}, "string"):`);
           for (const r of redacted.slice(0, 10)) console.log(`    ${r.kind} at ${r.where}`);
         }
-        for (const e of map.endpoints.slice(0, 40)) console.log(`    ${e.method.padEnd(6)} ${e.origin === map.origin ? e.path : e.origin + e.path}  -> ${e.functionName}`);
-        if (map.endpoints.length > 40) console.log(`    … ${map.endpoints.length - 40} more in api.json`);
+        if (dropped.length) console.log(`  Left out ${dropped.length} third-party or asset request(s). --all keeps them.`);
+        console.log(`  One line per endpoint: ${path.join(outDir, "index.txt")}`);
         console.log(`  Wrote: ${written.join(", ")}`);
         if (!fromStdin && !hasFlag(args, "--keep")) console.log("  Capture file deleted.");
+        console.log(sessionLine);
+        console.log(`\n  Next (no browser needed):`);
+        console.log(`    node ${path.join(outDir, "client.mjs")}                  what it can do`);
+        console.log(`    node ${path.join(outDir, "client.mjs")} get <path> --rsc --schema   learn a page's data`);
       }
       break;
     }
@@ -1655,18 +1852,41 @@ async function main() {
       }
       if (isDev) {
         console.log("\n  This is a dev/linked install (the package has a .git repo).");
-        console.log("  Update it with `git pull && bun run build`, not npm.");
+        console.log("  Update it with `git pull`, not npm. With `iframer` linked to bin/iframer-dev, every run rebuilds when the source changed.");
         break;
       }
 
-      console.log("\n  Updating via npm...");
+      // Install into the copy that is running, not npm's default prefix: with
+      // several node versions those differ and the update lands somewhere unused.
+      const cp = require("child_process");
+      const real = fs.realpathSync(pkgRoot);
+      const pm = real.match(/^(.*)[\\/]lib[\\/]node_modules[\\/]iframer-toolkit$/) || (process.platform === "win32" && real.match(/^(.*)[\\/]node_modules[\\/]iframer-toolkit$/));
+      const prefix = pm ? pm[1] : null;
+      const npmBin = (() => {
+        const near = path.join(path.dirname(process.execPath), process.platform === "win32" ? "npm.cmd" : "npm");
+        return fs.existsSync(near) ? JSON.stringify(near) : "npm";
+      })();
+      const cmd = `${npmBin} install -g iframer-toolkit@latest${prefix ? ` --prefix ${JSON.stringify(prefix)}` : ""}`;
+      console.log(`\n  Updating via npm${prefix ? ` into ${prefix}` : ""}...`);
       try {
-        require("child_process").execSync("npm install -g iframer-toolkit@latest", { stdio: "inherit" });
+        cp.execSync(cmd, { stdio: "inherit" });
       } catch {
         console.error("\n  npm install failed. If it's a permissions error:");
-        console.error("    sudo npm install -g iframer-toolkit@latest");
+        console.error(`    sudo ${cmd}`);
         process.exit(1);
       }
+      // Warn when the iframer on PATH is a different install than the one just updated.
+      try {
+        const onPath = cp.execSync(process.platform === "win32" ? "where iframer" : "command -v iframer", { encoding: "utf8", shell: process.platform === "win32" ? undefined : "/bin/sh" }).split(/\r?\n/)[0].trim();
+        const target = onPath && fs.realpathSync(onPath);
+        if (target && !target.startsWith(real + path.sep)) {
+          const v = cp.execSync(`${JSON.stringify(onPath)} --version`, { encoding: "utf8" }).trim();
+          if (v !== latest) {
+            console.warn(`\n  Warning: \`iframer\` on your PATH is another install (${target}, v${v}).`);
+            console.warn(`  Updated: ${real}. Remove the other one or put this one first on PATH.`);
+          }
+        }
+      } catch {}
       // The new version's files: rewrite the in-page kit and the /iframer skill
       // so agents don't keep uploading the old ones. Runs the NEW binary.
       try { require("child_process").execSync("iframer refresh", { stdio: "inherit" }); }
@@ -1742,20 +1962,45 @@ async function main() {
       --typed                       Generate TypeScript
       --mode <mode>                 Browser mode
 
-  Capture in a browser iframer doesn't control (T3 Code, Playwright MCP, ...):
+  Reverse engineer from a browser iframer doesn't control (T3 Code, Playwright MCP, ...).
+  The browser only maps the site; the output is a local folder with a Node client:
     kit                             Write the in-page kit, print the agent steps
       --for <t3|playwright-mcp|any> Which browser tool's steps to print (default: t3)
       --mode passive                No patching: URLs + forms only (for sites that detect it)
       --host-filter <regex>         Only record matching hosts
-      --client <path>               Also print steps to load a generated client.js
+      --max-calls <n>               Replay calls allowed per tab session (default: 500)
+      --max-result <n>              Chars a call returns before switching to an overview (default: 4000)
+      --hard-max <n>                Chars a call can ever return, even with {full:true} (default: 30000)
       --print                       Print the kit source instead (for tools without upload)
-    ingest <file|-|--latest>        Turn a capture into api.json + client.js + knowledge
-      --typed                       Also write client.d.ts
-      --out <dir>                   Output directory (default: ./<host>-api/)
+    ingest <file|-|--latest>        Capture -> folder: index.txt, api.json, auth.json, client.mjs, .env.example
+      --out <dir>                   Output folder (default: ~/.iframer/apis/<host>/)
+      --all                         Keep third-party hosts and framework assets
       --keep                        Keep the capture file (default: deleted)
       --no-knowledge                Don't update ~/.iframer/knowledge
       --strict                      Refuse on any secret-looking value instead of replacing it
       --json                        One-line JSON summary
+    auth <host> [--out <dir>]       Save the session for client.mjs into <dir>/.env (0600, gitignored)
+      (default)                     Taken from a browser on this machine that is logged in, checked on a captured page
+      --no-keychain                 Skip browsers whose cookies need the OS keychain (no prompt)
+      --from-file <f>               Cookie header or KEY=value lines from a file (e.g. an API key)
+    run <host> [recipe] [args]      Same as: node <dir>/client.mjs [recipe] [args]
+    schema <host> <path>            Captured structure of a page as find/pick paths (no values)
+    recipe <host> [name] ...        Save a mapped task as a function of client.mjs (one short line back)
+      --path <template>             Page or API path, {param} filled from args (/{team}/tickets)
+      --rsc                         Next.js page data (RSC header)
+      --find <path|js fn>           Pick the object by shape (data.tablesNeeded)
+      --pick <path|js fn>           Keep only these fields (data.{id,name})
+      --nodes <tags>                Server-rendered HTML instead of component props (a, li|tr, *)
+      --where <cond>                Filter the list: x>0, status=PUBLISHED, href~?id= (& joins)
+      --group <key>  --count  --limit <n>   Shape the answer before format
+      --format <js fn>              (data, args) => the one line to return
+      --run <js fn>                 async (core, args) => line. For pagination, polling, several calls
+                                    (core: get, action, find, pick, answer, need, sleep)
+      --action <name> --args <json> --approved [--read-only]   Next.js Server Action recipe
+      --action-prop <prop> --path <page> --find <keys> --approved   Inline action passed as a prop
+      --in-page                     Also build the in-page bundle: ONLY for sites that block requests from Node
+      --quiet                       One line back: the run command
+      --rm                          Delete a recipe; no name lists them
 
   Session:
     session stop                    Save state + close idle browsers on the shared daemon

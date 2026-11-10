@@ -998,6 +998,16 @@ var init_launcher = __esm({
 });
 
 // src/lib/auth/crypto.ts
+var crypto_exports = {};
+__export(crypto_exports, {
+  decrypt: () => decrypt,
+  deriveKey: () => deriveKey,
+  encrypt: () => encrypt,
+  generateTOTP: () => generateTOTP,
+  getLocalToken: () => getLocalToken,
+  getPairingTokens: () => getPairingTokens,
+  sha256: () => sha256
+});
 function getLocalToken() {
   if (process.env.IFRAMER_SECRET) return process.env.IFRAMER_SECRET;
   const candidates = [
@@ -1065,6 +1075,9 @@ function decrypt(blob, key) {
   const decipher = import_crypto.default.createDecipheriv("aes-256-gcm", key, iv);
   decipher.setAuthTag(tag);
   return decipher.update(ciphertext, void 0, "utf8") + decipher.final("utf8");
+}
+function sha256(str) {
+  return import_crypto.default.createHash("sha256").update(str).digest("hex");
 }
 function generateTOTP(secret, period = 30, digits = 6) {
   const base32Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -1162,6 +1175,10 @@ var init_persistence = __esm({
 });
 
 // src/lib/session/sqlite-store.ts
+var sqlite_store_exports = {};
+__export(sqlite_store_exports, {
+  SqliteStore: () => SqliteStore
+});
 function createBunDb(dbPath) {
   const { Database } = require("bun:sqlite");
   const db = new Database(dbPath);
@@ -1247,6 +1264,10 @@ var init_sqlite_store = __esm({
       async getSession(userId) {
         const row = this.db.queryGet("SELECT blob FROM sessions WHERE user_id = ?", userId);
         return row ? Buffer.from(row.blob) : null;
+      }
+      /** Keys of every stored browser session (one per user/profile). */
+      listSessionKeys() {
+        return this.db.queryAll("SELECT user_id FROM sessions").map((r) => r.user_id);
       }
       async setSession(userId, blob) {
         this.db.run("INSERT OR REPLACE INTO sessions (user_id, blob) VALUES (?, ?)", userId, blob);
@@ -1758,8 +1779,8 @@ var init_daemon = __esm({
        * a shared server. Pass force=true (crash recovery / shutdown) to kill all.
        */
       async stopAll(force = false) {
-        const keys = [...this.instances.entries()].filter(([, inst]) => force || inst.active === 0).map(([k]) => k);
-        await Promise.all(keys.map((k) => this.stopKey(k)));
+        const keys2 = [...this.instances.entries()].filter(([, inst]) => force || inst.active === 0).map(([k]) => k);
+        await Promise.all(keys2.map((k) => this.stopKey(k)));
       }
       resetIdleTimer(key) {
         const existing = this.idleTimers.get(key);
@@ -2238,8 +2259,8 @@ async function humanMove(page, toX, toY) {
   const lastPos = mousePositions.get(page);
   const fromX = lastPos?.x ?? randRange(TIMING.IDLE_MOUSE_X);
   const fromY = lastPos?.y ?? randRange(TIMING.IDLE_MOUSE_Y);
-  const path15 = generatePath(fromX, fromY, toX, toY);
-  for (const point of path15) {
+  const path18 = generatePath(fromX, fromY, toX, toY);
+  for (const point of path18) {
     await mouse.move(point.x, point.y);
     await sleep4(rand(2, 12));
   }
@@ -2888,7 +2909,7 @@ async function download(page, step) {
   const status = resp.status();
   if (!resp.ok()) throw new Error(`download: HTTP ${status} for ${step.url}`);
   const buf = await resp.body();
-  const fs14 = await import("fs");
+  const fs17 = await import("fs");
   const pathMod = await import("path");
   const { getDataDir: getDataDir2 } = await Promise.resolve().then(() => (init_paths(), paths_exports));
   let outPath;
@@ -2902,8 +2923,8 @@ async function download(page, step) {
     }
     outPath = pathMod.join(getDataDir2(), "downloads", step.path || name);
   }
-  fs14.mkdirSync(pathMod.dirname(outPath), { recursive: true });
-  fs14.writeFileSync(outPath, buf);
+  fs17.mkdirSync(pathMod.dirname(outPath), { recursive: true });
+  fs17.writeFileSync(outPath, buf);
   return { path: outPath, size: buf.length, status };
 }
 async function typeCode(page, step, ctx) {
@@ -2966,12 +2987,12 @@ async function find(page, step, ctx) {
   const elInfo = await element.evaluate((el) => {
     const tag = el.tagName.toLowerCase();
     const text = (el.textContent?.trim() || "").slice(0, 60);
-    const path15 = [];
+    const path18 = [];
     let current = el;
     while (current && current !== document.body && current !== document.documentElement) {
       let seg = current.tagName.toLowerCase();
       if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-        path15.unshift(`#${current.id}`);
+        path18.unshift(`#${current.id}`);
         break;
       }
       const parent = current.parentElement;
@@ -2983,10 +3004,10 @@ async function find(page, step, ctx) {
           seg += `:nth-of-type(${idx})`;
         }
       }
-      path15.unshift(seg);
+      path18.unshift(seg);
       current = parent;
     }
-    return { tag, text, selector: path15.join(" > ") };
+    return { tag, text, selector: path18.join(" > ") };
   });
   const ref = `@e${ctx.nextRefId++}`;
   const displayRole = step.role || elInfo.tag;
@@ -3180,12 +3201,12 @@ async function takeSnapshot(page, ctx, options) {
       return textual && el.getAttribute("tabindex") === "-1";
     }
     function buildSelector(el) {
-      const path15 = [];
+      const path18 = [];
       let current = el;
       while (current && current !== document.body && current !== document.documentElement) {
         let seg = current.tagName.toLowerCase();
         if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-          path15.unshift(`#${current.id}`);
+          path18.unshift(`#${current.id}`);
           break;
         }
         const parent = current.parentElement;
@@ -3197,10 +3218,10 @@ async function takeSnapshot(page, ctx, options) {
             seg += `:nth-of-type(${idx})`;
           }
         }
-        path15.unshift(seg);
+        path18.unshift(seg);
         current = parent;
       }
-      return path15.join(" > ");
+      return path18.join(" > ");
     }
     function getName(el) {
       const ariaLabel = el.getAttribute("aria-label");
@@ -3337,12 +3358,12 @@ async function annotatedScreenshot(page, ctx) {
       return true;
     }
     function buildSelector(el) {
-      const path15 = [];
+      const path18 = [];
       let current = el;
       while (current && current !== document.body && current !== document.documentElement) {
         let seg = current.tagName.toLowerCase();
         if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-          path15.unshift(`#${current.id}`);
+          path18.unshift(`#${current.id}`);
           break;
         }
         const parent = current.parentElement;
@@ -3354,10 +3375,10 @@ async function annotatedScreenshot(page, ctx) {
             seg += `:nth-of-type(${idx})`;
           }
         }
-        path15.unshift(seg);
+        path18.unshift(seg);
         current = parent;
       }
-      return path15.join(" > ");
+      return path18.join(" > ");
     }
     function getName(el) {
       const ariaLabel = el.getAttribute("aria-label");
@@ -5199,8 +5220,8 @@ function isLikelyId(segment) {
 function isRecord(x) {
   return typeof x === "object" && x !== null && !Array.isArray(x);
 }
-function parameterizePath(path15) {
-  const parts = path15.split("/");
+function parameterizePath(path18) {
+  const parts = path18.split("/");
   let idCount = 0;
   const parameterized = parts.map((part) => {
     if (part && isLikelyId(part)) {
@@ -5224,9 +5245,9 @@ function parseQueryParams(url) {
     return void 0;
   }
 }
-function parseCookies(cookieHeader) {
+function parseCookies(cookieHeader2) {
   const cookies = {};
-  for (const pair of cookieHeader.split(";")) {
+  for (const pair of cookieHeader2.split(";")) {
     const eq = pair.indexOf("=");
     if (eq > 0) {
       const name = pair.slice(0, eq).trim();
@@ -5289,16 +5310,16 @@ function gqlActionFromBody(body) {
   return void 0;
 }
 function classifyRequest(req) {
-  const path15 = req.path;
-  const lowerPath = path15.toLowerCase();
+  const path18 = req.path;
+  const lowerPath = path18.toLowerCase();
   const ct = (req.requestHeaders["content-type"] || req.requestHeaders["Content-Type"] || "").toLowerCase();
   const body = req.requestBody;
   if (ct.includes("application/grpc")) {
-    return { protocol: "grpc-web", action: path15.replace(/^\//, "") };
+    return { protocol: "grpc-web", action: path18.replace(/^\//, "") };
   }
   const soapAction = req.requestHeaders["soapaction"] || req.requestHeaders["SOAPAction"];
   if (soapAction || ct.includes("text/xml") || ct.includes("application/soap+xml")) {
-    return { protocol: "soap", action: (soapAction || path15).replace(/^["/]|["/]$/g, "") };
+    return { protocol: "soap", action: (soapAction || path18).replace(/^["/]|["/]$/g, "") };
   }
   if (/\/graphql\b/.test(lowerPath) || hasGraphQLShape(body)) {
     return { protocol: "graphql", action: gqlActionFromBody(body) ?? "anonymous" };
@@ -5313,7 +5334,7 @@ function classifyRequest(req) {
     const friendly = gqlActionFromBody(body);
     if (friendly) return { protocol: "form-rpc", action: friendly };
   }
-  return { protocol: "rest", action: `${req.method} ${parameterizePath(path15)}` };
+  return { protocol: "rest", action: `${req.method} ${parameterizePath(path18)}` };
 }
 function inferVerb(protocol, action, method, responseBody) {
   const lower = action.toLowerCase();
@@ -5348,8 +5369,8 @@ function buildFunctionName(protocol, action, method, verb) {
   if (protocol === "rest") {
     const parts = action.split(" ");
     const httpMethod = parts[0];
-    const path15 = parts.slice(1).join(" ");
-    const segs = path15.split("/").filter((s) => s && !s.startsWith("{"));
+    const path18 = parts.slice(1).join(" ");
+    const segs = path18.split("/").filter((s) => s && !s.startsWith("{"));
     const verbPrefix = httpMethod === "GET" ? verb === "list" ? "list" : "get" : httpMethod === "POST" ? "create" : httpMethod === "PUT" ? "update" : httpMethod === "PATCH" ? "patch" : httpMethod === "DELETE" ? "delete" : httpMethod.toLowerCase();
     return camelCase(`${verbPrefix} ${segs.join(" ")}`) || camelCase(action);
   }
@@ -6201,6 +6222,11 @@ var init_block_detection = __esm({
 });
 
 // src/lib/knowledge/extract-from-run.ts
+function sameDomain(hostOrOrigin, root) {
+  const h = hostOrOrigin.replace(/^[a-z]+:\/\//i, "").split(/[:/]/)[0].replace(/^\./, "").replace(/^www\./, "").toLowerCase();
+  const r = root.replace(/^www\./, "").toLowerCase();
+  return h === r || h.endsWith("." + r) || r.endsWith("." + h);
+}
 function extractKnowledgeFromRun(pipeline, result, sessionData, mode) {
   const firstNav = pipeline.steps.find((s) => s.type === "navigate");
   if (!firstNav || firstNav.type !== "navigate") return;
@@ -6218,19 +6244,19 @@ function extractKnowledgeFromRun(pipeline, result, sessionData, mode) {
   const sessionStorageKeys = [];
   if (sessionData) {
     for (const c of sessionData.cookies ?? []) {
-      if (c.domain.endsWith(domainRoot) || domainRoot.endsWith(c.domain.replace(/^\./, ""))) {
+      if (sameDomain(c.domain, domainRoot)) {
         if (!cookieNames.includes(c.name)) cookieNames.push(c.name);
       }
     }
     for (const [origin, store] of Object.entries(sessionData.localStorage ?? {})) {
-      if (origin.includes(domainRoot)) {
+      if (sameDomain(origin, domainRoot)) {
         for (const k of Object.keys(store)) {
           if (!localStorageKeys.includes(k)) localStorageKeys.push(k);
         }
       }
     }
     for (const [origin, store] of Object.entries(sessionData.sessionStorage ?? {})) {
-      if (origin.includes(domainRoot)) {
+      if (sameDomain(origin, domainRoot)) {
         for (const k of Object.keys(store)) {
           if (!sessionStorageKeys.includes(k)) sessionStorageKeys.push(k);
         }
@@ -6250,7 +6276,7 @@ function extractKnowledgeFromRun(pipeline, result, sessionData, mode) {
   const endpoints = [];
   const replayHeaders = /* @__PURE__ */ new Set();
   for (const api of result.capturedApi ?? []) {
-    if (!api.domain.includes(domainRoot) && !domainRoot.includes(api.domain.replace(/^www\./, ""))) continue;
+    if (!sameDomain(api.domain, domainRoot)) continue;
     if (api.auth?.authorization) replayHeaders.add("Authorization");
     for (const name of Object.keys(api.auth?.tokens ?? {})) replayHeaders.add(name);
     for (const ep of api.endpoints ?? []) {
@@ -11616,7 +11642,7 @@ In binary-headful mode, prefer asking the user to solve it in the visible window
 });
 
 // src/lib/kit/page-kit.ts
-function pageKit(opts) {
+function pageKit(opts, core) {
   opts = opts || {};
   var w = window;
   var VERSION = 1;
@@ -11633,8 +11659,10 @@ function pageKit(opts) {
     if (opts.hostFilter) hostRe = new RegExp(opts.hostFilter, "i");
   } catch (e) {
   }
-  var MAX_BODY = opts.maxBody || 2e5;
-  var MAX_CALLS = opts.maxCalls || 50;
+  var MAX_BODY = opts.maxBody || 5e6;
+  var MAX_CALLS = opts.maxCalls || 500;
+  var MAX_RESULT = opts.maxResult || 4e3;
+  var HARD_MAX = Math.max(opts.hardMax || 3e4, MAX_RESULT);
   function store() {
     try {
       if (w.sessionStorage) return w.sessionStorage;
@@ -11658,7 +11686,7 @@ function pageKit(opts) {
     replaced = w.__ifk.build || "old";
     try {
       var keep = {};
-      [KEY, "__ifk", "__ifkApi"].forEach(function(k) {
+      [KEY, "__ifk"].forEach(function(k) {
         keep[k] = ss && ss.getItem(k);
       });
       w.__ifk.stop();
@@ -11686,6 +11714,8 @@ function pageKit(opts) {
   var authSrc = {};
   var authMem = {};
   var rp = {};
+  var rpMulti = [];
+  var statics = {};
   var acts = {};
   var restored = 0;
   try {
@@ -11696,6 +11726,9 @@ function pageKit(opts) {
       if (saved.budget) budget = saved.budget;
       if (saved.authSrc) authSrc = saved.authSrc;
       if (saved.acts) acts = saved.acts;
+      if (saved.rp) rp = saved.rp;
+      if (saved.rpMulti) rpMulti = saved.rpMulti;
+      if (saved.statics) statics = saved.statics;
       restored = Object.keys(m).length;
     }
   } catch (e) {
@@ -11720,7 +11753,14 @@ function pageKit(opts) {
     return false;
   }
   function tpl(p) {
+    for (var i = 0; i < rpMulti.length; i++) {
+      var at = p.indexOf("/" + rpMulti[i].v);
+      var end = at + 1 + rpMulti[i].v.length;
+      if (at >= 0 && (end === p.length || p.charAt(end) === "/")) p = p.slice(0, at + 1) + "\0" + rpMulti[i].n + p.slice(end);
+    }
     return p.split("/").map(function(s) {
+      if (s.charAt(0) === "\0") return "{" + s.slice(1) + "}";
+      if (statics[s]) return s;
       var d = s;
       try {
         d = decodeURIComponent(s);
@@ -11730,19 +11770,90 @@ function pageKit(opts) {
       return isValueLike(s) ? "{id}" : s;
     }).join("/");
   }
-  var PARAM_RE = /\["([A-Za-z_][\w-]{0,40})","([^"\\\/]{1,80})","(?:d|c|oc|ci|dc)"/g;
-  function learnParams(text) {
-    if (!text || text.indexOf('","d"') < 0 && text.indexOf('","c"') < 0 && text.indexOf('","oc"') < 0) return;
-    PARAM_RE.lastIndex = 0;
+  var PARAM_RE = /\["([A-Za-z_][\w-]{0,40})","([^"\\]{1,200})","(d|c|oc|ci|dc|di)"/g;
+  var PARAM16_RE = /\{"n":"([A-Za-z_][\w-]{0,40})","t":"(d|c|oc|ci|dc|di)","k":"([^"\\]{1,200})"/g;
+  function addParam(name, value) {
+    if (!value || statics[value]) return;
+    if (value.indexOf("/") >= 0) {
+      if (!rpMulti.some(function(x) {
+        return x.v === value;
+      })) {
+        rpMulti.push({ v: value, n: name });
+        rpMulti.sort(function(a, b) {
+          return b.v.length - a.v.length;
+        });
+      }
+    } else if (!rp.hasOwnProperty(value)) rp[value] = name;
+  }
+  var STATIC16_RE = /"s":"([^"\\\/]{1,80})"/g;
+  var SIBLINGS_RE = /"t":"(?:d|c|oc|ci|dc|di)","k":"[^"\\]*","s":\[([^\]]*)\]/g;
+  var STATIC_OLD_RE = /\["([^"\\\/]{1,80})",\{"children"/g;
+  function learnStatics(text) {
     var x;
-    while (x = PARAM_RE.exec(text)) if (!rp.hasOwnProperty(x[2])) rp[x[2]] = x[1];
+    var add = function(n) {
+      if (n && n.indexOf("__") !== 0 && n.charAt(0) !== "(" && n.charAt(0) !== "@" && n !== "children") {
+        statics[n] = 1;
+        if (rp[n]) delete rp[n];
+      }
+    };
+    STATIC16_RE.lastIndex = 0;
+    while (x = STATIC16_RE.exec(text)) add(x[1]);
+    SIBLINGS_RE.lastIndex = 0;
+    while (x = SIBLINGS_RE.exec(text)) x[1].split(",").forEach(function(q) {
+      add(q.replace(/^"|"$/g, ""));
+    });
+    STATIC_OLD_RE.lastIndex = 0;
+    while (x = STATIC_OLD_RE.exec(text)) add(x[1]);
+  }
+  function learnParams(text) {
+    if (!text) return;
+    if (text.indexOf('"children"') >= 0 || text.indexOf('"s":') >= 0) learnStatics(text);
+    var x;
+    if (text.indexOf('{"n":"') >= 0) {
+      PARAM16_RE.lastIndex = 0;
+      while (x = PARAM16_RE.exec(text)) addParam(x[1], x[3]);
+    }
+    if (/","(d|c|oc)"/.test(text)) {
+      PARAM_RE.lastIndex = 0;
+      while (x = PARAM_RE.exec(text)) addParam(x[1], x[2]);
+    }
+  }
+  var initText = null;
+  function nextInitialText() {
+    if (initText !== null) return initText;
+    var parts = [];
+    try {
+      var f = w.__next_f;
+      if (f && f.length) f.forEach(function(x) {
+        if (x && x[0] === 1 && typeof x[1] === "string") parts.push(x[1]);
+      });
+      if (!parts.length) {
+        [].slice.call(document.querySelectorAll("script:not([src])")).forEach(function(sc) {
+          var t = sc.textContent || "";
+          var i = t.indexOf("self.__next_f.push(");
+          if (i < 0) return;
+          try {
+            var arr = JSON.parse(t.slice(i + 19, t.lastIndexOf(")")));
+            if (arr && arr[0] === 1 && typeof arr[1] === "string") parts.push(arr[1]);
+          } catch (e) {
+          }
+        });
+      }
+    } catch (e) {
+    }
+    initText = parts.join("");
+    return initText;
   }
   var nextIdx = 0;
   function scanNext() {
+    if (nextIdx === 0) {
+      learnParams(nextInitialText());
+      nextIdx = -1;
+    }
     try {
       var f = w.__next_f;
-      if (f && f.length > nextIdx) {
-        for (var i = nextIdx; i < f.length; i++) if (f[i] && typeof f[i][1] === "string") learnParams(f[i][1]);
+      if (f && f.length > Math.max(nextIdx, 0)) {
+        for (var i = Math.max(nextIdx, 0); i < f.length; i++) if (f[i] && typeof f[i][1] === "string") learnParams(f[i][1]);
         nextIdx = f.length;
       }
     } catch (e) {
@@ -11755,148 +11866,118 @@ function pageKit(opts) {
     } catch (e) {
     }
   }
-  function learnFromBody(b, u) {
-    if (typeof b !== "string" || b.length > 2e4) return;
-    var j;
+  var parseFlight = core.parseFlight, flightData = core.flightData, pickPath = core.pick, findByShape = core.find;
+  function jsize(v) {
     try {
-      j = JSON.parse(b);
+      return JSON.stringify(v === void 0 ? null : v).length;
     } catch (e) {
-      return;
+      return 0;
     }
-    var segs = {};
-    (u.pathname + "/" + location.pathname).split("/").forEach(function(s) {
-      if (s) {
-        try {
-          segs[decodeURIComponent(s)] = 1;
-        } catch (e) {
-        }
-      }
-    });
-    (function walk(v, d) {
-      if (!v || typeof v !== "object" || d > 3) return;
-      Object.keys(v).forEach(function(k) {
+  }
+  function overview(v) {
+    if (Array.isArray(v)) {
+      var a = { length: v.length };
+      if (v.length && v[0] && typeof v[0] === "object") a.itemKeys = Object.keys(v[0]).slice(0, 40);
+      return a;
+    }
+    if (v && typeof v === "object") {
+      var o = {};
+      Object.keys(v).slice(0, 60).forEach(function(k) {
         var x = v[k];
-        if (typeof x === "string" && x.length > 1 && segs[x] && /(id|slug|key|handle|code|name)$/i.test(k) && !rp.hasOwnProperty(x)) rp[x] = k;
-        else walk(x, d + 1);
+        o[k] = Array.isArray(x) ? "array(" + x.length + ") " + jsize(x) + " chars" : x && typeof x === "object" ? "object " + jsize(x) + " chars" : typeof x;
       });
-    })(j, 0);
+      return o;
+    }
+    return typeof v;
   }
-  function parseFlight(t) {
-    var rows = {};
+  function compIndex(c) {
+    return Object.keys(c).map(function(n) {
+      var v = c[n], one = Array.isArray(v) ? v[0] : v;
+      return { n, bytes: jsize(v), keys: one && typeof one === "object" ? Object.keys(one).slice(0, 12) : [], count: Array.isArray(v) ? v.length : void 0 };
+    }).sort(function(a, b) {
+      return b.bytes - a.bytes;
+    }).slice(0, 15).reduce(function(o, x) {
+      o[x.n] = x.count ? { bytes: x.bytes, instances: x.count, keys: x.keys } : { bytes: x.bytes, keys: x.keys };
+      return o;
+    }, {});
+  }
+  function finish(out, data, o) {
+    var flight = data && data.rows ? data : null;
+    if (o.schema) {
+      var so = typeof o.schema === "object" ? o.schema : {};
+      out.schema = core.schema(data, { under: so.under });
+      return out;
+    }
+    if (o.nodes !== void 0) {
+      if (!flight) {
+        out.error = "nodes needs an RSC (Next.js page) response";
+        return out;
+      }
+      data = core.nodes(flight.rows, o.nodes === true ? "*" : o.nodes);
+    }
+    if (o.find !== void 0 && o.nodes === void 0) {
+      var cands = core.findAll(data && data.components ? data.components : data, o.find), amb = core.ambiguity(cands);
+      if (amb) {
+        out.error = core.ambiguousMsg(o.find, amb);
+        return out;
+      }
+      var f = findByShape(data && data.components ? data.components : data, o.find);
+      if (f === void 0) {
+        out.error = "nothing matches find: " + (typeof o.find === "function" ? "function" : o.find);
+        if (data && data.components) out.components = compIndex(data.components);
+        if (data && data.components) out.hint = "find takes a key path that must exist (data.tablesNeeded), a component name from the list above, or a function";
+        return out;
+      }
+      data = f;
+    }
+    if (o.component && data && data.components) {
+      var names = [].concat(o.component), c = data.components, sel = {}, miss = [];
+      names.forEach(function(n) {
+        if (c.hasOwnProperty(n)) sel[n] = c[n];
+        else miss.push(n);
+      });
+      if (miss.length) {
+        out.error = "component not found: " + miss.join(", ");
+        out.components = Object.keys(c);
+        return out;
+      }
+      data = names.length === 1 ? sel[names[0]] : sel;
+    }
     try {
-      var b = new TextEncoder().encode(t), dec = new TextDecoder(), i = 0, n = b.length;
-      while (i < n) {
-        var c = i;
-        while (c < n && b[c] !== 58 && b[c] !== 10) c++;
-        if (c >= n) break;
-        if (b[c] === 10) {
-          i = c + 1;
-          continue;
-        }
-        var id = dec.decode(b.subarray(i, c));
-        var j = c + 1;
-        if (b[j] === 84) {
-          var cm = j + 1;
-          while (cm < n && b[cm] !== 44) cm++;
-          var len = parseInt(dec.decode(b.subarray(j + 1, cm)), 16) || 0;
-          rows[id] = { text: dec.decode(b.subarray(cm + 1, cm + 1 + len)) };
-          i = cm + 1 + len;
-          if (b[i] === 10) i++;
-          continue;
-        }
-        var nl = j;
-        while (nl < n && b[nl] !== 10) nl++;
-        var p = dec.decode(b.subarray(j, nl));
-        i = nl + 1;
-        if (!/^[0-9a-f]+$/i.test(id)) continue;
-        var tag = (/^[A-Z]+/.exec(p) || [""])[0];
-        try {
-          rows[id] = { tag, v: JSON.parse(p.slice(tag.length)) };
-        } catch (e) {
-        }
-      }
+      data = core.answer(data, o);
     } catch (e) {
+      out.error = String(e && e.message || e);
+      return out;
     }
-    return rows;
-  }
-  function flightData(rows) {
-    function resolve(v, d) {
-      if (d > 30) return null;
-      if (typeof v === "string") {
-        if (v === "$undefined") return void 0;
-        if (/^\$D/.test(v)) return v.slice(2);
-        var r = /^\$@?([0-9a-f]+)$/.exec(v);
-        if (r && rows[r[1]] && rows[r[1]].v !== void 0) return resolve(rows[r[1]].v, d + 1);
-        if (r && rows[r[1]] && rows[r[1]].text !== void 0) return rows[r[1]].text;
-        return v.charAt(0) === "$" && v.charAt(1) === "$" ? v.slice(1) : v;
-      }
-      if (Array.isArray(v)) return v.map(function(x) {
-        return resolve(x, d + 1);
+    if (o.raw) {
+      out.data = data;
+      return out;
+    }
+    var limit = Math.min(o.full ? HARD_MAX : o.maxBytes || MAX_RESULT, HARD_MAX);
+    var size = jsize(data);
+    if (size <= limit) {
+      out.data = data;
+      return out;
+    }
+    out.bytes = size;
+    var comps = data && typeof data === "object" && !Array.isArray(data) && data.components;
+    out.overview = comps ? compIndex(comps) : overview(data);
+    if (comps && flight) {
+      var byTag = {};
+      core.nodes(flight.rows).forEach(function(n) {
+        byTag[n.tag] = (byTag[n.tag] || 0) + 1;
       });
-      if (v && typeof v === "object") {
-        var o = {};
-        Object.keys(v).forEach(function(k) {
-          o[k] = resolve(v[k], d + 1);
-        });
-        return o;
-      }
-      return v;
+      if (Object.keys(byTag).length) out.overview.$nodes = byTag;
     }
-    var r0 = rows["0"] && rows["0"].v;
-    if (r0 && typeof r0 === "object" && !Array.isArray(r0) && typeof r0.a === "string" && /^\$@/.test(r0.a)) {
-      return { action: resolve(r0.a, 0) };
-    }
-    var names = {};
-    Object.keys(rows).forEach(function(id) {
-      var r = rows[id];
-      if (r.tag !== "I" || !r.v) return;
-      var nm = Array.isArray(r.v) ? r.v[2] : r.v.name;
-      names["$L" + id] = nm && nm !== "default" && nm !== "*" ? nm : "Component" + id;
-    });
-    var comps = {}, seen = 0;
-    function walk(v, d) {
-      if (d > 60 || seen > 400 || !v || typeof v !== "object") return;
-      if (Array.isArray(v)) {
-        if (v[0] === "$" && typeof v[1] === "string" && v.length === 4) {
-          var props = v[3];
-          if (props && typeof props === "object" && names[v[1]]) {
-            var data = {}, has = false;
-            Object.keys(props).forEach(function(k) {
-              if (k !== "children") {
-                data[k] = resolve(props[k], 0);
-                has = true;
-              }
-            });
-            if (has) {
-              seen++;
-              (comps[names[v[1]]] = comps[names[v[1]]] || []).push(data);
-            }
-          }
-          if (props && typeof props === "object") walk(props.children, d + 1);
-          return;
-        }
-        v.forEach(function(x) {
-          walk(x, d + 1);
-        });
-        return;
-      }
-      Object.keys(v).forEach(function(k) {
-        walk(v[k], d + 1);
-      });
-    }
-    Object.keys(rows).forEach(function(id) {
-      if (!rows[id].tag && rows[id].v !== void 0) walk(rows[id].v, 0);
-    });
-    Object.keys(comps).forEach(function(k) {
-      if (comps[k].length === 1) comps[k] = comps[k][0];
-    });
-    return { components: comps };
+    out.hint = (comps ? "choose by shape: {find:'key.path'} (names like $54 change), or server-rendered HTML: {nodes:'a'}, then " : "") + "narrow it: {where:'x>0'}, {group:'status'}, {count:true}, {limit:20}, {pick:'list.{id,name}'}, or {schema:true}. Limit " + limit + " chars" + (limit >= HARD_MAX ? " (hard cap)" : "; {full:true} raises it to " + HARD_MAX) + ". In-page code that filters itself: {raw:true}";
+    return out;
   }
   function isFlight(ct) {
     return /text\/x-component/i.test(ct || "");
   }
   var ACT_RE = /\(\s*"([0-9a-f]{40,44})"\s*,[^"()]{0,200}?,\s*"([A-Za-z_$][\w$]*)"\s*\)/g;
   var actScan = null;
+  var walkSt = null;
   function scanActions(fresh) {
     if (actScan && !fresh) return actScan;
     var srcs = {};
@@ -11944,22 +12025,49 @@ function pageKit(opts) {
       return null;
     }
   }
+  function mergeShape(a, b) {
+    if (JSON.stringify(a) === JSON.stringify(b)) return a;
+    if (a && b && typeof a === "object" && typeof b === "object" && !Array.isArray(a) && !Array.isArray(b)) {
+      var o = {};
+      Object.keys(a).forEach(function(k) {
+        o[k] = k in b ? mergeShape(a[k], b[k]) : a[k];
+      });
+      Object.keys(b).forEach(function(k) {
+        if (!(k in o)) o[k] = b[k];
+      });
+      return o;
+    }
+    if (Array.isArray(a) && Array.isArray(b)) return a.length && b.length ? [mergeShape(a[0], b[0])] : a.length ? a : b;
+    if (typeof a === "string" && typeof b === "string") {
+      var parts = a.split("|");
+      b.split("|").forEach(function(t) {
+        if (parts.indexOf(t) < 0) parts.push(t);
+      });
+      return parts.join("|");
+    }
+    return typeof a === "string" ? a : b;
+  }
   function shape(v, d) {
     d = d || 0;
     if (v === null) return "null";
-    if (Array.isArray(v)) return v.length ? [shape(v[0], d + 1)] : [];
+    if (Array.isArray(v)) {
+      if (!v.length) return [];
+      var acc;
+      for (var i = 0; i < Math.min(v.length, 25); i++) acc = i ? mergeShape(acc, shape(v[i], d + 1)) : shape(v[i], d + 1);
+      return [acc];
+    }
     if (typeof v === "object") {
       if (d > 6) return "object";
       var o = {};
-      var keys = Object.keys(v);
-      var dyn = keys.filter(isValueLike);
-      if (dyn.length && dyn.length >= keys.length / 2) {
+      var keys2 = Object.keys(v);
+      var dyn = keys2.filter(isValueLike);
+      if (dyn.length && dyn.length >= keys2.length / 2) {
         o["{key}"] = shape(v[dyn[0]], d + 1);
-        keys = keys.filter(function(k) {
+        keys2 = keys2.filter(function(k) {
           return !isValueLike(k);
         });
       }
-      keys.slice(0, 60).forEach(function(k) {
+      keys2.slice(0, 60).forEach(function(k) {
         if (!isValueLike(k)) o[k] = shape(v[k], d + 1);
       });
       return o;
@@ -11992,7 +12100,7 @@ function pageKit(opts) {
     }
     return { unknown: true };
   }
-  function resShape(text, ct) {
+  function resShape(text, ct, fd) {
     if (!text) return void 0;
     if (/json/i.test(ct || "")) {
       try {
@@ -12003,7 +12111,16 @@ function pageKit(opts) {
     if (isFlight(ct)) {
       learnParams(text);
       try {
-        return { rsc: shape(flightData(parseFlight(text))) };
+        var fdx = fd !== void 0 ? fd : flightData(parseFlight(text));
+        var sh = { rsc: shape(fdx) };
+        if (fdx && fdx.rows && fdx.action === void 0) {
+          var tags = {};
+          core.nodes(fdx.rows).forEach(function(n) {
+            tags[n.tag] = 1;
+          });
+          if (Object.keys(tags).length) sh.rsc.nodes = Object.keys(tags).join("|");
+        }
+        return sh;
       } catch (e) {
       }
     }
@@ -12015,7 +12132,7 @@ function pageKit(opts) {
   var persistTimer = null;
   function persist() {
     try {
-      ss.setItem(KEY, JSON.stringify({ v: VERSION, m, po, budget, authSrc, acts }));
+      ss.setItem(KEY, JSON.stringify({ v: VERSION, m, po, budget, authSrc, acts, rp, rpMulti, statics }));
     } catch (e) {
     }
   }
@@ -12037,8 +12154,8 @@ function pageKit(opts) {
       try {
         var j = JSON.parse(v);
         if (j === needle) return { from, key: k, json: true };
-        var path15 = findPath(j, needle, 0);
-        if (path15) return { from, key: k, path: path15 };
+        var path18 = findPath(j, needle, 0);
+        if (path18) return { from, key: k, path: path18 };
       } catch (e) {
       }
     }
@@ -12058,6 +12175,14 @@ function pageKit(opts) {
     var raw = value.slice(pre.length);
     if (raw.length < 8) return null;
     var hit = findIn(lstore(), "localStorage", raw) || findIn(ss, "sessionStorage", raw);
+    if (!hit) {
+      try {
+        [].slice.call(document.querySelectorAll("meta[name][content]")).forEach(function(mt) {
+          if (!hit && mt.getAttribute("content") === raw) hit = { from: "meta", key: mt.getAttribute("name") };
+        });
+      } catch (e) {
+      }
+    }
     if (!hit) {
       try {
         document.cookie.split(/;\s*/).forEach(function(c) {
@@ -12080,7 +12205,7 @@ function pageKit(opts) {
       if (s) authSrc[name] = s;
     }
   }
-  function readAuth() {
+  function readAuth2() {
     var out = {};
     Object.keys(authSrc).forEach(function(name) {
       var s = authSrc[name], v = null;
@@ -12098,6 +12223,9 @@ function pageKit(opts) {
           document.cookie.split(/;\s*/).forEach(function(c) {
             if (c.indexOf(s.key + "=") === 0) v = decodeURIComponent(c.slice(s.key.length + 1));
           });
+        } else if (s.from === "meta") {
+          var mt = document.querySelector('meta[name="' + s.key + '"]');
+          v = mt && mt.getAttribute("content");
         }
       } catch (e) {
         v = null;
@@ -12113,8 +12241,14 @@ function pageKit(opts) {
       if (!u || !/^https?:$/.test(u.protocol)) return;
       if (hostRe && !hostRe.test(u.host)) return;
       scanNext();
-      if (text !== void 0 && isFlight(ct)) learnParams(text);
-      learnFromBody(body, u);
+      var fd;
+      if (text !== void 0 && isFlight(ct)) {
+        learnParams(text);
+        try {
+          fd = flightData(parseFlight(text));
+        } catch (e2) {
+        }
+      }
       var act = null;
       Object.keys(headers || {}).forEach(function(h) {
         if (h.toLowerCase() === "next-action" && typeof headers[h] === "string") act = headers[h];
@@ -12139,7 +12273,16 @@ function pageKit(opts) {
         } else if (!NOISE_H.test(l) && !NOISE_H_PREFIX.test(l) && e.headers.indexOf(l) < 0) e.headers.push(l);
       });
       if (body !== void 0 && !e.req) e.req = bodyShape(body);
-      if (text !== void 0 && !e.res) e.res = resShape(text, ct);
+      if (text !== void 0) {
+        var ok = status >= 200 && status < 300;
+        var rs = resShape(text, ct, fd);
+        if (rs !== void 0) {
+          if (!e.res || ok && !e.resOk) {
+            e.res = rs;
+            e.resOk = ok;
+          } else if (ok && e.resOk) e.res = mergeShape(e.res, rs);
+        }
+      }
       persistSoon();
     } catch (err) {
     }
@@ -12281,7 +12424,11 @@ function pageKit(opts) {
     try {
       var f = ev.target;
       var doc = f.ownerDocument || document;
-      rec("form", f.method || "GET", f.action || doc.location.href, {}, new FormData(f), void 0, void 0, void 0, doc.location.href);
+      var fd = new FormData(f), href = doc.location.href;
+      setTimeout(function() {
+        if (ev.defaultPrevented) return;
+        rec("form", f.method || "GET", f.action || href, {}, fd, void 0, void 0, void 0, href);
+      }, 0);
     } catch (e) {
     }
   }
@@ -12417,6 +12564,7 @@ function pageKit(opts) {
       // What a replay needs besides the browser's own cookies: header names and
       // where the page keeps their values. Never the values.
       auth: { cookies: "browser session (sent automatically, HttpOnly included)", headers: authSrc },
+      routes: { static: Object.keys(statics) },
       endpoints: m,
       pathOnly
     };
@@ -12430,9 +12578,10 @@ function pageKit(opts) {
     version: VERSION,
     build: BUILD,
     mode,
+    // Counts only. {endpoints:true} adds "METHOD /path" per endpoint (same-origin paths short).
     summary: function() {
       var c = report().coverage;
-      return { installed: true, mode, seen: c.seen, withPayload: c.withPayload, pathOnly: c.pathOnly, replays: budget.calls, stopped: budget.stopped };
+      return { installed: true, mode, seen: c.seen, withPayload: c.withPayload, pathOnly: c.pathOnly, replays: budget.calls, maxCalls: MAX_CALLS, stopped: budget.stopped };
     },
     // Fallback for tools that can't download files: page the report through evaluate results.
     drain: function(cursor, maxBytes) {
@@ -12456,14 +12605,14 @@ function pageKit(opts) {
     // Replays through the page so the browser attaches its own cookies,
     // including HttpOnly ones. Same-origin, GET/HEAD only unless approved,
     // capped per session, and it stops for good on 403/429 or a bot wall.
-    call: function(method, path15, o) {
+    call: function(method, path18, o) {
       o = o || {};
       method = String(method || "GET").toUpperCase();
       if (budget.stopped) return Promise.resolve({ error: "stopped", reason: budget.stopped });
       if (method !== "GET" && method !== "HEAD" && !o.approved) {
         return Promise.resolve({ error: "write needs approval", hint: "ask the user, then pass {approved:true} for this one request" });
       }
-      var u = abs(path15);
+      var u = abs(path18);
       if (!u) return Promise.resolve({ error: "bad url" });
       if (u.origin !== location.origin && !o.crossOrigin) return Promise.resolve({ error: "cross-origin", hint: "navigate to " + u.origin + " first" });
       if (budget.calls >= MAX_CALLS) {
@@ -12473,12 +12622,12 @@ function pageKit(opts) {
       }
       budget.calls++;
       var init = { method, credentials: "include", headers: o.headers || {} };
-      if ((o.rsc || /[?&]_rsc=/.test(String(path15))) && !Object.keys(init.headers).some(function(k) {
+      if ((o.rsc || /[?&]_rsc=/.test(String(path18))) && !Object.keys(init.headers).some(function(k) {
         return k.toLowerCase() === "rsc";
       })) init.headers.rsc = "1";
       var used = [];
       if (u.origin === location.origin && o.auth !== false) {
-        var a = readAuth();
+        var a = readAuth2();
         Object.keys(a).forEach(function(h) {
           var has = Object.keys(init.headers).some(function(k) {
             return k.toLowerCase() === h;
@@ -12493,81 +12642,205 @@ function pageKit(opts) {
         init.body = JSON.stringify(o.json);
         init.headers["content-type"] = "application/json";
       } else if (o.body !== void 0) init.body = o.body;
-      var maxBytes = o.maxBytes || 2e4;
-      return origFetch.call(w, u.href, init).then(function(r) {
-        return r.text().then(function(t) {
-          var out = { status: r.status };
-          if (used.length) out.auth = used;
-          if (r.status === 401) {
-            var missing = Object.keys(authSrc).filter(function(h) {
-              return used.indexOf(h) < 0;
-            });
-            out.hint = missing.length ? "no value for " + missing.join(", ") + ": use the site once so it sends its token, then retry" : Object.keys(authSrc).length ? "auth headers were sent; the session may have expired" : "no auth header seen yet: use the site once while the kit records";
-          }
-          var wall = looksLikeWall(r.status, t);
-          if (wall) {
-            budget.stopped = wall;
-            out.stopped = wall;
-          }
-          persist();
-          var ct = r.headers.get("content-type");
-          if (isFlight(ct)) {
-            learnParams(t);
-            var data = flightData(parseFlight(t));
-            if (data.action !== void 0) data = data.action;
-            var size = JSON.stringify(data === void 0 ? null : data).length;
-            if (size > maxBytes && !o.full) {
-              out.shape = shape(data);
-              out.bytes = size;
-              out.hint = "big result, shown as its shape. Pass {full:true} and pick fields in the same evaluate: .then(r => r.data...)";
-            } else out.data = data;
-            return out;
-          }
-          if (t.length > maxBytes && !o.full) {
-            out.truncated = t.length;
-            t = t.slice(0, maxBytes);
-          }
-          try {
-            out.data = JSON.parse(t);
-          } catch (e) {
-            out.text = t.slice(0, 2e3);
-            if (/html/i.test(ct || "")) out.hint = "got HTML, not data. On Next.js pages pass {rsc:true}";
-          }
-          return out;
+      var retries = o.retry != null ? o.retry : method === "GET" ? 2 : 0;
+      function attempt(n) {
+        return origFetch.call(w, u.href, init).then(function(r) {
+          if (r.status >= 500 && n < retries) return new Promise(function(ok) {
+            setTimeout(ok, 300 * Math.pow(2, n));
+          }).then(function() {
+            return attempt(n + 1);
+          });
+          return r.text().then(function(t) {
+            var out = { status: r.status };
+            if (n) out.retried = n;
+            if (r.redirected && /\/(login|log-in|signin|sign-in|auth|sso)(\/|\?|$)/i.test(new URL(r.url).pathname)) {
+              out.error = "session expired: the request landed on a login page. Ask the user to log in again in this tab";
+              return out;
+            }
+            if (r.status === 429 && r.headers.get("retry-after")) out.retryAfter = r.headers.get("retry-after");
+            if (used.length) out.auth = used;
+            if (r.status === 401) {
+              var missing = Object.keys(authSrc).filter(function(h) {
+                return used.indexOf(h) < 0;
+              });
+              out.hint = missing.length ? "no value for " + missing.join(", ") + ": use the site once so it sends its token, then retry" : Object.keys(authSrc).length ? "auth headers were sent; the session may have expired" : "no auth header seen yet: use the site once while the kit records";
+            }
+            var wall = looksLikeWall(r.status, t);
+            if (wall) {
+              budget.stopped = wall;
+              out.stopped = wall;
+            }
+            persist();
+            var ct = r.headers.get("content-type");
+            if (isFlight(ct)) {
+              learnParams(t);
+              var data = flightData(parseFlight(t));
+              if (data.redirect) {
+                if (/\/(login|log-in|signin|sign-in|auth|sso)(\/|\?|$)/i.test(data.redirect)) out.error = "session expired: the page redirects to " + data.redirect + ". Ask the user to log in again in this tab";
+                else {
+                  out.redirect = data.redirect;
+                  out.hint = "the page redirected; call that path instead";
+                }
+                return out;
+              }
+              if (data.action !== void 0) data = data.action;
+              else if (data.errors) {
+                if (method === "GET" && n < retries && (o.find === void 0 || findByShape(data.components, o.find) === void 0))
+                  return new Promise(function(ok) {
+                    setTimeout(ok, 300 * Math.pow(2, n));
+                  }).then(function() {
+                    return attempt(n + 1);
+                  });
+                out.serverErrors = data.errors;
+              }
+              o.__path = path18;
+              return finish(out, data, o);
+            }
+            var parsed;
+            try {
+              parsed = JSON.parse(t);
+            } catch (e) {
+              out.text = t.slice(0, Math.min(o.raw ? t.length : 500, t.length));
+              if (t.length > out.text.length) out.truncated = t.length;
+              if (/html/i.test(ct || "")) out.hint = "got HTML, not data. On Next.js pages pass {rsc:true}";
+              return out;
+            }
+            return finish(out, parsed, o);
+          });
+        }, function(e) {
+          if (n < retries) return new Promise(function(ok) {
+            setTimeout(ok, 300 * Math.pow(2, n));
+          }).then(function() {
+            return attempt(n + 1);
+          });
+          return { error: String(e && e.message || e) };
         });
-      }, function(e) {
-        return { error: String(e && e.message || e) };
+      }
+      return attempt(0);
+    },
+    // Visits pages in the background so no single evaluate runs long (T3 times
+    // out at 15 s). Uses Next.js client navigation when there is one (no reload,
+    // the kit keeps recording); otherwise fetches each page's RSC data through
+    // the hooked fetch. Poll with walkStatus().
+    walk: function(paths, wo) {
+      wo = wo || {};
+      if (walkSt && !walkSt.done) return { error: "a walk is running", status: w.__ifk.walkStatus() };
+      var router = w.next && w.next.router;
+      var via = router && typeof router.push === "function" ? "next.router.push" : "fetch";
+      var st = walkSt = { i: 0, n: (paths || []).length, done: false, errors: [], via };
+      var waitMs = wo.waitMs || 1500;
+      (function step() {
+        if (st.stop || st.i >= st.n) {
+          st.done = true;
+          persist();
+          return;
+        }
+        var p = paths[st.i];
+        Promise.resolve().then(function() {
+          return w.fetch(p, { headers: { rsc: "1" }, credentials: "include" }).then(function() {
+            if (via !== "fetch") return router.push(p);
+          });
+        }).catch(function(e) {
+          st.errors.push(p + ": " + (e && e.message || e));
+        }).then(function() {
+          setTimeout(function() {
+            st.i++;
+            step();
+          }, waitMs);
+        });
+      })();
+      return { started: true, n: st.n, via, etaSec: Math.round(st.n * waitMs / 1e3) };
+    },
+    // Resolves when the walk is done or after ms (default 12000, under T3's 15 s).
+    walkWait: function(ms) {
+      var self = this, end = Date.now() + (ms || 12e3);
+      return new Promise(function(ok) {
+        (function tick() {
+          var st = self.walkStatus({ __inner: true });
+          if (!walkSt || walkSt.done || Date.now() >= end) return ok(st);
+          setTimeout(tick, 250);
+        })();
       });
+    },
+    walkStatus: function(wo) {
+      if (!walkSt) return { walking: false };
+      if (wo && wo.stop) walkSt.stop = true;
+      var c = report().coverage;
+      return { i: walkSt.i, n: walkSt.n, done: walkSt.done, via: walkSt.via, seen: c.seen, errors: walkSt.errors.slice(-3) };
     },
     // Calls a Next.js Server Action by export name (or id). The id is looked up
     // in the current page's chunks first, so it survives deploys.
-    action: function(nameOrId, args2, o) {
+    // target: export name or id, or {path, find, prop} for an action handed to a
+    // component as a prop (inline actions): the page is read first, so the id and
+    // bound args are the current render's.
+    action: function(target, args2, o) {
       o = o || {};
       if (budget.stopped) return Promise.resolve({ error: "stopped", reason: budget.stopped });
       if (!o.approved) return Promise.resolve({ error: "write needs approval", hint: "a Server Action runs server code and may change data: ask the user, then pass {approved:true}" });
       var self = this;
-      return scanActions(true).then(function(found) {
-        var id = null;
-        Object.keys(found).forEach(function(k) {
-          if (found[k] === nameOrId || k === nameOrId) id = k;
+      var list = Array.isArray(args2) ? args2 : args2 === void 0 ? [] : [args2];
+      var getRef;
+      if (target && typeof target === "object" && target.$action) getRef = Promise.resolve(target);
+      else if (target && typeof target === "object") {
+        getRef = self.call("GET", target.path, { rsc: true, raw: true, __inner: true }).then(function(r) {
+          if (!r || r.error || r.status >= 400) throw new Error("page " + target.path + ": " + (r && (r.error || r.status)));
+          var obj = findByShape(r.data && r.data.components ? r.data.components : r.data, target.find);
+          var ref = obj && obj[target.prop];
+          if (!ref || !ref.$action) throw new Error("action prop " + target.prop + " not found on " + target.path + " (page changed?)");
+          if (!o.path) o.path = target.path;
+          return ref;
         });
-        if (!id) Object.keys(acts).forEach(function(k) {
-          if (acts[k] === nameOrId) id = k;
+      } else {
+        getRef = scanActions(true).then(function(found) {
+          var id = null;
+          Object.keys(found).forEach(function(k) {
+            if (found[k] === target || k === target) id = k;
+          });
+          if (!id) Object.keys(acts).forEach(function(k) {
+            if (acts[k] === target) id = k;
+          });
+          if (!id && /^[0-9a-f]{40,44}$/.test(target)) id = target;
+          if (!id) throw new Error("action " + target + " not found: open a page that uses it, re-run the install eval, retry");
+          return { $action: id, bound: [] };
         });
-        if (!id && /^[0-9a-f]{40,44}$/.test(nameOrId)) id = nameOrId;
-        if (!id) return { error: "action not found", hint: "open a page that uses " + nameOrId + ", re-run the install eval, then retry" };
-        var body = JSON.stringify(Array.isArray(args2) ? args2 : args2 === void 0 ? [] : [args2]);
+      }
+      return getRef.then(function(ref) {
+        var id = ref.$action;
+        var body = JSON.stringify(core.reEncode(ref.bound || []).concat(core.encodeArgs(list)));
         return self.call("POST", o.path || location.pathname + location.search, {
+          __inner: true,
           approved: true,
           full: o.full,
           maxBytes: o.maxBytes,
+          pick: o.pick,
+          find: o.find,
+          component: o.component,
+          raw: o.raw,
+          where: o.where,
+          group: o.group,
+          count: o.count,
+          limit: o.limit,
           headers: { "next-action": id, accept: "text/x-component", "content-type": "text/plain;charset=UTF-8" },
           body
         }).then(function(r) {
+          if (r && (r.status === 404 || r.status === 409) && !o.__retried) {
+            var again = target && typeof target === "object" && !target.$action ? Promise.resolve(target) : core.actionId(acts[id] || target, true).then(function(nid) {
+              return nid && nid !== id ? { $action: nid, bound: [] } : null;
+            });
+            return again.then(function(t2) {
+              if (!t2) {
+                r.hint = "Server Action id not accepted (new deploy?) and no newer id on the live page";
+                return r;
+              }
+              return self.action(t2, args2, Object.assign({}, o, { __retried: true }));
+            });
+          }
           if (r && r.status === 404) r.hint = "Server Action id not accepted (new deploy?): reload the page, re-run the install eval, retry";
           if (r) r.actionId = id.slice(0, 8);
           return r;
         });
+      }, function(e) {
+        return { error: String(e && e.message || e) };
       });
     },
     // Removes every hook and forgets the capture.
@@ -12595,7 +12868,6 @@ function pageKit(opts) {
       try {
         ss.removeItem(KEY);
         ss.removeItem("__ifk");
-        ss.removeItem("__ifkApi");
       } catch (e) {
       }
       delete w.__ifk;
@@ -12616,6 +12888,1036 @@ var init_page_kit = __esm({
   }
 });
 
+// src/lib/kit/recipe-core.ts
+function recipeCore() {
+  function size(v) {
+    try {
+      return JSON.stringify(v === void 0 ? null : v).length;
+    } catch (e) {
+      return 0;
+    }
+  }
+  function parseFlight(t) {
+    var rows = {}, b = new TextEncoder().encode(t), dec = new TextDecoder(), i = 0, n = b.length;
+    while (i < n) {
+      var c = i;
+      while (c < n && b[c] !== 58 && b[c] !== 10) c++;
+      if (c >= n) break;
+      if (b[c] === 10) {
+        i = c + 1;
+        continue;
+      }
+      var id = dec.decode(b.subarray(i, c)), j = c + 1;
+      if (b[j] === 84) {
+        var cm = j + 1;
+        while (cm < n && b[cm] !== 44) cm++;
+        var len = parseInt(dec.decode(b.subarray(j + 1, cm)), 16) || 0;
+        rows[id] = { text: dec.decode(b.subarray(cm + 1, cm + 1 + len)) };
+        i = cm + 1 + len;
+        if (b[i] === 10) i++;
+        continue;
+      }
+      var nl = j;
+      while (nl < n && b[nl] !== 10) nl++;
+      var p = dec.decode(b.subarray(j, nl));
+      i = nl + 1;
+      if (!/^[0-9a-f]+$/i.test(id)) continue;
+      var tag = (/^[A-Z]+/.exec(p) || [""])[0];
+      try {
+        rows[id] = { tag, v: JSON.parse(p.slice(tag.length)) };
+      } catch (e) {
+      }
+    }
+    return rows;
+  }
+  function flightData(rows) {
+    function resolve(v, d) {
+      if (d > 30) return null;
+      if (typeof v === "string") {
+        if (v.charAt(0) !== "$") return v;
+        if (v === "$undefined") return void 0;
+        if (v === "$NaN") return NaN;
+        if (v === "$Infinity") return Infinity;
+        if (v === "$-Infinity") return -Infinity;
+        if (v === "$-0") return 0;
+        if (/^\$D/.test(v)) return v.slice(2);
+        if (/^\$n-?\d+$/.test(v)) {
+          var big = Number(v.slice(2));
+          return Number.isSafeInteger(big) ? big : v.slice(2);
+        }
+        var ref = /^\$([QWKhF])([0-9a-f]+)$/.exec(v);
+        if (ref) {
+          var row = rows[ref[2]] && rows[ref[2]].v;
+          if (ref[1] === "Q") {
+            var mo = {};
+            (Array.isArray(row) ? row : []).forEach(function(e) {
+              if (Array.isArray(e)) mo[String(resolve(e[0], d + 1))] = resolve(e[1], d + 1);
+            });
+            return mo;
+          }
+          if (ref[1] === "W") return resolve(Array.isArray(row) ? row : [], d + 1);
+          if (ref[1] === "K") return "[FormData]";
+          if (row && typeof row === "object" && typeof row.id === "string") {
+            var bound = row.bound == null ? [] : resolve(row.bound, d + 1);
+            return { $action: row.id, bound: Array.isArray(bound) ? bound : [] };
+          }
+          return "[server function]";
+        }
+        var pr = /^\$@?([0-9a-f]+):(.+)$/.exec(v);
+        if (pr && rows[pr[1]] && rows[pr[1]].v !== void 0) {
+          var node = rows[pr[1]].v, parts = pr[2].split(":");
+          for (var pi = 0; pi < parts.length && node != null; pi++) {
+            var part = parts[pi];
+            if (typeof node === "string" && /^\$@?[0-9a-f]+(:|$)/.test(node)) node = resolve(node, d + 1);
+            if (Array.isArray(node) && node[0] === "$" && node.length === 4 && (part === "props" || part === "type" || part === "key")) node = part === "props" ? node[3] : part === "type" ? node[1] : node[2];
+            else node = node[part];
+          }
+          return resolve(node, d + 1);
+        }
+        var r = /^\$@?([0-9a-f]+)$/.exec(v);
+        if (r && rows[r[1]] && rows[r[1]].v !== void 0) return resolve(rows[r[1]].v, d + 1);
+        if (r && rows[r[1]] && rows[r[1]].text !== void 0) return rows[r[1]].text;
+        return v.charAt(0) === "$" && v.charAt(1) === "$" ? v.slice(1) : v;
+      }
+      if (Array.isArray(v)) return v.map(function(x) {
+        return resolve(x, d + 1);
+      });
+      if (v && typeof v === "object") {
+        var o = {};
+        Object.keys(v).forEach(function(k) {
+          o[k] = resolve(v[k], d + 1);
+        });
+        return o;
+      }
+      return v;
+    }
+    var r0 = rows["0"] && rows["0"].v;
+    if (r0 && typeof r0 === "object" && !Array.isArray(r0) && typeof r0.a === "string" && /^\$@/.test(r0.a) && !("t" in r0) && !("c" in r0) && !Array.isArray(r0.f)) return { action: resolve(r0.a, 0) };
+    var redirect = null, errors = [], denied = null;
+    Object.keys(rows).forEach(function(id) {
+      var r = rows[id];
+      if (r.tag !== "E" || !r.v) return;
+      var dg = String(r.v.digest || "");
+      var m = /^NEXT_REDIRECT;[^;]*;([^;]+);/.exec(dg);
+      if (m) redirect = m[1];
+      else if (/^NEXT_HTTP_ERROR_FALLBACK;40[13]/.test(dg)) denied = dg.slice(-3);
+      else if (/^NEXT_HTTP_ERROR_FALLBACK;404/.test(dg)) errors.push("404");
+      else errors.push(dg || r.v.message || "error");
+    });
+    var names = {};
+    Object.keys(rows).forEach(function(id) {
+      var r = rows[id];
+      if (r.tag !== "I" || !r.v) return;
+      var nm = Array.isArray(r.v) ? r.v[2] : r.v.name;
+      names["$L" + id] = nm && nm !== "default" && nm !== "*" ? nm : "Component" + id;
+    });
+    function nextInternal(name, p) {
+      return "parallelRouterKey" in p || "segmentPath" in p || "serverProvidedParams" in p || /^(OutletBoundary|MetadataBoundary|ViewportBoundary|RootLayoutBoundary|HTTPAccessFallbackBoundary|ErrorBoundary|RenderFromTemplateContext|ClientPageRoot|ClientSegmentRoot|LayoutRouter|InnerLayoutRouter|AppRouter|ServerInsertedHTMLProvider|NotFoundBoundary|RedirectBoundary|IconMark|AsyncMetadataOutlet|StreamingMetadataOutlet)$/.test(name);
+    }
+    var comps = {}, seen = 0;
+    function walk(v, d) {
+      if (d > 60 || seen > 400 || !v || typeof v !== "object") return;
+      if (Array.isArray(v)) {
+        if (v[0] === "$" && typeof v[1] === "string" && v.length === 4) {
+          var props = v[3];
+          if (props && typeof props === "object" && names[v[1]] && !nextInternal(names[v[1]], props)) {
+            var data = {}, has = false;
+            Object.keys(props).forEach(function(k) {
+              if (k !== "children") {
+                data[k] = resolve(props[k], 0);
+                has = true;
+              }
+            });
+            if (has) {
+              seen++;
+              (comps[names[v[1]]] = comps[names[v[1]]] || []).push(data);
+            }
+          }
+          if (props && typeof props === "object") walk(props.children, d + 1);
+          return;
+        }
+        v.forEach(function(x) {
+          walk(x, d + 1);
+        });
+        return;
+      }
+      Object.keys(v).forEach(function(k) {
+        walk(v[k], d + 1);
+      });
+    }
+    var skip = fallbackRows(rows);
+    Object.keys(rows).forEach(function(id) {
+      if (!rows[id].tag && rows[id].v !== void 0 && !skip[id]) walk(rows[id].v, 0);
+    });
+    Object.keys(comps).forEach(function(k) {
+      if (comps[k].length === 1) comps[k] = comps[k][0];
+    });
+    Object.defineProperty(comps, "__components", { enumerable: false, value: true });
+    var out = { components: comps };
+    Object.defineProperty(out, "nodes", { enumerable: false, get: function() {
+      return nodes(rows);
+    } });
+    Object.defineProperty(out, "rows", { enumerable: false, value: rows });
+    if (redirect) out.redirect = redirect;
+    if (denied) out.denied = denied;
+    if (errors.length) out.errors = errors;
+    return out;
+  }
+  function alt(o, tok) {
+    var names = tok.replace(/\[\]$/, "").split("|");
+    for (var i = 0; i < names.length; i++) if (o && typeof o === "object" && names[i] in o) return names[i];
+    return null;
+  }
+  function hasPath(v, spec) {
+    if (String(spec).indexOf(",") >= 0) return String(spec).split(",").every(function(p) {
+      return hasPath(v, p.trim());
+    });
+    var toks = String(spec).split(".");
+    for (var i = 0; i < toks.length; i++) {
+      while (Array.isArray(v)) v = v.length ? v[0] : void 0;
+      if (!v || typeof v !== "object") return false;
+      var t = alt(v, toks[i]);
+      if (t === null) return false;
+      v = v[t];
+    }
+    return true;
+  }
+  function findAll(data, f) {
+    var uniq = function(list) {
+      var seen = {}, out = [];
+      list.forEach(function(x) {
+        var h = contentKey(x);
+        if (!seen[h]) {
+          seen[h] = 1;
+          out.push(x);
+        }
+      });
+      return out;
+    };
+    if (typeof f === "string" && data && data.__components) {
+      var m = /^([A-Za-z_$][\w$]*)(?:\[(\d+)\])?$/.exec(f);
+      if (m && Object.prototype.hasOwnProperty.call(data, m[1])) {
+        var inst = [].concat(data[m[1]]);
+        if (m[2] !== void 0) return inst[+m[2]] ? [inst[+m[2]]] : [];
+        return uniq(inst);
+      }
+    }
+    var test = typeof f === "function" ? function(x) {
+      try {
+        return !!f(x);
+      } catch (e) {
+        return false;
+      }
+    } : function(x) {
+      return hasPath(x, f);
+    };
+    var level = data && data.__components ? Object.keys(data).reduce(function(a, k) {
+      return a.concat(data[k]);
+    }, []) : [data], depth = 0;
+    while (level.length && depth < 12) {
+      var hits = level.filter(function(x) {
+        return x && typeof x === "object" && !Array.isArray(x) && test(x);
+      });
+      if (hits.length) return uniq(hits);
+      var next = [];
+      level.forEach(function(x) {
+        if (!x || typeof x !== "object") return;
+        if (Array.isArray(x)) {
+          for (var i = 0; i < Math.min(x.length, 50); i++) next.push(x[i]);
+        } else Object.keys(x).forEach(function(k) {
+          next.push(x[k]);
+        });
+      });
+      level = next.slice(0, 5e3);
+      depth++;
+    }
+    return [];
+  }
+  function contentKey(x) {
+    var s;
+    try {
+      s = JSON.stringify(x);
+    } catch (e) {
+      s = String(Math.random());
+    }
+    var h = 5381;
+    for (var i = 0; i < s.length; i++) h = (h << 5) + h + s.charCodeAt(i) | 0;
+    return s.length + ":" + h;
+  }
+  function fingerprint(obj) {
+    return obj && typeof obj === "object" && !Array.isArray(obj) ? Object.keys(obj).sort() : [];
+  }
+  function ambiguity(all) {
+    return all.length > 1 ? all : null;
+  }
+  function describe(x, f) {
+    var at = typeof f === "string" && !/^[A-Za-z_$][\w$]*(\[\d+\])?$/.test(f) ? f.split(",")[0] : null, v = at ? pick(x, at) : null, L = Array.isArray(v) ? null : listIn(x);
+    return "{" + Object.keys(x).slice(0, 8).join(",") + "}" + (Array.isArray(v) ? " (" + at + ": " + v.length + " items)" : L ? " (" + L.key + ": " + L.list.length + " items)" : "");
+  }
+  function ambiguousMsg(f, amb) {
+    var extra = Object.keys(amb[0]).filter(function(k) {
+      return !(k in amb[1]);
+    })[0] || Object.keys(amb[1]).filter(function(k) {
+      return !(k in amb[0]);
+    })[0];
+    var name = typeof f === "string" && /^[A-Za-z_$][\w$]*$/.test(f) ? f : null;
+    return "ambiguous find '" + f + "': matches " + amb.length + ": " + amb.slice(0, 4).map(function(x, i) {
+      return "[" + i + "] " + describe(x, f);
+    }).join(" | ") + ". " + (name ? "The component is rendered " + amb.length + " times with different data: pick one, e.g. find:'" + name + "[0]'" : extra ? "Add a key only the right one has, e.g. find:'" + f + "," + extra + "'" : "Use a more specific find");
+  }
+  function findLocked(data, f, fp) {
+    var all = findAll(data, f);
+    if (typeof f === "string" && f.indexOf("|") >= 0) fp = null;
+    if (!fp || !fp.length) {
+      var amb = ambiguity(all);
+      if (amb) {
+        var e0 = new Error(ambiguousMsg(f, amb));
+        e0.ambiguous = true;
+        throw e0;
+      }
+      return all[0];
+    }
+    var ok = all.filter(function(x) {
+      return fp.every(function(k) {
+        return k in x;
+      });
+    });
+    if (ok.length > 1) {
+      var e1 = new Error(ambiguousMsg(f, ok));
+      e1.ambiguous = true;
+      throw e1;
+    }
+    if (ok.length) return ok[0];
+    var e = new Error("matched a different list: learned on {" + fp.join(",") + "}, found " + (all.length ? all.map(function(x) {
+      return "{" + Object.keys(x).slice(0, 10).join(",") + "}";
+    }).join(" ") : "nothing"));
+    e.missing = fp;
+    throw e;
+  }
+  function find2(data, f) {
+    return findAll(data, f)[0];
+  }
+  function pick(v, spec) {
+    if (typeof spec === "function") return spec(v);
+    if (Array.isArray(spec)) {
+      var r = {};
+      spec.forEach(function(sp) {
+        r[sp] = pick(v, sp);
+      });
+      return r;
+    }
+    var toks = String(spec).match(/\{[^}]*\}|[^.]+/g) || [];
+    function go(x, i) {
+      if (i >= toks.length || x == null) return x;
+      var t = toks[i].replace(/\[\]$/, "");
+      if (Array.isArray(x) && t !== "length" && !/^\d+$/.test(t)) return x.map(function(y) {
+        return go(y, i);
+      });
+      if (t.charAt(0) === "{") {
+        var o = {};
+        t.slice(1, -1).split(",").forEach(function(k) {
+          k = k.trim();
+          if (!k) return;
+          var alts = k.split("|"), hit = null;
+          for (var ai = 0; ai < alts.length && hit === null; ai++) {
+            var val = alts[ai].indexOf(".") >= 0 ? pick(x, alts[ai]) : x[alts[ai]];
+            if (val !== void 0) {
+              hit = alts[ai];
+              o[hit] = val;
+            }
+          }
+          if (hit === null) o[alts[0]] = void 0;
+        });
+        return go(o, i + 1);
+      }
+      var a = t.indexOf("|") >= 0 ? alt(x, t) : t;
+      return go(a === null ? void 0 : x[a], i + 1);
+    }
+    return go(v, 0);
+  }
+  function cond(spec) {
+    if (typeof spec === "function") return spec;
+    var parts = String(spec).split("&").map(function(c) {
+      var m = /^\s*([\w$.|]+)\s*(>=|<=|!=|=|>|<|~|!~)\s*(.*?)\s*$/.exec(c);
+      if (!m) throw new Error("bad where: " + c + " (use key>1, key=val, key~text)");
+      return { key: m[1], op: m[2], val: m[3] };
+    });
+    return function(x) {
+      return parts.every(function(p) {
+        var v = pick(x, p.key), want = p.val, n = Number(want);
+        if (want === "null") want = null;
+        switch (p.op) {
+          case "=":
+            return v == want || String(v) === String(want);
+          case "!=":
+            return !(v == want || String(v) === String(want));
+          case ">":
+            return Number(v) > n;
+          case "<":
+            return Number(v) < n;
+          case ">=":
+            return Number(v) >= n;
+          case "<=":
+            return Number(v) <= n;
+          case "~":
+            return String(v == null ? "" : v).toLowerCase().indexOf(String(want).toLowerCase()) >= 0;
+          case "!~":
+            return String(v == null ? "" : v).toLowerCase().indexOf(String(want).toLowerCase()) < 0;
+        }
+      });
+    };
+  }
+  function shapeChanged(missing, sample) {
+    var e = new Error("shape changed: missing " + missing.join(", ") + (sample && typeof sample === "object" ? " (items have: " + Object.keys(sample).slice(0, 15).join(", ") + ")" : ""));
+    e.missing = missing;
+    return e;
+  }
+  function need(v, paths) {
+    var miss = [].concat(paths).filter(function(p) {
+      return !hasPath(v, p);
+    });
+    if (miss.length) throw shapeChanged(miss, Array.isArray(v) ? v[0] : v);
+    return v;
+  }
+  function strictPick(v, spec) {
+    if (typeof spec === "function" || Array.isArray(spec)) return pick(v, spec);
+    var out = pick(v, spec);
+    if (out === void 0) throw shapeChanged([String(spec)], v);
+    var m = /\{([^}]*)\}$/.exec(String(spec));
+    if (m) {
+      var rows = Array.isArray(out) ? out : [out];
+      if (rows.length) {
+        var gone = m[1].split(",").map(function(k) {
+          return k.trim();
+        }).filter(function(k) {
+          if (!k) return false;
+          return !rows.some(function(r) {
+            return r && Object.keys(r).some(function(rk) {
+              return k.split("|").indexOf(rk) >= 0 && r[rk] !== void 0;
+            });
+          });
+        });
+        if (gone.length) throw shapeChanged(gone, null);
+      }
+    }
+    return out;
+  }
+  function answer(data, o) {
+    var prefix = "", fields = null, fn = null;
+    if (typeof o.pick === "function" || Array.isArray(o.pick)) fn = o.pick;
+    else if (o.pick !== void 0) {
+      var m = /^(.*?)\.?(\{[^}]*\})$/.exec(String(o.pick));
+      if (m) {
+        prefix = m[1];
+        fields = m[2];
+      } else prefix = String(o.pick);
+    }
+    var t = prefix ? strictPick(data, prefix) : data;
+    var needList = o.where !== void 0 || o.group !== void 0 || o.count || o.limit;
+    var lk = null;
+    if (needList && !fn) {
+      var L = listIn(t);
+      if (!L) throw new Error("where/group/count need a list: point pick at it (e.g. pick:'data.items'). Got " + (t === null ? "null" : Array.isArray(t) ? "array" : typeof t) + (t && typeof t === "object" ? " with keys " + Object.keys(t).slice(0, 12).join(", ") : ""));
+      lk = L.key;
+      if (o.where !== void 0) t = query(t, { where: o.where, key: lk });
+    }
+    if (fields) {
+      var L2 = lk ? listIn(t, lk) : null;
+      t = L2 && !Array.isArray(t) ? L2.set(strictPick(L2.list, fields)) : strictPick(t, fields);
+    }
+    if (fn) t = typeof fn === "function" ? fn(t) : pick(t, fn);
+    if (needList && fn && o.where !== void 0) t = query(t, { where: o.where });
+    if (o.group !== void 0 || o.count || o.limit) t = query(t, { group: o.group, count: o.count, limit: o.limit, key: lk });
+    return t;
+  }
+  var SENSITIVE_KEY = /name|email|phone/i;
+  var EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+  function sampleVal(v, d, key) {
+    if (v === null) return "null";
+    if (v === void 0) return "undefined";
+    if (typeof v === "string") {
+      if (key && SENSITIVE_KEY.test(key)) return JSON.stringify(v.charAt(0) + "\u2026");
+      var s = v.replace(EMAIL, "\u2026@\u2026");
+      return JSON.stringify(s.length > 24 ? s.slice(0, 23) + "\u2026" : s);
+    }
+    if (typeof v !== "object") return String(v);
+    if (Array.isArray(v)) return "[" + v.length + "]";
+    var ks = Object.keys(v);
+    if (d >= 2) return "{" + ks.slice(0, 6).join(",") + (ks.length > 6 ? ",\u2026" : "") + "}";
+    return "{" + ks.map(function(k, i) {
+      return i < 6 ? k + ":" + sampleVal(v[k], d + 1, k) : k;
+    }).join(", ") + "}";
+  }
+  function isRecordList(v) {
+    return Array.isArray(v) && v.length > 0 && v[0] && typeof v[0] === "object" && !Array.isArray(v[0]);
+  }
+  function schema(data, o) {
+    o = o || {};
+    var lines = [], LIMIT = 1500;
+    function walk(path18, v, d) {
+      if (d > 8 || v == null || typeof v !== "object") return;
+      if (v.$action) {
+        lines.push(path18 + " = Server Action prop (recipe: --action-prop " + path18.split(".").pop() + ")");
+        return;
+      }
+      if (Array.isArray(v)) {
+        if (!isRecordList(v)) return;
+        lines.push(path18 + "[" + v.length + "] " + fmtBytes(size(v)) + "  " + sampleVal(v[0], 0));
+        Object.keys(v[0]).forEach(function(k) {
+          walk(path18 + "[]." + k, v[0][k], d + 1);
+        });
+        return;
+      }
+      Object.keys(v).forEach(function(k) {
+        walk(path18 ? path18 + "." + k : k, v[k], d + 1);
+      });
+    }
+    if (data && data.components) {
+      Object.keys(data.components).forEach(function(n) {
+        var c = data.components[n];
+        if (o.under && n !== o.under.split(".")[0]) return;
+        var start = Array.isArray(c) ? c[0] : c, base = n;
+        var distinct = Array.isArray(c) ? findAll(data.components, n).length : 1;
+        if (distinct > 1 && !o.under) lines.push(n + " \xD7" + distinct + " instances with different data (paths below are [0]); select one with find:'" + n + "[i]'");
+        if (o.under && o.under.indexOf(".") > 0) {
+          start = pick(start, o.under.split(".").slice(1).join("."));
+          base = o.under;
+        }
+        walk(base, start, 0);
+      });
+    } else walk(o.under || "", o.under ? pick(data, o.under) : data, 0);
+    if (data && data.rows) {
+      var byTag = {};
+      nodes(data.rows).forEach(function(n) {
+        (byTag[n.tag] = byTag[n.tag] || []).push(n);
+      });
+      Object.keys(byTag).forEach(function(t) {
+        if (byTag[t].length < 2) return;
+        var ex = byTag[t][0];
+        lines.push("nodes:" + t + "[" + byTag[t].length + "]  " + sampleVal(ex.href ? { href: ex.href, text: ex.text } : { text: ex.text }, 0));
+      });
+    }
+    var out = ["# find:'<1st part>' pick:'<rest>'. Lists of records only; zoom: {schema:{under:'Comp.path'}}"], used = 0, more = 0;
+    lines.forEach(function(l) {
+      if (l.length > 260) l = l.slice(0, 259) + "\u2026";
+      if (used + l.length > LIMIT) {
+        more++;
+        return;
+      }
+      out.push(l);
+      used += l.length + 1;
+    });
+    if (!lines.length) out.push("(no lists of records; try {nodes:'a'} or call without schema)");
+    if (more) out.push("# +" + more + " more: zoom with {schema:{under:'Comp.path'}}");
+    return out.join("\n");
+  }
+  function sigOf(v) {
+    return v && typeof v === "object" && !Array.isArray(v) ? Object.keys(v).sort().join(",") : "";
+  }
+  function fmtBytes(n) {
+    return n >= 1024 ? (n / 1024).toFixed(n >= 10240 ? 0 : 1) + "KB" : n + "B";
+  }
+  function listIn(v, key) {
+    if (Array.isArray(v)) return { list: v, set: function(l) {
+      return l;
+    } };
+    if (v && typeof v === "object") {
+      var best = key && Array.isArray(v[key]) ? key : null;
+      if (!best) Object.keys(v).forEach(function(k) {
+        if (Array.isArray(v[k]) && (!best || v[k].length > v[best].length)) best = k;
+      });
+      if (best) return { key: best, list: v[best], set: function(l) {
+        var o = Object.assign({}, v);
+        o[best] = l;
+        return o;
+      } };
+    }
+    return null;
+  }
+  function query(data, q) {
+    if (!q || q.where === void 0 && q.group === void 0 && !q.count && !q.limit) return data;
+    var L = listIn(data, q.key);
+    if (!L) return data;
+    var list = L.list;
+    var keysOf = function(spec) {
+      if (typeof spec !== "string") return [];
+      return spec.split("&").map(function(c) {
+        return (/^\s*([\w$.|]+)/.exec(c) || [])[1];
+      }).filter(Boolean);
+    };
+    var mustHave = keysOf(q.where).concat(q.group !== void 0 ? [String(q.group)] : []);
+    var missing = mustHave.filter(function(k) {
+      return list.length && !list.some(function(x) {
+        return x && typeof x === "object" && pick(x, k) !== void 0;
+      });
+    });
+    if (missing.length) throw shapeChanged(missing, list[0]);
+    if (q.where !== void 0) list = list.filter(cond(q.where));
+    if (q.group !== void 0) {
+      var g = {};
+      list.forEach(function(x) {
+        var k = String(pick(x, q.group));
+        g[k] = (g[k] || 0) + 1;
+      });
+      return { count: list.length, by: g };
+    }
+    if (q.count) return list.length;
+    if (q.limit) list = list.slice(0, q.limit);
+    return L.set(list);
+  }
+  var FALLBACK_PROP = /^(notFound|forbidden|unauthorized|error|errorStyles|errorScripts|notFoundStyles)$/;
+  function fallbackRows(rows) {
+    var skip = {}, todo = [];
+    var refs = function(v, d, out) {
+      if (d > 30 || v == null) return;
+      if (typeof v === "string") {
+        var m = /^\$(?:L|@)?([0-9a-f]+)$/.exec(v);
+        if (m && rows[m[1]] && !rows[m[1]].tag) out.push(m[1]);
+        return;
+      }
+      if (typeof v === "object") Object.keys(v).forEach(function(k) {
+        refs(v[k], d + 1, out);
+      });
+    };
+    var scan = function(v, d) {
+      if (!v || typeof v !== "object" || d > 60) return;
+      if (!Array.isArray(v)) Object.keys(v).forEach(function(k) {
+        if (FALLBACK_PROP.test(k)) refs(v[k], 0, todo);
+      });
+      Object.keys(v).forEach(function(k) {
+        scan(v[k], d + 1);
+      });
+    };
+    Object.keys(rows).forEach(function(id2) {
+      if (!rows[id2].tag) scan(rows[id2].v, 0);
+    });
+    while (todo.length) {
+      var id = todo.pop();
+      if (skip[id]) continue;
+      skip[id] = 1;
+      refs(rows[id].v, 0, todo);
+    }
+    return skip;
+  }
+  var NODE_TAGS = /^(a|li|tr|td|th|h[1-6]|p|button|option|label|dt|dd|time|span|strong|code)$/;
+  function nodes(rows, tag) {
+    var out = [];
+    function text(v, d) {
+      if (v == null || d > 40) return "";
+      if (typeof v === "string") return v.charAt(0) === "$" ? "" : v;
+      if (typeof v === "number") return String(v);
+      if (Array.isArray(v)) {
+        if (v[0] === "$" && v.length === 4) return text(v[3] && v[3].children, d + 1);
+        return v.map(function(x) {
+          return text(x, d + 1);
+        }).join(" ");
+      }
+      return "";
+    }
+    var want = function(t) {
+      return !tag || tag === "*" || tag.split("|").indexOf(t) >= 0;
+    };
+    function linksIn(v, d) {
+      var found = [];
+      (function scan(x, dd) {
+        if (!x || typeof x !== "object" || dd > 20 || found.length > 2) return;
+        if (Array.isArray(x)) {
+          if (x[0] === "$" && x.length === 4 && x[3] && typeof x[3] === "object") {
+            var h = typeof x[3].href === "string" ? x[3].href : null;
+            if (h && found.indexOf(h) < 0) found.push(h);
+            scan(x[3].children, dd + 1);
+            return;
+          }
+          x.forEach(function(y) {
+            scan(y, dd + 1);
+          });
+        }
+      })(v, d);
+      return found;
+    }
+    function walk(v, d, href) {
+      if (!v || typeof v !== "object" || d > 80 || out.length >= 3e3) return;
+      if (Array.isArray(v)) {
+        if (v[0] === "$" && typeof v[1] === "string" && v.length === 4 && v[1].charAt(0) === "$") {
+          var cp = v[3] || {};
+          var ch = typeof cp.href === "string" ? cp.href : cp.href && typeof cp.href.pathname === "string" ? cp.href.pathname : null;
+          if (ch && want("a")) {
+            var lt = text(cp.children, 0).replace(/\s+/g, " ").trim().slice(0, 300);
+            out.push({ tag: "a", text: lt, href: ch });
+          }
+          if (cp && typeof cp === "object") Object.keys(cp).forEach(function(k) {
+            if (!FALLBACK_PROP.test(k)) walk(cp[k], d + 1, ch || href);
+          });
+          return;
+        }
+        if (v[0] === "$" && typeof v[1] === "string" && v.length === 4 && v[1].charAt(0) !== "$") {
+          var p = v[3] || {};
+          var here2 = typeof p.href === "string" ? p.href : href;
+          if (NODE_TAGS.test(v[1]) && want(v[1])) {
+            var t = text(p.children, 0).replace(/\s+/g, " ").trim().slice(0, 300);
+            if (t || here2) {
+              var n = { tag: v[1], text: t };
+              if (!here2 && v[1] !== "a") {
+                var inner = linksIn(p.children, 0);
+                if (inner.length === 1) here2 = inner[0];
+              }
+              if (here2) n.href = here2;
+              if (p.id) n.id = p.id;
+              if (p.value !== void 0) n.value = p.value;
+              if (p.dateTime) n.dateTime = p.dateTime;
+              out.push(n);
+            }
+          }
+          walk(p.children, d + 1, here2);
+          return;
+        }
+        v.forEach(function(x) {
+          walk(x, d + 1, href);
+        });
+        return;
+      }
+      Object.keys(v).forEach(function(k) {
+        walk(v[k], d + 1, href);
+      });
+    }
+    var skip = fallbackRows(rows);
+    Object.keys(rows).forEach(function(id) {
+      if (!rows[id].tag && rows[id].v !== void 0 && !skip[id]) walk(rows[id].v, 0);
+    });
+    return out;
+  }
+  var NET = { base: null, cookie: null, env: null, actions: {}, relogin: "log in again in this tab", onExpired: null };
+  var inPage = typeof document !== "undefined" && typeof location !== "undefined";
+  function abs(p) {
+    return NET.base ? new URL(p, NET.base).href : p;
+  }
+  function origin() {
+    return NET.base ? new URL(NET.base).origin : location.origin;
+  }
+  function here() {
+    return inPage && !NET.base ? location.pathname + location.search : "/";
+  }
+  function scriptsOf(live, page) {
+    if (!live && inPage && !NET.base) {
+      var s0 = {};
+      [].slice.call(document.scripts).forEach(function(s) {
+        if (s.src) s0[s.src] = 1;
+      });
+      performance.getEntriesByType("resource").forEach(function(r) {
+        if (r.initiatorType === "script" || /\.js(\?|$)/.test(r.name)) s0[r.name] = 1;
+      });
+      return Promise.resolve(Object.keys(s0));
+    }
+    var url = abs(page || here());
+    return send(url, { cache: "no-store" }).then(function(r) {
+      return r.text();
+    }).then(function(html) {
+      var out = [], re = /<script[^>]+src="([^"]+)"/g, x;
+      while (x = re.exec(html)) out.push(new URL(x[1].replace(/&amp;/g, "&"), NET.base ? url : location.href).href);
+      return out;
+    });
+  }
+  function actionId(name, live, page) {
+    var known = NET.actions[name];
+    if (known && !live) return Promise.resolve(known.id);
+    return scriptsOf(live || !inPage || !!NET.base, page || known && known.page).then(function(list) {
+      return scanFor(name, list, live);
+    });
+  }
+  function scanFor(name, list, live) {
+    var urls = list.filter(function(s) {
+      try {
+        var u = new URL(s, NET.base || location.href);
+        return u.origin === origin() && /\/_next\//.test(u.pathname);
+      } catch (e) {
+        return false;
+      }
+    });
+    var re = /\(\s*"([0-9a-f]{40,44})"\s*,[^"()]{0,200}?,\s*"([A-Za-z_$][\w$]*)"\s*\)/g;
+    return Promise.all(urls.map(function(u) {
+      return send(u, { cache: live ? "no-store" : "default" }).then(function(r) {
+        return r.text();
+      }).then(function(t) {
+        var x, hit = null;
+        re.lastIndex = 0;
+        while (x = re.exec(t)) if (x[2] === name || x[1] === name) hit = x[1];
+        return hit;
+      }, function() {
+        return null;
+      });
+    })).then(function(ids) {
+      return ids.filter(Boolean)[0] || null;
+    });
+  }
+  function encodeArgs(v) {
+    if (typeof v === "string") return v.charAt(0) === "$" ? "$" + v : v;
+    if (v === void 0) return "$undefined";
+    if (typeof v === "bigint") return "$n" + v.toString();
+    if (v instanceof Date) return "$D" + v.toISOString();
+    if (Array.isArray(v)) return v.map(encodeArgs);
+    if (v && typeof v === "object") {
+      var o = {};
+      Object.keys(v).forEach(function(k) {
+        o[k] = encodeArgs(v[k]);
+      });
+      return o;
+    }
+    return v;
+  }
+  function reEncode(v) {
+    if (typeof v === "string") return v.charAt(0) === "$" ? "$" + v : v;
+    if (Array.isArray(v)) return v.map(reEncode);
+    if (v && typeof v === "object") {
+      var o = {};
+      Object.keys(v).forEach(function(k) {
+        o[k] = reEncode(v[k]);
+      });
+      return o;
+    }
+    return v === void 0 ? "$undefined" : v;
+  }
+  function actionRef(from) {
+    return get(from.path, { rsc: true, find: from.find }).then(function(d) {
+      var obj = find2(d && d.components ? d.components : d, from.find);
+      var ref = obj && obj[from.prop];
+      if (!ref || !ref.$action) throw new Error("action prop " + from.prop + " not found on " + from.path + " (page changed?)");
+      return ref;
+    });
+  }
+  var AUTH = {};
+  function envName2(h) {
+    return h.replace(/[^A-Za-z0-9]+/g, "_").toUpperCase();
+  }
+  function authHeaders() {
+    var out = {};
+    Object.keys(AUTH).forEach(function(name) {
+      var s = AUTH[name], v = null;
+      try {
+        if (NET.env) v = NET.env[envName2(name)];
+        else if (s.from === "localStorage" || s.from === "sessionStorage") {
+          v = window[s.from] && window[s.from].getItem(s.key);
+          if (v != null && (s.json || s.path)) {
+            v = JSON.parse(v);
+            (s.path || []).forEach(function(k) {
+              v = v == null ? v : v[k];
+            });
+          }
+        } else if (s.from === "cookie") {
+          document.cookie.split(/;\s*/).forEach(function(c) {
+            if (c.indexOf(s.key + "=") === 0) v = decodeURIComponent(c.slice(s.key.length + 1));
+          });
+        } else if (s.from === "meta") {
+          var m = document.querySelector('meta[name="' + s.key + '"]');
+          v = m && m.getAttribute("content");
+        }
+      } catch (e) {
+        v = null;
+      }
+      if (typeof v === "string" && v) out[name] = NET.env && s.prefix && v.indexOf(s.prefix) === 0 ? v : (s.prefix || "") + v;
+    });
+    return out;
+  }
+  function send(url, init) {
+    init = Object.assign({ credentials: "include" }, init || {});
+    if (NET.cookie) init.headers = Object.assign({ cookie: NET.cookie }, init.headers || {});
+    return fetch(abs(url), init);
+  }
+  function sleep6(ms) {
+    return new Promise(function(r) {
+      setTimeout(r, ms);
+    });
+  }
+  var LOGIN2 = /\/(login|log-in|signin|sign-in|auth|sso)(\/|\?|$)/i;
+  function get(path18, o, attempt) {
+    o = o || {};
+    attempt = attempt || 0;
+    var method = o.method || "GET";
+    var retries = o.retry != null ? o.retry : method === "GET" ? 2 : 0;
+    var h = Object.assign({}, authHeaders(), o.headers || {});
+    if (o.rsc) h.RSC = "1";
+    var again = function(why) {
+      if (attempt >= retries) throw new Error(why);
+      return sleep6(300 * Math.pow(2, attempt)).then(function() {
+        return get(path18, o, attempt + 1);
+      });
+    };
+    var refreshed = function(e) {
+      if (o._fresh || !NET.onExpired || !/^(session expired|HTTP 401)/.test(e && e.message || "")) throw e;
+      return Promise.resolve(NET.onExpired()).then(function(ok) {
+        if (!ok) throw e;
+        return get(path18, Object.assign({}, o, { _fresh: true }), attempt);
+      });
+    };
+    return send(path18, { method, headers: h, body: o.body }).then(function(r) {
+      return r.text().then(function(t) {
+        if (r.redirected && LOGIN2.test(new URL(r.url).pathname)) throw new Error("session expired: " + NET.relogin);
+        if (r.status === 401) throw new Error("HTTP 401: not logged in, or the session expired: " + NET.relogin);
+        if (r.status === 403 || r.status === 429 || /captcha|cf-chl|are you a robot/i.test(t.slice(0, 3e3))) {
+          var ra = r.headers.get("retry-after");
+          throw new Error("stopped: HTTP " + r.status + (ra ? " (retry-after " + ra + ")" : "") + " or bot wall");
+        }
+        if (r.status >= 500) return again("HTTP " + r.status + " after " + (attempt + 1) + " tries");
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        var d;
+        if (/text\/x-component/i.test(r.headers.get("content-type") || "")) {
+          d = flightData(parseFlight(t));
+          if (d.redirect && LOGIN2.test(d.redirect)) throw new Error("session expired: " + NET.relogin);
+          if (d.redirect) throw new Error("redirected to " + d.redirect);
+          if (d.denied) throw new Error("session expired, or this account can't see " + path18 + " (the page answered " + d.denied + "): " + NET.relogin);
+          if (d.action !== void 0) d = d.action;
+          else if (d.errors && o.find !== void 0 && find2(d.components, o.find) === void 0) {
+            return again("page errored on the server (" + d.errors[0] + ") after " + (attempt + 1) + " tries");
+          }
+        } else {
+          try {
+            d = JSON.parse(t);
+          } catch (e) {
+            if (/html/i.test(r.headers.get("content-type") || "") && /<input[^>]+type=["']?password/i.test(t)) throw new Error("session expired (got a login page): " + NET.relogin);
+            throw new Error("not data (got " + (r.headers.get("content-type") || "text") + ")");
+          }
+        }
+        return d;
+      });
+    }, function(e) {
+      if (/^(session|stopped|HTTP)/.test(e.message)) throw e;
+      return again("network: " + e.message);
+    }).catch(refreshed);
+  }
+  function action(target, args2, path18) {
+    var resolveRef = target && typeof target === "object" ? target.$action ? Promise.resolve(target) : actionRef(target).then(function(r) {
+      path18 = path18 || target.path;
+      return r;
+    }) : actionId(target, false, path18).then(function(id) {
+      if (!id) throw new Error("action " + target + " not found" + (inPage && !NET.base ? " on this page: open a page that uses it" : ": pass the page that uses it"));
+      return { $action: id, bound: [] };
+    });
+    return resolveRef.then(function(ref) {
+      var body = reEncode(ref.bound || []).concat(encodeArgs(args2 || []));
+      var known = typeof target === "string" && NET.actions[target];
+      var post = function(id) {
+        return get(path18 || known && known.page || here(), {
+          method: "POST",
+          body: JSON.stringify(body),
+          headers: { "next-action": id, accept: "text/x-component", "content-type": "text/plain;charset=UTF-8" }
+        });
+      };
+      return post(ref.$action).catch(function(e) {
+        if (!/HTTP (404|409)/.test(e.message)) throw e;
+        if (target && typeof target === "object" && !target.$action) return actionRef(target).then(function(r2) {
+          body = reEncode(r2.bound || []).concat(encodeArgs(args2 || []));
+          return post(r2.$action);
+        });
+        if (typeof target === "string") return actionId(target, true, path18).then(function(id) {
+          if (!id || id === ref.$action) throw e;
+          return post(id);
+        });
+        throw e;
+      });
+    });
+  }
+  return {
+    parseFlight,
+    flightData,
+    find: find2,
+    pick,
+    get,
+    action,
+    actionRef,
+    encodeArgs,
+    reEncode,
+    size,
+    sleep: sleep6,
+    actionId,
+    query,
+    cond,
+    nodes,
+    listKey: function(v) {
+      var L = listIn(v);
+      return L && L.key;
+    },
+    schema,
+    need,
+    strictPick,
+    answer,
+    sigOf,
+    findAll,
+    findLocked,
+    fingerprint,
+    ambiguity,
+    describe,
+    ambiguousMsg,
+    setAuth: function(a) {
+      AUTH = a || {};
+    },
+    authHeaders,
+    setTransport: function(t) {
+      Object.keys(t || {}).forEach(function(k) {
+        NET[k] = t[k];
+      });
+    },
+    envName: envName2
+  };
+}
+function recipeRunner(core, fps) {
+  function fill2(t, a) {
+    if (typeof t === "string") return t.replace(/\{([A-Za-z_$][\w$]*)\}/g, function(_, k) {
+      if (a[k] === void 0) throw new Error("missing arg " + k);
+      return t.charAt(0) === "/" ? String(a[k]).split("/").map(encodeURIComponent).join("/") : a[k];
+    });
+    if (Array.isArray(t)) return t.map(function(x) {
+      return fill2(x, a);
+    });
+    if (t && typeof t === "object") {
+      var o = {};
+      Object.keys(t).forEach(function(k) {
+        var v = t[k];
+        o[k] = typeof v === "string" && /^\{[A-Za-z_$][\w$]*\}$/.test(v) ? (function(n) {
+          if (a[n] === void 0) throw new Error("missing arg " + n);
+          return a[n];
+        })(v.slice(1, -1)) : fill2(v, a);
+      });
+      return o;
+    }
+    return t;
+  }
+  return function run2(spec, a, max) {
+    a = a || {};
+    max = max || 4e3;
+    return Promise.resolve().then(function() {
+      if (spec.run) return spec.run(core, a);
+      var p = spec.path ? fill2(spec.path, a) : void 0;
+      if (spec.actionProp) return core.action({ path: p, find: spec.find, prop: spec.actionProp }, fill2(spec.args || [], a), p);
+      return spec.action ? core.action(spec.action, fill2(spec.args || [], a), p) : core.get(p, { rsc: spec.rsc, find: spec.find });
+    }).then(function(d) {
+      if (spec.nodes && !spec.run) {
+        if (!d || !d.rows) throw new Error("nodes needs a Next.js page (RSC) response");
+        d = core.nodes(d.rows, spec.nodes);
+      }
+      if (spec.find !== void 0 && !spec.actionProp && !spec.run && !spec.nodes) {
+        var all = fps.get(), fp = spec.fp || all[spec.name];
+        var f = core.findLocked(d && d.components ? d.components : d, spec.find, fp);
+        if (f === void 0) throw new Error("shape not found (site changed?): " + (spec.findText || spec.find));
+        if (!fp && spec.name && typeof spec.find === "string" && spec.find.indexOf("|") < 0) {
+          all[spec.name] = core.fingerprint(f);
+          fps.set(all);
+        }
+        d = f;
+      }
+      if (!spec.run) d = core.answer(d, spec);
+      var line = spec.format ? spec.format(d, a) : d;
+      line = typeof line === "string" ? line : JSON.stringify(line);
+      return line.length > max ? line.slice(0, max) + " \u2026(" + line.length + " chars: tighten pick/format)" : line;
+    }).catch(function(e) {
+      return "error: " + (e && e.message || e);
+    });
+  };
+}
+var init_recipe_core = __esm({
+  "src/lib/kit/recipe-core.ts"() {
+    "use strict";
+  }
+});
+
 // src/lib/kit/capture.ts
 function parseCapture(raw) {
   let data;
@@ -12624,7 +13926,7 @@ function parseCapture(raw) {
   } catch {
     throw new CaptureError("not JSON: expected a file written by the kit's dump() or the joined drain() chunks");
   }
-  if (data?.kind !== "iframer-capture" && !(data?.v === 1 && data?.endpoints && data?.coverage)) {
+  if (data?.kind !== "iframer-capture") {
     throw new CaptureError('not an iframer capture (missing kind: "iframer-capture")');
   }
   if (data.v !== 1) throw new CaptureError(`unsupported capture version ${data.v}; update iframer`);
@@ -12677,7 +13979,7 @@ function mask(s) {
   return s.length <= 4 ? "****" : `${s.slice(0, 3)}\u2026 (${s.length} chars)`;
 }
 function scanString(s, where, out) {
-  if (TYPE_NAMES.has(s)) return;
+  if (TYPE_NAMES.has(s) || s.split("|").every((t) => TYPE_NAMES.has(t))) return;
   for (const [kind, re] of DETECTORS) {
     if (kind === "token") {
       for (const part of splitWords(s)) {
@@ -12724,7 +14026,7 @@ function splitWords(s) {
 function redactUrl(s) {
   const kinds = [];
   const hit = (part) => {
-    if (!part || part.includes("{")) return null;
+    if (!part || part.includes("{") || STATICS.has(part)) return null;
     let d = part;
     try {
       d = decodeURIComponent(part);
@@ -12791,6 +14093,7 @@ function redactShape(v, kinds) {
 }
 function redactCapture(report) {
   const redacted = [];
+  STATICS = new Set(report.routes?.static ?? []);
   const endpoints = {};
   for (const [key, ep] of Object.entries(report.endpoints)) {
     const kinds = [];
@@ -12885,10 +14188,10 @@ function buildApiMap(report) {
     capturedAt: report.capturedAt,
     coverage: report.coverage,
     identity: {
-      cookies: report.auth?.cookies ?? "browser session (sent automatically, HttpOnly included)",
+      cookies: report.auth?.cookies ?? "session cookies, HttpOnly included (COOKIE in .env)",
       headers: Object.entries(report.auth?.headers ?? {}).map(([name, src]) => ({ name, source: describeAuthSource(src) }))
     },
-    replay: "in-page only: load the kit, then the client, and call window.__ifkApi.<fn>() through the agent's evaluate tool. HttpOnly cookies never leave the browser, so the same calls fail from curl.",
+    replay: "client.mjs next to this file (Node, no browser). Session: .env (iframer auth <host>). In-page fallback for sites that block Node: window.__ifk.call, or iframer recipe --in-page.",
     endpoints,
     pathOnly: report.pathOnly
   };
@@ -12899,130 +14202,13 @@ function describeAuthSource(s) {
   const at = s.path?.length ? `${s.key} -> ${s.path.join(".")}` : s.key;
   return `${s.from}["${at}"]${pre}; __ifk.call attaches it automatically`;
 }
-function pathParams(p) {
-  const used = /* @__PURE__ */ new Set();
-  return (p.match(/\{([^}]+)\}/g) || []).map((m) => {
-    let base = m.slice(1, -1).replace(/[^A-Za-z0-9_$]/g, "_");
-    if (!/^[A-Za-z_$]/.test(base)) base = "p_" + base;
-    let name = base, n = 2;
-    while (used.has(name)) name = `${base}${n++}`;
-    used.add(name);
-    return name;
-  });
-}
-function takesBody(ep) {
-  return ep.request !== void 0 || ep.method === "POST" || ep.method === "PUT" || ep.method === "PATCH";
-}
-function renderClient(map) {
-  const lines = [];
-  const skipped = [];
-  lines.push(`// Generated by \`iframer ingest\` from ${map.origin}${map.capturedAt ? ` (${map.capturedAt.slice(0, 10)})` : ""}.`);
-  lines.push(`// Runs IN the page, after the iframer kit, so the browser attaches the session`);
-  lines.push(`// cookies. Load it like the kit (file -> sessionStorage -> top-level eval).`);
-  lines.push(`// Writes (non-GET) need {approved:true}: ask the user first.`);
-  lines.push(`(function () {`);
-  lines.push(`  function c(m, p, o) {`);
-  lines.push(`    if (!window.__ifk) return Promise.resolve({ error: "NOT_INSTALLED: eval(sessionStorage.__ifk) first" });`);
-  lines.push(`    return window.__ifk.call(m, p, o);`);
-  lines.push(`  }`);
-  lines.push(`  function a(name, args, o) {`);
-  lines.push(`    if (!window.__ifk) return Promise.resolve({ error: "NOT_INSTALLED: eval(sessionStorage.__ifk) first" });`);
-  lines.push(`    return window.__ifk.action(name, args, o);`);
-  lines.push(`  }`);
-  lines.push(`  function q(query) {`);
-  lines.push(`    if (!query) return "";`);
-  lines.push(`    var s = new URLSearchParams(query).toString();`);
-  lines.push(`    return s ? "?" + s : "";`);
-  lines.push(`  }`);
-  lines.push(`  window.__ifkApi = {`);
-  for (const ep of map.endpoints) {
-    if (ep.kind === "ws" || ep.kind === "sse" || ep.kind === "beacon") {
-      skipped.push(`${ep.kind} ${ep.path}`);
-      continue;
-    }
-    if (ep.origin !== map.origin) {
-      skipped.push(`${ep.method} ${ep.origin}${ep.path} (cross-origin)`);
-      continue;
-    }
-    if (ep.action) {
-      const ref = JSON.stringify(ep.action.name || ep.action.id);
-      lines.push(`    // Next.js Server Action at ${ep.path}. args: array of the action's arguments. Needs {approved:true}.`);
-      lines.push(`    ${ep.functionName}: function (args, opts) { return a(${ref}, args, opts); },`);
-      continue;
-    }
-    const params = pathParams(ep.path);
-    let i = 0;
-    const urlExpr = JSON.stringify(ep.path).replace(/\{[^}]+\}/g, () => `" + encodeURIComponent(${params[i++]}) + "`).replace(/ \+ ""$/, "").replace(/^"" \+ /, "");
-    const hasBody = takesBody(ep);
-    if (hasBody) params.push("body");
-    params.push("query", "opts");
-    const base = [hasBody ? "json: body" : "", ep.rsc ? "rsc: true" : ""].filter(Boolean).join(", ");
-    const optsExpr = base ? `Object.assign({ ${base} }, opts)` : `opts`;
-    const doc = [
-      ep.query.length ? `query: ${ep.query.join(", ")}` : "",
-      ep.status.length ? `seen ${ep.status.join("/")}` : ""
-    ].filter(Boolean).join("; ");
-    lines.push(`    // ${ep.method} ${ep.path}${doc ? `  (${doc})` : ""}`);
-    lines.push(`    ${ep.functionName}: function (${params.join(", ")}) { return c(${JSON.stringify(ep.method)}, ${urlExpr} + q(query), ${optsExpr}); },`);
-  }
-  lines.push(`  };`);
-  lines.push(`  return Object.keys(window.__ifkApi);`);
-  lines.push(`})();`);
-  if (skipped.length) lines.push(`// Not wrapped: ${skipped.join("; ")}`);
-  return lines.join("\n") + "\n";
-}
-function tsType(s, indent = "  ") {
-  if (typeof s === "string") {
-    if (s === "null") return "null";
-    if (["string", "number", "boolean"].includes(s)) return s;
-    return "unknown";
-  }
-  if (Array.isArray(s)) return s.length ? `Array<${tsType(s[0], indent)}>` : "unknown[]";
-  if (s && typeof s === "object") {
-    const entries = Object.entries(s);
-    if (!entries.length) return "Record<string, unknown>";
-    const inner = indent + "  ";
-    const body = entries.map(([k, v]) => k === "{key}" ? `${inner}[key: string]: ${tsType(v, inner)};` : `${inner}${/^[A-Za-z_$][\w$]*$/.test(k) ? k : JSON.stringify(k)}?: ${tsType(v, inner)};`);
-    return `{
-${body.join("\n")}
-${indent}}`;
-  }
-  return "unknown";
-}
-function renderTypes(map) {
-  const out = [`// Generated by \`iframer ingest\` from ${map.origin}. Shapes come from one sample each: fields may be optional.`];
-  out.push(`type IfkResult<T> = Promise<{ status?: number; data?: T; text?: string; truncated?: number; error?: string; stopped?: string }>;`);
-  out.push(`type IfkOpts = { approved?: boolean; headers?: Record<string, string>; maxBytes?: number; full?: boolean; rsc?: boolean; auth?: boolean };`);
-  out.push(`interface IfkApi {`);
-  for (const ep of map.endpoints) {
-    if (ep.kind === "ws" || ep.kind === "sse" || ep.kind === "beacon" || ep.origin !== map.origin) continue;
-    if (ep.action) {
-      const args2 = ep.request?.json !== void 0 ? tsType(ep.request.json, "  ") : "unknown[]";
-      const r = ep.response?.rsc?.action;
-      out.push(`  /** Next.js Server Action ${ep.action.name || ep.action.id.slice(0, 8)} at ${ep.path} */`);
-      out.push(`  ${ep.functionName}(args: ${args2}, opts?: IfkOpts): IfkResult<${r !== void 0 ? tsType(r, "  ") : "unknown"}>;`);
-      continue;
-    }
-    const ids = pathParams(ep.path).map((n) => `${n}: string | number`);
-    const hasBody = takesBody(ep);
-    const req = ep.request?.json !== void 0 ? tsType(ep.request.json, "  ") : ep.request?.form || ep.request?.multipart ? "Record<string, string>" : "unknown";
-    const res = ep.response && typeof ep.response === "object" && !Array.isArray(ep.response) && "contentType" in ep.response && "bytes" in ep.response ? "unknown" : tsType(ep.response, "  ");
-    const params = [...ids, ...hasBody ? [`body: ${req}`] : [], `query?: Record<string, string>`, `opts?: IfkOpts`];
-    out.push(`  /** ${ep.method} ${ep.path} */`);
-    out.push(`  ${ep.functionName}(${params.join(", ")}): IfkResult<${res}>;`);
-  }
-  out.push(`}`);
-  out.push(`declare global { interface Window { __ifkApi: IfkApi } }`);
-  out.push(`export {};`);
-  return out.join("\n") + "\n";
-}
 function shortShape(s, depth = 0) {
   if (typeof s === "string") return s;
   if (Array.isArray(s)) return s.length ? `${shortShape(s[0], depth + 1)}[]` : "[]";
   if (s && typeof s === "object") {
-    const keys = Object.keys(s);
-    if (depth > 0) return `{${keys.slice(0, 4).join(",")}${keys.length > 4 ? ",\u2026" : ""}}`;
-    return `{${keys.slice(0, 6).map((k) => `${k}:${shortShape(s[k], depth + 1)}`).join(", ")}${keys.length > 6 ? ", \u2026" : ""}}`;
+    const keys2 = Object.keys(s);
+    if (depth > 0) return `{${keys2.slice(0, 4).join(",")}${keys2.length > 4 ? ",\u2026" : ""}}`;
+    return `{${keys2.slice(0, 6).map((k) => `${k}:${shortShape(s[k], depth + 1)}`).join(", ")}${keys2.length > 6 ? ", \u2026" : ""}}`;
   }
   return "?";
 }
@@ -13034,7 +14220,140 @@ function describeEndpoint(ep) {
   if (ep.authHeaders.length) parts.push(`auth ${ep.authHeaders.join(",")}`);
   return parts.filter(Boolean).join("; ");
 }
-var import_fs11, import_os4, import_path12, CaptureError, TYPE_NAMES, DETECTORS, PLACEHOLDER, union, VERB;
+function mergeEp(p, e) {
+  return {
+    ...p,
+    n: p.n + e.n,
+    status: union(p.status, e.status),
+    query: union(p.query, e.query),
+    headers: union(p.headers, e.headers),
+    auth: union(p.auth, e.auth),
+    req: p.req ?? e.req,
+    res: p.res ?? e.res,
+    ...p.redacted || e.redacted ? { redacted: union(p.redacted, e.redacted) } : {}
+  };
+}
+function sameSite(a, b) {
+  const h = (o) => {
+    try {
+      return new URL(o).hostname;
+    } catch {
+      return o;
+    }
+  };
+  const x = h(a), y = h(b);
+  return x === y || x.split(".").slice(-2).join(".") === y.split(".").slice(-2).join(".");
+}
+function cleanCapture(report, opts = {}) {
+  const dropped = [];
+  let eps = Object.entries(report.endpoints);
+  if (!opts.all) {
+    eps = eps.filter(([k]) => {
+      const { origin, path: p } = splitKey(k);
+      const keep = sameSite(origin, report.origin) && !NOISE_PATH.test(p);
+      if (!keep) dropped.push(k);
+      return keep;
+    });
+  }
+  const byAction = /* @__PURE__ */ new Map();
+  const out = {};
+  for (const [k, ep] of eps) {
+    const id = ep.next?.action;
+    if (id && byAction.has(id)) {
+      const first = byAction.get(id);
+      out[first] = mergeEp(out[first], ep);
+      continue;
+    }
+    if (id) byAction.set(id, k);
+    out[k] = out[k] ? mergeEp(out[k], ep) : ep;
+  }
+  const statics = new Set(report.routes?.static ?? []);
+  const named = /* @__PURE__ */ new Map();
+  const segs = (k) => {
+    const s = splitKey(k);
+    return { ...s, parts: s.path.split("#")[0].split("/") };
+  };
+  for (const k of Object.keys(out)) {
+    const { method, parts } = segs(k);
+    parts.forEach((p, i) => {
+      if (/^\{[A-Za-z_$][\w$]*\}$/.test(p) && p !== "{id}") named.set(`${method}|${parts.length}|${i}`, p);
+    });
+  }
+  const result = {};
+  for (const [k, ep] of Object.entries(out)) {
+    const { method, origin, parts } = segs(k);
+    const frag = k.includes("#") ? k.slice(k.indexOf("#")) : "";
+    let changed = false;
+    const np = parts.map((p, i) => {
+      const nm = named.get(`${method}|${parts.length}|${i}`);
+      if (!nm || p === nm || p.startsWith("{") || statics.has(p)) return p;
+      const sib = [...parts];
+      sib[i] = nm;
+      const sibKey = `${method} ${origin}${sib.join("/")}${frag}`;
+      if (!(sibKey in out)) return p;
+      changed = true;
+      return nm;
+    });
+    const nk = changed ? `${method} ${origin}${np.join("/")}${frag}` : k;
+    result[nk] = result[nk] ? mergeEp(result[nk], ep) : ep;
+  }
+  const pathOnly = opts.all ? report.pathOnly : report.pathOnly.filter((p) => sameSite(p, report.origin) && !NOISE_PATH.test(splitKey(`GET ${p}`).path));
+  const withPayload = Object.values(result).filter((e) => e.req || e.res).length;
+  const coverage = { ...report.coverage, seen: Object.keys(result).length + pathOnly.length, withPayload, pathOnly: pathOnly.length };
+  return { report: { ...report, endpoints: result, pathOnly, coverage }, dropped };
+}
+function renderIndex(map) {
+  const lines = [`# ${map.origin}: ${map.endpoints.length} endpoints. Call from Node: node client.mjs get <path> [--rsc] [--schema] (session in .env: iframer auth). Details: api.json`];
+  for (const e of map.endpoints) {
+    const what = e.action ? `action ${e.action.name || e.action.id.slice(0, 8)}` : `${e.method} ${e.origin === map.origin ? e.path : e.origin + e.path}`;
+    const r = e.response;
+    const comps = r?.rsc?.components && r?.rsc?.action === void 0 ? Object.fromEntries(Object.entries(r.rsc.components).sort(([, a], [, b]) => Number(hasList(b)) - Number(hasList(a)))) : void 0;
+    let ret = r !== void 0 ? shortShape(r?.rsc?.action ?? comps ?? r) : "";
+    if (ret.length > 90) ret = ret.slice(0, 87) + "...";
+    const html = r?.rsc?.nodes;
+    if (html) ret += `${ret ? " " : ""}+html(${html}): --nodes tag`;
+    lines.push(`${e.functionName}  ${what}${e.rsc ? " [rsc]" : ""}${ret ? `  -> ${ret}` : ""}`);
+  }
+  return lines.join("\n") + "\n";
+}
+function schemaFromMap(map, target, budget = 1500) {
+  const want = target.replace(/^https?:\/\/[^/]+/, "").split("?")[0];
+  const matches2 = (tplPath) => tplPath === want || new RegExp("^" + tplPath.replace(/[.*+?^$()|[\]\\]/g, "\\$&").replace(/\\\{[^}]+\\\}|\{[^}]+\}/g, "[^/]+(?:/[^/]+)*?") + "$").test(want);
+  const eps = map.endpoints.filter((e) => e.origin === map.origin && matches2(e.path));
+  if (!eps.length) return null;
+  const lines = [];
+  const walk = (p, v, d) => {
+    if (d > 8 || v == null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      const item = v[0];
+      if (!item || typeof item !== "object" || Array.isArray(item)) return;
+      lines.push(`${p}[] {${Object.keys(item).join(",")}}`);
+      for (const [k, x] of Object.entries(item)) walk(`${p}[].${k}`, x, d + 1);
+      return;
+    }
+    for (const [k, x] of Object.entries(v)) walk(p ? `${p}.${k}` : k, x, d + 1);
+  };
+  for (const e of eps) {
+    const r = e.response;
+    lines.push(`# ${e.action ? `action ${e.action.name || e.action.id.slice(0, 8)}` : `${e.method} ${e.path}`}${e.rsc ? " [rsc]" : ""}`);
+    if (r?.rsc?.components) {
+      for (const [n, c] of Object.entries(r.rsc.components)) walk(n, Array.isArray(c) ? c[0] : c, 0);
+      if (r.rsc.nodes) lines.push(`nodes: ${r.rsc.nodes}  -> {nodes:'tag'}`);
+    } else walk("", r?.rsc?.action ?? r, 0);
+  }
+  let out = "", used = 0;
+  for (const l of lines) {
+    if (used + l.length + 1 > budget) {
+      out += `# +more: --budget 4000
+`;
+      break;
+    }
+    out += l + "\n";
+    used += l.length + 1;
+  }
+  return out;
+}
+var import_fs11, import_os4, import_path12, CaptureError, TYPE_NAMES, DETECTORS, PLACEHOLDER, STATICS, union, VERB, NOISE_PATH, hasList;
 var init_capture = __esm({
   "src/lib/kit/capture.ts"() {
     "use strict";
@@ -13052,8 +14371,686 @@ var init_capture = __esm({
       ["token", /(?=[A-Za-z0-9_\-.]*\d)(?=[A-Za-z0-9_\-.]*[A-Za-z])^[A-Za-z0-9_\-.]{24,}$/]
     ];
     PLACEHOLDER = "{id}";
+    STATICS = /* @__PURE__ */ new Set();
     union = (a = [], b = []) => [.../* @__PURE__ */ new Set([...a, ...b])];
     VERB = { GET: "get", HEAD: "head", POST: "create", PUT: "update", PATCH: "update", DELETE: "delete" };
+    NOISE_PATH = /^\/(_next\/(static|image|webpack-hmr)|_vercel\/|__nextjs|favicon|robots\.txt|sitemap)/;
+    hasList = (v, d = 0) => d < 6 && !!v && typeof v === "object" && (Array.isArray(v) || Object.values(v).some((x) => hasList(x, d + 1)));
+  }
+});
+
+// src/lib/kit/recipes.ts
+function iframerCli() {
+  try {
+    let d = import_path13.default.dirname((0, import_url.fileURLToPath)(importMetaUrl));
+    for (let i = 0; i < 6; i++) {
+      const pkg = import_path13.default.join(d, "package.json");
+      if (import_fs12.default.existsSync(pkg) && JSON.parse(import_fs12.default.readFileSync(pkg, "utf8")).name === "iframer-toolkit") {
+        const dev = import_path13.default.join(d, "bin", "iframer-dev");
+        if (import_fs12.default.existsSync(dev)) return dev;
+        const cli = import_path13.default.join(d, "dist", "cli.js");
+        return import_fs12.default.existsSync(cli) ? cli : null;
+      }
+      d = import_path13.default.dirname(d);
+    }
+  } catch {
+  }
+  return null;
+}
+function apisDir(host) {
+  return import_path13.default.join(getDataDir(), "apis", normalizeHost(host));
+}
+function normalizeHost(host) {
+  return host.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+}
+function listRecipes(host) {
+  const dir = recipesDir(host);
+  if (!import_fs12.default.existsSync(dir)) return [];
+  return import_fs12.default.readdirSync(dir).filter((f) => f.endsWith(".json")).sort().map((f) => JSON.parse(import_fs12.default.readFileSync(import_path13.default.join(dir, f), "utf8")));
+}
+function saveRecipe(spec) {
+  if (!/^[A-Za-z_$][\w$]*$/.test(spec.name)) throw new Error(`recipe name must be a JS identifier: ${spec.name}`);
+  if (RESERVED.has(spec.name)) throw new Error(`recipe name ${spec.name} is taken by the client: pick another`);
+  if (!spec.path && !spec.action && !spec.actionProp && !spec.run) throw new Error("a recipe needs --path, --action, --action-prop or --run");
+  if (spec.actionProp && (!spec.path || !spec.find)) throw new Error("--action-prop needs --path (the page) and --find (the props shape)");
+  for (const k of ["find", "pick", "format"]) if (spec[k] && isCode(spec[k])) checkCode(spec[k], k);
+  if (spec.run) {
+    if (!isCode(spec.run)) throw new Error("--run must be a JS function: async (core, args) => ...");
+    checkCode(spec.run, "run");
+  }
+  const dir = recipesDir(spec.host);
+  import_fs12.default.mkdirSync(dir, { recursive: true });
+  import_fs12.default.writeFileSync(import_path13.default.join(dir, `${spec.name}.json`), JSON.stringify(spec, null, 2) + "\n");
+  writeOutputs(spec.host);
+  return clientPath(spec.host);
+}
+function removeRecipe(host, name) {
+  const f = import_path13.default.join(recipesDir(host), `${name}.json`);
+  if (!import_fs12.default.existsSync(f)) return false;
+  import_fs12.default.unlinkSync(f);
+  writeOutputs(host);
+  return true;
+}
+function outputsFile(host) {
+  return import_path13.default.join(apisDir(host), "outputs.json");
+}
+function outputDirs(host) {
+  const dirs = [apisDir(host)];
+  try {
+    for (const d of JSON.parse(import_fs12.default.readFileSync(outputsFile(host), "utf8"))) if (!dirs.includes(d)) dirs.push(d);
+  } catch {
+  }
+  return dirs;
+}
+function addOutputDir(host, dir) {
+  const abs = import_path13.default.resolve(dir);
+  if (abs === import_path13.default.resolve(apisDir(host))) return;
+  const extra = outputDirs(host).slice(1).filter((d) => import_fs12.default.existsSync(d));
+  if (!extra.includes(abs)) extra.push(abs);
+  import_fs12.default.mkdirSync(apisDir(host), { recursive: true });
+  import_fs12.default.writeFileSync(outputsFile(host), JSON.stringify(extra, null, 2) + "\n");
+}
+function clientPath(host, dir = apisDir(host)) {
+  return import_path13.default.join(dir, "client.mjs");
+}
+function writeOutputs(host) {
+  const written = [];
+  for (const dir of outputDirs(host)) {
+    if (dir !== apisDir(host) && !import_fs12.default.existsSync(dir)) continue;
+    written.push(...writeClient(host, dir));
+  }
+  if (import_fs12.default.existsSync(import_path13.default.join(apisDir(host), "recipes.js"))) written.push(writeBundle(host));
+  return written;
+}
+function writeClient(host, dir = apisDir(host)) {
+  import_fs12.default.mkdirSync(dir, { recursive: true });
+  const map = readMap(host, dir);
+  const auth = readAuth(host, dir);
+  const specs = listRecipes(host);
+  const out = [];
+  const put = (name, body, mode) => {
+    const p = import_path13.default.join(dir, name);
+    import_fs12.default.writeFileSync(p, body, mode ? { mode } : void 0);
+    out.push(p);
+  };
+  put("client.mjs", renderClient(host, map, auth, specs, dir), 493);
+  put(".env.example", envExample(host, auth));
+  const gi = import_path13.default.join(dir, ".gitignore");
+  const cur = import_fs12.default.existsSync(gi) ? import_fs12.default.readFileSync(gi, "utf8") : "";
+  for (const line of [".env", ".fingerprints.json"]) if (!cur.split("\n").includes(line)) import_fs12.default.appendFileSync(gi, (cur && !cur.endsWith("\n") ? "\n" : "") + line + "\n");
+  return out;
+}
+function writeBundle(host) {
+  const file = import_path13.default.join(apisDir(host), "recipes.js");
+  import_fs12.default.mkdirSync(import_path13.default.dirname(file), { recursive: true });
+  import_fs12.default.writeFileSync(file, renderRecipes(listRecipes(host), readAuth(host)));
+  return file;
+}
+function rebuildAllBundles() {
+  const root = import_path13.default.join(getDataDir(), "apis");
+  if (!import_fs12.default.existsSync(root)) return [];
+  return import_fs12.default.readdirSync(root).filter((h) => !h.includes(".bak-") && (import_fs12.default.existsSync(import_path13.default.join(root, h, "api.json")) || import_fs12.default.existsSync(import_path13.default.join(root, h, "recipes")))).flatMap((h) => writeOutputs(h));
+}
+function readMap(host, dir) {
+  for (const d of [dir, apisDir(host)]) {
+    try {
+      return JSON.parse(import_fs12.default.readFileSync(import_path13.default.join(d, "api.json"), "utf8"));
+    } catch {
+    }
+  }
+  return { origin: `https://${host}`, endpoints: [] };
+}
+function envExample(host, auth) {
+  const lines = [
+    `# Session for ${host}. Copy to .env (never commit it) or run: iframer auth ${host}`,
+    `# COOKIE: the Cookie request header of a logged-in request (DevTools > Network > a request > Request Headers).`,
+    `COOKIE=`
+  ];
+  for (const h of Object.keys(auth)) lines.push(`# ${h} header (the page keeps it in ${describeSource(auth[h])})`, `${envName(h)}=`);
+  return lines.join("\n") + "\n";
+}
+function describeSource(s) {
+  if (!s || typeof s !== "object") return "an unknown place";
+  return s.key ? `${s.from} "${s.key}"${s.path?.length ? ` at ${s.path.join(".")}` : ""}` : String(s.from);
+}
+function readAuth(host, dir = apisDir(host)) {
+  for (const d of [dir, apisDir(host)]) {
+    try {
+      return JSON.parse(import_fs12.default.readFileSync(import_path13.default.join(d, "auth.json"), "utf8"));
+    } catch {
+    }
+  }
+  return {};
+}
+function checkCode(src, what) {
+  try {
+    new Function(`return (${src});`);
+  } catch (e) {
+    throw new Error(`--${what} is not valid JS: ${e.message}`);
+  }
+}
+function addSnippet(s) {
+  const f = [];
+  const put = (k, v) => {
+    if (v !== void 0) f.push(`${k}: ${v}`);
+  };
+  put("path", s.path === void 0 ? void 0 : JSON.stringify(s.path));
+  if (s.rsc) f.push("rsc: true");
+  put("action", s.action === void 0 ? void 0 : JSON.stringify(s.action));
+  put("actionProp", s.actionProp === void 0 ? void 0 : JSON.stringify(s.actionProp));
+  put("args", s.args === void 0 ? void 0 : JSON.stringify(s.args));
+  for (const k of ["find", "pick", "format", "run", "where"]) if (s[k] !== void 0) f.push(`${k}: ${lit(s[k])}`);
+  put("nodes", s.nodes === void 0 ? void 0 : JSON.stringify(s.nodes));
+  put("group", s.group === void 0 ? void 0 : JSON.stringify(s.group));
+  if (s.count) f.push("count: true");
+  if (s.limit) f.push(`limit: ${s.limit}`);
+  return `__ifkRecipes.__add(${JSON.stringify(s.name)}, { ${f.join(", ")} }, 1, ${JSON.stringify(RUNTIME)})`;
+}
+function specLiteral(s) {
+  const fields = [
+    `name: ${JSON.stringify(s.name)}`,
+    `path: ${JSON.stringify(s.path)}`,
+    `rsc: ${!!s.rsc}`,
+    `action: ${JSON.stringify(s.action)}`,
+    `actionProp: ${JSON.stringify(s.actionProp)}`,
+    `args: ${JSON.stringify(s.args ?? null)}`,
+    `find: ${lit(s.find)}`,
+    `findText: ${JSON.stringify(s.find ?? "")}`,
+    `pick: ${lit(s.pick)}`,
+    `format: ${lit(s.format)}`,
+    `run: ${lit(s.run)}`,
+    `nodes: ${JSON.stringify(s.nodes)}`,
+    `where: ${lit(s.where)}`,
+    `group: ${JSON.stringify(s.group)}`,
+    `count: ${!!s.count}`,
+    `limit: ${JSON.stringify(s.limit ?? null)}`
+  ];
+  return `{ ${fields.join(", ")} }`;
+}
+function renderClient(host, map, auth, specs, dir) {
+  const origin = map.origin || `https://${host}`;
+  const eps = (map.endpoints || []).filter((e) => !e.origin || e.origin === origin);
+  const actions = {};
+  for (const e of eps) if (e.action?.name && !actions[e.action.name]) actions[e.action.name] = { id: e.action.id, page: e.path };
+  const pages = eps.filter((e) => e.method === "GET").map((e) => `${e.rsc ? "page" : "get "} ${e.path}`);
+  for (const u of map.pathOnly || []) {
+    try {
+      const x = new URL(u);
+      if (x.origin === origin && !pages.some((p) => p.endsWith(" " + x.pathname))) pages.push(`seen ${x.pathname}`);
+    } catch {
+    }
+  }
+  const out = [];
+  out.push(`#!/usr/bin/env node`);
+  out.push(`// ${host} API client, generated by iframer from a capture of ${origin}. Node 18+, no browser.`);
+  out.push(`// Regenerated by \`iframer ingest\` and \`iframer recipe\`: don't edit, add recipes instead.`);
+  out.push(`//`);
+  out.push(`// Auth: .env next to this file (see .env.example). Refresh it with: iframer auth ${host} --out ${JSON.stringify(dir)}`);
+  out.push(`//`);
+  out.push(`// CLI:     node client.mjs                         everything this client knows`);
+  out.push(`//          node client.mjs <recipe> '{"arg":"x"}'  one saved task, one line`);
+  out.push(`//          node client.mjs get <path> --rsc --schema     learn a page's data (then --find/--pick/--where/--group/--count/--limit)`);
+  out.push(`//          node client.mjs action <name> '[args]' --approved`);
+  out.push(`// Library: import { get, page, action, recipes } from "./client.mjs"`);
+  out.push(``);
+  out.push(`import fs from "node:fs";`);
+  out.push(`import path from "node:path";`);
+  out.push(`import { fileURLToPath } from "node:url";`);
+  out.push(``);
+  out.push(`const DIR = path.dirname(fileURLToPath(import.meta.url));`);
+  out.push(`export const ORIGIN = ${JSON.stringify(origin)};`);
+  out.push(`const AUTH = ${JSON.stringify(auth)}; // auth headers the site sends (names and where the page keeps them, no values)`);
+  out.push(`const ACTIONS = ${JSON.stringify(actions, null, 2)};`);
+  out.push(`const PAGES = ${JSON.stringify(pages)};`);
+  out.push(``);
+  out.push(READ_ENV);
+  out.push(`const HOST = ${JSON.stringify(host)};`);
+  out.push(`const IFRAMER = process.env.IFRAMER_BIN || ${JSON.stringify(iframerCli() || "iframer")}; // the iframer that wrote this client`);
+  out.push(`const env = { ...readEnv(path.join(DIR, ".env")), ...process.env };`);
+  out.push(REFRESH);
+  out.push(`export const core = (${recipeCore.toString()})();`);
+  out.push(`core.setAuth(AUTH);`);
+  out.push(`core.setTransport({ base: ORIGIN, cookie: env.COOKIE || null, env, actions: ACTIONS, relogin: ${JSON.stringify(`log in to ${host} in a browser on this machine, then: iframer auth ${host} --out ${dir}`)}, onExpired: refreshSession });`);
+  out.push(``);
+  out.push(`const FP = path.join(DIR, ".fingerprints.json");`);
+  out.push(`const fps = {`);
+  out.push(`  get() { try { return JSON.parse(fs.readFileSync(FP, "utf8")); } catch { return {}; } },`);
+  out.push(`  set(m) { try { fs.writeFileSync(FP, JSON.stringify(m, null, 2)); } catch {} },`);
+  out.push(`};`);
+  out.push(`const run = (${recipeRunner.toString()})(core, fps);`);
+  out.push(``);
+  out.push(`/** Any same-site request. Next.js page data: {rsc: true}. Returns parsed data. */`);
+  out.push(`// No session yet: take it from a logged-in browser before the first call.`);
+  out.push(`const ready = env.COOKIE ? Promise.resolve() : refreshSession();`);
+  out.push(`export const get = (p, o) => ready.then(() => core.get(p, o));`);
+  out.push(`/** A Next.js page's data: {components: {Name: props}, rows, ...}. */`);
+  out.push(`export const page = (p, o) => get(p, { ...o, rsc: true });`);
+  out.push(`/** A Next.js Server Action by export name (its id is re-found after a deploy). Changes data unless it only reads. */`);
+  out.push(`export const action = (name, args = [], pagePath) => ready.then(() => core.action(name, args, pagePath));`);
+  out.push(`export const actions = Object.fromEntries(Object.keys(ACTIONS).map((n) => [n, (...args) => action(n, args)]));`);
+  out.push(``);
+  out.push(`const SPECS = {`);
+  for (const r of specs) {
+    out.push(`  // ${r.name}${r.description ? `: ${r.description}` : ""}${r.writes ? "  [writes]" : ""}`);
+    out.push(`  ${JSON.stringify(r.name)}: ${specLiteral(r)},`);
+  }
+  out.push(`};`);
+  out.push(`/** Saved recipes: each takes its args object and resolves to one short line ("error: ..." on failure). */`);
+  out.push(`export const recipes = Object.fromEntries(Object.keys(SPECS).map((n) => [n, (a, max) => ready.then(() => run(SPECS[n], a, max))]));`);
+  for (const r of specs) out.push(`export const ${r.name} = recipes[${JSON.stringify(r.name)}];`);
+  out.push(``);
+  out.push(CLI_SOURCE.replace(/__HOST__/g, host));
+  return out.join("\n") + "\n";
+}
+function renderRecipes(specs, auth = {}) {
+  const out = [];
+  out.push(`// iframer in-page recipes${specs[0] ? ` for ${specs[0].host}` : ""}: the fallback for sites that block non-browser clients.`);
+  out.push(`// Prefer client.mjs (Node). Here: run in a logged-in tab on the site: window.__ifkRecipes.<name>({...args}) returns one short line.`);
+  for (const s of specs) out.push(`//   ${s.name}${s.description ? `: ${s.description}` : ""}${s.writes ? "  [writes]" : ""}`);
+  out.push(`(function () {`);
+  out.push(`  var core = (${recipeCore.toString()})();`);
+  out.push(`  core.setAuth(${JSON.stringify(auth)}); // where the site keeps its auth headers: read fresh on every call`);
+  out.push(`  var run = (${recipeRunner.toString()})(core, { get: fpStore, set: fpSave });`);
+  out.push(`  var R = window.__ifkRecipes = { __runtime: ${JSON.stringify(RUNTIME)} };`);
+  out.push(`  function store() {`);
+  out.push(`    try { if (window.localStorage) return window.localStorage; } catch (e) {}`);
+  out.push(`    try { var f = document.getElementById("__ifk_ss"); if (!f) { f = document.createElement("iframe"); f.id = "__ifk_ss"; f.style.display = "none"; document.documentElement.appendChild(f); } return f.contentWindow.localStorage; } catch (e) { return null; }`);
+  out.push(`  }`);
+  out.push(`  function fpStore() { try { return JSON.parse((store() || {}).getItem && store().getItem("__ifkFP") || "{}"); } catch (e) { return {}; } }`);
+  out.push(`  function fpSave(m) { try { store().setItem("__ifkFP", JSON.stringify(m)); } catch (e) {} }`);
+  out.push(`  function src(v) { return typeof v === "function" ? "(" + v.toString() + ")" : JSON.stringify(v === undefined ? null : v); }`);
+  out.push(`  R.__add = function (name, spec, persist, runtime) {`);
+  out.push(`    if (runtime && runtime !== R.__runtime) return "recipe runtime outdated in this tab: reload the bundle (the 3 upload calls), then add again";`);
+  out.push(`    spec.findText = spec.findText || (typeof spec.find === "string" ? spec.find : "");`);
+  out.push(`    spec.name = name;`);
+  out.push(`    R[name] = function (a) { return run(spec, a); };`);
+  out.push(`    if (persist) { var st = store(); if (st && st.getItem("__ifkR")) { var body = Object.keys(spec).map(function (k) { return JSON.stringify(k) + ":" + src(spec[k]); }).join(","); st.setItem("__ifkR", st.getItem("__ifkR") + "\\n;window.__ifkRecipes.__add(" + JSON.stringify(name) + ",{" + body + "});"); } }`);
+  out.push(`    return name;`);
+  out.push(`  };`);
+  for (const s of specs) out.push(`  R[${JSON.stringify(s.name)}] = function (a) { return run(${specLiteral(s)}, a); };`);
+  out.push(`  return Object.keys(R);`);
+  out.push(`})();`);
+  return out.join("\n") + "\n";
+}
+var import_fs12, import_path13, import_crypto13, import_url, RUNTIME, recipesDir, RESERVED, envName, isCode, lit, READ_ENV, REFRESH, CLI_SOURCE;
+var init_recipes = __esm({
+  "src/lib/kit/recipes.ts"() {
+    "use strict";
+    import_fs12 = __toESM(require("fs"));
+    import_path13 = __toESM(require("path"));
+    init_paths();
+    import_crypto13 = __toESM(require("crypto"));
+    import_url = require("url");
+    init_recipe_core();
+    RUNTIME = import_crypto13.default.createHash("sha1").update(recipeCore.toString()).update(recipeRunner.toString()).update(renderRecipes.toString()).digest("hex").slice(0, 8);
+    recipesDir = (host) => import_path13.default.join(apisDir(host), "recipes");
+    RESERVED = /* @__PURE__ */ new Set(["get", "page", "action", "actions", "recipes", "schema", "core", "run", "default"]);
+    envName = (h) => h.replace(/[^A-Za-z0-9]+/g, "_").toUpperCase();
+    isCode = (s) => /=>|^\s*(async\s+)?function\b/.test(s);
+    lit = (s) => s === void 0 ? "undefined" : isCode(s) ? `(${s})` : JSON.stringify(s);
+    READ_ENV = String.raw`function readEnv(file) {
+  const env = {};
+  try {
+    for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+      const m = /^\s*(?:export\s+)?([A-Za-z_]\w*)\s*=\s*(.*?)\s*$/.exec(line);
+      if (m) env[m[1]] = m[2].replace(/^(['"])(.*)\1$/, "$2");
+    }
+  } catch {}
+  return env;
+}`;
+    REFRESH = String.raw`let refreshed = null;
+function refreshSession() {
+  if (refreshed) return refreshed;
+  refreshed = new Promise((ok) => {
+    if (process.env.IFRAMER_NO_AUTO_AUTH === "1") return ok(false);
+    import("node:child_process").then(({ execFile }) => {
+      const argv = ["auth", HOST, "--out", DIR, "--auto"];
+      const [cmd, a] = /\.[cm]?js$/.test(IFRAMER) ? [process.execPath, [IFRAMER, ...argv]] : [IFRAMER, argv];
+      execFile(cmd, a, { timeout: 90000 }, (err) => {
+        if (err) return ok(false);
+        const e = readEnv(path.join(DIR, ".env"));
+        if (!e.COOKIE || e.COOKIE === env.COOKIE) return ok(false);
+        env.COOKIE = e.COOKIE;
+        core.setTransport({ cookie: e.COOKIE });
+        ok(true);
+      });
+    }, () => ok(false));
+  });
+  return refreshed;
+}`;
+    CLI_SOURCE = String.raw`function flags(argv) {
+  const o = { _: [] };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (!a.startsWith("--")) { o._.push(a); continue; }
+    const k = a.slice(2), next = argv[i + 1];
+    if (["rsc", "schema", "count", "full", "approved", "json"].includes(k)) o[k] = true;
+    else { o[k] = next; i++; }
+  }
+  return o;
+}
+function args(s) {
+  if (!s) return {};
+  if (/^[\[{]/.test(s.trim())) return JSON.parse(s);
+  return Object.fromEntries(s.split(/\s+/).filter(Boolean).map((kv) => { const i = kv.indexOf("="); return [kv.slice(0, i), kv.slice(i + 1)]; }));
+}
+const show = (v, max) => {
+  const s = typeof v === "string" ? v : JSON.stringify(v);
+  if (s.length <= max) return s;
+  const over = v && typeof v === "object" ? core.schema(v.components || v) : "";
+  return s.slice(0, Math.min(max, 1500)) + " …(" + s.length + " chars; narrow it with --find/--pick/--where/--group/--count/--limit, or --full)" + (over ? "\n" + over : "");
+};
+async function main(argv) {
+  const f = flags(argv), cmd = f._[0], max = f.full ? 30000 : 4000;
+  if (!cmd) {
+    const need = ["COOKIE", ...Object.keys(AUTH).map(core.envName)];
+    console.log("__HOST__ (" + ORIGIN + ")");
+    await ready;
+    console.log("auth: " + need.map((n) => n + (env[n] ? " set" : " missing")).join(", ") + (need.some((n) => !env[n]) ? "  -> log in to __HOST__ in a browser here, then iframer auth __HOST__" : ""));
+    console.log("recipes: " + (Object.keys(SPECS).join(", ") || "none yet (iframer recipe __HOST__ <name> ...)"));
+    console.log("actions: " + (Object.keys(ACTIONS).join(", ") || "none"));
+    console.log("pages/endpoints (" + PAGES.length + "): " + PAGES.slice(0, 30).join(" | ") + (PAGES.length > 30 ? " | ..." : ""));
+    return 0;
+  }
+  if (cmd === "get" || cmd === "page") {
+    const p = f._[1];
+    if (!p) throw new Error("usage: node client.mjs get <path> [--rsc] [--schema] [--find F] [--pick P] [--where W] [--group G] [--count] [--limit N] [--nodes a]");
+    let d = await get(p, { rsc: f.rsc || cmd === "page", find: f.find });
+    if (f.schema) { console.log(core.schema(d, { under: f.under })); return 0; }
+    if (f.nodes) { if (!d || !d.rows) throw new Error("--nodes needs a Next.js page (--rsc)"); d = core.nodes(d.rows, f.nodes); }
+    else if (f.find) {
+      const amb = core.ambiguity(core.findAll(d && d.components ? d.components : d, f.find));
+      if (amb) throw new Error(core.ambiguousMsg(f.find, amb));
+      d = core.find(d && d.components ? d.components : d, f.find);
+      if (d === undefined) throw new Error("nothing matches --find " + f.find + ": see --schema");
+    }
+    d = core.answer(d, { pick: f.pick, where: f.where, group: f.group, count: f.count, limit: f.limit && +f.limit });
+    console.log(show(d, max));
+    return 0;
+  }
+  if (cmd === "action") {
+    if (!f._[1]) throw new Error("usage: node client.mjs action <name> '[args]' --approved [--path /page]");
+    if (!f.approved) throw new Error("actions can change data: re-run with --approved once the user OKs it");
+    const a = f._[2] ? JSON.parse(f._[2]) : [];
+    console.log(show(await action(f._[1], Array.isArray(a) ? a : [a], f.path), max));
+    return 0;
+  }
+  if (SPECS[cmd]) {
+    const line = await recipes[cmd](args(f._.slice(1).join(" ")), max);
+    console.log(line);
+    return line.startsWith("error:") ? 1 : 0;
+  }
+  throw new Error("unknown command " + cmd + ". Recipes: " + (Object.keys(SPECS).join(", ") || "none"));
+}
+const isMain = (() => { try { return fs.realpathSync(fileURLToPath(import.meta.url)) === fs.realpathSync(process.argv[1]); } catch { return false; } })();
+if (isMain) {
+  main(process.argv.slice(2)).then((code) => { process.exitCode = code; }, (e) => { console.log("error: " + (e && e.message || e)); process.exitCode = 1; });
+}`;
+  }
+});
+
+// src/lib/kit/browser-cookies.ts
+function readRows(file, sql) {
+  const tmp = import_fs13.default.mkdtempSync(import_path14.default.join(import_os5.default.tmpdir(), "ifk-ck-"));
+  try {
+    const db = import_path14.default.join(tmp, "c");
+    import_fs13.default.copyFileSync(file, db);
+    if (import_fs13.default.existsSync(file + "-journal")) import_fs13.default.copyFileSync(file + "-journal", db + "-journal");
+    if (import_fs13.default.existsSync(file + "-wal")) import_fs13.default.copyFileSync(file + "-wal", db + "-wal");
+    if (IS_BUN2) {
+      const { Database: Database2 } = require("bun:sqlite");
+      const d2 = new Database2(db);
+      try {
+        return d2.query(sql).all();
+      } finally {
+        d2.close();
+      }
+    }
+    const Database = require("better-sqlite3");
+    const d = new Database(db);
+    try {
+      return d.prepare(sql).all();
+    } finally {
+      d.close();
+    }
+  } catch {
+    return [];
+  } finally {
+    import_fs13.default.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+function matches(host, cookieHost) {
+  const h = host.toLowerCase().split(":")[0];
+  const c = cookieHost.toLowerCase();
+  if (c.startsWith(".")) return h === c.slice(1) || h.endsWith(c);
+  return h === c;
+}
+function profiles() {
+  const home = import_os5.default.homedir();
+  const out = [];
+  const ls = (d) => {
+    try {
+      return import_fs13.default.readdirSync(d);
+    } catch {
+      return [];
+    }
+  };
+  if (process.platform === "darwin") {
+    const sup = import_path14.default.join(home, "Library", "Application Support");
+    for (const app of ls(sup).filter((a) => /^t3code/i.test(a))) {
+      const parts = import_path14.default.join(sup, app, "Partitions");
+      for (const p of ls(parts)) out.push({ source: `T3 Code tab (${p})`, file: import_path14.default.join(parts, p, "Cookies") });
+      out.push({ source: `T3 Code (${app})`, file: import_path14.default.join(sup, app, "Cookies") });
+    }
+    const chromes = [
+      ["Chrome", "Google/Chrome", "Chrome Safe Storage"],
+      ["Brave", "BraveSoftware/Brave-Browser", "Brave Safe Storage"],
+      ["Edge", "Microsoft Edge", "Microsoft Edge Safe Storage"],
+      ["Arc", "Arc/User Data", "Arc Safe Storage"],
+      ["Chromium", "Chromium", "Chromium Safe Storage"]
+    ];
+    for (const [name, dir, keychain] of chromes) {
+      const root = import_path14.default.join(sup, dir);
+      for (const prof of ls(root)) {
+        for (const f of [import_path14.default.join(root, prof, "Cookies"), import_path14.default.join(root, prof, "Network", "Cookies")]) {
+          out.push({ source: `${name} (${prof})`, file: f, keychain });
+        }
+      }
+    }
+  } else if (process.platform === "linux") {
+    const cfg = process.env.XDG_CONFIG_HOME || import_path14.default.join(home, ".config");
+    for (const app of ls(cfg).filter((a) => /^t3code/i.test(a))) {
+      const parts = import_path14.default.join(cfg, app, "Partitions");
+      for (const p of ls(parts)) out.push({ source: `T3 Code tab (${p})`, file: import_path14.default.join(parts, p, "Cookies") });
+    }
+    for (const [name, dir] of [["Chrome", "google-chrome"], ["Chromium", "chromium"], ["Brave", "BraveSoftware/Brave-Browser"]]) {
+      const root = import_path14.default.join(cfg, dir);
+      for (const prof of ls(root)) for (const f of [import_path14.default.join(root, prof, "Cookies"), import_path14.default.join(root, prof, "Network", "Cookies")]) out.push({ source: `${name} (${prof})`, file: f });
+    }
+  }
+  return out.filter((p) => import_fs13.default.existsSync(p.file));
+}
+function chromeKey(p) {
+  if (process.platform === "linux") return import_crypto14.default.pbkdf2Sync("peanuts", "saltysalt", 1, 16, "sha1");
+  if (!p.keychain) return null;
+  if (keys.has(p.keychain)) return keys.get(p.keychain);
+  let k = null;
+  try {
+    const pw = (0, import_child_process5.execFileSync)("security", ["find-generic-password", "-w", "-s", p.keychain], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 6e4 }).trim();
+    if (pw) k = import_crypto14.default.pbkdf2Sync(pw, "saltysalt", 1003, 16, "sha1");
+  } catch {
+  }
+  keys.set(p.keychain, k);
+  return k;
+}
+function decrypt2(enc, key, hostHashed) {
+  const ver = enc.subarray(0, 3).toString();
+  if (ver !== "v10" && ver !== "v11") return null;
+  try {
+    const d = import_crypto14.default.createDecipheriv("aes-128-cbc", key, Buffer.alloc(16, " "));
+    let out = Buffer.concat([d.update(enc.subarray(3)), d.final()]);
+    if (hostHashed && out.length >= 32) out = out.subarray(32);
+    return out.toString("utf8");
+  } catch {
+    return null;
+  }
+}
+function browserJars(host, opts = {}) {
+  const now = Date.now();
+  const bare = host.toLowerCase().split(":")[0].replace(/^www\./, "");
+  const jars = [];
+  for (const p of profiles()) {
+    if (p.keychain && opts.keychain === false) continue;
+    const rows = readRows(p.file, `SELECT host_key, name, value, hex(encrypted_value) AS enc, path, expires_utc, last_access_utc FROM cookies WHERE host_key LIKE '%${bare.replace(/'/g, "")}'`);
+    const mine = rows.filter((r) => matches(host, r.host_key) && (!r.expires_utc || chromeMs(r.expires_utc) > now));
+    if (!mine.length) continue;
+    let version = 0;
+    if (mine.some((r) => !r.value && r.enc)) version = Number(readRows(p.file, "SELECT value FROM meta WHERE key='version'")[0]?.value || 0);
+    const cookies = [];
+    let lastUsed = 0;
+    for (const r of mine) {
+      let v = r.value || null;
+      if (!v && r.enc) {
+        const key = chromeKey(p);
+        if (!key) continue;
+        v = decrypt2(Buffer.from(r.enc, "hex"), key, version >= 24);
+      }
+      if (v == null) continue;
+      cookies.push({ name: r.name, value: v, domain: r.host_key, path: r.path || "/" });
+      lastUsed = Math.max(lastUsed, chromeMs(r.last_access_utc));
+    }
+    if (cookies.length) jars.push({ source: p.source, cookies, lastUsed });
+  }
+  return jars.sort((a, b) => b.lastUsed - a.lastUsed);
+}
+function cookieHeader(jar) {
+  const seen = /* @__PURE__ */ new Map();
+  for (const c of jar.cookies) {
+    const rank = c.path.length * 1e3 + c.domain.replace(/^\./, "").length - (c.domain.startsWith(".") ? 1 : 0);
+    const cur = seen.get(c.name);
+    if (!cur || rank > cur.rank) seen.set(c.name, { value: c.value, rank });
+  }
+  return [...seen].map(([n, v]) => `${n}=${v.value}`).join("; ");
+}
+var import_crypto14, import_fs13, import_os5, import_path14, import_child_process5, IS_BUN2, chromeMs, keys;
+var init_browser_cookies = __esm({
+  "src/lib/kit/browser-cookies.ts"() {
+    "use strict";
+    import_crypto14 = __toESM(require("crypto"));
+    import_fs13 = __toESM(require("fs"));
+    import_os5 = __toESM(require("os"));
+    import_path14 = __toESM(require("path"));
+    import_child_process5 = require("child_process");
+    IS_BUN2 = typeof globalThis.Bun !== "undefined";
+    chromeMs = (t) => t ? t / 1e3 - 116444736e5 : 0;
+    keys = /* @__PURE__ */ new Map();
+  }
+});
+
+// src/lib/kit/session-env.ts
+function candidatePaths(host, dir) {
+  for (const d of [dir, apisDir(host)]) {
+    try {
+      const map = JSON.parse(import_fs14.default.readFileSync(import_path15.default.join(d, "api.json"), "utf8"));
+      const out = [];
+      const add = (p, rsc) => {
+        if (!/\{/.test(p) && !out.some((x) => x.path === p)) out.push({ path: p, rsc });
+      };
+      const eps = (map.endpoints || []).filter((e) => e.method === "GET" && (!e.origin || e.origin === map.origin));
+      for (const e of eps.filter((e2) => e2.rsc)) add(e.path, true);
+      for (const e of eps.filter((e2) => !e2.rsc)) add(e.path, false);
+      for (const u of map.pathOnly || []) {
+        try {
+          const x = new URL(u);
+          if (x.origin === map.origin) add(x.pathname, true);
+        } catch {
+        }
+      }
+      return out.slice(0, 12);
+    } catch {
+    }
+  }
+  return [];
+}
+async function check(origin, p, cookie) {
+  try {
+    const r = await fetch(new URL(p.path, origin), { headers: { ...cookie ? { cookie } : {}, ...p.rsc ? { RSC: "1" } : {} }, redirect: "follow", signal: AbortSignal.timeout(1e4) });
+    const t = await r.text();
+    if (r.redirected && LOGIN.test(new URL(r.url).pathname)) return "out";
+    if (r.status === 401 || r.status === 403) return "out";
+    if (/NEXT_REDIRECT;[^;]*;[^;]*(login|signin|sign-in|auth)/i.test(t.slice(0, 5e3))) return "out";
+    if (/"digest":"NEXT_HTTP_ERROR_FALLBACK;40[13]"/.test(t)) return "out";
+    if (/<input[^>]+type=["']?password/i.test(t)) return "out";
+    return r.ok ? "in" : "error";
+  } catch {
+    return "error";
+  }
+}
+async function findProbe(origin, paths) {
+  for (const p of paths) if (await check(origin, p, null) === "out") return p;
+  return null;
+}
+function writeEnv(dir, vals) {
+  import_fs14.default.mkdirSync(dir, { recursive: true });
+  const envFile = import_path15.default.join(dir, ".env");
+  const cur = {};
+  try {
+    for (const l of import_fs14.default.readFileSync(envFile, "utf8").split(/\r?\n/)) {
+      const m = /^([A-Za-z_]\w*)=(.*)$/.exec(l);
+      if (m) cur[m[1]] = m[2];
+    }
+  } catch {
+  }
+  Object.assign(cur, vals);
+  import_fs14.default.writeFileSync(envFile, Object.entries(cur).map(([k, v]) => `${k}=${v}`).join("\n") + "\n", { mode: 384 });
+  import_fs14.default.chmodSync(envFile, 384);
+  const gi = import_path15.default.join(dir, ".gitignore");
+  const giCur = import_fs14.default.existsSync(gi) ? import_fs14.default.readFileSync(gi, "utf8") : "";
+  if (!giCur.split("\n").includes(".env")) import_fs14.default.appendFileSync(gi, (giCur && !giCur.endsWith("\n") ? "\n" : "") + ".env\n");
+  return envFile;
+}
+async function refreshSession(host, dir, opts = {}) {
+  const envFile = import_path15.default.join(dir, ".env");
+  let origin = `https://${host}`;
+  try {
+    origin = JSON.parse(import_fs14.default.readFileSync(import_path15.default.join(apisDir(host), "api.json"), "utf8")).origin || origin;
+  } catch {
+  }
+  const probe = await findProbe(origin, candidatePaths(host, dir));
+  const tried = [];
+  const attempt = async (jars) => {
+    let untested = null;
+    for (const jar of jars) {
+      const cookie = cookieHeader(jar);
+      const ok = probe ? await check(origin, probe, cookie) === "in" : null;
+      tried.push(`${jar.source}: ${ok === null ? "untested" : ok ? "logged in" : "not logged in"}`);
+      if (ok) return { ok: true, source: `${jar.source}, checked on ${probe.path}`, envFile: writeEnv(dir, { COOKIE: cookie }) };
+      if (ok === null && !untested) untested = jar;
+    }
+    if (untested) return { ok: true, source: `${untested.source} (not verified: no captured page needs a login)`, envFile: writeEnv(dir, { COOKIE: cookieHeader(untested) }) };
+    return null;
+  };
+  const first = await attempt([...browserJars(host, { keychain: false }), ...opts.extra || []]);
+  if (first) return first;
+  if (opts.keychain !== false) {
+    const second = await attempt(browserJars(host, { keychain: true }).filter((j) => !tried.some((t) => t.startsWith(j.source + ":"))));
+    if (second) return second;
+  }
+  return {
+    ok: false,
+    envFile,
+    note: tried.length ? `no logged-in session found (${tried.join("; ")}). Log in to ${host} in the browser, then run this again` : `no browser on this machine has cookies for ${host}. Log in to it in the browser, then run this again`
+  };
+}
+var import_fs14, import_path15, LOGIN;
+var init_session_env = __esm({
+  "src/lib/kit/session-env.ts"() {
+    "use strict";
+    import_fs14 = __toESM(require("fs"));
+    import_path15 = __toESM(require("path"));
+    init_browser_cookies();
+    init_recipes();
+    LOGIN = /\/(login|log-in|signin|sign-in|auth|sso)(\/|\?|$)/i;
   }
 });
 
@@ -13062,20 +15059,44 @@ var kit_exports = {};
 __export(kit_exports, {
   CaptureError: () => CaptureError,
   KIT_TARGETS: () => KIT_TARGETS,
+  RUNTIME: () => RUNTIME,
+  addOutputDir: () => addOutputDir,
+  addSnippet: () => addSnippet,
+  apisDir: () => apisDir,
   buildApiMap: () => buildApiMap,
+  cleanCapture: () => cleanCapture,
+  clientPath: () => clientPath,
   describeAuthSource: () => describeAuthSource,
   describeEndpoint: () => describeEndpoint,
   downloadDirs: () => downloadDirs,
+  envName: () => envName,
   findLatestCapture: () => findLatestCapture,
   kitDir: () => kitDir,
   kitInstructions: () => kitInstructions,
   kitSource: () => kitSource,
+  listRecipes: () => listRecipes,
+  normalizeHost: () => normalizeHost,
+  outputDirs: () => outputDirs,
   parseCapture: () => parseCapture,
+  readAuth: () => readAuth,
+  rebuildAllBundles: () => rebuildAllBundles,
+  recipeInstructions: () => recipeInstructions,
+  recipeRun: () => recipeRun,
+  recipeRunFallback: () => recipeRunFallback,
   redactCapture: () => redactCapture,
+  refreshSession: () => refreshSession,
+  removeRecipe: () => removeRecipe,
   renderClient: () => renderClient,
-  renderTypes: () => renderTypes,
+  renderIndex: () => renderIndex,
+  renderRecipes: () => renderRecipes,
+  saveRecipe: () => saveRecipe,
   scanCapture: () => scanCapture,
-  writeKit: () => writeKit
+  schemaFromMap: () => schemaFromMap,
+  writeBundle: () => writeBundle,
+  writeClient: () => writeClient,
+  writeEnv: () => writeEnv,
+  writeKit: () => writeKit,
+  writeOutputs: () => writeOutputs
 });
 function kitSource(opts = {}) {
   const clean = {};
@@ -13083,28 +15104,32 @@ function kitSource(opts = {}) {
   if (opts.hostFilter) clean.hostFilter = opts.hostFilter;
   if (opts.maxBody) clean.maxBody = opts.maxBody;
   if (opts.maxCalls) clean.maxCalls = opts.maxCalls;
+  if (opts.maxResult) clean.maxResult = opts.maxResult;
+  if (opts.hardMax) clean.hardMax = opts.hardMax;
   const fn = pageKit.toString();
-  const build = import_crypto13.default.createHash("sha1").update(fn).digest("hex").slice(0, 10);
-  return `(${fn})(${JSON.stringify({ ...clean, build })});
+  const core = recipeCore.toString();
+  const build = import_crypto15.default.createHash("sha1").update(fn).update(core).digest("hex").slice(0, 10);
+  return `(${fn})(${JSON.stringify({ ...clean, build })}, (${core})());
 `;
 }
 function kitDir() {
-  return import_path13.default.join(getDataDir(), "kit");
+  return import_path16.default.join(getDataDir(), "kit");
 }
-function writeKit(opts = {}, file = import_path13.default.join(kitDir(), "iframer-kit.js")) {
-  import_fs12.default.mkdirSync(import_path13.default.dirname(file), { recursive: true });
-  import_fs12.default.writeFileSync(file, kitSource(opts), "utf8");
+function writeKit(opts = {}, file = import_path16.default.join(kitDir(), "iframer-kit.js")) {
+  import_fs15.default.mkdirSync(import_path16.default.dirname(file), { recursive: true });
+  import_fs15.default.writeFileSync(file, kitSource(opts), "utf8");
   return file;
 }
-function kitInstructions(target, kitPath, clientPath) {
+function kitInstructions(target, kitPath) {
   const common = [
     ``,
     `Rules:`,
-    `- After EVERY full page load, run \`${INSTALL}\` again. It restores what was captured. Check with \`${STATUS}\`.`,
-    `- Drive the site with your normal tools while it records. Only shapes are kept, never values.`,
-    `- Next.js sites: page data comes back from \`window.__ifk.call('GET','/path',{rsc:true})\` as {components:{Name:props}}. Server Actions: \`window.__ifk.action('exportName',[args],{approved:true})\` (the id is looked up again after deploys).`,
-    `- Replay: \`window.__ifk.call('GET','/path')\` runs in the page with the user's cookies. Writes need {approved:true}, so ask the user first. It stops on 403, 429 or a captcha page: do not retry.`,
-    `- Coverage is never complete: workers, redirect hops, HttpOnly cookies and cross-origin iframes are invisible to the kit.`,
+    `- The tab is only for mapping the site. The result is local: \`iframer ingest\` writes a folder (--out <dir>, default ~/.iframer/apis/<host>/) with the API map and client.mjs, a Node client that runs without a browser.`,
+    `- After EVERY full page load, run \`${INSTALL}\` again. It restores what was captured. Check with \`${STATUS}\`. Calls the page makes while loading, before the kit is back, are not recorded: navigate inside the app (click links) so they happen again.`,
+    `- Drive the site with your normal tools while it records. Only shapes are kept, never values. Next.js page data (RSC) and Server Action ids are recorded too.`,
+    `- Quick look without leaving the tab: \`window.__ifk.call('GET','/path',{rsc:true,schema:true})\`. Writes need the user's OK first. Stop on 403, 429 or a captcha page.`,
+    `- Coverage is never complete: workers, redirect hops and cross-origin iframes are invisible to the kit.`,
+    `- After ingest: \`iframer auth <host> --out <dir>\` saves the session into the folder's .env, then \`node <dir>/client.mjs\` lists what it can do.`,
     `- Done: \`window.__ifk.stop()\` removes the hooks.`
   ];
   if (target === "t3") {
@@ -13120,16 +15145,6 @@ function kitInstructions(target, kitPath, clientPath) {
       `Export:`,
       `5. preview_evaluate: window.__ifk.dump()`,
       `6. Run: iframer ingest --latest   (finds the newest capture in T3's downloads; or pass preview_status.downloads[].path)`,
-      ...clientPath ? [
-        ``,
-        `Use the generated client (after the kit is installed):`,
-        `a. preview_evaluate: ${MAKE_INPUT}`,
-        `b. preview_act: action=upload, selector=#__ifk_in, paths=["${clientPath}"]`,
-        `c. preview_evaluate: ${stash("__ifkApi")}`,
-        `d. preview_evaluate: ${INSTALL_CLIENT}   -> list of function names`,
-        `e. preview_evaluate: window.__ifkApi.<functionName>(...)`,
-        `After a page load: ${INSTALL} then ${INSTALL_CLIENT}`
-      ] : [],
       ...common
     ].join("\n");
   }
@@ -13165,62 +15180,80 @@ function kitInstructions(target, kitPath, clientPath) {
     ...common
   ].join("\n");
 }
+function recipeInstructions(bundle, names) {
+  return [
+    `In-page fallback (only for sites that block requests from Node). Load once per site (kept in the site's localStorage: survives reloads and new tabs; repeat only when the bundle changes):`,
+    `1. preview_evaluate: ${MAKE_INPUT}`,
+    `2. preview_act: action=upload, selector=#__ifk_in, paths=["${bundle}"]`,
+    `3. preview_evaluate: document.getElementById('__ifk_in').files[0].text().then(t=>{${LS}.__ifkR=t;document.getElementById('__ifk_in').remove();return t.length})`,
+    ``,
+    `Run: ONE call, one short line back:`,
+    ...names.map((n) => `   preview_evaluate: ${recipeRun(n)}`),
+    ``,
+    `If the site deletes localStorage ("localStorage is not defined"): ${recipeRunFallback(names[0] || "<name>")}`
+  ].join("\n");
+}
 function drainFallback() {
   return [
     `Drain fallback (no downloads): evaluate window.__ifk.drain(0) -> {chunk, next}. Repeat with drain(next)`,
     `until next is null, write the joined chunks to a file, then \`iframer ingest <file>\`.`
   ].join("\n");
 }
-var import_crypto13, import_fs12, import_path13, KIT_TARGETS, MAKE_INPUT, SS, stash, STASH, INSTALL, INSTALL_CLIENT, STATUS;
+var import_crypto15, import_fs15, import_path16, KIT_TARGETS, MAKE_INPUT, SS, stash, STASH, INSTALL, STATUS, LS, recipeRun, recipeRunFallback;
 var init_kit = __esm({
   "src/lib/kit/index.ts"() {
     "use strict";
-    import_crypto13 = __toESM(require("crypto"));
-    import_fs12 = __toESM(require("fs"));
-    import_path13 = __toESM(require("path"));
+    import_crypto15 = __toESM(require("crypto"));
+    import_fs15 = __toESM(require("fs"));
+    import_path16 = __toESM(require("path"));
     init_paths();
     init_page_kit();
+    init_recipe_core();
     init_capture();
+    init_recipes();
+    init_session_env();
     KIT_TARGETS = ["t3", "playwright-mcp", "any"];
     MAKE_INPUT = `(()=>{let i=document.createElement('input');i.type='file';i.id='__ifk_in';i.style.display='none';document.documentElement.append(i);return 1})()`;
     SS = `(window.sessionStorage||(document.getElementById('__ifk_ss')||(f=>(f.id='__ifk_ss',f.style.display='none',document.documentElement.append(f),f))(document.createElement('iframe'))).contentWindow.sessionStorage)`;
     stash = (key) => `document.getElementById('__ifk_in').files[0].text().then(t=>{${SS}.${key}=t;document.getElementById('__ifk_in').remove();return t.length})`;
     STASH = stash("__ifk");
     INSTALL = `eval(${SS}.__ifk)`;
-    INSTALL_CLIENT = `eval(${SS}.__ifkApi)`;
     STATUS = `window.__ifk?window.__ifk.summary():'NOT_INSTALLED'`;
+    LS = `(window.localStorage||(document.getElementById('__ifk_ss')||(f=>(f.id='__ifk_ss',f.style.display='none',document.documentElement.append(f),f))(document.createElement('iframe'))).contentWindow.localStorage)`;
+    recipeRun = (name, args2 = "{...}") => `(eval(localStorage.__ifkR),__ifkRecipes.${name}(${args2}))`;
+    recipeRunFallback = (name, args2 = "{...}") => `(eval(${LS}.__ifkR),__ifkRecipes.${name}(${args2}))`;
   }
 });
 
 // bin/cli.js
-var fs13 = require("fs");
-var os5 = require("os");
-var path14 = require("path");
+var fs16 = require("fs");
+var os6 = require("os");
+var path17 = require("path");
 var { execSync: execSync3 } = require("child_process");
 var readline = require("readline");
-var HOME_DIR = os5.homedir();
-var CONFIG_DIR = process.env.IFRAMER_DATA_DIR || path14.join(HOME_DIR, ".iframer");
-var CLAUDE_CONFIG_PATH = path14.join(HOME_DIR, ".claude.json");
-var CODEX_CONFIG_PATH = path14.join(HOME_DIR, ".codex", "config.toml");
+var HOME_DIR = os6.homedir();
+var CONFIG_DIR = process.env.IFRAMER_DATA_DIR || path17.join(HOME_DIR, ".iframer");
+var CLAUDE_CONFIG_PATH = path17.join(HOME_DIR, ".claude.json");
+var CODEX_CONFIG_PATH = path17.join(HOME_DIR, ".codex", "config.toml");
 var LOCAL_USER_ID = "iframer-local";
 function resolveLocalToken() {
   if (process.env.IFRAMER_SECRET) return process.env.IFRAMER_SECRET;
   const candidates = [
-    path14.join(CONFIG_DIR, "secret"),
-    path14.join(process.env.XDG_RUNTIME_DIR || os5.tmpdir(), "iframer-secret")
+    path17.join(CONFIG_DIR, "secret"),
+    path17.join(process.env.XDG_RUNTIME_DIR || os6.tmpdir(), "iframer-secret")
   ];
   for (const file of candidates) {
     try {
-      const existing = fs13.readFileSync(file, "utf8").trim();
+      const existing = fs16.readFileSync(file, "utf8").trim();
       if (existing) return existing;
     } catch {
     }
   }
   for (const file of candidates) {
     try {
-      fs13.mkdirSync(path14.dirname(file), { recursive: true });
+      fs16.mkdirSync(path17.dirname(file), { recursive: true });
       const secret = require("crypto").randomBytes(32).toString("hex");
-      fs13.writeFileSync(file, secret, { mode: 384 });
+      fs16.writeFileSync(file, secret, { mode: 384 });
       return secret;
     } catch {
     }
@@ -13271,21 +15304,21 @@ function promptHidden(question) {
   });
 }
 function resolveMcpRuntime() {
-  const mcpServerTS = path14.join(__dirname, "..", "src", "mcp", "server.ts");
-  const mcpServerCJS = path14.join(__dirname, "mcp-server.cjs");
+  const mcpServerTS = path17.join(__dirname, "..", "src", "mcp", "server.ts");
+  const mcpServerCJS = path17.join(__dirname, "mcp-server.cjs");
   let bunPath;
   try {
     bunPath = execSync3("which bun", { encoding: "utf8" }).trim();
   } catch {
   }
-  if (bunPath && fs13.existsSync(mcpServerTS)) {
+  if (bunPath && fs16.existsSync(mcpServerTS)) {
     return {
       command: bunPath,
       args: ["run", mcpServerTS],
       message: "  Using bun to run MCP server from source (no build needed)"
     };
   }
-  if (fs13.existsSync(mcpServerCJS)) {
+  if (fs16.existsSync(mcpServerCJS)) {
     return {
       command: "node",
       args: [mcpServerCJS],
@@ -13300,8 +15333,8 @@ function resolveIframerSecret() {
   let secret = process.env.IFRAMER_SECRET;
   if (secret) return secret;
   try {
-    const envPath = path14.join(__dirname, "..", ".env");
-    const envContent = fs13.readFileSync(envPath, "utf8");
+    const envPath = path17.join(__dirname, "..", ".env");
+    const envContent = fs16.readFileSync(envPath, "utf8");
     const match = envContent.match(/^IFRAMER_SECRET=(.+)$/m);
     if (match) secret = match[1].trim();
   } catch {
@@ -13310,22 +15343,22 @@ function resolveIframerSecret() {
 }
 function installSkill() {
   const candidates = [
-    path14.join(__dirname, "..", "skills", "iframer.md"),
-    path14.join(__dirname, "skills", "iframer.md")
+    path17.join(__dirname, "..", "skills", "iframer.md"),
+    path17.join(__dirname, "skills", "iframer.md")
   ];
   let source = null;
   for (const c of candidates) {
-    if (fs13.existsSync(c)) {
+    if (fs16.existsSync(c)) {
       source = c;
       break;
     }
   }
   if (!source) return false;
-  const destDir = path14.join(HOME_DIR, ".claude", "commands");
-  const dest = path14.join(destDir, "iframer.md");
+  const destDir = path17.join(HOME_DIR, ".claude", "commands");
+  const dest = path17.join(destDir, "iframer.md");
   try {
-    fs13.mkdirSync(destDir, { recursive: true });
-    fs13.copyFileSync(source, dest);
+    fs16.mkdirSync(destDir, { recursive: true });
+    fs16.copyFileSync(source, dest);
     return true;
   } catch (err) {
     console.error(`  Warning: could not install skill: ${err.message}`);
@@ -13333,10 +15366,10 @@ function installSkill() {
   }
 }
 function removeSkill() {
-  const dest = path14.join(HOME_DIR, ".claude", "commands", "iframer.md");
+  const dest = path17.join(HOME_DIR, ".claude", "commands", "iframer.md");
   try {
-    if (fs13.existsSync(dest)) {
-      fs13.unlinkSync(dest);
+    if (fs16.existsSync(dest)) {
+      fs16.unlinkSync(dest);
       return true;
     }
   } catch {
@@ -13345,8 +15378,8 @@ function removeSkill() {
 }
 function writeMachineSecret(secret) {
   try {
-    fs13.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs13.writeFileSync(path14.join(CONFIG_DIR, "secret"), secret, { mode: 384 });
+    fs16.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs16.writeFileSync(path17.join(CONFIG_DIR, "secret"), secret, { mode: 384 });
     return true;
   } catch (err) {
     console.error(`  Warning: could not write ~/.iframer/secret: ${err.message}`);
@@ -13355,7 +15388,7 @@ function writeMachineSecret(secret) {
 }
 function loadClaudeConfig() {
   try {
-    return JSON.parse(fs13.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    return JSON.parse(fs16.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
   } catch {
     return {};
   }
@@ -13364,13 +15397,13 @@ function installClaudeMcp(mcpName, mcpEntry) {
   const config = loadClaudeConfig();
   if (!config.mcpServers) config.mcpServers = {};
   config.mcpServers[mcpName] = mcpEntry;
-  fs13.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
+  fs16.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
   return CLAUDE_CONFIG_PATH;
 }
 function removeClaudeMcp(mcpName) {
   let config;
   try {
-    config = JSON.parse(fs13.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    config = JSON.parse(fs16.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
   } catch {
     return { removed: false, path: CLAUDE_CONFIG_PATH };
   }
@@ -13378,7 +15411,7 @@ function removeClaudeMcp(mcpName) {
     return { removed: false, path: CLAUDE_CONFIG_PATH };
   }
   delete config.mcpServers[mcpName];
-  fs13.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
+  fs16.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
   return { removed: true, path: CLAUDE_CONFIG_PATH };
 }
 function escapeTomlString(value) {
@@ -13425,10 +15458,10 @@ function renderCodexMcpBlock(mcpName, mcpEntry) {
   return lines.join("\n");
 }
 function installCodexMcp(mcpName, mcpEntry) {
-  fs13.mkdirSync(path14.dirname(CODEX_CONFIG_PATH), { recursive: true });
+  fs16.mkdirSync(path17.dirname(CODEX_CONFIG_PATH), { recursive: true });
   let content = "";
   try {
-    content = fs13.readFileSync(CODEX_CONFIG_PATH, "utf8");
+    content = fs16.readFileSync(CODEX_CONFIG_PATH, "utf8");
   } catch {
   }
   const existing = findCodexMcpSection(content, mcpName);
@@ -13437,7 +15470,7 @@ function installCodexMcp(mcpName, mcpEntry) {
   }
   const trimmed = content.trimEnd();
   const block = renderCodexMcpBlock(mcpName, mcpEntry);
-  fs13.writeFileSync(CODEX_CONFIG_PATH, trimmed ? `${trimmed}
+  fs16.writeFileSync(CODEX_CONFIG_PATH, trimmed ? `${trimmed}
 
 ${block}
 ` : `${block}
@@ -13447,7 +15480,7 @@ ${block}
 function removeCodexMcp(mcpName) {
   let content;
   try {
-    content = fs13.readFileSync(CODEX_CONFIG_PATH, "utf8");
+    content = fs16.readFileSync(CODEX_CONFIG_PATH, "utf8");
   } catch {
     return { removed: false, path: CODEX_CONFIG_PATH };
   }
@@ -13456,7 +15489,7 @@ function removeCodexMcp(mcpName) {
     return { removed: false, path: CODEX_CONFIG_PATH };
   }
   const next = [...existing.lines.slice(0, existing.start), ...existing.lines.slice(existing.end)].join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
-  fs13.writeFileSync(CODEX_CONFIG_PATH, next ? `${next}
+  fs16.writeFileSync(CODEX_CONFIG_PATH, next ? `${next}
 ` : "");
   return { removed: true, path: CODEX_CONFIG_PATH };
 }
@@ -13474,7 +15507,7 @@ async function executeViaWarmServer(steps, options) {
     if (info && isPidAlive2(info.pid)) {
       let ownVersion = null;
       try {
-        ownVersion = JSON.parse(fs13.readFileSync(path14.join(__dirname, "..", "package.json"), "utf8")).version;
+        ownVersion = JSON.parse(fs16.readFileSync(path17.join(__dirname, "..", "package.json"), "utf8")).version;
       } catch {
       }
       if (ownVersion && info.version !== ownVersion) {
@@ -13516,9 +15549,9 @@ async function getLocalIframer() {
   if (_iframer) return _iframer;
   try {
     const { Iframer: Iframer2 } = await Promise.resolve().then(() => (init_iframer(), iframer_exports));
-    const publicDir = path14.join(os5.tmpdir(), "iframer-screenshots");
-    const screenshotDir = path14.join(publicDir, "screenshots");
-    fs13.mkdirSync(screenshotDir, { recursive: true });
+    const publicDir = path17.join(os6.tmpdir(), "iframer-screenshots");
+    const screenshotDir = path17.join(publicDir, "screenshots");
+    fs16.mkdirSync(screenshotDir, { recursive: true });
     _iframer = new Iframer2({
       screenshotDir,
       publicUrl: `file://${publicDir}`
@@ -13612,7 +15645,7 @@ async function installChrome() {
 }
 function isMcpInstalled(mcpName) {
   try {
-    const config = JSON.parse(fs13.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    const config = JSON.parse(fs16.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
     return !!(config.mcpServers && config.mcpServers[mcpName]);
   } catch {
     return false;
@@ -13620,7 +15653,7 @@ function isMcpInstalled(mcpName) {
 }
 var EXTENSION_ID = "mjfdkiicioigljhenkgaldhihllfdpll";
 function extensionDir() {
-  return path14.join(__dirname, "..", "extension");
+  return path17.join(__dirname, "..", "extension");
 }
 function semverNewer(a, b) {
   const pa = String(a).split(".").map((n) => parseInt(n, 10) || 0);
@@ -13634,7 +15667,7 @@ function semverNewer(a, b) {
 async function reloadAndRestartServer(reloadExtension) {
   let info = null;
   try {
-    info = JSON.parse(fs13.readFileSync(path14.join(CONFIG_DIR, "server.json"), "utf8"));
+    info = JSON.parse(fs16.readFileSync(path17.join(CONFIG_DIR, "server.json"), "utf8"));
   } catch {
   }
   if (!info || !info.port) {
@@ -13663,34 +15696,34 @@ async function reloadAndRestartServer(reloadExtension) {
 var NM_HOST_NAME = "com.iframer.token";
 function nativeMessagingBrowserDirs() {
   if (process.platform === "darwin") {
-    const as = path14.join(HOME_DIR, "Library", "Application Support");
+    const as = path17.join(HOME_DIR, "Library", "Application Support");
     return [
-      { browser: "Chrome", dir: path14.join(as, "Google", "Chrome"), always: true },
-      { browser: "Chrome Beta", dir: path14.join(as, "Google", "Chrome Beta") },
-      { browser: "Chrome Canary", dir: path14.join(as, "Google", "Chrome Canary") },
-      { browser: "Chromium", dir: path14.join(as, "Chromium") },
-      { browser: "Brave", dir: path14.join(as, "BraveSoftware", "Brave-Browser") },
-      { browser: "Edge", dir: path14.join(as, "Microsoft Edge") },
-      { browser: "Vivaldi", dir: path14.join(as, "Vivaldi") },
-      { browser: "Arc", dir: path14.join(as, "Arc", "User Data") }
+      { browser: "Chrome", dir: path17.join(as, "Google", "Chrome"), always: true },
+      { browser: "Chrome Beta", dir: path17.join(as, "Google", "Chrome Beta") },
+      { browser: "Chrome Canary", dir: path17.join(as, "Google", "Chrome Canary") },
+      { browser: "Chromium", dir: path17.join(as, "Chromium") },
+      { browser: "Brave", dir: path17.join(as, "BraveSoftware", "Brave-Browser") },
+      { browser: "Edge", dir: path17.join(as, "Microsoft Edge") },
+      { browser: "Vivaldi", dir: path17.join(as, "Vivaldi") },
+      { browser: "Arc", dir: path17.join(as, "Arc", "User Data") }
     ];
   }
-  const cfg = process.env.XDG_CONFIG_HOME || path14.join(HOME_DIR, ".config");
+  const cfg = process.env.XDG_CONFIG_HOME || path17.join(HOME_DIR, ".config");
   return [
-    { browser: "Chrome", dir: path14.join(cfg, "google-chrome"), always: true },
-    { browser: "Chrome Beta", dir: path14.join(cfg, "google-chrome-beta") },
-    { browser: "Chromium", dir: path14.join(cfg, "chromium") },
-    { browser: "Brave", dir: path14.join(cfg, "BraveSoftware", "Brave-Browser") },
-    { browser: "Edge", dir: path14.join(cfg, "microsoft-edge") },
-    { browser: "Vivaldi", dir: path14.join(cfg, "vivaldi") }
+    { browser: "Chrome", dir: path17.join(cfg, "google-chrome"), always: true },
+    { browser: "Chrome Beta", dir: path17.join(cfg, "google-chrome-beta") },
+    { browser: "Chromium", dir: path17.join(cfg, "chromium") },
+    { browser: "Brave", dir: path17.join(cfg, "BraveSoftware", "Brave-Browser") },
+    { browser: "Edge", dir: path17.join(cfg, "microsoft-edge") },
+    { browser: "Vivaldi", dir: path17.join(cfg, "vivaldi") }
   ];
 }
 function extensionMarkerPath() {
-  return path14.join(CONFIG_DIR, "extension.json");
+  return path17.join(CONFIG_DIR, "extension.json");
 }
 function readExtensionMarker() {
   try {
-    return JSON.parse(fs13.readFileSync(extensionMarkerPath(), "utf8"));
+    return JSON.parse(fs16.readFileSync(extensionMarkerPath(), "utf8"));
   } catch {
     return null;
   }
@@ -13699,12 +15732,12 @@ function extensionInstalled() {
   return !!readExtensionMarker();
 }
 function writeExtensionMarker(flavor, browsers) {
-  fs13.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs13.writeFileSync(extensionMarkerPath(), JSON.stringify({ installed: true, flavor, browsers, installedAt: (/* @__PURE__ */ new Date()).toISOString() }, null, 2));
+  fs16.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs16.writeFileSync(extensionMarkerPath(), JSON.stringify({ installed: true, flavor, browsers, installedAt: (/* @__PURE__ */ new Date()).toISOString() }, null, 2));
 }
 function clearExtensionMarker() {
   try {
-    fs13.unlinkSync(extensionMarkerPath());
+    fs16.unlinkSync(extensionMarkerPath());
   } catch {
   }
 }
@@ -13716,27 +15749,27 @@ var EXTENSION_FLAVORS = {
 function installExtensionHost() {
   const setup = require_native_host_setup();
   resolveLocalToken();
-  const srcHost = path14.join(__dirname, "..", "extension", "native-host.cjs");
-  if (!fs13.existsSync(srcHost)) {
+  const srcHost = path17.join(__dirname, "..", "extension", "native-host.cjs");
+  if (!fs16.existsSync(srcHost)) {
     console.error(`  Host script not found: ${srcHost}`);
     process.exit(1);
   }
-  fs13.mkdirSync(CONFIG_DIR, { recursive: true });
-  const hostScript = path14.join(CONFIG_DIR, "extension-token-host.cjs");
-  fs13.copyFileSync(srcHost, hostScript);
+  fs16.mkdirSync(CONFIG_DIR, { recursive: true });
+  const hostScript = path17.join(CONFIG_DIR, "extension-token-host.cjs");
+  fs16.copyFileSync(srcHost, hostScript);
   const dataDir = process.env.IFRAMER_DATA_DIR || void 0;
   const isWindows = process.platform === "win32";
-  const wrapper = path14.join(CONFIG_DIR, isWindows ? "extension-token-host.bat" : "extension-token-host.sh");
+  const wrapper = path17.join(CONFIG_DIR, isWindows ? "extension-token-host.bat" : "extension-token-host.sh");
   if (isWindows) {
-    fs13.writeFileSync(wrapper, setup.windowsWrapper({ execPath: process.execPath, homeDir: HOME_DIR, dataDir }));
+    fs16.writeFileSync(wrapper, setup.windowsWrapper({ execPath: process.execPath, homeDir: HOME_DIR, dataDir }));
   } else {
-    fs13.writeFileSync(wrapper, setup.posixWrapper({ execPath: process.execPath, hostScript, dataDir }), { mode: 493 });
+    fs16.writeFileSync(wrapper, setup.posixWrapper({ execPath: process.execPath, hostScript, dataDir }), { mode: 493 });
   }
   const manifest = setup.hostManifest(wrapper, EXTENSION_ID);
   const installed = [];
   if (isWindows) {
-    const manifestPath = path14.join(CONFIG_DIR, `${NM_HOST_NAME}.json`);
-    fs13.writeFileSync(manifestPath, manifest);
+    const manifestPath = path17.join(CONFIG_DIR, `${NM_HOST_NAME}.json`);
+    fs16.writeFileSync(manifestPath, manifest);
     for (const { browser, root } of setup.WINDOWS_BROWSERS) {
       try {
         require("child_process").execFileSync(
@@ -13753,11 +15786,11 @@ function installExtensionHost() {
     return { installed, wrapper };
   }
   for (const { browser, dir, always } of nativeMessagingBrowserDirs()) {
-    if (!always && !fs13.existsSync(dir)) continue;
+    if (!always && !fs16.existsSync(dir)) continue;
     try {
-      const nmDir = path14.join(dir, "NativeMessagingHosts");
-      fs13.mkdirSync(nmDir, { recursive: true });
-      fs13.writeFileSync(path14.join(nmDir, `${NM_HOST_NAME}.json`), manifest);
+      const nmDir = path17.join(dir, "NativeMessagingHosts");
+      fs16.mkdirSync(nmDir, { recursive: true });
+      fs16.writeFileSync(path17.join(nmDir, `${NM_HOST_NAME}.json`), manifest);
       installed.push(browser);
     } catch (e) {
       console.error(`  ${browser}: failed (${e.message})`);
@@ -13779,10 +15812,10 @@ function removeExtensionHost() {
     }
   } else {
     for (const { browser, dir } of nativeMessagingBrowserDirs()) {
-      const file = path14.join(dir, "NativeMessagingHosts", `${NM_HOST_NAME}.json`);
+      const file = path17.join(dir, "NativeMessagingHosts", `${NM_HOST_NAME}.json`);
       try {
-        if (fs13.existsSync(file)) {
-          fs13.unlinkSync(file);
+        if (fs16.existsSync(file)) {
+          fs16.unlinkSync(file);
           removed.push(browser);
         }
       } catch {
@@ -13791,19 +15824,19 @@ function removeExtensionHost() {
   }
   for (const f of ["extension-token-host.cjs", "extension-token-host.sh", "extension-token-host.bat", `${NM_HOST_NAME}.json`]) {
     try {
-      fs13.unlinkSync(path14.join(CONFIG_DIR, f));
+      fs16.unlinkSync(path17.join(CONFIG_DIR, f));
     } catch {
     }
   }
   return removed;
 }
 async function removeChrome() {
-  const chromeDir = path14.join(CONFIG_DIR, "chrome");
-  if (!fs13.existsSync(chromeDir)) {
+  const chromeDir = path17.join(CONFIG_DIR, "chrome");
+  if (!fs16.existsSync(chromeDir)) {
     console.log("  Chrome for Testing not found, nothing to remove.");
     return;
   }
-  fs13.rmSync(chromeDir, { recursive: true, force: true });
+  fs16.rmSync(chromeDir, { recursive: true, force: true });
   console.log(`  Removed ${chromeDir}`);
 }
 async function main() {
@@ -13813,7 +15846,7 @@ async function main() {
     case "-v":
     case "version": {
       try {
-        console.log(JSON.parse(fs13.readFileSync(path14.join(__dirname, "..", "package.json"), "utf8")).version);
+        console.log(JSON.parse(fs16.readFileSync(path17.join(__dirname, "..", "package.json"), "utf8")).version);
       } catch (e) {
         console.error(`  Could not read the version: ${e.message}`);
         process.exit(1);
@@ -13824,7 +15857,7 @@ async function main() {
     case "status": {
       let server = "not running";
       try {
-        const info = JSON.parse(fs13.readFileSync(path14.join(CONFIG_DIR, "server.json"), "utf8"));
+        const info = JSON.parse(fs16.readFileSync(path17.join(CONFIG_DIR, "server.json"), "utf8"));
         const res = await fetch(`http://127.0.0.1:${info.port}/health`, { signal: AbortSignal.timeout(1500) });
         if (res.ok) server = `http://127.0.0.1:${info.port}`;
       } catch {
@@ -13850,7 +15883,7 @@ async function main() {
       let instances = null;
       let serverUp = false;
       try {
-        const info = JSON.parse(fs13.readFileSync(path14.join(CONFIG_DIR, "server.json"), "utf8"));
+        const info = JSON.parse(fs16.readFileSync(path17.join(CONFIG_DIR, "server.json"), "utf8"));
         if (info && info.port) {
           serverUp = true;
           const res = await fetch(`http://127.0.0.1:${info.port}/instances`, {
@@ -14024,8 +16057,8 @@ async function main() {
         const parsed = JSON.parse(input);
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
         if (!Array.isArray(parsed) && parsed.options) inputOptions = parsed.options;
-      } else if (fs13.existsSync(input)) {
-        const parsed = JSON.parse(fs13.readFileSync(input, "utf-8"));
+      } else if (fs16.existsSync(input)) {
+        const parsed = JSON.parse(fs16.readFileSync(input, "utf-8"));
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
         if (!Array.isArray(parsed) && parsed.options) inputOptions = parsed.options;
       } else {
@@ -14062,10 +16095,10 @@ async function main() {
           try {
             const res = await fetch(shot, { signal: AbortSignal.timeout(1e4) });
             if (res.ok) {
-              const dir = path14.join(os5.tmpdir(), "iframer-screenshots", "screenshots");
-              fs13.mkdirSync(dir, { recursive: true });
-              const file = path14.join(dir, `state-${Date.now()}.jpg`);
-              fs13.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
+              const dir = path17.join(os6.tmpdir(), "iframer-screenshots", "screenshots");
+              fs16.mkdirSync(dir, { recursive: true });
+              const file = path17.join(dir, `state-${Date.now()}.jpg`);
+              fs16.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
               shot = `file://${file}`;
             }
           } catch {
@@ -14135,7 +16168,7 @@ Screenshot: ${shot}`);
       if (sub === "stop") {
         let stopped = false;
         try {
-          const info = JSON.parse(fs13.readFileSync(path14.join(CONFIG_DIR, "server.json"), "utf8"));
+          const info = JSON.parse(fs16.readFileSync(path17.join(CONFIG_DIR, "server.json"), "utf8"));
           if (info && info.port) {
             const res = await fetch(`http://127.0.0.1:${info.port}/interactive/stop`, {
               method: "POST",
@@ -14250,8 +16283,8 @@ Screenshot: ${shot}`);
       } else if (input.startsWith("[") || input.startsWith("{")) {
         const parsed = JSON.parse(input);
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
-      } else if (fs13.existsSync(input)) {
-        const parsed = JSON.parse(fs13.readFileSync(input, "utf-8"));
+      } else if (fs16.existsSync(input)) {
+        const parsed = JSON.parse(fs16.readFileSync(input, "utf-8"));
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
       } else {
         console.error(`  Not a URL or file: ${input}`);
@@ -14264,8 +16297,8 @@ Screenshot: ${shot}`);
       const result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options });
       if (result.capturedApi && result.capturedApi.length > 0) {
         const outputDir = parseFlag(args, "--output") || `./${result.capturedApi[0].domain}`;
-        fs13.mkdirSync(outputDir, { recursive: true });
-        fs13.writeFileSync(path14.join(outputDir, "captured-api.json"), JSON.stringify(result.capturedApi, null, 2));
+        fs16.mkdirSync(outputDir, { recursive: true });
+        fs16.writeFileSync(path17.join(outputDir, "captured-api.json"), JSON.stringify(result.capturedApi, null, 2));
         console.log(`  Captured ${result.capturedApi.reduce((sum, api) => sum + api.endpoints.length, 0)} endpoints`);
         console.log(`  Saved to: ${outputDir}/captured-api.json`);
         for (const api of result.capturedApi) {
@@ -14286,9 +16319,230 @@ Screenshot: ${shot}`);
       const kit = await Promise.resolve().then(() => (init_kit(), kit_exports));
       const kitPath = kit.writeKit({});
       const skill = installSkill();
+      const bundles = kit.rebuildAllBundles();
       console.log(`  Kit: ${kitPath}`);
+      if (bundles.length) console.log(`  Clients rebuilt: ${bundles.length} file(s) (client.mjs per site, plus in-page bundles where made)`);
       console.log(skill ? "  Skill: ~/.claude/commands/iframer.md" : "  Skill: not found in the package, skipped");
       break;
+    }
+    case "schema": {
+      const kit = await Promise.resolve().then(() => (init_kit(), kit_exports));
+      const host = args[0] && !args[0].startsWith("--") ? kit.normalizeHost(args[0]) : null;
+      const target = args[1] && !args[1].startsWith("--") ? args[1] : null;
+      if (!host || !target) {
+        console.error("  Usage: iframer schema <host> <path> [--budget 1200]");
+        process.exit(1);
+      }
+      let map;
+      try {
+        map = JSON.parse(fs16.readFileSync(path17.join(kit.apisDir(host), "api.json"), "utf8"));
+      } catch {
+        console.error(`  No capture for ${host}. Map it first: iframer kit, then iframer ingest.`);
+        process.exit(1);
+      }
+      const out = kit.schemaFromMap(map, target, parseInt(parseFlag(args, "--budget") || "1200", 10));
+      if (!out) {
+        console.error(`  ${target} isn't in the capture. In the page: window.__ifk.call('GET','${target}',{rsc:true,schema:true})`);
+        process.exit(1);
+      }
+      process.stdout.write(out);
+      break;
+    }
+    case "recipe": {
+      const kit = await Promise.resolve().then(() => (init_kit(), kit_exports));
+      const host = args[0] && !args[0].startsWith("--") ? kit.normalizeHost(args[0]) : null;
+      const name = args[1] && !args[1].startsWith("--") ? args[1] : null;
+      if (!host) {
+        console.error("  Usage: iframer recipe <host> <name> --path P [--rsc] [--find F] [--pick P] [--where W] [--group G] [--count] [--limit N] [--format F]");
+        console.error("         iframer recipe <host> <name> --action <exportName> --args '<json>' --approved [--read-only]");
+        console.error("         iframer recipe <host> <name> --rm");
+        console.error("         iframer recipe <host>                  (list, one line each)");
+        console.error("    Saved into client.mjs (Node): node <dir>/client.mjs <name> '{...}'");
+        console.error("    --in-page            Also build the in-page bundle, for sites that block requests from Node");
+        process.exit(1);
+      }
+      const clients = () => kit.outputDirs(host).filter((d) => fs16.existsSync(path17.join(d, "client.mjs"))).map((d) => path17.join(d, "client.mjs"));
+      if (!name) {
+        const all = kit.listRecipes(host);
+        if (!all.length) {
+          console.log(`  No recipes for ${host}.`);
+          break;
+        }
+        for (const r of all) console.log(`  ${r.name}${r.description ? `: ${r.description}` : ""}${r.writes ? "  [writes]" : ""}`);
+        for (const c of clients()) console.log(`  Client: ${c}`);
+        break;
+      }
+      if (hasFlag(args, "--rm")) {
+        console.log(kit.removeRecipe(host, name) ? `  Removed ${name}.` : `  No recipe ${name}.`);
+        break;
+      }
+      const action = parseFlag(args, "--action");
+      const actionProp = parseFlag(args, "--action-prop");
+      if ((action || actionProp) && !hasFlag(args, "--approved")) {
+        console.error("  Server Action recipes run server code without asking each time. Get the user's OK, then add --approved.");
+        process.exit(1);
+      }
+      let actionArgs;
+      const rawArgs = parseFlag(args, "--args");
+      if (rawArgs) {
+        try {
+          actionArgs = JSON.parse(rawArgs);
+        } catch {
+          console.error("  --args must be JSON");
+          process.exit(1);
+        }
+      }
+      const spec = {
+        name,
+        host,
+        path: parseFlag(args, "--path") || void 0,
+        rsc: hasFlag(args, "--rsc") || void 0,
+        action: action || void 0,
+        actionProp: actionProp || void 0,
+        args: actionArgs,
+        find: parseFlag(args, "--find") || void 0,
+        pick: parseFlag(args, "--pick") || void 0,
+        format: parseFlag(args, "--format") || void 0,
+        run: parseFlag(args, "--run") || void 0,
+        nodes: parseFlag(args, "--nodes") || void 0,
+        where: parseFlag(args, "--where") || void 0,
+        group: parseFlag(args, "--group") || void 0,
+        count: hasFlag(args, "--count") || void 0,
+        limit: parseFlag(args, "--limit") ? parseInt(parseFlag(args, "--limit"), 10) : void 0,
+        description: parseFlag(args, "--describe") || void 0,
+        writes: action || actionProp ? !hasFlag(args, "--read-only") : void 0
+      };
+      try {
+        kit.saveRecipe(spec);
+      } catch (e) {
+        console.error(`  ${e.message}`);
+        process.exit(1);
+      }
+      const vars = [...new Set([...(spec.path || "").matchAll(/\{([A-Za-z_$][\w$]*)\}/g), ...JSON.stringify(spec.args ?? "").matchAll(/\{([A-Za-z_$][\w$]*)\}/g)].map((m) => m[1]))];
+      const runLine = (c) => `node ${c} ${name}${vars.length ? ` '${JSON.stringify(Object.fromEntries(vars.map((v) => [v, "\u2026"])))}'` : ""}`;
+      if (hasFlag(args, "--in-page")) {
+        const bundle = kit.writeBundle(host);
+        if (hasFlag(args, "--quiet")) {
+          console.log(`saved ${name}. Run: ${runLine(clients()[0])}  In-page add (1 call): ${kit.addSnippet(spec)}`);
+          break;
+        }
+        console.log(`  Saved ${name}. Run: ${runLine(clients()[0])}
+`);
+        console.log(kit.recipeInstructions(bundle, kit.listRecipes(host).map((r) => r.name)));
+        break;
+      }
+      if (hasFlag(args, "--quiet")) {
+        console.log(`saved ${name}. Run: ${runLine(clients()[0])}`);
+        break;
+      }
+      console.log(`  Saved ${name}.`);
+      for (const c of clients()) console.log(`  Run: ${runLine(c)}`);
+      break;
+    }
+    case "auth": {
+      const kit = await Promise.resolve().then(() => (init_kit(), kit_exports));
+      const host = args[0] && !args[0].startsWith("--") ? kit.normalizeHost(args[0]) : null;
+      if (!host) {
+        console.error("  Usage: iframer auth <host> [--out <dir>]   save a logged-in session for client.mjs into <dir>/.env");
+        console.error("    (default)            Find it in a browser on this machine that is logged in to the site");
+        console.error("    --no-keychain        Skip browsers whose cookies need the OS keychain (no prompt)");
+        console.error("    --from-file <f>      Cookie header or KEY=value lines from a file (e.g. an API key)");
+        console.error("    --auto               One quiet line, no keychain prompt, exit 1 if nothing works (client.mjs uses this)");
+        process.exit(1);
+      }
+      const dir = path17.resolve(parseFlag(args, "--out") || kit.apisDir(host));
+      const auto = hasFlag(args, "--auto");
+      const say = (m) => {
+        if (!auto) console.log(m);
+      };
+      const wanted = Object.keys(kit.readAuth(host, dir)).map(kit.envName);
+      const from = parseFlag(args, "--from-file");
+      const vals = {};
+      let source = "";
+      if (from) {
+        const t = fs16.readFileSync(path17.resolve(from), "utf8").trim();
+        if (/^[A-Za-z_]\w*=/.test(t) && t.split(/\r?\n/).every((l) => !l.trim() || /^\s*(#|[A-Za-z_]\w*=)/.test(l))) {
+          for (const l of t.split(/\r?\n/)) {
+            const m = /^\s*([A-Za-z_]\w*)=(.*)$/.exec(l);
+            if (m) vals[m[1]] = m[2].trim().replace(/^(['"])(.*)\1$/, "$2");
+          }
+        } else if (t) vals.COOKIE = t.replace(/^cookie:\s*/i, "");
+        if (!Object.keys(vals).length) {
+          console.error("  Nothing saved.");
+          process.exit(1);
+        }
+        source = from;
+        say(`  Saved ${Object.keys(vals).join(", ")} to ${kit.writeEnv(dir, vals)} (from ${source}). Values not shown.`);
+      } else {
+        const extra = [];
+        try {
+          const { getDataDir: getDataDir2 } = await Promise.resolve().then(() => (init_paths(), paths_exports));
+          const { SqliteStore: SqliteStore2 } = await Promise.resolve().then(() => (init_sqlite_store(), sqlite_store_exports));
+          const { deriveKey: deriveKey2, decrypt: decrypt3 } = await Promise.resolve().then(() => (init_crypto(), crypto_exports));
+          const store = new SqliteStore2(getDataDir2());
+          const key = await deriveKey2(LOCAL_TOKEN);
+          const bare = host.split(":")[0].replace(/^www\./, "");
+          const now = Date.now() / 1e3;
+          for (const id of store.listSessionKeys()) {
+            if (id !== LOCAL_USER_ID && !id.startsWith(LOCAL_USER_ID + "::")) continue;
+            let data;
+            try {
+              data = JSON.parse(decrypt3(await store.getSession(id), key));
+            } catch {
+              continue;
+            }
+            const jar = (data.cookies || []).filter((c) => {
+              const d = c.domain.replace(/^\./, "");
+              return (bare === d || bare.endsWith("." + d) || d.endsWith("." + bare)) && (!c.expires || c.expires < 0 || c.expires > now);
+            });
+            if (jar.length) extra.push({ source: `iframer browser (${id.split("::")[1] || "default"})`, cookies: jar.map((c) => ({ name: c.name, value: c.value, domain: c.domain, path: c.path || "/" })), lastUsed: Date.parse(data.extractedAt || 0) || 0 });
+          }
+          store.close();
+        } catch {
+        }
+        const r = await kit.refreshSession(host, dir, { extra, keychain: !hasFlag(args, "--no-keychain") && !auto });
+        if (!r.ok) {
+          if (auto) console.log(`auth: ${r.note}`);
+          else console.error(`  ${r.note}.`);
+          process.exit(1);
+        }
+        source = r.source;
+        if (auto) {
+          console.log(`auth: session from ${r.source}`);
+          break;
+        }
+        say(`  Saved COOKIE to ${r.envFile} (from ${r.source}). Values not shown.`);
+      }
+      const cur = {};
+      try {
+        for (const l of fs16.readFileSync(path17.join(dir, ".env"), "utf8").split(/\r?\n/)) {
+          const m = /^([A-Za-z_]\w*)=(.*)$/.exec(l);
+          if (m) cur[m[1]] = m[2];
+        }
+      } catch {
+      }
+      const missing = wanted.filter((v) => !cur[v]);
+      if (missing.length) say(`  Still missing: ${missing.join(", ")} (headers the site sends; add them to .env)`);
+      if (fs16.existsSync(path17.join(dir, "client.mjs"))) say(`  Check: node ${path17.join(dir, "client.mjs")}`);
+      break;
+    }
+    case "run": {
+      const kit = await Promise.resolve().then(() => (init_kit(), kit_exports));
+      const host = args[0] && !args[0].startsWith("--") ? kit.normalizeHost(args[0]) : null;
+      if (!host) {
+        console.error(`  Usage: iframer run <host> [recipe] ['{"arg":"x"}']   (same as node <dir>/client.mjs ...)`);
+        process.exit(1);
+      }
+      const out = parseFlag(args, "--out");
+      const client = out ? path17.join(path17.resolve(out), "client.mjs") : kit.clientPath(host);
+      if (!fs16.existsSync(client)) {
+        console.error(`  No client at ${client}. Map the site first: iframer kit, then iframer ingest.`);
+        process.exit(1);
+      }
+      const { spawnSync } = await import("child_process");
+      const rest = args.slice(1).filter((a, i, all) => a !== "--out" && all[i - 1] !== "--out");
+      const r = spawnSync(process.execPath, [client, ...rest], { stdio: "inherit" });
+      process.exit(r.status ?? 1);
     }
     case "kit": {
       const kit = await Promise.resolve().then(() => (init_kit(), kit_exports));
@@ -14302,15 +16556,24 @@ Screenshot: ${shot}`);
         console.error("  --mode must be hook (default) or passive (no patching, URLs + forms only)");
         process.exit(1);
       }
-      const opts = { mode, hostFilter: parseFlag(args, "--host-filter") };
+      const num = (f) => {
+        const v = parseFlag(args, f);
+        if (v === void 0 || v === null) return void 0;
+        const n = parseInt(v, 10);
+        if (!(n > 0)) {
+          console.error(`  ${f} needs a positive number`);
+          process.exit(1);
+        }
+        return n;
+      };
+      const opts = { mode, hostFilter: parseFlag(args, "--host-filter"), maxCalls: num("--max-calls"), maxResult: num("--max-result"), hardMax: num("--hard-max") };
       if (hasFlag(args, "--print")) {
         process.stdout.write(kit.kitSource(opts));
         break;
       }
       const outFile = parseFlag(args, "--out");
-      const kitPath = kit.writeKit(opts, outFile ? path14.resolve(outFile) : void 0);
-      const client = parseFlag(args, "--client");
-      console.log(kit.kitInstructions(target, kitPath, client ? path14.resolve(client) : void 0));
+      const kitPath = kit.writeKit(opts, outFile ? path17.resolve(outFile) : void 0);
+      console.log(kit.kitInstructions(target, kitPath));
       break;
     }
     case "ingest": {
@@ -14328,8 +16591,9 @@ Screenshot: ${shot}`);
       if (!input) {
         console.error("  Usage: iframer ingest <capture file | - | --latest>");
         console.error("    --latest             Newest capture in T3 Code's downloads or ~/Downloads");
-        console.error("    --out <dir>          Output directory (default: ./<host>-api/)");
-        console.error("    --typed              Also write client.d.ts");
+        console.error("    --out <dir>          Output folder for the map + client.mjs (default: ~/.iframer/apis/<host>/)");
+        console.error("    --all                Keep third-party hosts and framework assets");
+        console.error("    --no-session         Don't look for a logged-in session in this machine's browsers");
         console.error("    --keep               Keep the capture file (default: deleted after ingest)");
         console.error("    --no-knowledge       Don't update ~/.iframer/knowledge");
         console.error("    --strict             Refuse the capture on any secret-looking value instead of replacing it");
@@ -14337,11 +16601,11 @@ Screenshot: ${shot}`);
         process.exit(1);
       }
       const fromStdin = input === "-";
-      const raw = fromStdin ? fs13.readFileSync(0, "utf8") : fs13.readFileSync(input, "utf8");
+      const raw = fromStdin ? fs16.readFileSync(0, "utf8") : fs16.readFileSync(input, "utf8");
       const removeInput = () => {
         if (fromStdin || hasFlag(args, "--keep")) return;
         try {
-          fs13.unlinkSync(input);
+          fs16.unlinkSync(input);
         } catch {
         }
       };
@@ -14365,46 +16629,61 @@ Screenshot: ${shot}`);
         }
         process.exit(2);
       }
+      let dropped = [];
+      ({ report, dropped } = kit.cleanCapture(report, { all: hasFlag(args, "--all") }));
       const map = kit.buildApiMap(report);
       const host = new URL(report.origin).host;
-      const outDir = path14.resolve(parseFlag(args, "--out") || `./${host.replace(/[^a-z0-9.-]/gi, "_")}-api`);
-      fs13.mkdirSync(outDir, { recursive: true });
+      const outDir = path17.resolve(parseFlag(args, "--out") || kit.apisDir(host));
+      fs16.mkdirSync(outDir, { recursive: true });
       const written = [];
       const write2 = (name, body) => {
-        const p = path14.join(outDir, name);
-        fs13.writeFileSync(p, body);
+        const p = path17.join(outDir, name);
+        fs16.writeFileSync(p, body);
         written.push(p);
       };
+      write2("index.txt", kit.renderIndex(map));
+      write2("auth.json", JSON.stringify(report.auth?.headers ?? {}, null, 2) + "\n");
       write2("api.json", JSON.stringify(map, null, 2) + "\n");
-      write2("client.js", kit.renderClient(map));
-      if (hasFlag(args, "--typed")) write2("client.d.ts", kit.renderTypes(map));
+      const hostDir = path17.resolve(kit.apisDir(host));
+      if (outDir !== hostDir) {
+        fs16.mkdirSync(hostDir, { recursive: true });
+        for (const f of ["index.txt", "auth.json", "api.json"]) fs16.copyFileSync(path17.join(outDir, f), path17.join(hostDir, f));
+        kit.addOutputDir(host, outDir);
+      }
+      for (const f of kit.writeOutputs(host)) if (f.startsWith(outDir + path17.sep) && !written.includes(f)) written.push(f);
       if (!hasFlag(args, "--no-knowledge")) {
         const { mergeKnowledge: mergeKnowledge2 } = await Promise.resolve().then(() => (init_knowledge(), knowledge_exports));
         const authHeaders = [...new Set(map.endpoints.flatMap((e) => e.authHeaders))];
         const c2 = report.coverage;
         mergeKnowledge2(host, {
           lastMode: `kit-${report.kit?.mode || "hook"}`,
-          browserRequired: true,
+          browserRequired: false,
           auth: { type: authHeaders.length ? "session cookies + headers" : "session cookies", headers: authHeaders.length ? authHeaders : void 0 },
           endpoints: map.endpoints.map((e) => ({
             method: e.method,
             path: e.origin === map.origin ? e.path : `${e.origin}${e.path}`,
             description: kit.describeEndpoint(e),
-            example: e.origin === map.origin ? `window.__ifk.call(${JSON.stringify(e.method)}, ${JSON.stringify(e.path)})` : void 0,
+            example: e.origin === map.origin ? `node ${path17.join(outDir, "client.mjs")} get ${e.path}${e.rsc ? " --rsc" : ""}` : void 0,
             firstSeen: report.capturedAt
           })),
           notes: [
             `In-page capture: ${c2.seen} seen, ${c2.withPayload} with payload, ${c2.pathOnly} path only. Not complete: ${c2.blindSpots.join(", ")}.`,
-            "Replay in the page (window.__ifk.call): HttpOnly cookies never leave the browser.",
+            `Local client: ${path17.join(outDir, "client.mjs")} (Node). Session in .env next to it: iframer auth ${host}${outDir !== path17.resolve(kit.apisDir(host)) ? ` --out ${outDir}` : ""}.`,
             ...map.identity.headers.map((h) => `Auth header ${h.name}: ${h.source}.`),
             ...redacted.length ? [`Private values replaced with placeholders in ${new Set(redacted.map((r) => r.where)).size} endpoint(s); see privateValues in api.json and pass them per call.`] : []
           ]
         });
       }
       removeInput();
+      let sessionLine = `  Session: ${path17.join(outDir, ".env")} (kept)`;
+      if (hasFlag(args, "--no-session")) sessionLine = `  Session: skipped (iframer auth ${host} when needed)`;
+      else if (!fs16.existsSync(path17.join(outDir, ".env"))) {
+        const s = await kit.refreshSession(host, outDir, { keychain: false });
+        sessionLine = s.ok ? `  Session: from ${s.source} -> ${s.envFile} (values not shown)` : `  Session: ${s.note}: iframer auth ${host}${outDir !== path17.resolve(kit.apisDir(host)) ? ` --out ${outDir}` : ""}`;
+      }
       const c = report.coverage;
       if (json) {
-        console.log(JSON.stringify({ ok: true, origin: report.origin, endpoints: map.endpoints.length, coverage: { seen: c.seen, withPayload: c.withPayload, pathOnly: c.pathOnly }, redacted: redacted.map((r) => ({ kind: r.kind, at: r.where })), files: written, inputDeleted: !fromStdin && !hasFlag(args, "--keep") }));
+        console.log(JSON.stringify({ ok: true, origin: report.origin, session: sessionLine.trim(), endpoints: map.endpoints.length, dropped: dropped.length, index: path17.join(outDir, "index.txt"), coverage: { seen: c.seen, withPayload: c.withPayload, pathOnly: c.pathOnly }, redacted: redacted.map((r) => ({ kind: r.kind, at: r.where })), files: written, inputDeleted: !fromStdin && !hasFlag(args, "--keep") }));
       } else {
         console.log(`  ${report.origin}: ${map.endpoints.length} endpoints (${c.withPayload} with payload, ${c.pathOnly} path only). Not complete.`);
         for (const h of map.identity.headers) console.log(`  Identity: ${h.name} <- ${h.source}`);
@@ -14412,10 +16691,15 @@ Screenshot: ${shot}`);
           console.log(`  Replaced ${redacted.length} secret-looking value(s) with placeholders ({id}, {key}, "string"):`);
           for (const r of redacted.slice(0, 10)) console.log(`    ${r.kind} at ${r.where}`);
         }
-        for (const e of map.endpoints.slice(0, 40)) console.log(`    ${e.method.padEnd(6)} ${e.origin === map.origin ? e.path : e.origin + e.path}  -> ${e.functionName}`);
-        if (map.endpoints.length > 40) console.log(`    \u2026 ${map.endpoints.length - 40} more in api.json`);
+        if (dropped.length) console.log(`  Left out ${dropped.length} third-party or asset request(s). --all keeps them.`);
+        console.log(`  One line per endpoint: ${path17.join(outDir, "index.txt")}`);
         console.log(`  Wrote: ${written.join(", ")}`);
         if (!fromStdin && !hasFlag(args, "--keep")) console.log("  Capture file deleted.");
+        console.log(sessionLine);
+        console.log(`
+  Next (no browser needed):`);
+        console.log(`    node ${path17.join(outDir, "client.mjs")}                  what it can do`);
+        console.log(`    node ${path17.join(outDir, "client.mjs")} get <path> --rsc --schema   learn a page's data`);
       }
       break;
     }
@@ -14428,7 +16712,7 @@ Screenshot: ${shot}`);
       let secretSource = secret ? "env/.env" : null;
       if (!secret) {
         try {
-          secret = fs13.readFileSync(path14.join(CONFIG_DIR, "secret"), "utf8").trim();
+          secret = fs16.readFileSync(path17.join(CONFIG_DIR, "secret"), "utf8").trim();
           if (secret) secretSource = "~/.iframer/secret";
         } catch {
         }
@@ -14468,10 +16752,10 @@ Screenshot: ${shot}`);
     }
     // ─── Telemetry report ────────────────────────────────────────────
     case "telemetry": {
-      const file = path14.join(CONFIG_DIR, "telemetry.jsonl");
+      const file = path17.join(CONFIG_DIR, "telemetry.jsonl");
       if (args.includes("--clear")) {
         try {
-          fs13.unlinkSync(file);
+          fs16.unlinkSync(file);
         } catch {
         }
         console.log("  Telemetry log cleared.");
@@ -14479,7 +16763,7 @@ Screenshot: ${shot}`);
       }
       let lines;
       try {
-        lines = fs13.readFileSync(file, "utf8").trim().split("\n").filter(Boolean);
+        lines = fs16.readFileSync(file, "utf8").trim().split("\n").filter(Boolean);
       } catch {
         console.log("  No telemetry recorded yet. It logs automatically as agents use iframer");
         console.log("  (new MCP sessions only \u2014 restart a session if it predates telemetry).");
@@ -14604,11 +16888,11 @@ Screenshot: ${shot}`);
     // ─── Update (npm as the extension update channel) ────────────────
     case "update": {
       const checkOnly = args.includes("--check");
-      const pkgRoot = path14.join(__dirname, "..");
-      const isDev = fs13.existsSync(path14.join(pkgRoot, ".git"));
+      const pkgRoot = path17.join(__dirname, "..");
+      const isDev = fs16.existsSync(path17.join(pkgRoot, ".git"));
       let installed = "unknown";
       try {
-        installed = JSON.parse(fs13.readFileSync(path14.join(pkgRoot, "package.json"), "utf8")).version;
+        installed = JSON.parse(fs16.readFileSync(path17.join(pkgRoot, "package.json"), "utf8")).version;
       } catch {
       }
       let latest = null;
@@ -14631,16 +16915,39 @@ Screenshot: ${shot}`);
       }
       if (isDev) {
         console.log("\n  This is a dev/linked install (the package has a .git repo).");
-        console.log("  Update it with `git pull && bun run build`, not npm.");
+        console.log("  Update it with `git pull`, not npm. With `iframer` linked to bin/iframer-dev, every run rebuilds when the source changed.");
         break;
       }
-      console.log("\n  Updating via npm...");
+      const cp = require("child_process");
+      const real = fs16.realpathSync(pkgRoot);
+      const pm = real.match(/^(.*)[\\/]lib[\\/]node_modules[\\/]iframer-toolkit$/) || process.platform === "win32" && real.match(/^(.*)[\\/]node_modules[\\/]iframer-toolkit$/);
+      const prefix = pm ? pm[1] : null;
+      const npmBin = (() => {
+        const near = path17.join(path17.dirname(process.execPath), process.platform === "win32" ? "npm.cmd" : "npm");
+        return fs16.existsSync(near) ? JSON.stringify(near) : "npm";
+      })();
+      const cmd = `${npmBin} install -g iframer-toolkit@latest${prefix ? ` --prefix ${JSON.stringify(prefix)}` : ""}`;
+      console.log(`
+  Updating via npm${prefix ? ` into ${prefix}` : ""}...`);
       try {
-        require("child_process").execSync("npm install -g iframer-toolkit@latest", { stdio: "inherit" });
+        cp.execSync(cmd, { stdio: "inherit" });
       } catch {
         console.error("\n  npm install failed. If it's a permissions error:");
-        console.error("    sudo npm install -g iframer-toolkit@latest");
+        console.error(`    sudo ${cmd}`);
         process.exit(1);
+      }
+      try {
+        const onPath = cp.execSync(process.platform === "win32" ? "where iframer" : "command -v iframer", { encoding: "utf8", shell: process.platform === "win32" ? void 0 : "/bin/sh" }).split(/\r?\n/)[0].trim();
+        const target = onPath && fs16.realpathSync(onPath);
+        if (target && !target.startsWith(real + path17.sep)) {
+          const v = cp.execSync(`${JSON.stringify(onPath)} --version`, { encoding: "utf8" }).trim();
+          if (v !== latest) {
+            console.warn(`
+  Warning: \`iframer\` on your PATH is another install (${target}, v${v}).`);
+            console.warn(`  Updated: ${real}. Remove the other one or put this one first on PATH.`);
+          }
+        }
+      } catch {
       }
       try {
         require("child_process").execSync("iframer refresh", { stdio: "inherit" });
@@ -14713,20 +17020,45 @@ Screenshot: ${shot}`);
       --typed                       Generate TypeScript
       --mode <mode>                 Browser mode
 
-  Capture in a browser iframer doesn't control (T3 Code, Playwright MCP, ...):
+  Reverse engineer from a browser iframer doesn't control (T3 Code, Playwright MCP, ...).
+  The browser only maps the site; the output is a local folder with a Node client:
     kit                             Write the in-page kit, print the agent steps
       --for <t3|playwright-mcp|any> Which browser tool's steps to print (default: t3)
       --mode passive                No patching: URLs + forms only (for sites that detect it)
       --host-filter <regex>         Only record matching hosts
-      --client <path>               Also print steps to load a generated client.js
+      --max-calls <n>               Replay calls allowed per tab session (default: 500)
+      --max-result <n>              Chars a call returns before switching to an overview (default: 4000)
+      --hard-max <n>                Chars a call can ever return, even with {full:true} (default: 30000)
       --print                       Print the kit source instead (for tools without upload)
-    ingest <file|-|--latest>        Turn a capture into api.json + client.js + knowledge
-      --typed                       Also write client.d.ts
-      --out <dir>                   Output directory (default: ./<host>-api/)
+    ingest <file|-|--latest>        Capture -> folder: index.txt, api.json, auth.json, client.mjs, .env.example
+      --out <dir>                   Output folder (default: ~/.iframer/apis/<host>/)
+      --all                         Keep third-party hosts and framework assets
       --keep                        Keep the capture file (default: deleted)
       --no-knowledge                Don't update ~/.iframer/knowledge
       --strict                      Refuse on any secret-looking value instead of replacing it
       --json                        One-line JSON summary
+    auth <host> [--out <dir>]       Save the session for client.mjs into <dir>/.env (0600, gitignored)
+      (default)                     Taken from a browser on this machine that is logged in, checked on a captured page
+      --no-keychain                 Skip browsers whose cookies need the OS keychain (no prompt)
+      --from-file <f>               Cookie header or KEY=value lines from a file (e.g. an API key)
+    run <host> [recipe] [args]      Same as: node <dir>/client.mjs [recipe] [args]
+    schema <host> <path>            Captured structure of a page as find/pick paths (no values)
+    recipe <host> [name] ...        Save a mapped task as a function of client.mjs (one short line back)
+      --path <template>             Page or API path, {param} filled from args (/{team}/tickets)
+      --rsc                         Next.js page data (RSC header)
+      --find <path|js fn>           Pick the object by shape (data.tablesNeeded)
+      --pick <path|js fn>           Keep only these fields (data.{id,name})
+      --nodes <tags>                Server-rendered HTML instead of component props (a, li|tr, *)
+      --where <cond>                Filter the list: x>0, status=PUBLISHED, href~?id= (& joins)
+      --group <key>  --count  --limit <n>   Shape the answer before format
+      --format <js fn>              (data, args) => the one line to return
+      --run <js fn>                 async (core, args) => line. For pagination, polling, several calls
+                                    (core: get, action, find, pick, answer, need, sleep)
+      --action <name> --args <json> --approved [--read-only]   Next.js Server Action recipe
+      --action-prop <prop> --path <page> --find <keys> --approved   Inline action passed as a prop
+      --in-page                     Also build the in-page bundle: ONLY for sites that block requests from Node
+      --quiet                       One line back: the run command
+      --rm                          Delete a recipe; no name lists them
 
   Session:
     session stop                    Save state + close idle browsers on the shared daemon

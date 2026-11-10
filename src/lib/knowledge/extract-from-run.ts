@@ -8,12 +8,14 @@ import { mergeKnowledge, type KnowledgeAuth, type KnowledgeEndpoint } from "../k
  * incrementally learns about every site the agent touches.
  *
  * Pure module-level function (no `this`) so it can be unit-tested directly.
- *
- * KNOWN BUG (preserved as-is; fix belongs in a separate PR): domain matching
- * uses substring/suffix checks without a label boundary, so a cookie or origin
- * for `evil-figma.com` is treated as belonging to `figma.com`. See the
- * `endsWith`/`includes` calls below. Correct check: `d === root || d.endsWith("." + root)`.
  */
+
+/** Same site on a label boundary: figma.com, www.figma.com, .figma.com; never evil-figma.com. */
+function sameDomain(hostOrOrigin: string, root: string): boolean {
+  const h = hostOrOrigin.replace(/^[a-z]+:\/\//i, "").split(/[:/]/)[0].replace(/^\./, "").replace(/^www\./, "").toLowerCase();
+  const r = root.replace(/^www\./, "").toLowerCase();
+  return h === r || h.endsWith("." + r) || r.endsWith("." + h);
+}
 export function extractKnowledgeFromRun(
   pipeline: Pipeline,
   result: PipelineResult,
@@ -43,21 +45,21 @@ export function extractKnowledgeFromRun(
   if (sessionData) {
     // Cookie names scoped to this domain (strip leading dot for display)
     for (const c of sessionData.cookies ?? []) {
-      if (c.domain.endsWith(domainRoot) || domainRoot.endsWith(c.domain.replace(/^\./, ""))) {
+      if (sameDomain(c.domain, domainRoot)) {
         if (!cookieNames.includes(c.name)) cookieNames.push(c.name);
       }
     }
 
     // localStorage/sessionStorage keys for any origin matching the domain
     for (const [origin, store] of Object.entries(sessionData.localStorage ?? {})) {
-      if (origin.includes(domainRoot)) {
+      if (sameDomain(origin, domainRoot)) {
         for (const k of Object.keys(store)) {
           if (!localStorageKeys.includes(k)) localStorageKeys.push(k);
         }
       }
     }
     for (const [origin, store] of Object.entries(sessionData.sessionStorage ?? {})) {
-      if (origin.includes(domainRoot)) {
+      if (sameDomain(origin, domainRoot)) {
         for (const k of Object.keys(store)) {
           if (!sessionStorageKeys.includes(k)) sessionStorageKeys.push(k);
         }
@@ -82,7 +84,7 @@ export function extractKnowledgeFromRun(
 
   for (const api of result.capturedApi ?? []) {
     // Only consider same-domain captured APIs
-    if (!api.domain.includes(domainRoot) && !domainRoot.includes(api.domain.replace(/^www\./, ""))) continue;
+    if (!sameDomain(api.domain, domainRoot)) continue;
 
     if (api.auth?.authorization) replayHeaders.add("Authorization");
     for (const name of Object.keys(api.auth?.tokens ?? {})) replayHeaders.add(name);

@@ -106,6 +106,11 @@ export class SqliteStore implements StorageBackend {
     return row ? Buffer.from(row.blob) : null;
   }
 
+  /** Keys of every stored browser session (one per user/profile). */
+  listSessionKeys(): string[] {
+    return this.db.queryAll("SELECT user_id FROM sessions").map((r: { user_id: string }) => r.user_id);
+  }
+
   async setSession(userId: string, blob: Buffer): Promise<void> {
     this.db.run("INSERT OR REPLACE INTO sessions (user_id, blob) VALUES (?, ?)", userId, blob);
   }

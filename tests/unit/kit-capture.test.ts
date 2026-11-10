@@ -3,7 +3,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import {
-  buildApiMap, redactCapture, kitInstructions, kitSource, parseCapture, renderClient, renderTypes, scanCapture, findLatestCapture,
+  buildApiMap, redactCapture, cleanCapture, renderIndex, kitInstructions, kitSource, parseCapture, scanCapture, findLatestCapture,
   type CaptureReport,
 } from "../../src/lib/kit/index";
 
@@ -24,10 +24,6 @@ describe("parseCapture", () => {
     expect(() => parseCapture("nope")).toThrow(/not JSON/);
     expect(() => parseCapture(JSON.stringify({ hello: 1 }))).toThrow(/not an iframer capture/);
     expect(() => parseCapture(JSON.stringify({ kind: "iframer-capture", v: 9, origin: O, endpoints: {}, coverage: {} }))).toThrow(/version 9/);
-  });
-  test("accepts spike v1 files without the kind marker", () => {
-    const r = parseCapture(JSON.stringify({ v: 1, origin: O, endpoints: {}, coverage: { seen: 0 } }));
-    expect(r.pathOnly).toEqual([]);
   });
 });
 
@@ -92,7 +88,7 @@ describe("identity", () => {
   });
 });
 
-describe("buildApiMap + client", () => {
+describe("buildApiMap + index", () => {
   const r = report({
     [`GET ${O}/api/items/{id}`]: ep({ query: ["limit"], res: { data: [{ id: "number" }] } }),
     [`GET ${O}/api/items`]: ep({ res: { data: [{ id: "number" }] } }),
@@ -111,28 +107,10 @@ describe("buildApiMap + client", () => {
     expect(names["DELETE /api/orders/{id}/lines/{id}"]).toBe("deleteOrdersLines");
   });
 
-  test("client wraps same-origin calls and skips the rest", () => {
-    const js = renderClient(map);
-    expect(js).toContain(`getItems: function (id, query, opts) { return c("GET", "/api/items/" + encodeURIComponent(id) + q(query), opts); }`);
-    expect(js).toContain(`deleteOrdersLines: function (id, id2, query, opts)`);
-    expect(js).toContain(`Object.assign({ json: body }, opts)`);
-    expect(js).toContain("Not wrapped:");
-    expect(js).not.toContain("cdn.other.test/api/config\"");
-    // Valid JS that defines window.__ifkApi when run after the kit.
-    const calls: unknown[] = [];
-    const window: any = { __ifk: { call: (...a: unknown[]) => (calls.push(a), Promise.resolve({ status: 200 })) } };
-    const fns = new Function("window", "URLSearchParams", `return ${js.replace(/^\/\/.*$/gm, "").trim()}`)(window, URLSearchParams);
-    expect(fns).toContain("createOrders");
-    window.__ifkApi.getItems(7, { limit: 2 });
-    window.__ifkApi.createOrders({ sku: "a" }, null, { approved: true });
-    expect(calls).toEqual([["GET", "/api/items/7?limit=2", undefined], ["POST", "/api/orders", { json: { sku: "a" }, approved: true }]]);
-  });
-
-  test("types describe the shapes", () => {
-    const d = renderTypes(map);
-    expect(d).toContain("createOrders(body: {");
-    expect(d).toContain("sku?: string;");
-    expect(d).toContain("declare global { interface Window { __ifkApi: IfkApi } }");
+  test("index lists one line per endpoint, list-holding components first", () => {
+    const idx = renderIndex(map);
+    expect(idx).toContain("getItems  GET /api/items/{id}  -> {data:{id}[]}");
+    expect(idx.split("\n")[0]).toContain("6 endpoints");
   });
 });
 
@@ -140,7 +118,7 @@ describe("kit source + instructions", () => {
   test("kit is one self-contained expression with options baked in", () => {
     const src = kitSource({ mode: "passive", hostFilter: "example" });
     expect(src.startsWith("(function pageKit(")).toBe(true);
-    expect(src).toMatch(/\(\{"mode":"passive","hostFilter":"example","build":"[0-9a-f]{10}"\}\);/);
+    expect(src).toMatch(/\(\{"mode":"passive","hostFilter":"example","build":"[0-9a-f]{10}"\}, \(function recipeCore\(/);
     expect(src).not.toMatch(/\beval\(|new Function/);
   });
   test("T3 steps use upload + sessionStorage + top-level eval", () => {
@@ -165,4 +143,55 @@ test("findLatestCapture sniffs contents, ignores names and old files", () => {
   fs.utimesSync(path.join(sub, "ancient"), new Date(0), new Date(0));
   expect(findLatestCapture([dir])).toBe(path.join(sub, "newer"));
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+describe("cleanCapture", () => {
+  test("keeps the site's API, merges by named param and action id", () => {
+    const r = report({
+      [`GET ${O}/{communitySlug}/dashboard/groups`]: ep({ n: 1 }),
+      [`GET ${O}/dougco/dashboard/groups`]: ep({ n: 2 }),
+      [`GET ${O}/sunny/dashboard/groups`]: ep({ n: 3 }),
+      [`GET ${O}/admin/dashboard/campaigns`]: ep(),
+      [`GET ${O}/admin/dashboard/settings`]: ep(),
+      [`POST ${O}/a/x#getCredits`]: ep({ next: { action: "4008140f", name: "getCredits" } }),
+      [`POST ${O}/b/y#getCredits`]: ep({ n: 4, next: { action: "4008140f", name: "getCredits" } }),
+      [`GET ${O}/_next/static/chunks/main.js`]: ep(),
+      [`POST https://us.i.posthog.com/e`]: ep(),
+      [`GET https://api.example.test/v1/me`]: ep(),
+    }, [`https://maps.googleapis.com/x`, `${O}/api/boot`]);
+    const { report: c, dropped } = cleanCapture(r);
+    const keys = Object.keys(c.endpoints).map((k) => k.replace(O, "")).sort();
+    expect(keys).toEqual([
+      "GET /admin/dashboard/campaigns",
+      "GET /admin/dashboard/settings",
+      "GET /{communitySlug}/dashboard/groups",
+      "GET https://api.example.test/v1/me",
+      "POST /a/x#getCredits",
+    ]);
+    expect(c.endpoints[`GET ${O}/{communitySlug}/dashboard/groups`].n).toBe(6);
+    expect(c.endpoints[`POST ${O}/a/x#getCredits`].n).toBe(5);
+    expect(dropped.length).toBe(2);
+    expect(c.pathOnly).toEqual([`${O}/api/boot`]);
+    const idx = renderIndex(buildApiMap(c)).split("\n");
+    expect(idx[0]).toContain("5 endpoints");
+    expect(idx.some((l) => l.startsWith("getCredits  action getCredits"))).toBe(true);
+  });
+});
+
+test("recipe bundles and add snippets are valid JS", () => {
+  const { renderRecipes, addSnippet } = require("../../src/lib/kit/recipes");
+  const spec = { name: "x", host: "h", path: "/a/{b}", rsc: true, find: "T", pick: "data.items.{id}", where: "n>0", group: "s", format: "d => d.count + ' ok'" };
+  expect(() => new Function(renderRecipes([spec]))).not.toThrow();
+  expect(() => new Function(addSnippet(spec))).not.toThrow();
+});
+
+
+test("loading a bundle replaces the recipes of an older one, and an outdated tab refuses new recipes", () => {
+  const { renderRecipes, addSnippet } = require("../../src/lib/kit/recipes");
+  const g: any = { __ifkRecipes: { cost: () => 0, oldRecipe: () => 0, __runtime: "old" }, localStorage: undefined, document: undefined };
+  new Function("window", "document", renderRecipes([{ name: "a", host: "h", path: "/x" }]))(g, undefined);
+  expect(Object.keys(g.__ifkRecipes).filter((k) => !k.startsWith("__"))).toEqual(["a"]);
+  g.__ifkRecipes.__runtime = "stale";
+  const snippet = addSnippet({ name: "b", host: "h", path: "/y" }).replace(/^__ifkRecipes/, "window.__ifkRecipes");
+  expect(new Function("window", `return ${snippet}`)(g)).toMatch(/runtime outdated/);
 });

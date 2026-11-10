@@ -1,0 +1,32 @@
+#!/bin/sh
+# Development launcher: runs this checkout's iframer. When anything in src/, bin/cli.js
+# or skills/ is newer than dist/cli.js, it rebuilds first and refreshes the installed
+# copies (in-page kit, /iframer skill, every client.mjs). Link `iframer` here instead
+# of dist/cli.js to use the working tree without publishing. Not shipped to npm.
+ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+DIST="$ROOT/dist/cli.js"
+
+stale() {
+  [ ! -f "$DIST" ] && return 0
+  [ -n "$(find "$ROOT/src" "$ROOT/skills" "$ROOT/bin/cli.js" -type f -newer "$DIST" 2>/dev/null | head -1)" ]
+}
+
+if stale; then
+  LOCK="${TMPDIR:-/tmp}/iframer-dev-build.lock"
+  # One build at a time; others wait for it (up to ~60s), then use its result.
+  i=0
+  until mkdir "$LOCK" 2>/dev/null; do
+    i=$((i + 1)); [ $i -gt 120 ] && break; sleep 0.5
+  done
+  if stale; then
+    if ! (cd "$ROOT" && npm run build >/tmp/iframer-dev-build.log 2>&1); then
+      rmdir "$LOCK" 2>/dev/null
+      echo "iframer-dev: build failed, see /tmp/iframer-dev-build.log" >&2
+      exit 1
+    fi
+    node "$DIST" refresh >/dev/null 2>&1
+  fi
+  rmdir "$LOCK" 2>/dev/null
+fi
+
+exec node "$DIST" "$@"
