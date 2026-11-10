@@ -14813,7 +14813,8 @@ function readRows(file, sql) {
     } finally {
       d.close();
     }
-  } catch {
+  } catch (e) {
+    unreadable.set(file, e.message.split("\n")[0].slice(0, 80));
     return [];
   } finally {
     import_fs13.default.rmSync(tmp, { recursive: true, force: true });
@@ -14825,8 +14826,14 @@ function matches(host, cookieHost) {
   if (c.startsWith(".")) return h === c.slice(1) || h.endsWith(c);
   return h === c;
 }
-function profiles() {
+function appRoots() {
   const home = import_os5.default.homedir();
+  if (process.platform === "darwin") return [import_path14.default.join(home, "Library", "Application Support")];
+  if (process.platform === "win32") return [process.env.APPDATA, process.env.LOCALAPPDATA].filter(Boolean);
+  return [process.env.XDG_CONFIG_HOME || import_path14.default.join(home, ".config")];
+}
+function profiles() {
+  const win = process.platform === "win32";
   const out = [];
   const ls = (d) => {
     try {
@@ -14835,60 +14842,87 @@ function profiles() {
       return [];
     }
   };
-  if (process.platform === "darwin") {
-    const sup = import_path14.default.join(home, "Library", "Application Support");
-    for (const app of ls(sup).filter((a) => /^t3code/i.test(a))) {
-      const parts = import_path14.default.join(sup, app, "Partitions");
-      for (const p of ls(parts)) out.push({ source: `T3 Code tab (${p})`, file: import_path14.default.join(parts, p, "Cookies") });
-      out.push({ source: `T3 Code (${app})`, file: import_path14.default.join(sup, app, "Cookies") });
+  const add = (source, dir, opts = {}) => {
+    for (const f of [import_path14.default.join(dir, "Cookies"), import_path14.default.join(dir, "Network", "Cookies")]) out.push({ source, file: f, keychain: opts.keychain, localState: opts.localState });
+  };
+  for (const root of appRoots()) {
+    for (const app of ls(root).filter((a) => /^t3[\s_-]?code/i.test(a))) {
+      const appDir = import_path14.default.join(root, app);
+      const localState = import_path14.default.join(appDir, "Local State");
+      for (const p of ls(import_path14.default.join(appDir, "Partitions"))) add(`T3 Code tab (${p})`, import_path14.default.join(appDir, "Partitions", p), { localState });
+      add(`T3 Code (${app})`, appDir, { localState });
     }
-    const chromes = [
+    const chromes = process.platform === "darwin" ? [
       ["Chrome", "Google/Chrome", "Chrome Safe Storage"],
       ["Brave", "BraveSoftware/Brave-Browser", "Brave Safe Storage"],
       ["Edge", "Microsoft Edge", "Microsoft Edge Safe Storage"],
       ["Arc", "Arc/User Data", "Arc Safe Storage"],
       ["Chromium", "Chromium", "Chromium Safe Storage"]
-    ];
-    for (const [name, dir, keychain] of chromes) {
-      const root = import_path14.default.join(sup, dir);
-      for (const prof of ls(root)) {
-        for (const f of [import_path14.default.join(root, prof, "Cookies"), import_path14.default.join(root, prof, "Network", "Cookies")]) {
-          out.push({ source: `${name} (${prof})`, file: f, keychain });
-        }
-      }
-    }
-  } else if (process.platform === "linux") {
-    const cfg = process.env.XDG_CONFIG_HOME || import_path14.default.join(home, ".config");
-    for (const app of ls(cfg).filter((a) => /^t3code/i.test(a))) {
-      const parts = import_path14.default.join(cfg, app, "Partitions");
-      for (const p of ls(parts)) out.push({ source: `T3 Code tab (${p})`, file: import_path14.default.join(parts, p, "Cookies") });
-    }
-    for (const [name, dir] of [["Chrome", "google-chrome"], ["Chromium", "chromium"], ["Brave", "BraveSoftware/Brave-Browser"]]) {
-      const root = import_path14.default.join(cfg, dir);
-      for (const prof of ls(root)) for (const f of [import_path14.default.join(root, prof, "Cookies"), import_path14.default.join(root, prof, "Network", "Cookies")]) out.push({ source: `${name} (${prof})`, file: f });
+    ] : win ? [["Chrome", "Google/Chrome/User Data", ""], ["Edge", "Microsoft/Edge/User Data", ""], ["Brave", "BraveSoftware/Brave-Browser/User Data", ""], ["Chromium", "Chromium/User Data", ""]] : [["Chrome", "google-chrome", ""], ["Chromium", "chromium", ""], ["Brave", "BraveSoftware/Brave-Browser", ""]];
+    for (const [name, dir] of chromes) {
+      const r = import_path14.default.join(root, dir);
+      const localState = win ? import_path14.default.join(r, "Local State") : void 0;
+      for (const prof of ls(r)) if (prof !== "Local State") add(`${name} (${prof})`, import_path14.default.join(r, prof), { keychain: process.platform === "darwin" ? `${name} Safe Storage` : void 0, localState });
     }
   }
   return out.filter((p) => import_fs13.default.existsSync(p.file));
 }
-function chromeKey(p) {
-  if (process.platform === "linux") return import_crypto14.default.pbkdf2Sync("peanuts", "saltysalt", 1, 16, "sha1");
+function cookieStores() {
+  return profiles().map((p) => unreadable.has(p.file) ? `${p.source} [unreadable: ${unreadable.get(p.file)}]` : p.source);
+}
+function dpapiUnprotect(blobB64) {
+  const ps = `[Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String('${blobB64}'),$null,'CurrentUser'))`;
+  for (const exe of ["powershell", "pwsh"]) {
+    try {
+      const out = (0, import_child_process5.execFileSync)(exe, ["-NoProfile", "-NonInteractive", "-Command", ps], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 6e4 }).trim();
+      if (out) return Buffer.from(out, "base64");
+    } catch {
+    }
+  }
+  return null;
+}
+function cookieKey(p) {
+  if (process.platform === "win32") {
+    if (!p.localState) return null;
+    if (keys.has(p.localState)) return keys.get(p.localState);
+    let k2 = null;
+    try {
+      const b = Buffer.from(JSON.parse(import_fs13.default.readFileSync(p.localState, "utf8")).os_crypt.encrypted_key, "base64");
+      const blob = b.subarray(0, 5).toString() === "DPAPI" ? b.subarray(5) : b;
+      const key = dpapiUnprotect(blob.toString("base64"));
+      if (key && key.length === 32) k2 = { key, algo: "gcm" };
+    } catch {
+    }
+    keys.set(p.localState, k2);
+    return k2;
+  }
+  if (process.platform === "linux") return { key: import_crypto14.default.pbkdf2Sync("peanuts", "saltysalt", 1, 16, "sha1"), algo: "cbc" };
   if (!p.keychain) return null;
   if (keys.has(p.keychain)) return keys.get(p.keychain);
   let k = null;
   try {
     const pw = (0, import_child_process5.execFileSync)("security", ["find-generic-password", "-w", "-s", p.keychain], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 6e4 }).trim();
-    if (pw) k = import_crypto14.default.pbkdf2Sync(pw, "saltysalt", 1003, 16, "sha1");
+    if (pw) k = { key: import_crypto14.default.pbkdf2Sync(pw, "saltysalt", 1003, 16, "sha1"), algo: "cbc" };
   } catch {
   }
   keys.set(p.keychain, k);
   return k;
 }
-function decrypt2(enc, key, hostHashed) {
+function decrypt2(enc, ck, hostHashed) {
   const ver = enc.subarray(0, 3).toString();
   if (ver !== "v10" && ver !== "v11") return null;
   try {
-    const d = import_crypto14.default.createDecipheriv("aes-128-cbc", key, Buffer.alloc(16, " "));
-    let out = Buffer.concat([d.update(enc.subarray(3)), d.final()]);
+    let out;
+    if (ck.algo === "gcm") {
+      const iv = enc.subarray(3, 15);
+      const tag = enc.subarray(enc.length - 16);
+      const d = import_crypto14.default.createDecipheriv("aes-256-gcm", ck.key, iv);
+      d.setAuthTag(tag);
+      out = Buffer.concat([d.update(enc.subarray(15, enc.length - 16)), d.final()]);
+    } else {
+      const d = import_crypto14.default.createDecipheriv("aes-128-cbc", ck.key, Buffer.alloc(16, " "));
+      out = Buffer.concat([d.update(enc.subarray(3)), d.final()]);
+    }
     if (hostHashed && out.length >= 32) out = out.subarray(32);
     return out.toString("utf8");
   } catch {
@@ -14911,8 +14945,11 @@ function browserJars(host, opts = {}) {
     for (const r of mine) {
       let v = r.value || null;
       if (!v && r.enc) {
-        const key = chromeKey(p);
-        if (!key) continue;
+        const key = cookieKey(p);
+        if (!key) {
+          unreadable.set(p.file, process.platform === "win32" ? "cookies are encrypted and the Local State key could not be unwrapped" : "cookies are encrypted and the decryption key is unavailable");
+          continue;
+        }
         v = decrypt2(Buffer.from(r.enc, "hex"), key, version >= 24);
       }
       if (v == null) continue;
@@ -14932,7 +14969,7 @@ function cookieHeader(jar) {
   }
   return [...seen].map(([n, v]) => `${n}=${v.value}`).join("; ");
 }
-var import_crypto14, import_fs13, import_os5, import_path14, import_child_process5, IS_BUN2, chromeMs, keys;
+var import_crypto14, import_fs13, import_os5, import_path14, import_child_process5, IS_BUN2, unreadable, chromeMs, keys;
 var init_browser_cookies = __esm({
   "src/lib/kit/browser-cookies.ts"() {
     "use strict";
@@ -14942,6 +14979,7 @@ var init_browser_cookies = __esm({
     import_path14 = __toESM(require("path"));
     import_child_process5 = require("child_process");
     IS_BUN2 = typeof globalThis.Bun !== "undefined";
+    unreadable = /* @__PURE__ */ new Map();
     chromeMs = (t) => t ? t / 1e3 - 116444736e5 : 0;
     keys = /* @__PURE__ */ new Map();
   }
@@ -15036,10 +15074,12 @@ async function refreshSession(host, dir, opts = {}) {
     const second = await attempt(browserJars(host, { keychain: true }).filter((j) => !tried.some((t) => t.startsWith(j.source + ":"))));
     if (second) return second;
   }
+  const stores = [...new Set(cookieStores())];
+  const looked = stores.length ? `looked in ${stores.length} browser cookie store(s): ${stores.slice(0, 6).join(", ")}${stores.length > 6 ? ", ..." : ""}` : "found no browser cookie store on this machine (T3 Code, Chrome, Brave, Edge, Arc)";
   return {
     ok: false,
     envFile,
-    note: tried.length ? `no logged-in session found (${tried.join("; ")}). Log in to ${host} in the browser, then run this again` : `no browser on this machine has cookies for ${host}. Log in to it in the browser, then run this again`
+    note: tried.length ? `no logged-in session found (${tried.join("; ")}). Log in to ${host} in the browser tab, then run this again` : `no cookies for ${host} on this machine (${looked}). Log in to ${host} in a T3 Code tab or Chrome, then run this again. If you are logged in and this still fails, report it as an iframer bug with this message; do not ask for the cookie`
   };
 }
 var import_fs14, import_path15, LOGIN;

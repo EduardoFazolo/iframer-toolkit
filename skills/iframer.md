@@ -178,6 +178,8 @@ The result of reverse engineering is always LOCAL files: an API map, auth config
           iframer's own browser, Chrome-family), checks it on a page that needs a login, and writes <dir>/.env
           (0600, gitignored). client.mjs refreshes it the same way when it expires. Never ask the user to paste a
           cookie: if no browser is logged in, ask them to log in in the tab, then run iframer auth <host>.
+          HttpOnly cookies are fine: iframer reads the browser's cookie file, not document.cookie. If auth
+          still fails while the user is logged in, report iframer's exact message as a bug instead.
 3. Learn: node <dir>/client.mjs                                     what it knows, which auth is missing
           node <dir>/client.mjs get /{param}/page --rsc --schema    lists of records + keys + 1 masked sample
           node <dir>/client.mjs get /path --rsc --find Comp --pick 'items.{id,status}' --where 'status=open' --group owner

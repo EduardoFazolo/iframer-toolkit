@@ -6,7 +6,7 @@
  */
 import fs from "fs";
 import path from "path";
-import { browserJars, cookieHeader, type CookieJar } from "./browser-cookies";
+import { browserJars, cookieHeader, cookieStores, type CookieJar } from "./browser-cookies";
 import { apisDir } from "./recipes";
 
 export interface SessionResult {
@@ -106,11 +106,14 @@ export async function refreshSession(host: string, dir: string, opts: { extra?: 
     const second = await attempt(browserJars(host, { keychain: true }).filter((j) => !tried.some((t) => t.startsWith(j.source + ":"))));
     if (second) return second;
   }
+  // Say exactly where we looked, so nobody guesses that the cookie is unreadable (HttpOnly is fine here).
+  const stores = [...new Set(cookieStores())];
+  const looked = stores.length ? `looked in ${stores.length} browser cookie store(s): ${stores.slice(0, 6).join(", ")}${stores.length > 6 ? ", ..." : ""}` : "found no browser cookie store on this machine (T3 Code, Chrome, Brave, Edge, Arc)";
   return {
     ok: false,
     envFile,
     note: tried.length
-      ? `no logged-in session found (${tried.join("; ")}). Log in to ${host} in the browser, then run this again`
-      : `no browser on this machine has cookies for ${host}. Log in to it in the browser, then run this again`,
+      ? `no logged-in session found (${tried.join("; ")}). Log in to ${host} in the browser tab, then run this again`
+      : `no cookies for ${host} on this machine (${looked}). Log in to ${host} in a T3 Code tab or Chrome, then run this again. If you are logged in and this still fails, report it as an iframer bug with this message; do not ask for the cookie`,
   };
 }
