@@ -25,14 +25,39 @@ const IS_BUN = typeof (globalThis as any).Bun !== "undefined";
 /** Cookie files that exist but could not be read (locked by the running app, no sqlite driver...). */
 const unreadable = new Map<string, string>();
 
+/**
+ * Copy a file that another process holds open. fs.copyFileSync uses the OS copy call,
+ * which on Windows opens the source without a write share and fails EBUSY/EPERM when the
+ * browser has the cookie DB open. Falling back to our own open ('r' requests shared
+ * read/write/delete on Windows) and a manual byte copy reads it alongside the live app.
+ */
+function copyOpenFile(src: string, dst: string): void {
+  try {
+    fs.copyFileSync(src, dst);
+    return;
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code !== "EBUSY" && code !== "EPERM" && code !== "EACCES") throw e;
+  }
+  const fd = fs.openSync(src, "r");
+  try {
+    const buf = Buffer.allocUnsafe(1 << 20);
+    let pos = 0, n = 0;
+    const out = fs.openSync(dst, "w");
+    try {
+      while ((n = fs.readSync(fd, buf, 0, buf.length, pos)) > 0) { fs.writeSync(out, buf, 0, n); pos += n; }
+    } finally { fs.closeSync(out); }
+  } finally { fs.closeSync(fd); }
+}
+
 function readRows(file: string, sql: string): any[] {
   // Copy first: the browser holds the file open and may be writing to it.
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ifk-ck-"));
   try {
     const db = path.join(tmp, "c");
-    fs.copyFileSync(file, db);
-    if (fs.existsSync(file + "-journal")) fs.copyFileSync(file + "-journal", db + "-journal");
-    if (fs.existsSync(file + "-wal")) fs.copyFileSync(file + "-wal", db + "-wal");
+    copyOpenFile(file, db);
+    if (fs.existsSync(file + "-journal")) copyOpenFile(file + "-journal", db + "-journal");
+    if (fs.existsSync(file + "-wal")) copyOpenFile(file + "-wal", db + "-wal");
     if (IS_BUN) {
       const { Database } = require("bun:sqlite");
       const d = new Database(db);

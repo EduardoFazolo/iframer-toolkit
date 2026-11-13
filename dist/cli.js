@@ -14790,13 +14790,38 @@ if (isMain) {
 });
 
 // src/lib/kit/browser-cookies.ts
+function copyOpenFile(src, dst) {
+  try {
+    import_fs13.default.copyFileSync(src, dst);
+    return;
+  } catch (e) {
+    const code = e.code;
+    if (code !== "EBUSY" && code !== "EPERM" && code !== "EACCES") throw e;
+  }
+  const fd = import_fs13.default.openSync(src, "r");
+  try {
+    const buf = Buffer.allocUnsafe(1 << 20);
+    let pos = 0, n = 0;
+    const out = import_fs13.default.openSync(dst, "w");
+    try {
+      while ((n = import_fs13.default.readSync(fd, buf, 0, buf.length, pos)) > 0) {
+        import_fs13.default.writeSync(out, buf, 0, n);
+        pos += n;
+      }
+    } finally {
+      import_fs13.default.closeSync(out);
+    }
+  } finally {
+    import_fs13.default.closeSync(fd);
+  }
+}
 function readRows(file, sql) {
   const tmp = import_fs13.default.mkdtempSync(import_path14.default.join(import_os5.default.tmpdir(), "ifk-ck-"));
   try {
     const db = import_path14.default.join(tmp, "c");
-    import_fs13.default.copyFileSync(file, db);
-    if (import_fs13.default.existsSync(file + "-journal")) import_fs13.default.copyFileSync(file + "-journal", db + "-journal");
-    if (import_fs13.default.existsSync(file + "-wal")) import_fs13.default.copyFileSync(file + "-wal", db + "-wal");
+    copyOpenFile(file, db);
+    if (import_fs13.default.existsSync(file + "-journal")) copyOpenFile(file + "-journal", db + "-journal");
+    if (import_fs13.default.existsSync(file + "-wal")) copyOpenFile(file + "-wal", db + "-wal");
     if (IS_BUN2) {
       const { Database: Database2 } = require("bun:sqlite");
       const d2 = new Database2(db);
