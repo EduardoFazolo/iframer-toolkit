@@ -15037,6 +15037,9 @@ var init_browser_cookies = __esm({
 });
 
 // src/lib/kit/session-env.ts
+function storeLocked(store) {
+  return /unreadable:\s*(EBUSY|EPERM|EACCES)|resource busy or locked/i.test(store);
+}
 function candidatePaths(host, dir) {
   for (const d of [dir, apisDir(host)]) {
     try {
@@ -15126,7 +15129,16 @@ async function refreshSession(host, dir, opts = {}) {
     if (second) return second;
   }
   const stores = [...new Set(cookieStores())];
+  const locked = stores.some(storeLocked);
   const looked = stores.length ? `looked in ${stores.length} browser cookie store(s): ${stores.slice(0, 6).join(", ")}${stores.length > 6 ? ", ..." : ""}` : "found no browser cookie store on this machine (T3 Code, Chrome, Brave, Edge, Arc)";
+  if (locked) {
+    return {
+      ok: false,
+      locked: true,
+      envFile,
+      note: `${host}'s session is open in a browser that locks its cookie store, so it can't be exported to a file (${looked}). This is normal on Windows with T3 Code running. Run the recipes inside the logged-in tab instead (in-page replay): iframer recipe ${host} --in-page`
+    };
+  }
   return {
     ok: false,
     envFile,
@@ -15183,6 +15195,7 @@ __export(kit_exports, {
   saveRecipe: () => saveRecipe,
   scanCapture: () => scanCapture,
   schemaFromMap: () => schemaFromMap,
+  storeLocked: () => storeLocked,
   writeBundle: () => writeBundle,
   writeClient: () => writeClient,
   writeEnv: () => writeEnv,
@@ -15273,7 +15286,7 @@ function kitInstructions(target, kitPath) {
 }
 function recipeInstructions(bundle, names) {
   return [
-    `In-page fallback (only for sites that block requests from Node). Load once per site (kept in the site's localStorage: survives reloads and new tabs; repeat only when the bundle changes):`,
+    `In-page replay \u2014 run recipes in the logged-in tab (the tab sends the session itself, HttpOnly included; no cookie export needed). Use this when iframer auth says the session is locked/can't be exported, or when a site blocks Node. Load once per site (kept in the site's localStorage: survives reloads and new tabs; repeat only when the bundle changes):`,
     `1. preview_evaluate: ${MAKE_INPUT}`,
     `2. preview_act: action=upload, selector=#__ifk_in, paths=["${bundle}"]`,
     `3. preview_evaluate: document.getElementById('__ifk_in').files[0].text().then(t=>{${LS}.__ifkR=t;document.getElementById('__ifk_in').remove();return t.length})`,
@@ -16593,6 +16606,21 @@ Screenshot: ${shot}`);
         }
         const r = await kit.refreshSession(host, dir, { extra, keychain: !hasFlag(args, "--no-keychain") && !auto });
         if (!r.ok) {
+          if (r.locked) {
+            if (auto) {
+              console.log(`auth: ${r.note}`);
+              process.exit(2);
+            }
+            console.error(`  ${r.note}.
+`);
+            try {
+              const bundle = kit.writeBundle(host);
+              const names = kit.listRecipes(host).map((x) => x.name);
+              console.error(kit.recipeInstructions(bundle, names));
+            } catch {
+            }
+            process.exit(2);
+          }
           if (auto) console.log(`auth: ${r.note}`);
           else console.error(`  ${r.note}.`);
           process.exit(1);

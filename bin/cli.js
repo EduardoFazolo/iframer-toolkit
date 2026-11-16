@@ -1441,6 +1441,20 @@ async function main() {
         } catch {}
         const r = await kit.refreshSession(host, dir, { extra, keychain: !hasFlag(args, "--no-keychain") && !auto });
         if (!r.ok) {
+          // The session is open in a browser that locks its cookie store (Windows
+          // + T3 Code / Chrome), so it can't be exported. Don't dead-end: switch
+          // to in-page replay — build the bundle and print how to run recipes in
+          // the logged-in tab, where the browser attaches the session itself.
+          if (r.locked) {
+            if (auto) { console.log(`auth: ${r.note}`); process.exit(2); }
+            console.error(`  ${r.note}.\n`);
+            try {
+              const bundle = kit.writeBundle(host);
+              const names = kit.listRecipes(host).map((x) => x.name);
+              console.error(kit.recipeInstructions(bundle, names));
+            } catch {}
+            process.exit(2);
+          }
           if (auto) console.log(`auth: ${r.note}`); else console.error(`  ${r.note}.`);
           process.exit(1);
         }

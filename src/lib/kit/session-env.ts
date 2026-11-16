@@ -15,6 +15,18 @@ export interface SessionResult {
   /** Why nothing was saved, or what was tried. */
   note?: string;
   envFile: string;
+  /**
+   * True when a browser on this machine holds a cookie store open with an
+   * exclusive lock (Windows: T3 Code / Chrome keep their cookie DB locked while
+   * running), so the session exists but cannot be exported to a file. The caller
+   * should switch to in-page replay (run recipes inside the logged-in tab).
+   */
+  locked?: boolean;
+}
+
+/** A cookie store that exists but is locked by the running browser (can't be copied/read). */
+export function storeLocked(store: string): boolean {
+  return /unreadable:\s*(EBUSY|EPERM|EACCES)|resource busy or locked/i.test(store);
 }
 
 const LOGIN = /\/(login|log-in|signin|sign-in|auth|sso)(\/|\?|$)/i;
@@ -108,7 +120,19 @@ export async function refreshSession(host: string, dir: string, opts: { extra?: 
   }
   // Say exactly where we looked, so nobody guesses that the cookie is unreadable (HttpOnly is fine here).
   const stores = [...new Set(cookieStores())];
+  const locked = stores.some(storeLocked);
   const looked = stores.length ? `looked in ${stores.length} browser cookie store(s): ${stores.slice(0, 6).join(", ")}${stores.length > 6 ? ", ..." : ""}` : "found no browser cookie store on this machine (T3 Code, Chrome, Brave, Edge, Arc)";
+  // A locked store means the session is there but the running browser (T3 Code /
+  // Chrome on Windows) holds its cookie DB open exclusively, so it can't be
+  // exported. Don't dead-end — point at in-page replay, which needs no export.
+  if (locked) {
+    return {
+      ok: false,
+      locked: true,
+      envFile,
+      note: `${host}'s session is open in a browser that locks its cookie store, so it can't be exported to a file (${looked}). This is normal on Windows with T3 Code running. Run the recipes inside the logged-in tab instead (in-page replay): iframer recipe ${host} --in-page`,
+    };
+  }
   return {
     ok: false,
     envFile,

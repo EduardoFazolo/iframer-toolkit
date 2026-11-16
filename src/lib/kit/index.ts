@@ -144,10 +144,16 @@ export const recipeRun = (name: string, args = "{...}") => `(eval(localStorage._
 /** Same, for sites that delete window.localStorage (reads it through a blank iframe). */
 export const recipeRunFallback = (name: string, args = "{...}") => `(eval(${LS}.__ifkR),__ifkRecipes.${name}(${args}))`;
 
-/** Fallback for sites that block non-browser clients: load the in-page bundle into a T3 tab and run one. */
+/**
+ * Run recipes inside a logged-in T3 tab: load the in-page bundle into the tab
+ * and call one. The tab's browser attaches the real session (HttpOnly included),
+ * so this needs no exported cookie. Use it when the session can't be exported —
+ * on Windows a T3 Code tab login lives in a cookie store the running browser
+ * locks — and for sites that block non-browser (Node) clients.
+ */
 export function recipeInstructions(bundle: string, names: string[]): string {
   return [
-    `In-page fallback (only for sites that block requests from Node). Load once per site (kept in the site's localStorage: survives reloads and new tabs; repeat only when the bundle changes):`,
+    `In-page replay — run recipes in the logged-in tab (the tab sends the session itself, HttpOnly included; no cookie export needed). Use this when iframer auth says the session is locked/can't be exported, or when a site blocks Node. Load once per site (kept in the site's localStorage: survives reloads and new tabs; repeat only when the bundle changes):`,
     `1. preview_evaluate: ${MAKE_INPUT}`,
     `2. preview_act: action=upload, selector=#__ifk_in, paths=["${bundle}"]`,
     `3. preview_evaluate: document.getElementById('__ifk_in').files[0].text().then(t=>{${LS}.__ifkR=t;document.getElementById('__ifk_in').remove();return t.length})`,
