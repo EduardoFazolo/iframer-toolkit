@@ -15036,64 +15036,6 @@ var init_browser_cookies = __esm({
   }
 });
 
-// src/lib/kit/t3-cookie-bridge.ts
-function t3BridgeConfig(env = process.env) {
-  const token = env.IFRAMER_T3_COOKIE_TOKEN || env.T3_ACP_MCP_AUTHORIZATION || env.T3_LOCAL_BEARER;
-  const explicit = env.IFRAMER_T3_COOKIE_URL;
-  if (explicit) return { url: explicit, token };
-  const base = env.IFRAMER_T3_BASE_URL || (env.T3_ACP_MCP_ENDPOINT ? originOf(env.T3_ACP_MCP_ENDPOINT) : null);
-  if (base && token) return { url: base.replace(/\/+$/, "") + T3_COOKIE_PATH, token };
-  return null;
-}
-function t3BridgeConfigured(env = process.env) {
-  return t3BridgeConfig(env) !== null;
-}
-function belongs(bare, domain) {
-  const d = (domain || "").replace(/^\./, "").toLowerCase();
-  if (!d) return false;
-  return bare === d || bare.endsWith("." + d) || d.endsWith("." + bare);
-}
-async function t3BridgeJars(host, opts = {}) {
-  const env = opts.env || process.env;
-  const cfg = t3BridgeConfig(env);
-  if (!cfg) return [];
-  const f = opts.fetchImpl || globalThis.fetch;
-  if (!f) return [];
-  const bare = host.toLowerCase().split(":")[0].replace(/^www\./, "");
-  try {
-    const res = await f(cfg.url, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...authHeader(cfg.token) },
-      body: JSON.stringify({ host: bare, urls: [`https://${bare}/`] }),
-      signal: AbortSignal.timeout(8e3)
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    const raw = Array.isArray(data) ? data : data?.cookies || [];
-    const now = Date.now() / 1e3;
-    const cookies = raw.filter((c) => c && typeof c.name === "string" && typeof c.value === "string" && belongs(bare, c.domain)).filter((c) => c.expires == null || c.expires <= 0 || c.expires > now).map((c) => ({ name: c.name, value: c.value, domain: c.domain || bare, path: c.path || "/" }));
-    if (!cookies.length) return [];
-    return [{ source: "T3 Code session (bridge)", cookies, lastUsed: Date.now() }];
-  } catch {
-    return [];
-  }
-}
-var T3_COOKIE_PATH, originOf, authHeader;
-var init_t3_cookie_bridge = __esm({
-  "src/lib/kit/t3-cookie-bridge.ts"() {
-    "use strict";
-    T3_COOKIE_PATH = "/api/experimental/preview/cookies";
-    originOf = (u) => {
-      try {
-        return new URL(u).origin;
-      } catch {
-        return null;
-      }
-    };
-    authHeader = (token) => token ? { authorization: /^bearer\s/i.test(token) ? token : `Bearer ${token}` } : {};
-  }
-});
-
 // src/lib/kit/session-env.ts
 function candidatePaths(host, dir) {
   for (const d of [dir, apisDir(host)]) {
@@ -15177,17 +15119,14 @@ async function refreshSession(host, dir, opts = {}) {
     if (untested) return { ok: true, source: `${untested.source} (not verified: no captured page needs a login)`, envFile: writeEnv(dir, { COOKIE: cookieHeader(untested) }) };
     return null;
   };
-  const bridge = await t3BridgeJars(host).catch(() => []);
-  const first = await attempt([...bridge, ...browserJars(host, { keychain: false }), ...opts.extra || []]);
+  const first = await attempt([...browserJars(host, { keychain: false }), ...opts.extra || []]);
   if (first) return first;
   if (opts.keychain !== false) {
     const second = await attempt(browserJars(host, { keychain: true }).filter((j) => !tried.some((t) => t.startsWith(j.source + ":"))));
     if (second) return second;
   }
   const stores = [...new Set(cookieStores())];
-  const locked = stores.some((s) => /unreadable: EBUSY|resource busy or locked/i.test(s));
-  const bridgeNote = t3BridgeConfigured() ? "; the T3 Code cookie bridge was tried too" : locked ? "; a store was locked by the running app and the T3 Code cookie bridge is not available (T3 Code exposes no cookie endpoint on this build)" : "";
-  const looked = (stores.length ? `looked in ${stores.length} browser cookie store(s): ${stores.slice(0, 6).join(", ")}${stores.length > 6 ? ", ..." : ""}` : "found no browser cookie store on this machine (T3 Code, Chrome, Brave, Edge, Arc)") + bridgeNote;
+  const looked = stores.length ? `looked in ${stores.length} browser cookie store(s): ${stores.slice(0, 6).join(", ")}${stores.length > 6 ? ", ..." : ""}` : "found no browser cookie store on this machine (T3 Code, Chrome, Brave, Edge, Arc)";
   return {
     ok: false,
     envFile,
@@ -15201,7 +15140,6 @@ var init_session_env = __esm({
     import_fs14 = __toESM(require("fs"));
     import_path15 = __toESM(require("path"));
     init_browser_cookies();
-    init_t3_cookie_bridge();
     init_recipes();
     LOGIN = /\/(login|log-in|signin|sign-in|auth|sso)(\/|\?|$)/i;
   }
@@ -15213,7 +15151,6 @@ __export(kit_exports, {
   CaptureError: () => CaptureError,
   KIT_TARGETS: () => KIT_TARGETS,
   RUNTIME: () => RUNTIME,
-  T3_COOKIE_PATH: () => T3_COOKIE_PATH,
   addOutputDir: () => addOutputDir,
   addSnippet: () => addSnippet,
   apisDir: () => apisDir,
@@ -15246,9 +15183,6 @@ __export(kit_exports, {
   saveRecipe: () => saveRecipe,
   scanCapture: () => scanCapture,
   schemaFromMap: () => schemaFromMap,
-  t3BridgeConfig: () => t3BridgeConfig,
-  t3BridgeConfigured: () => t3BridgeConfigured,
-  t3BridgeJars: () => t3BridgeJars,
   writeBundle: () => writeBundle,
   writeClient: () => writeClient,
   writeEnv: () => writeEnv,
@@ -15369,7 +15303,6 @@ var init_kit = __esm({
     init_capture();
     init_recipes();
     init_session_env();
-    init_t3_cookie_bridge();
     KIT_TARGETS = ["t3", "playwright-mcp", "any"];
     MAKE_INPUT = `(()=>{let i=document.createElement('input');i.type='file';i.id='__ifk_in';i.style.display='none';document.documentElement.append(i);return 1})()`;
     SS = `(window.sessionStorage||(document.getElementById('__ifk_ss')||(f=>(f.id='__ifk_ss',f.style.display='none',document.documentElement.append(f),f))(document.createElement('iframe'))).contentWindow.sessionStorage)`;
