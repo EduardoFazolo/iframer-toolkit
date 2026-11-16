@@ -50,6 +50,53 @@ function copyOpenFile(src: string, dst: string): void {
   } finally { fs.closeSync(fd); }
 }
 
+/**
+ * Query a copied cookie DB, returning rows as plain objects. The driver is
+ * picked once, best-first:
+ *   1. bun:sqlite        — when running under Bun.
+ *   2. node:sqlite       — the Node standard-library SQLite (stable since Node 22).
+ *                          It has no native addon to compile or load, so it keeps
+ *                          working across Node major versions where a prebuilt
+ *                          better-sqlite3 binary would fail to load (the real
+ *                          Windows failure: "The module '...' could not be read"
+ *                          after a Node upgrade).
+ *   3. better-sqlite3    — only if node:sqlite is missing (older Node).
+ * node:sqlite needs setReadBigInts(true) to read Chrome's out-of-range
+ * microsecond timestamps; those BigInts are coerced back to Number so callers
+ * (chromeMs, Number(...)) are unchanged from the better-sqlite3 behaviour.
+ */
+type SqlAll = (dbPath: string, sql: string) => any[];
+let sqlAll: SqlAll | null = null;
+function getSqlAll(): SqlAll {
+  if (sqlAll) return sqlAll;
+  if (IS_BUN) {
+    const { Database } = require("bun:sqlite");
+    return (sqlAll = (dbPath, sql) => {
+      const d = new Database(dbPath);
+      try { return d.query(sql).all(); } finally { d.close(); }
+    });
+  }
+  try {
+    const { DatabaseSync } = require("node:sqlite");
+    return (sqlAll = (dbPath, sql) => {
+      const d = new DatabaseSync(dbPath, { readOnly: true });
+      try {
+        const st = d.prepare(sql);
+        st.setReadBigInts(true);
+        return st.all().map((row: any) => {
+          for (const k in row) if (typeof row[k] === "bigint") row[k] = Number(row[k]);
+          return row;
+        });
+      } finally { d.close(); }
+    });
+  } catch {}
+  const Database = require("better-sqlite3");
+  return (sqlAll = (dbPath, sql) => {
+    const d = new Database(dbPath);
+    try { return d.prepare(sql).all(); } finally { d.close(); }
+  });
+}
+
 function readRows(file: string, sql: string): any[] {
   // Copy first: the browser holds the file open and may be writing to it.
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ifk-ck-"));
@@ -58,20 +105,19 @@ function readRows(file: string, sql: string): any[] {
     copyOpenFile(file, db);
     if (fs.existsSync(file + "-journal")) copyOpenFile(file + "-journal", db + "-journal");
     if (fs.existsSync(file + "-wal")) copyOpenFile(file + "-wal", db + "-wal");
-    if (IS_BUN) {
-      const { Database } = require("bun:sqlite");
-      const d = new Database(db);
-      try { return d.query(sql).all(); } finally { d.close(); }
-    }
-    const Database = require("better-sqlite3");
-    const d = new Database(db);
-    try { return d.prepare(sql).all(); } finally { d.close(); }
+    return getSqlAll()(db, sql);
   } catch (e) {
     unreadable.set(file, (e as Error).message.split("\n")[0].slice(0, 80));
     return [];
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+}
+
+/** Read a copied cookie SQLite file. Exposed for tests — exercises the active
+ *  SQLite driver (node:sqlite / better-sqlite3) and the BigInt→Number coercion. */
+export function __readCookieRowsForTest(file: string, sql: string): any[] {
+  return readRows(file, sql);
 }
 
 /** Cookies that a request to host would carry: same host, or a parent-domain cookie. */

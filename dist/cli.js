@@ -14815,6 +14815,46 @@ function copyOpenFile(src, dst) {
     import_fs13.default.closeSync(fd);
   }
 }
+function getSqlAll() {
+  if (sqlAll) return sqlAll;
+  if (IS_BUN2) {
+    const { Database: Database2 } = require("bun:sqlite");
+    return sqlAll = (dbPath, sql) => {
+      const d = new Database2(dbPath);
+      try {
+        return d.query(sql).all();
+      } finally {
+        d.close();
+      }
+    };
+  }
+  try {
+    const { DatabaseSync } = require("node:sqlite");
+    return sqlAll = (dbPath, sql) => {
+      const d = new DatabaseSync(dbPath, { readOnly: true });
+      try {
+        const st = d.prepare(sql);
+        st.setReadBigInts(true);
+        return st.all().map((row) => {
+          for (const k in row) if (typeof row[k] === "bigint") row[k] = Number(row[k]);
+          return row;
+        });
+      } finally {
+        d.close();
+      }
+    };
+  } catch {
+  }
+  const Database = require("better-sqlite3");
+  return sqlAll = (dbPath, sql) => {
+    const d = new Database(dbPath);
+    try {
+      return d.prepare(sql).all();
+    } finally {
+      d.close();
+    }
+  };
+}
 function readRows(file, sql) {
   const tmp = import_fs13.default.mkdtempSync(import_path14.default.join(import_os5.default.tmpdir(), "ifk-ck-"));
   try {
@@ -14822,22 +14862,7 @@ function readRows(file, sql) {
     copyOpenFile(file, db);
     if (import_fs13.default.existsSync(file + "-journal")) copyOpenFile(file + "-journal", db + "-journal");
     if (import_fs13.default.existsSync(file + "-wal")) copyOpenFile(file + "-wal", db + "-wal");
-    if (IS_BUN2) {
-      const { Database: Database2 } = require("bun:sqlite");
-      const d2 = new Database2(db);
-      try {
-        return d2.query(sql).all();
-      } finally {
-        d2.close();
-      }
-    }
-    const Database = require("better-sqlite3");
-    const d = new Database(db);
-    try {
-      return d.prepare(sql).all();
-    } finally {
-      d.close();
-    }
+    return getSqlAll()(db, sql);
   } catch (e) {
     unreadable.set(file, e.message.split("\n")[0].slice(0, 80));
     return [];
@@ -14994,7 +15019,7 @@ function cookieHeader(jar) {
   }
   return [...seen].map(([n, v]) => `${n}=${v.value}`).join("; ");
 }
-var import_crypto14, import_fs13, import_os5, import_path14, import_child_process5, IS_BUN2, unreadable, chromeMs, keys;
+var import_crypto14, import_fs13, import_os5, import_path14, import_child_process5, IS_BUN2, unreadable, sqlAll, chromeMs, keys;
 var init_browser_cookies = __esm({
   "src/lib/kit/browser-cookies.ts"() {
     "use strict";
@@ -15005,6 +15030,7 @@ var init_browser_cookies = __esm({
     import_child_process5 = require("child_process");
     IS_BUN2 = typeof globalThis.Bun !== "undefined";
     unreadable = /* @__PURE__ */ new Map();
+    sqlAll = null;
     chromeMs = (t) => t ? t / 1e3 - 116444736e5 : 0;
     keys = /* @__PURE__ */ new Map();
   }
