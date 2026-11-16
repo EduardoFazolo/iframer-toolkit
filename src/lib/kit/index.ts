@@ -14,6 +14,7 @@ import { recipeCore } from "./recipe-core";
 export * from "./capture";
 export * from "./recipes";
 export * from "./session-env";
+export * from "./t3-cookie-bridge";
 
 export interface KitOptions {
   mode?: "hook" | "passive";

@@ -7,6 +7,7 @@
 import fs from "fs";
 import path from "path";
 import { browserJars, cookieHeader, cookieStores, type CookieJar } from "./browser-cookies";
+import { t3BridgeJars, t3BridgeConfigured } from "./t3-cookie-bridge";
 import { apisDir } from "./recipes";
 
 export interface SessionResult {
@@ -100,7 +101,12 @@ export async function refreshSession(host: string, dir: string, opts: { extra?: 
     return null;
   };
 
-  const first = await attempt([...browserJars(host, { keychain: false }), ...(opts.extra || [])]);
+  // Ask T3 Code for its session first: on Windows the T3 tab login lives in a
+  // cookie DB that is exclusively locked while T3 runs, so it can't be read from
+  // disk — the bridge gets it (HttpOnly included) straight from T3. No-op unless
+  // the bridge is configured, so other platforms/machines are unaffected.
+  const bridge = await t3BridgeJars(host).catch(() => [] as CookieJar[]);
+  const first = await attempt([...bridge, ...browserJars(host, { keychain: false }), ...(opts.extra || [])]);
   if (first) return first;
   if (opts.keychain !== false) {
     const second = await attempt(browserJars(host, { keychain: true }).filter((j) => !tried.some((t) => t.startsWith(j.source + ":"))));
@@ -108,7 +114,13 @@ export async function refreshSession(host: string, dir: string, opts: { extra?: 
   }
   // Say exactly where we looked, so nobody guesses that the cookie is unreadable (HttpOnly is fine here).
   const stores = [...new Set(cookieStores())];
-  const looked = stores.length ? `looked in ${stores.length} browser cookie store(s): ${stores.slice(0, 6).join(", ")}${stores.length > 6 ? ", ..." : ""}` : "found no browser cookie store on this machine (T3 Code, Chrome, Brave, Edge, Arc)";
+  const locked = stores.some((s) => /unreadable: EBUSY|resource busy or locked/i.test(s));
+  const bridgeNote = t3BridgeConfigured()
+    ? "; the T3 Code cookie bridge was tried too"
+    : locked
+      ? "; a store was locked by the running app and the T3 Code cookie bridge is not available (T3 Code exposes no cookie endpoint on this build)"
+      : "";
+  const looked = (stores.length ? `looked in ${stores.length} browser cookie store(s): ${stores.slice(0, 6).join(", ")}${stores.length > 6 ? ", ..." : ""}` : "found no browser cookie store on this machine (T3 Code, Chrome, Brave, Edge, Arc)") + bridgeNote;
   return {
     ok: false,
     envFile,
