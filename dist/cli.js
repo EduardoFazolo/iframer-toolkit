@@ -15291,7 +15291,7 @@ function recipeInstructions(bundle, names) {
     `2. preview_act: action=upload, selector=#__ifk_in, paths=["${bundle}"]`,
     `3. preview_evaluate: document.getElementById('__ifk_in').files[0].text().then(t=>{${LS}.__ifkR=t;document.getElementById('__ifk_in').remove();return t.length})`,
     ``,
-    `Run: ONE call, one short line back:`,
+    names.length ? `Run: ONE call, one short line back:` : `No recipes saved for this site yet \u2014 save one first (iframer recipe <host> <name> --path ... ), then run it in the tab:`,
     ...names.map((n) => `   preview_evaluate: ${recipeRun(n)}`),
     ``,
     `If the site deletes localStorage ("localStorage is not defined"): ${recipeRunFallback(names[0] || "<name>")}`
