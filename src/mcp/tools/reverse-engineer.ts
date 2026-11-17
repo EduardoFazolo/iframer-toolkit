@@ -15,7 +15,7 @@ During capture, drive the site like a user (open the inbox, send a message…) �
     {
       steps: z.array(z.record(z.string(), z.unknown())).describe("Pipeline steps to run while capturing — same step format as the execute tool"),
       outputDir: z.string().optional().describe("Directory to save the captured API files. If not provided, ask the user or default to ./<domain>/"),
-      typed: z.boolean().optional().describe("Save as .ts with inferred types instead of .js. Set to true when the user asks for types, typescript, or type inference."),
+      typed: z.boolean().optional().describe("TypeScript (.ts + types.ts) is the default. Pass false only when the user explicitly asks for plain JavaScript."),
       options: z.object({
         staleTimeoutMs: z.number().optional().describe("Override the 20s stale-state timeout per step"),
         continueOnObstacle: z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
@@ -164,7 +164,8 @@ export function formatCapturedApi(lines: string[], capturedApi: CapturedApi[], p
 
   const mainDomain = capturedApi[0]?.domain || "api";
   const dir = params.outputDir || `./${mainDomain}`;
-  const ext = params.typed ? ".ts" : ".js";
+  const typed = params.typed !== false;
+  const ext = typed ? ".ts" : ".js";
   lines.push(`\n━━━ Save instructions ━━━`);
   lines.push(`Save to: ${dir}`);
   lines.push(`Format: ${ext} files`);
@@ -183,13 +184,14 @@ export function formatCapturedApi(lines: string[], capturedApi: CapturedApi[], p
   lines.push(`  <protocol>/<verb>/<functionName>${ext}  — one file per endpoint, uses shared transport`);
   lines.push(`    e.g. graphql/queries/<fn>${ext}, graphql/mutations/<fn>${ext}, rest/read/<fn>${ext}, rest/create/<fn>${ext}`);
   lines.push(`  index${ext}                         — re-export all endpoint functions`);
-  if (params.typed) lines.push(`  types.ts                         — interfaces inferred from response bodies`);
+  if (typed) lines.push(`  types.ts                         — interfaces inferred from response bodies`);
   lines.push(`  README.md                        — endpoints grouped by protocol + verb, auth expiry warning`);
 
   lines.push(`\nHow to read the endpoint list — one request ≠ one endpoint; an endpoint is (protocol, action):`);
   lines.push(`  REST: action = "METHOD /parameterized/path" · GraphQL: action = operationName (or doc_id for persisted queries) — many ops share one /graphql URL, EACH is its own endpoint · JSON-RPC: action = body.method · gRPC-web: action = request path · Form-RPC (FB-style urlencoded): action = fb_api_req_friendly_name / doc_id · SOAP: action = SOAPAction header.`);
   lines.push(`  iframer already classified everything — use .protocol, .action, .verb, .functionName directly.`);
   lines.push(`\nRules:`);
+  lines.push(`  - Follow this layout exactly: one file per endpoint, never one big file. Language is ${typed ? "TypeScript" : "JavaScript"} as stated above.`);
   lines.push(`  - One function per (protocol, action) — NEVER merge GraphQL operations just because they share the URL. Use the functionName field verbatim for the file + export name.`);
   lines.push(`  - verb=read|list → queries/ (GraphQL) or read/ (REST). verb=create|update|delete|action → mutations/ (GraphQL) or verb dir (REST).`);
   lines.push(`  - Each endpoint file is minimal: import transport + auth, call transport with the action id, pass variables, return typed result.`);

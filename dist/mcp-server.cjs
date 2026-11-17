@@ -923,7 +923,7 @@ During capture, drive the site like a user (open the inbox, send a message\u2026
     {
       steps: import_zod4.z.array(import_zod4.z.record(import_zod4.z.string(), import_zod4.z.unknown())).describe("Pipeline steps to run while capturing \u2014 same step format as the execute tool"),
       outputDir: import_zod4.z.string().optional().describe("Directory to save the captured API files. If not provided, ask the user or default to ./<domain>/"),
-      typed: import_zod4.z.boolean().optional().describe("Save as .ts with inferred types instead of .js. Set to true when the user asks for types, typescript, or type inference."),
+      typed: import_zod4.z.boolean().optional().describe("TypeScript (.ts + types.ts) is the default. Pass false only when the user explicitly asks for plain JavaScript."),
       options: import_zod4.z.object({
         staleTimeoutMs: import_zod4.z.number().optional().describe("Override the 20s stale-state timeout per step"),
         continueOnObstacle: import_zod4.z.boolean().optional().describe("Try to auto-resolve obstacles (default: true)"),
@@ -1053,7 +1053,8 @@ Endpoints (${api.endpoints.length}) [${protocolSummary}] \u2014 full detail in c
   }
   const mainDomain = capturedApi[0]?.domain || "api";
   const dir = params.outputDir || `./${mainDomain}`;
-  const ext = params.typed ? ".ts" : ".js";
+  const typed = params.typed !== false;
+  const ext = typed ? ".ts" : ".js";
   lines.push(`
 \u2501\u2501\u2501 Save instructions \u2501\u2501\u2501`);
   lines.push(`Save to: ${dir}`);
@@ -1072,7 +1073,7 @@ Layout (protocols present: ${Array.from(protocolsSeen).join(", ")}):`);
   lines.push(`  <protocol>/<verb>/<functionName>${ext}  \u2014 one file per endpoint, uses shared transport`);
   lines.push(`    e.g. graphql/queries/<fn>${ext}, graphql/mutations/<fn>${ext}, rest/read/<fn>${ext}, rest/create/<fn>${ext}`);
   lines.push(`  index${ext}                         \u2014 re-export all endpoint functions`);
-  if (params.typed) lines.push(`  types.ts                         \u2014 interfaces inferred from response bodies`);
+  if (typed) lines.push(`  types.ts                         \u2014 interfaces inferred from response bodies`);
   lines.push(`  README.md                        \u2014 endpoints grouped by protocol + verb, auth expiry warning`);
   lines.push(`
 How to read the endpoint list \u2014 one request \u2260 one endpoint; an endpoint is (protocol, action):`);
@@ -1080,6 +1081,7 @@ How to read the endpoint list \u2014 one request \u2260 one endpoint; an endpoin
   lines.push(`  iframer already classified everything \u2014 use .protocol, .action, .verb, .functionName directly.`);
   lines.push(`
 Rules:`);
+  lines.push(`  - Follow this layout exactly: one file per endpoint, never one big file. Language is ${typed ? "TypeScript" : "JavaScript"} as stated above.`);
   lines.push(`  - One function per (protocol, action) \u2014 NEVER merge GraphQL operations just because they share the URL. Use the functionName field verbatim for the file + export name.`);
   lines.push(`  - verb=read|list \u2192 queries/ (GraphQL) or read/ (REST). verb=create|update|delete|action \u2192 mutations/ (GraphQL) or verb dir (REST).`);
   lines.push(`  - Each endpoint file is minimal: import transport + auth, call transport with the action id, pass variables, return typed result.`);

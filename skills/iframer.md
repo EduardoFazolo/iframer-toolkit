@@ -1,8 +1,24 @@
 ---
-description: "Use iframer to browse websites, login, take screenshots, reverse-engineer APIs, and manage browser sessions. Invoke with /iframer followed by what you want to do."
+name: iframer
+description: "Use for ANY browser task: open/read/click a website, use the user's own logged-in browser or tabs ('my browser', 'I'm logged in', 'my Chrome profile'), research on social sites (X, TikTok, Instagram, Reddit), download media, screenshots, logins, reverse-engineering a site's API ('rev', 'map the API', 'write a client for this site'), scraping, cookies/session for a script. Read this BEFORE reaching for a new browser, screen recording, accessibility APIs, yt-dlp --cookies-from-browser, or asking the user to log in or paste anything."
 ---
 
-You are an expert at using the iframer browser automation toolkit. The user wants you to do something with iframer. Parse their request and execute the right MCP tool calls with correctly-built pipelines.
+You are an expert at using the iframer browser automation toolkit. Parse the user's request and execute the right MCP tool calls (or CLI commands) with correctly-built pipelines.
+
+## The rules users had to repeat most (read first)
+
+Every rule below is a correction real users had to make, often more than once. Follow them without being told.
+
+1. **"Use my browser" / "I'm logged in" means the user's real Chrome through the iframer extension** (`tabs` → `execute` with `mode:"extension"` + `tabId`). Never launch a fresh browser, never ask them to log in again, never say "it only shows 12 posts without login". If the extension isn't connected, say so; don't fall back to a logged-out browser.
+2. **Never trigger OS security prompts.** No screen recording, no macOS accessibility tree, no `--cookies-from-browser` (it asks Keychain to unlock Chrome's cookies on every call). Need an authenticated download or request? Run it inside the logged-in tab (`download` step, or `evaluate` a `fetch`), which already carries the session. Public content needs no cookies at all.
+3. **Prefer the cheapest path that works:** a known API (`knowledge get`) or a reverse-engineered client, then `browse`/`extract`, then UI clicking. UI automation costs the most tokens: don't click through pages you could fetch. Repetitive work goes into a reusable script, not repeated tool calls.
+4. **"Rev" / "reverse engineer" / "write the API for this site" means LOCAL files that run from Node or Bun**, saved in the folder the user names (else iframer's cache). TypeScript, one file per endpoint, exactly the layout the tool's save instructions print. Never one big JS file. A script that lives inside the browser is only for (a) sites with heavy bot walls and (b) sessions that can't be exported (see the auth step below).
+5. **Respect rate limits from the first request.** Sequential, human-paced (seconds between actions, no parallel bursts), back off on 429/403/captcha and stop instead of retrying. Rate-limit or IP bans waste the user's whole day.
+6. **Never make the user do mechanical work.** Don't ask them to paste cookies, copy files, close apps, accept downloads, or open links you can open. Clicking "accept" on a permission prompt is the most you may ask.
+7. **Don't reload a page to dismiss something.** Click the dialog's own cancel/close button. Reloads lose state and re-trigger page loads.
+8. **When the user says they'll test it themselves, stop using the browser.** Do only what they asked.
+9. **Before a long run, make sure the iframer you're calling is the version the user expects** (`iframer --version` or `status`). If it looks stale, say so first instead of doing the whole job on an old build.
+10. **When iframer itself hangs or errors, report the exact message and what you tried.** Don't silently switch tools (screen capture, curl with copied cookies, a different browser). The user fixes iframer from your report.
 
 ## Available MCP tools
 
@@ -160,7 +176,7 @@ execute: steps: [{ type: "click", selector: "@e3" }, { type: "screenshot" }]
        { type: "wait", ms: 3000 }
      ]
      outputDir: "<path-to-save>"
-     typed: true   // generates TypeScript interfaces
+     // TypeScript is the default; pass typed:false only if the user asks for plain JS
      options: { staleTimeoutMs: 60000, continueOnError: true }
 ```
 
@@ -178,8 +194,12 @@ The result of reverse engineering is always LOCAL files: an API map, auth config
           iframer's own browser, Chrome-family), checks it on a page that needs a login, and writes <dir>/.env
           (0600, gitignored). client.mjs refreshes it the same way when it expires. Never ask the user to paste a
           cookie: if no browser is logged in, ask them to log in in the tab, then run iframer auth <host>.
-          HttpOnly cookies are fine: iframer reads the browser's cookie file, not document.cookie. If auth
-          still fails while the user is logged in, report iframer's exact message as a bug instead.
+          HttpOnly cookies are fine: iframer reads the browser's cookie file, not document.cookie.
+          LOCKED SESSION (exit code 2, "can't be exported"): on Windows a running T3 Code / Chrome locks its cookie
+          file. Don't fight it, and don't ask the user to close anything. Run the same recipes INSIDE the logged-in
+          tab: iframer recipe <host> --in-page prints the 3 load steps, then one short call per recipe. The tab
+          attaches the session itself (HttpOnly included). It's still API calls, not UI clicking, so it's just as cheap.
+          Any other auth failure while the user is logged in: report iframer's exact message as a bug.
 3. Learn: node <dir>/client.mjs                                     what it knows, which auth is missing
           node <dir>/client.mjs get /{param}/page --rsc --schema    lists of records + keys + 1 masked sample
           node <dir>/client.mjs get /path --rsc --find Comp --pick 'items.{id,status}' --where 'status=open' --group owner
@@ -194,7 +214,7 @@ The result of reverse engineering is always LOCAL files: an API map, auth config
 - `--run "async (core, a) => …"` recipes for multi-step flows: `core.get(path,{rsc})`, `core.action(name,args)`, `core.find/pick/answer`, `core.need(obj, paths)` to fail loud.
 - "session expired": client.mjs already tried to refresh it from the logged-in browser. Ask the user to log in to the site in the tab, then `iframer auth <host>`. 429/captcha: stop.
 - Calls the page makes while loading happen before the kit is back: navigate inside the app (click links) so the kit records them. Mapping many pages: `window.__ifk.walk([paths])`, `window.__ifk.walkWait()`, then dump and ingest.
-- In-page fallback, ONLY for sites that block requests from Node (bot walls): `window.__ifk.call('GET', path, {rsc:true, schema:true})` in the tab, and `iframer recipe … --in-page` prints how to load and run recipes there. Not the default.
+- In-page replay, ONLY for (a) sites that block requests from Node (bot walls) and (b) sessions `iframer auth` reports as locked (exit 2): `window.__ifk.call('GET', path, {rsc:true, schema:true})` in the tab, and `iframer recipe … --in-page` prints how to load and run recipes there. Otherwise the Node client is the default.
 
 ### Handle captchas
 
@@ -349,6 +369,12 @@ If the MCP disconnects repeatedly on the same operation, the site is probably to
 | Restarting the entire login flow after a captcha/stall | The browser is still on the same page — just continue from where you are |
 | Not passing `mode` consistently across execute calls in the same flow | Always pass the same `options.mode` for all steps in a multi-call flow |
 | Panicking when MCP disconnects (running `claude mcp`, inspecting source, giving up) | Just wait 2-3 seconds, call `status` to verify reconnect, then `session restart` and retry |
+| Launching a browser / logging in when the user said they're logged in | `tabs list` → extension mode on their tab |
+| Screen recording, accessibility tree, `yt-dlp --cookies-from-browser` | Read/fetch/download inside the logged-in tab; public media needs no cookies |
+| Reloading the page to get rid of a dialog | Click the dialog's cancel/close |
+| Rev'd API written as one big `.js` file | TypeScript, one file per endpoint, the layout in the save instructions |
+| Asking the user to accept a download, open a link, paste a cookie | Do it yourself in the tab (`download` step, `click`) |
+| Bursting requests at a site | Sequential, human-paced, stop on 429/403/captcha |
 
 ## Driving the user's real Chrome (extension mode)
 

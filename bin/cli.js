@@ -170,11 +170,17 @@ function installSkill() {
   }
   if (!source) return false;
 
-  const destDir = path.join(HOME_DIR, ".claude", "commands");
-  const dest = path.join(destDir, "iframer.md");
+  // Installed as a real skill (auto-loaded when the task matches its
+  // description), not only a /command: agents never saw the command unless
+  // the user typed /iframer, so they kept repeating the same mistakes.
   try {
-    fs.mkdirSync(destDir, { recursive: true });
-    fs.copyFileSync(source, dest);
+    for (const dir of skillDirs()) {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.copyFileSync(source, path.join(dir, "SKILL.md"));
+    }
+    // The old /iframer command would shadow the skill with a stale copy.
+    const legacy = path.join(HOME_DIR, ".claude", "commands", "iframer.md");
+    if (fs.existsSync(legacy)) fs.unlinkSync(legacy);
     return true;
   } catch (err) {
     console.error(`  Warning: could not install skill: ${err.message}`);
@@ -182,18 +188,26 @@ function installSkill() {
   }
 }
 
+/** Where the iframer skill lives: Claude Code always, Codex when it's installed. */
+function skillDirs() {
+  const dirs = [path.join(HOME_DIR, ".claude", "skills", "iframer")];
+  if (fs.existsSync(path.join(HOME_DIR, ".codex"))) dirs.push(path.join(HOME_DIR, ".codex", "skills", "iframer"));
+  return dirs;
+}
+
 /**
- * Remove the /iframer skill from the Claude Code commands directory.
+ * Remove the iframer skill (and the legacy /iframer command).
  */
 function removeSkill() {
-  const dest = path.join(HOME_DIR, ".claude", "commands", "iframer.md");
-  try {
-    if (fs.existsSync(dest)) {
-      fs.unlinkSync(dest);
-      return true;
-    }
-  } catch {}
-  return false;
+  let removed = false;
+  for (const dir of skillDirs()) {
+    try {
+      if (fs.existsSync(path.join(dir, "SKILL.md"))) { fs.rmSync(dir, { recursive: true, force: true }); removed = true; }
+    } catch {}
+  }
+  const legacy = path.join(HOME_DIR, ".claude", "commands", "iframer.md");
+  try { if (fs.existsSync(legacy)) { fs.unlinkSync(legacy); removed = true; } } catch {}
+  return removed;
 }
 
 /**
@@ -1299,7 +1313,7 @@ async function main() {
       const bundles = kit.rebuildAllBundles();
       console.log(`  Kit: ${kitPath}`);
       if (bundles.length) console.log(`  Clients rebuilt: ${bundles.length} file(s) (client.mjs per site, plus in-page bundles where made)`);
-      console.log(skill ? "  Skill: ~/.claude/commands/iframer.md" : "  Skill: not found in the package, skipped");
+      console.log(skill ? "  Skill: ~/.claude/skills/iframer/SKILL.md (auto-loads when a task needs a browser)" : "  Skill: not found in the package, skipped");
       break;
     }
 

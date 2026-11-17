@@ -15458,27 +15458,44 @@ function installSkill() {
     }
   }
   if (!source) return false;
-  const destDir = path17.join(HOME_DIR, ".claude", "commands");
-  const dest = path17.join(destDir, "iframer.md");
   try {
-    fs16.mkdirSync(destDir, { recursive: true });
-    fs16.copyFileSync(source, dest);
+    for (const dir of skillDirs()) {
+      fs16.mkdirSync(dir, { recursive: true });
+      fs16.copyFileSync(source, path17.join(dir, "SKILL.md"));
+    }
+    const legacy = path17.join(HOME_DIR, ".claude", "commands", "iframer.md");
+    if (fs16.existsSync(legacy)) fs16.unlinkSync(legacy);
     return true;
   } catch (err) {
     console.error(`  Warning: could not install skill: ${err.message}`);
     return false;
   }
 }
+function skillDirs() {
+  const dirs = [path17.join(HOME_DIR, ".claude", "skills", "iframer")];
+  if (fs16.existsSync(path17.join(HOME_DIR, ".codex"))) dirs.push(path17.join(HOME_DIR, ".codex", "skills", "iframer"));
+  return dirs;
+}
 function removeSkill() {
-  const dest = path17.join(HOME_DIR, ".claude", "commands", "iframer.md");
+  let removed = false;
+  for (const dir of skillDirs()) {
+    try {
+      if (fs16.existsSync(path17.join(dir, "SKILL.md"))) {
+        fs16.rmSync(dir, { recursive: true, force: true });
+        removed = true;
+      }
+    } catch {
+    }
+  }
+  const legacy = path17.join(HOME_DIR, ".claude", "commands", "iframer.md");
   try {
-    if (fs16.existsSync(dest)) {
-      fs16.unlinkSync(dest);
-      return true;
+    if (fs16.existsSync(legacy)) {
+      fs16.unlinkSync(legacy);
+      removed = true;
     }
   } catch {
   }
-  return false;
+  return removed;
 }
 function writeMachineSecret(secret) {
   try {
@@ -16426,7 +16443,7 @@ Screenshot: ${shot}`);
       const bundles = kit.rebuildAllBundles();
       console.log(`  Kit: ${kitPath}`);
       if (bundles.length) console.log(`  Clients rebuilt: ${bundles.length} file(s) (client.mjs per site, plus in-page bundles where made)`);
-      console.log(skill ? "  Skill: ~/.claude/commands/iframer.md" : "  Skill: not found in the package, skipped");
+      console.log(skill ? "  Skill: ~/.claude/skills/iframer/SKILL.md (auto-loads when a task needs a browser)" : "  Skill: not found in the package, skipped");
       break;
     }
     case "schema": {
