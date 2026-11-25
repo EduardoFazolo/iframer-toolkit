@@ -199,6 +199,7 @@ The result of reverse engineering is always LOCAL files: an API map, auth config
           file. Don't fight it, and don't ask the user to close anything. Run the same recipes INSIDE the logged-in
           tab: iframer recipe <host> --in-page prints the 3 load steps, then one short call per recipe. The tab
           attaches the session itself (HttpOnly included). It's still API calls, not UI clicking, so it's just as cheap.
+          Many calls, a script, or a scheduled run: use the tab bridge instead (below), so Node keeps doing the work.
           Any other auth failure while the user is logged in: report iframer's exact message as a bug.
 3. Learn: node <dir>/client.mjs                                     what it knows, which auth is missing
           node <dir>/client.mjs get /{param}/page --rsc --schema    lists of records + keys + 1 masked sample
@@ -215,6 +216,26 @@ The result of reverse engineering is always LOCAL files: an API map, auth config
 - "session expired": client.mjs already tried to refresh it from the logged-in browser. Ask the user to log in to the site in the tab, then `iframer auth <host>`. 429/captcha: stop.
 - Calls the page makes while loading happen before the kit is back: navigate inside the app (click links) so the kit records them. Mapping many pages: `window.__ifk.walk([paths])`, `window.__ifk.walkWait()`, then dump and ingest.
 - In-page replay, ONLY for (a) sites that block requests from Node (bot walls) and (b) sessions `iframer auth` reports as locked (exit 2): `window.__ifk.call('GET', path, {rsc:true, schema:true})` in the tab, and `iframer recipe … --in-page` prints how to load and run recipes there. Otherwise the Node client is the default.
+
+### Tab bridge: Node scripts through a logged-in tab (no cookie)
+
+`client.mjs`, recipes and any Node script can send their requests through a tab that is already logged in. The tab does the fetch with its own login (HttpOnly included); no cookie is read, exported or saved, and no tool call is needed per request. Use it when `iframer auth` says the session is locked (exit 2), for scheduled or long script runs, and whenever the user says not to touch cookies.
+
+```
+1. iframer bridge attach <host> [--for t3|playwright-mcp|any]   starts the bridge, prints ONE expression
+2. Evaluate that expression once in the logged-in tab            -> ATTACHED (or ALREADY_ATTACHED)
+3. Run the script as usual: node <dir>/client.mjs <recipe> ...   it picks the tab by itself
+   iframer bridge status                                         which sites have a tab attached
+```
+
+- Off unless a tab is attached. Nothing attached: `client.mjs` runs exactly as before (saved session, `iframer auth`).
+- `CSP_BLOCKED`: the site forbids the page from connecting to 127.0.0.1 (many big sites do). The bridge can't be used there: use `iframer auth`, in-page replay, or the extension. Do not retry.
+- `NO_BRIDGE` / `WAITING`: run `iframer bridge attach <host>` again and evaluate the fresh expression. Chrome 147+ may ask to allow local network access for the site: the user allows it once.
+- A page reload, a navigation to another page load or a closed tab drops it: evaluate the same expression again. A bridge restart does not: the tab reconnects by itself (a background tab can take a minute).
+- `stopped: tab bridge: ...` from a script: do the one step it names. `A write may have reached the site`: check the site first, never re-send it blindly. `was not sent`: safe to run again once the tab is back.
+- It only carries same-site requests from the page. It can't click, navigate, take screenshots or read cookies: that is still `execute` / extension mode.
+- Other scripts (not a generated client): `iframer bridge client --out <file>` writes a 1-file module; `(await bridgeFetch(url, init)) ?? <own request with the saved session>`.
+- Options: `--name <n>` when 2 profiles are logged in to the same site (scripts set `IFRAMER_BRIDGE_TAB=<n>`), `--read-only` to refuse writes, `--site <domain>` to cover a parent domain. `IFRAMER_BRIDGE=off` makes a script ignore the bridge. `iframer bridge stop` ends it.
 
 ### Handle captchas
 

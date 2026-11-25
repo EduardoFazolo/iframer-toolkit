@@ -1,6 +1,6 @@
 {
   "name": "iframer-toolkit",
-  "version": "0.12.5",
+  "version": "0.12.6",
   "description": "Browser access toolkit for AI agents — CLI and MCP server for headless/headful browsing, login flows, and pipeline execution.",
   "keywords": [
     "iframer",
@@ -48,7 +48,8 @@
     "test:extension": "node tests/integration/extension-bridge.mjs",
     "prepublishOnly": "bun run build",
     "test:cdp-relay": "bun tests/integration/cdp-relay.mjs",
-    "test:kit": "bun tests/integration/kit-bridge.mjs && bun tests/integration/kit-node-client.mjs"
+    "test:kit": "bun tests/integration/kit-bridge.mjs && bun tests/integration/kit-node-client.mjs",
+    "test:bridge": "bun tests/integration/tab-bridge.mjs && BRIDGE_CLI=dist/cli.js bun tests/integration/tab-bridge.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

@@ -40,6 +40,8 @@ const targets = [
     outfile: "dist/local-server.cjs",
     external: [...shared.external, "express", "ws"],
   },
+  // The tab bridge daemon: its own small bundle, so it loads no native module and nothing of the main CLI.
+  { entryPoints: ["src/lib/tabbridge/server-main.ts"], outfile: "dist/bridge-server.cjs", external: ["ws"] },
 ];
 
 for (const t of targets) {
