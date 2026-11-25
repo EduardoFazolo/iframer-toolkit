@@ -373,7 +373,7 @@ What it guarantees:
 - **Next.js specifics.** Route segments named from the app's route data (`/{org}/{project}/issues`), RSC flight parsing including React's path references, server-rendered HTML as `--nodes a`, Server Actions called by export name (`node client.mjs action <name> --approved`, recipes `--action`) with the id re-found after deploys, inline actions via `--action-prop`.
 - **Safe defaults.** Same-site requests only. Actions need `--approved`. Stops on 403, 429 or a captcha; retries GETs on 5xx; reports "session expired" on a login redirect or 401, with the `iframer auth` command to refresh it. The `.env` is never printed, and is gitignored.
 - **Not complete.** Worker traffic, redirect hops, cross-origin iframes, and calls a page makes before the kit is installed are invisible to it.
-- **Bot walls.** For sites that block requests from Node, `iframer recipe … --in-page` builds the same recipes as a bundle that runs inside a logged-in tab. It's a fallback, not the default.
+- **Bot walls.** For sites that block requests from Node, `iframer recipe … --in-page` builds the same recipes as a bundle that runs inside a logged-in tab. It's a fallback, not the default. The tab bridge below is the other way: the Node client keeps running and the tab only carries its requests.
 
 ### Tab bridge: Node scripts through a logged-in tab
 
