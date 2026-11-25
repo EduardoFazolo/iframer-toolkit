@@ -296,12 +296,12 @@ export function renderClient(host: string, map: MapLite, auth: Record<string, un
     "while", "with", "yield"];
   const MODULE_DECLARED = ["fs", "path", "fileURLToPath", "DIR", "ORIGIN", "AUTH", "ACTIONS", "PAGES", "readEnv", "HOST", "IFRAMER", "env", "refreshed",
     "refreshSession", "core", "FP", "fps", "run", "ready", "get", "page", "action", "actions", "SPECS", "recipes", "flags", "args", "show", "main", "isMain"];
-  // Every global the generated module's own code reads (the inlined request core included: it also probes the page
-  // globals to see where it runs). Keep in step with recipe-core.ts and tabbridge/client.ts.
-  const GLOBALS_USED = ["AbortController", "AbortSignal", "Array", "ArrayBuffer", "BigInt", "Boolean", "Buffer", "Date", "Error", "Function", "Headers",
-    "Infinity", "JSON", "Map", "Math", "NaN", "Number", "Object", "Promise", "RegExp", "Response", "Set", "String", "Symbol", "TextDecoder", "TextEncoder",
-    "URL", "URLSearchParams", "Uint8Array", "clearTimeout", "console", "decodeURIComponent", "document", "encodeURIComponent", "fetch", "globalThis",
-    "isNaN", "localStorage", "location", "navigator", "parseFloat", "parseInt", "performance", "process", "sessionStorage", "setTimeout", "window"];
+  // The globals the generated module's own code reads, and only those: found by scanning a generated client.mjs for
+  // every global name. A name missing here can break the module when a recipe has it (as on master); a name here that
+  // the module never reads would stop that recipe from being called by name, for nothing.
+  const GLOBALS_USED = ["AbortController", "AbortSignal", "Array", "ArrayBuffer", "Boolean", "Buffer", "Date", "Error", "Headers", "JSON", "Math", "NaN",
+    "Number", "Object", "Promise", "Response", "String", "TextDecoder", "TextEncoder", "URL", "URLSearchParams", "clearTimeout", "console",
+    "decodeURIComponent", "document", "encodeURIComponent", "fetch", "globalThis", "location", "parseInt", "performance", "process", "setTimeout", "window"];
   const NOT_BINDINGS = new Set([...RESERVED_WORDS, ...MODULE_DECLARED, ...GLOBALS_USED]);
   const clashes = (n: string) => NOT_BINDINGS.has(n);
   const out: string[] = [];

@@ -147,6 +147,7 @@ export function startFixture() {
       // A redirect that leaves the site, to a target that allows it (CORS): the relay must refuse the answer.
       if (p === "/api/redirect-out") { res.writeHead(302, { location: `http://localhost:${server.address().port}/api/cors-echo` }); return res.end(); }
       if (p === "/api/cors-echo") return json(200, { reached: "another site" }, { "access-control-allow-origin": req.headers.origin || "*", "access-control-allow-credentials": "true" });
+      if (p === "/api/fake-marker") return json(200, { ok: true }, { "x-iframer-bridge": "redirect-not-followed" });
       if (p === "/api/stream") { res.writeHead(200, { "content-type": "text/event-stream" }); res.write("data: 1\n\n"); return; }
       if (p === "/api/huge") { res.writeHead(200, { "content-type": "application/octet-stream", "content-length": String(40 * 1024 * 1024) }); res.write("x"); return; }
       if (p === "/api/bytes") { res.writeHead(200, { "content-type": "application/octet-stream" }); return res.end(Buffer.from([0, 255, 1, 254, 128, 10, 13])); }

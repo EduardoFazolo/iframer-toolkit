@@ -92,9 +92,10 @@ export function tabRelay(c) {
     if (q.notAfter && Date.now() > q.notAfter) return reply({ expired: 1 });
     var method = String(q.method || "GET").toUpperCase(), read = method === "GET" || method === "HEAD";
     function run() {
-      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null, timer, started = false;
+      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null, timer, started = false, cross = "";
       Promise.resolve().then(function () {
         var u = new URL(q.url, location.href);
+        if (u.origin !== location.origin) cross = u.host;
         if (!mine(u)) throw new Error("not this tab's site: " + u.hostname);
         if (c.ro && !read) throw new Error("this tab is attached read-only: " + method + " refused");
         var headers = {}, referrer;
@@ -142,6 +143,11 @@ export function tabRelay(c) {
         });
       }).catch(function (e) {
         var out = { error: read && ctl && ctl.signal.aborted ? "aborted: the read was stopped or timed out" : String((e && e.message) || e) };
+        // A fetch to another host of the site that fails: the browser does not say whether that host refused this
+        // page (CORS; the request then DID reach it) or could not be reached. So it is final, never a reason to send
+        // the same request again through another tab. Only a failed fetch to this page's own origin means "this tab
+        // can't reach its site".
+        if (started && cross && !(ctl && ctl.signal.aborted) && e && e.name === "TypeError") out.error = "the request to " + cross + " could not be completed from this tab: that host does not accept requests from " + location.host + " (CORS), or it is unreachable. Attach a tab on " + cross + " itself";
         // A fetch that failed after it started, in a mode that refuses redirects off this origin (or all redirects).
         // Refused before any fetch: certain not to be on the site (the daemon tells a write's caller so).
         if (!started) out.unsent = 1;

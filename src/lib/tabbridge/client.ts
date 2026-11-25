@@ -87,8 +87,8 @@ export function tabBridgeClient(d) {
     try {
       var headers = new Headers();
       Object.keys(r.headers || {}).forEach(function (k) {
-        // The tab already decoded the body.
-        if (/^content-(encoding|length)$/i.test(k)) return;
+        // The tab already decoded the body. The marker below is ours alone: a site can't set it.
+        if (/^(content-(encoding|length)|x-iframer-bridge)$/i.test(k)) return;
         try { headers.set(k, r.headers[k]); } catch (e) {}
       });
       if (redirect) headers.set("x-iframer-bridge", "redirect-not-followed");

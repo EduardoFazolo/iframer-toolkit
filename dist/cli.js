@@ -14462,7 +14462,7 @@ function tabBridgeClient(d) {
     try {
       var headers = new Headers();
       Object.keys(r.headers || {}).forEach(function(k) {
-        if (/^content-(encoding|length)$/i.test(k)) return;
+        if (/^(content-(encoding|length)|x-iframer-bridge)$/i.test(k)) return;
         try {
           headers.set(k, r.headers[k]);
         } catch (e) {
@@ -15158,31 +15158,23 @@ function renderClient(host, map, auth, specs, dir) {
     "AbortSignal",
     "Array",
     "ArrayBuffer",
-    "BigInt",
     "Boolean",
     "Buffer",
     "Date",
     "Error",
-    "Function",
     "Headers",
-    "Infinity",
     "JSON",
-    "Map",
     "Math",
     "NaN",
     "Number",
     "Object",
     "Promise",
-    "RegExp",
     "Response",
-    "Set",
     "String",
-    "Symbol",
     "TextDecoder",
     "TextEncoder",
     "URL",
     "URLSearchParams",
-    "Uint8Array",
     "clearTimeout",
     "console",
     "decodeURIComponent",
@@ -15190,15 +15182,10 @@ function renderClient(host, map, auth, specs, dir) {
     "encodeURIComponent",
     "fetch",
     "globalThis",
-    "isNaN",
-    "localStorage",
     "location",
-    "navigator",
-    "parseFloat",
     "parseInt",
     "performance",
     "process",
-    "sessionStorage",
     "setTimeout",
     "window"
   ];
@@ -16071,9 +16058,10 @@ function tabRelay(c) {
     if (q.notAfter && Date.now() > q.notAfter) return reply({ expired: 1 });
     var method = String(q.method || "GET").toUpperCase(), read2 = method === "GET" || method === "HEAD";
     function run2() {
-      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null, timer, started = false;
+      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null, timer, started = false, cross = "";
       Promise.resolve().then(function() {
         var u = new URL(q.url, location.href);
+        if (u.origin !== location.origin) cross = u.host;
         if (!mine(u)) throw new Error("not this tab's site: " + u.hostname);
         if (c.ro && !read2) throw new Error("this tab is attached read-only: " + method + " refused");
         var headers = {}, referrer;
@@ -16128,6 +16116,7 @@ function tabRelay(c) {
         });
       }).catch(function(e) {
         var out = { error: read2 && ctl && ctl.signal.aborted ? "aborted: the read was stopped or timed out" : String(e && e.message || e) };
+        if (started && cross && !(ctl && ctl.signal.aborted) && e && e.name === "TypeError") out.error = "the request to " + cross + " could not be completed from this tab: that host does not accept requests from " + location.host + " (CORS), or it is unreachable. Attach a tab on " + cross + " itself";
         if (!started) out.unsent = 1;
         reply(out);
       }).then(function() {

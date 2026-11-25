@@ -334,8 +334,8 @@ else kit.saveRecipe({ name: "activeCampaigns", host, path: "/{community}/dashboa
 if (CLI) cli(["recipe", host, "composed", "--run", "async (core, args) => 'composed:' + (await activeCampaigns({ community: 'acme' }))", "--quiet"]);
 else kit.saveRecipe({ name: "composed", host, run: "async (core, args) => 'composed:' + (await activeCampaigns({ community: 'acme' }))" });
 // ...also when the other recipe's name is an ordinary property name every object has, or one of the bridge's own names.
-if (CLI) cli(["recipe", host, "composed2", "--run", "async (core, args) => [String(await toString({})).length > 40, String(await __tabHome({})).length > 40, String(await Bun({})).length > 40].join()", "--quiet"]);
-else kit.saveRecipe({ name: "composed2", host, run: "async (core, args) => [String(await toString({})).length > 40, String(await __tabHome({})).length > 40, String(await Bun({})).length > 40].join()" });
+if (CLI) cli(["recipe", host, "composed2", "--run", "async (core, args) => [String(await toString({})).length > 40, String(await __tabHome({})).length > 40, String(await Bun({})).length > 40, String(await Map({})).length > 40].join()", "--quiet"]);
+else kit.saveRecipe({ name: "composed2", host, run: "async (core, args) => [String(await toString({})).length > 40, String(await __tabHome({})).length > 40, String(await Bun({})).length > 40, String(await Map({})).length > 40].join()" });
 // Recipes named like the client's own internals must not break the regenerated module.
 for (const name of ["os", "__tab", "__tabFetch", "__tabHome", "globalThis", "fetch", "process", "env", "path", "fs", "toString", "Bun", "async", "TextEncoder", "document", "Map"]) {
   if (CLI) cli(["recipe", host, name, "--path", "/api/x", "--quiet"]); else kit.saveRecipe({ name, host, path: "/api/x" });
@@ -420,7 +420,7 @@ console.log(JSON.stringify({ first: first.sentCookie, second: second.sentCookie 
   r = await node(["composed"]);
   check("a code recipe still calls another recipe by name", r === "composed:1", r);
   r = await node(["composed2"]);
-  check("...also recipes named toString, __tabHome or Bun (they stay module bindings)", r === "true,true,true", r);
+  check("...also recipes named toString, __tabHome, Bun or Map (they stay module bindings)", r === "true,true,true,true", r);
   r = await node(["action", "getRestaurants", JSON.stringify([{ communitySlug: "acme" }]), "--approved"]);
   check("a write (Server Action, id re-found from the page's JS) runs through the tab", r.includes("Bistro") && r.includes("acme"), r);
   r = await node(["get", "/api/redirect-me"]);
@@ -455,6 +455,7 @@ out.hugeWrite = await j("/api/huge", { method: "POST", body: "{}" }).catch((e) =
 out.asError = await j("/api/redirect-me", { redirect: "error" }).catch((e) => e.message);
 out.head = await j("/api/echo-head", { method: "HEAD" });
 out.afterError = await j("/api/x");
+out.fake = await j("/api/fake-marker");
 console.log(JSON.stringify(out));
 `);
   let out = {};
@@ -475,6 +476,7 @@ console.log(JSON.stringify(out));
   check("a read redirected to another site comes back as 302: the other site is never requested, the source once", out.out?.status === 302 && !log.some((l) => l.path === "/api/cors-echo") && log.filter((l) => l.path === "/api/redirect-out").length === 1, { out: out.out, hits: log.filter((l) => /cors-echo|redirect-out/.test(l.path)) });
   check("a redirecting read is requested once, and its target never", log.filter((l) => l.path === "/api/redirect-me" && l.method === "GET").length === 4 && log.filter((l) => l.path === "/api/redirect-target").length === 0, log.filter((l) => /redirect-(me|target)/.test(l.path)));
   check("redirect: error on a redirect is an error about the redirect, not a dead tab, and the tab keeps answering", /redirect: error/.test(String(out.asError)) && !/No live tab/.test(String(out.asError)) && out.afterError?.status === 200, { e: out.asError, after: out.afterError });
+  check("a site can't fake the redirect marker: its own header is dropped", out.fake?.status === 200 && out.fake.marked === null, out.fake);
   check("a request that is not redirected is sent once", log.filter((l) => l.path === "/api/echo-head").length === 1 && out.head?.status === 200, { head: out.head, hits: log.filter((l) => l.path === "/api/echo-head") });
   check("a write that reached the site and then failed (answer too large) says it may have reached it", /32 MB.*may have reached the site/.test(String(out.hugeWrite)) && log.some((l) => l.path === "/api/huge" && l.method === "POST"), out.hugeWrite);
   text = cli(["bridge", "status"]);
@@ -517,6 +519,23 @@ console.log(JSON.stringify(out));
   check("IFRAMER_BRIDGE_TAB picks it, and its writes are refused", /read-only/.test(r), r);
   r = await node(["get", "/api/private"], { IFRAMER_BRIDGE_TAB: "viewer" });
   check("...while its reads work", r.includes("only-with-cookie"), r);
+
+  // A request to another host of the site that does not accept it (no CORS headers): the browser reports only a failed
+  // fetch, though the request reached that host. With 2 tabs attached it must still be sent once, never retried.
+  {
+    let hits = 0;
+    const other = http.createServer((req, res) => { hits++; res.writeHead(200, { "content-type": "application/json" }); res.end("{}"); });
+    await new Promise((ok) => other.listen(0, "127.0.0.1", ok));
+    const wide = cli(["bridge", "attach", host, "--site", "127.0.0.1", "--name", "cross", "--print"]);
+    const one = await tab.evaluate(wide), two = await viewer.evaluate(wide);
+    const probe = path.join(bin, "cross.mjs");
+    fs.writeFileSync(probe, `import { bridgeFetch } from "./tab-bridge.mjs";
+console.log(await bridgeFetch("http://127.0.0.1:${other.address().port}/hit").then((r) => "status " + (r && r.status), (e) => e.message));
+`);
+    r = await exec(probe, [], { IFRAMER_BRIDGE_TAB: "cross" });
+    check("a request another host of the site refuses (CORS) is sent once with 2 tabs attached, and the error says so", one === "ATTACHED" && two === "ATTACHED" && hits === 1 && /could not be completed from this tab/.test(r) && !/No live tab/.test(r), { one, two, hits, r });
+    other.close();
+  }
 
   // The tab closes: nothing attached again.
   await viewer.context.close();
