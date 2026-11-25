@@ -72,6 +72,8 @@ export interface Reply {
   maybeSent?: boolean;
   /** Never got its turn: too many reads of this site at once. */
   busy?: boolean;
+  /** A tab was given this request (whatever came of it). Absent: it never left the daemon. */
+  handed?: boolean;
 }
 
 export interface Timings {
@@ -277,6 +279,7 @@ export class Bridge {
   private finish(id: string, w: Wait, reply: Reply | null): void {
     clearTimeout(w.timer);
     this.waiting.delete(id);
+    if (reply && w.tried.size) reply.handed = true;
     w.done(reply);
     const waitingLine = this.line.get(w.site);
     if (!w.active) {
@@ -313,9 +316,11 @@ export class Bridge {
     if (w.cancelled) return this.finish(id, w, null); // nobody is waiting: never try another tab
     const now = this.now();
     const all = this.pools.get(w.pool) ?? [];
+    // Read-only is a safety switch: one read-only tab makes the whole pool refuse writes (the strictest wins), so a
+    // write can never slip through an older tab of the same name that was attached without it.
     const usable = all.filter((x) => w.read || !x.readOnly);
-    if (!w.read && all.length && !usable.length) {
-      return this.finish(id, w, { error: `the ${w.site} tab is attached read-only, so it refuses ${w.job.method}. Attach it again without --read-only to allow writes` });
+    if (!w.read && all.some((x) => x.readOnly)) {
+      return this.finish(id, w, { error: `a ${w.site} tab is attached read-only, so ${w.job.method} is refused. Attach again without --read-only (and close the read-only tab) to allow writes` });
     }
     const open = w.tried.size >= MAX_TABS ? [] : [...usable].reverse().filter((x) => !w.tried.has(x.id));
     const lastProbe = Math.max(0, ...all.map((x) => x.probed));

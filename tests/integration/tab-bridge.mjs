@@ -122,13 +122,36 @@ check("a request for another site never reaches this tab", r.http === 503 && a.g
 r = await viaTab("https://evil.example/app.example.com");
 check("...whatever its path says", r.http === 503 && a.got.length === 1, r);
 
+{
+  const before = a.got.length;
+  const one = await viaTab("https://app.example.com/once", { rid: "same-id-1" });
+  const two = await viaTab("https://app.example.com/once", { rid: "same-id-1" });
+  check("the same request arriving twice (a client that re-sends after a dropped connection) reaches the tab once", one.http === 200 && two.http === 409 && two.duplicate === true && a.got.length === before + 1, { one: one.http, two });
+  // A generated client whose .env holds a token the page keeps in its own storage: the saved value must not travel to the tab.
+  const h = "app.example.com", d2 = fs.mkdtempSync(path.join(os.tmpdir(), "ifb-auth-"));
+  fs.writeFileSync(path.join(d2, "api.json"), JSON.stringify({ origin: APP, endpoints: [] }));
+  fs.writeFileSync(path.join(d2, "auth.json"), JSON.stringify({ authorization: { from: "localStorage", key: "session", prefix: "Bearer " }, "x-api-key": {} }));
+  fs.writeFileSync(path.join(d2, ".env"), "AUTHORIZATION=Bearer SAVED-OTHER-ACCOUNT\nX_API_KEY=KEY-SET-BY-HAND\nCOOKIE=sid=SAVED\n");
+  kit.writeClient(h, d2);
+  await new Promise((ok) => { const c = spawn("node", [path.join(d2, "client.mjs"), "get", "/auth-probe"], { env: { PATH: process.env.PATH, HOME: os.homedir(), IFRAMER_DATA_DIR: data, IFRAMER_NO_AUTO_AUTH: "1" } }); c.on("close", ok); });
+  const job = a.got.find((q) => /auth-probe/.test(q.url)) || {};
+  const sent = JSON.stringify(job.headers || {});
+  check("a saved auth header the page rebuilds itself never travels to the tab; a hand-set key and no cookie do", !!job.url && !/SAVED-OTHER-ACCOUNT/.test(JSON.stringify(job)) && /KEY-SET-BY-HAND/.test(sent) && !/sid=SAVED/.test(JSON.stringify(job)) && !!job.auth?.authorization, job);
+  fs.rmSync(d2, { recursive: true, force: true });
+}
+{
+  const said = cli(["bridge", "status"]);
+  check("status says a tab still runs another version's snippet", /another iframer version/.test(said), said);
+}
+
 const b = fakeTab({ site: "app.example.com", origin: "https://sub.app.example.com", k: key("https://sub.app.example.com", "app.example.com") });
 await b.opened;
 r = await viaTab("https://app.example.com/2");
 check("a second tab attaches, the older one stays, the newest answers", r.http === 200 && b.got.length === 1 && a.ws.readyState === WebSocket.OPEN && (await (await call("/status")).json()).tabs.length === 2, r);
 b.ws.close(); await sleep(100);
+let aGot = a.got.length;
 r = await viaTab("https://app.example.com/3");
-check("...and the older one still answers when the newest is gone", r.http === 200 && a.got.length === 2, r);
+check("...and the older one still answers when the newest is gone", r.http === 200 && a.got.length === aGot + 1, r);
 
 const ro = fakeTab({ site: "ro.example.com", origin: "https://ro.example.com", k: key("https://ro.example.com", "ro.example.com", "default", true), ro: true });
 await ro.opened;
@@ -139,7 +162,7 @@ check("...and still reads", (await viaTab("https://ro.example.com/x")).status ==
 const named = fakeTab({ site: "app.example.com", origin: APP, k: key(APP, "app.example.com", "work"), name: "work" });
 await named.opened;
 r = await viaTab("https://app.example.com/n", { tab: "work" });
-check("--name: a request for tab \"work\" goes to that tab only", r.http === 200 && named.got.length === 1 && a.got.length === 2, r);
+check("--name: a request for tab \"work\" goes to that tab only", r.http === 200 && named.got.length === 1 && a.got.length === aGot + 1, r);
 
 let text = cli(["bridge", "status"]);
 check("iframer bridge status lists the attached sites", /tab bridge running/.test(text) && /app\.example\.com/.test(text) && /ro\.example\.com \(.*read-only/.test(text) && /name work/.test(text), text);
@@ -212,8 +235,24 @@ console.log(JSON.stringify(out));
   check("a write whose connection to the daemon dies half-way is an error, never null (no second send)", /^ERR .*may have reached the site/.test(String(o[0])) && seen.length === 1, o);
   o = await run(["cut"], `out.push(await one(A, ${post}));`);
   check("...same when the daemon's answer is cut off", /^ERR .*may have reached the site/.test(String(o[0])), o);
-  o = await run(["drop"], `out.push(await one(A));`);
-  check("a read in the same spot falls back (null)", o[0] === null, o);
+  o = await run(["drop", "none"], `out.push(await one(A)); out.push(await one(A));`);
+  check("a read whose connection to the daemon dies half-way is an error too, and the run does not fall back after it", /^ERR .*dropped/.test(String(o[0])) && /^ERR /.test(String(o[1])), o);
+  {
+    // The generated client saw a tab attached (it then skips its saved session). The connection drops on its first
+    // request: it must stop, not carry on with the saved cookie.
+    const cdir = path.join(fdata, "c");
+    fs.mkdirSync(cdir, { recursive: true });
+    fs.writeFileSync(path.join(cdir, "api.json"), JSON.stringify({ origin: "https://a.example.com", endpoints: [] }));
+    fs.writeFileSync(path.join(cdir, ".env"), "COOKIE=sid=SAVED\n");
+    kit.writeClient("a.example.com", cdir);
+    steps = ["drop"]; seen.length = 0; probeAttached = true;
+    fs.writeFileSync(path.join(fdata, "bridge.json"), JSON.stringify({ port: fport, token: "t", pid: process.pid, started: "", v: state.BRIDGE_VERSION }));
+    const got = await new Promise((ok) => {
+      const c = spawn("node", [path.join(cdir, "client.mjs"), "get", "/x"], { env: { PATH: process.env.PATH, HOME: os.homedir(), IFRAMER_DATA_DIR: fdata, IFRAMER_NO_AUTO_AUTH: "1" } });
+      let t = ""; c.stdout.on("data", (d) => (t += d)); c.stderr.on("data", (d) => (t += d)); c.on("close", () => ok(t.trim()));
+    });
+    check("after the client saw a tab attached, a dropped connection stops the run (no quiet switch to the saved session)", /stopped: tab bridge/.test(got) && !/network:/.test(got) && seen.length === 1, got);
+  }
   const closed = await freePort();
   o = await run([], `out.push(await one(A, ${post}));`, { port: closed });
   check("a write the daemon never got (connection refused) is null: safe to send the other way", o[0] === null && seen.length === 0, o);
@@ -291,8 +330,11 @@ else kit.saveRecipe({ name: "activeCampaigns", host, path: "/{community}/dashboa
 // A code recipe that calls another recipe by its name (they are module bindings), as it could before.
 if (CLI) cli(["recipe", host, "composed", "--run", "async (core, args) => 'composed:' + (await activeCampaigns({ community: 'acme' }))", "--quiet"]);
 else kit.saveRecipe({ name: "composed", host, run: "async (core, args) => 'composed:' + (await activeCampaigns({ community: 'acme' }))" });
+// ...also when the other recipe's name is an ordinary property name every object has, or one of the bridge's own names.
+if (CLI) cli(["recipe", host, "composed2", "--run", "async (core, args) => [String(await toString({})).length > 40, String(await __tabHome({})).length > 40, String(await Bun({})).length > 40].join()", "--quiet"]);
+else kit.saveRecipe({ name: "composed2", host, run: "async (core, args) => [String(await toString({})).length > 40, String(await __tabHome({})).length > 40, String(await Bun({})).length > 40].join()" });
 // Recipes named like the client's own internals must not break the regenerated module.
-for (const name of ["os", "__tab", "__tabFetch", "__tabHome", "globalThis", "fetch", "process", "env", "path", "fs"]) {
+for (const name of ["os", "__tab", "__tabFetch", "__tabHome", "globalThis", "fetch", "process", "env", "path", "fs", "toString", "Bun", "async"]) {
   if (CLI) cli(["recipe", host, name, "--path", "/api/x", "--quiet"]); else kit.saveRecipe({ name, host, path: "/api/x" });
 }
 const client = path.join(dir, "client.mjs");
@@ -374,6 +416,8 @@ console.log(JSON.stringify({ first: first.sentCookie, second: second.sentCookie 
   check("a recipe runs through the tab", r === "1", r);
   r = await node(["composed"]);
   check("a code recipe still calls another recipe by name", r === "composed:1", r);
+  r = await node(["composed2"]);
+  check("...also recipes named toString, __tabHome or Bun (they stay module bindings)", r === "true,true,true", r);
   r = await node(["action", "getRestaurants", JSON.stringify([{ communitySlug: "acme" }]), "--approved"]);
   check("a write (Server Action, id re-found from the page's JS) runs through the tab", r.includes("Bistro") && r.includes("acme"), r);
   r = await node(["get", "/api/rate-limited"]);
@@ -423,8 +467,9 @@ console.log(JSON.stringify(out));
   check("a response over 32 MB is refused", /32 MB/.test(String(out.huge)), out.huge);
   check("another host with no tab is null, whatever this one uses", out.cross === null, out.cross);
   check("a write never follows a redirect: it comes back as 302 and the target is not requested", out.writeRedirect?.status === 302 && !log.some((l) => l.path === "/api/redirect-target" && l.method === "POST") && log.filter((l) => l.path === "/api/redirect-target").length === 1, { r: out.writeRedirect, hits: log.filter((l) => /redirect/.test(l.path)) });
-  check("a read redirected to another site comes back as 302 and the other site is never requested", out.out?.status === 302 && !log.some((l) => l.path === "/api/cors-echo"), { out: out.out, hits: log.filter((l) => /cors-echo|redirect-out/.test(l.path)) });
-  check("redirect: error on a redirect is an error about the redirect, and the tab is not treated as dead", /redirect/.test(String(out.asError)) && !/No live tab/.test(String(out.asError)) && out.afterError?.status === 200, { e: out.asError, after: out.afterError });
+  check("a read redirected to another origin is refused by the browser: the other site is never requested, the source once, and the error says why", /redirected this request to another origin/.test(String(out.out)) && !log.some((l) => l.path === "/api/cors-echo") && log.filter((l) => l.path === "/api/redirect-out").length === 1, { out: out.out, hits: log.filter((l) => /cors-echo|redirect-out/.test(l.path)) });
+  check("a redirecting read is requested once, not twice", log.filter((l) => l.path === "/api/redirect-me" && l.method === "GET").length === 3 && log.filter((l) => l.path === "/api/redirect-target").length === 1, log.filter((l) => /redirect-(me|target)/.test(l.path)));
+  check("redirect: error on a redirect names the redirect as a cause, and the tab keeps answering", /redirected this request/.test(String(out.asError)) && out.afterError?.status === 200, { e: out.asError, after: out.afterError });
   check("a request that is not redirected is sent once", log.filter((l) => l.path === "/api/echo-head").length === 1 && out.head?.status === 200, { head: out.head, hits: log.filter((l) => l.path === "/api/echo-head") });
   check("a write that reached the site and then failed (answer too large) says it may have reached it", /32 MB.*may have reached the site/.test(String(out.hugeWrite)) && log.some((l) => l.path === "/api/huge" && l.method === "POST"), out.hugeWrite);
   text = cli(["bridge", "status"]);

@@ -216,6 +216,7 @@ var Bridge = class {
   finish(id, w, reply) {
     clearTimeout(w.timer);
     this.waiting.delete(id);
+    if (reply && w.tried.size) reply.handed = true;
     w.done(reply);
     const waitingLine = this.line.get(w.site);
     if (!w.active) {
@@ -254,8 +255,8 @@ var Bridge = class {
     const now = this.now();
     const all = this.pools.get(w.pool) ?? [];
     const usable = all.filter((x) => w.read || !x.readOnly);
-    if (!w.read && all.length && !usable.length) {
-      return this.finish(id, w, { error: `the ${w.site} tab is attached read-only, so it refuses ${w.job.method}. Attach it again without --read-only to allow writes` });
+    if (!w.read && all.some((x) => x.readOnly)) {
+      return this.finish(id, w, { error: `a ${w.site} tab is attached read-only, so ${w.job.method} is refused. Attach again without --read-only (and close the read-only tab) to allow writes` });
     }
     const open = w.tried.size >= MAX_TABS ? [] : [...usable].reverse().filter((x) => !w.tried.has(x.id));
     const lastProbe = Math.max(0, ...all.map((x) => x.probed));
@@ -315,7 +316,7 @@ var Bridge = class {
 var import_crypto = __toESM(require("crypto"));
 var import_fs = __toESM(require("fs"));
 var import_path2 = __toESM(require("path"));
-var BRIDGE_VERSION = 2;
+var BRIDGE_VERSION = 3;
 var DEFAULT_PORT = 47625;
 var bridgePort = () => Number(process.env.IFRAMER_BRIDGE_PORT) || DEFAULT_PORT;
 var stateFile = () => import_path2.default.join(getDataDir(), "bridge.json");
@@ -459,6 +460,8 @@ function startBridgeServer(o) {
   const scale2 = o.scale ?? 1;
   const bridge = new Bridge(timings(scale2), covers);
   const sockets = /* @__PURE__ */ new Map();
+  const seen = /* @__PURE__ */ new Map();
+  let oldRelayAt = 0;
   const send = (res, code, body) => {
     if (res.destroyed || res.writableEnded) return;
     res.writeHead(code, { "Content-Type": "application/json", "Cache-Control": "no-store" });
@@ -468,7 +471,7 @@ function startBridgeServer(o) {
     const host = String(req.headers.host || "");
     if (req.headers.origin !== void 0 || !/^(127\.0\.0\.1|localhost):\d+$/.test(host)) return send(res, 403, { error: "forbidden" });
     if (!safeEqual(String(req.headers.authorization || ""), `Bearer ${o.token}`)) return send(res, 401, { error: "bad token" });
-    if (req.method === "GET" && req.url === "/status") return send(res, 200, { pid: process.pid, v: BRIDGE_VERSION, ...bridge.status() });
+    if (req.method === "GET" && req.url === "/status") return send(res, 200, { pid: process.pid, v: BRIDGE_VERSION, ...bridge.status(), ...oldRelayAt ? { oldRelayMs: Date.now() - oldRelayAt } : {} });
     if (req.method !== "POST") return send(res, 404, { error: "not found" });
     if (req.url === "/shutdown") {
       res.on("finish", () => o.onIdle?.());
@@ -500,6 +503,12 @@ function startBridgeServer(o) {
       const route = bridge.route(q.url, name);
       if (req.url === "/probe") return send(res, 200, "none" in route ? { attached: false, why: route.none, detachedMs: route.detachedMs } : { attached: true, site: route.site });
       if ("none" in route) return send(res, 503, { error: route.none, detachedMs: route.detachedMs });
+      if (typeof q.rid === "string" && q.rid) {
+        const now = Date.now();
+        for (const [k, at] of seen) if (now - at > 3e5) seen.delete(k);
+        if (seen.has(q.rid)) return send(res, 409, { error: "this request was already received once (the client re-sent it after its connection dropped)", duplicate: true, handed: true });
+        seen.set(q.rid, now);
+      }
       const job = { url: q.url, method: String(q.method || "GET").toUpperCase(), headers: q.headers || {}, body: q.body ?? null, body64: q.body64 ?? null, redirect: q.redirect, ...q.auth && typeof q.auth === "object" ? { auth: q.auth } : {} };
       const id = bridge.request(route, job, (reply) => {
         if (reply) send(res, 200, reply);
@@ -526,7 +535,9 @@ function startBridgeServer(o) {
     }
     const site = u.searchParams.get("s") || "", name = u.searchParams.get("n") || "default", readOnly = u.searchParams.get("ro") === "1";
     const origin = String(req.headers.origin || "");
-    const ok = u.pathname === "/relay" && u.searchParams.get("v") === String(BRIDGE_VERSION) && validSite(site) && validName(name) && covers(site, origin) && safeEqual(u.searchParams.get("k") || "", tabKey(o.masterKey, origin, site, name, readOnly));
+    const current = u.searchParams.get("v") === String(BRIDGE_VERSION);
+    if (u.pathname === "/relay" && !current && covers(site, origin)) oldRelayAt = Date.now();
+    const ok = u.pathname === "/relay" && current && validSite(site) && validName(name) && covers(site, origin) && safeEqual(u.searchParams.get("k") || "", tabKey(o.masterKey, origin, site, name, readOnly));
     if (!ok) {
       sock.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
       return;

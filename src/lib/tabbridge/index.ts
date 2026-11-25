@@ -16,7 +16,7 @@ export { relaySource } from "./relay";
 export { tabBridgeClient, clientModuleSource } from "./client";
 
 export interface TabInfo { site: string; name: string; url: string; since: number; stalled: boolean; readOnly: boolean }
-export interface BridgeStatus { pid: number; v: number; tabs: TabInfo[]; detached: Array<{ site: string; name: string; at: number }> }
+export interface BridgeStatus { pid: number; v: number; tabs: TabInfo[]; detached: Array<{ site: string; name: string; at: number }>; oldRelayMs?: number }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -174,6 +174,7 @@ export async function statusText(): Promise<string> {
     `tab bridge running (pid ${s.pid}, 127.0.0.1:${st!.port})${s.v === BRIDGE_VERSION ? "" : " (older version: `iframer bridge attach <host>` replaces it)"}`,
     `attached: ${pools.join(", ") || "none"}`,
     ...(gone.length ? [`detached: ${gone.join(", ")}`] : []),
+    ...(s.oldRelayMs !== undefined && s.oldRelayMs < 120_000 ? ["a tab is still running the snippet of another iframer version (it tried to attach in the last 2 min and was refused): evaluate the fresh expression from `iframer bridge attach <host>` in it"] : []),
   ].join("\n");
 }
 

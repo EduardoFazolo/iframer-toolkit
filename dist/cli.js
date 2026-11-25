@@ -14487,8 +14487,13 @@ function tabBridgeClient(d) {
       return res.json();
     }).then(
       function(r) {
-        if (!r.attached && r.why) skipped = r.why;
-        return !!r.attached;
+        if (!r || !r.attached) {
+          if (r && r.why) skipped = r.why;
+          return false;
+        }
+        var h = hostOf(url);
+        if (!mode[h]) mode[h] = "tab";
+        return true;
       },
       function() {
         down = true;
@@ -14515,7 +14520,13 @@ function tabBridgeClient(d) {
     each(function(k, v) {
       if (String(k).toLowerCase() !== "cookie" && v != null) headers[k] = String(v);
     });
-    var job = { url, method, headers };
+    Object.keys(d.auth || {}).forEach(function(name) {
+      if (!d.auth[name] || !d.auth[name].from) return;
+      Object.keys(headers).forEach(function(k) {
+        if (k.toLowerCase() === name.toLowerCase()) delete headers[k];
+      });
+    });
+    var job = { url, method, headers, rid: Date.now().toString(36) + Math.random().toString(36).slice(2, 12) };
     if (init.redirect) job.redirect = String(init.redirect);
     if (env.IFRAMER_BRIDGE_TAB) job.tab = env.IFRAMER_BRIDGE_TAB;
     if (d.auth && Object.keys(d.auth).length) job.auth = d.auth;
@@ -14545,7 +14556,9 @@ function tabBridgeClient(d) {
   function route(req) {
     var h = req.host;
     if (req.sig && req.sig.aborted) return Promise.reject(aborted(req.sig));
-    if (mode[h]) return send(req);
+    if (!deciding[h] && mode[h]) return settled(function() {
+      return send(req);
+    });
     if (deciding[h]) {
       var gate = deciding[h];
       var wait2 = !req.sig ? gate : new Promise(function(ok, no) {
@@ -14567,7 +14580,9 @@ function tabBridgeClient(d) {
       open = ok;
     });
     deciding[h] = mine;
-    var first = send(req);
+    var first = settled(function() {
+      return send(req);
+    });
     var done = function() {
       if (deciding[h] === mine) delete deciding[h];
       open();
@@ -14604,42 +14619,52 @@ function tabBridgeClient(d) {
       clearTimeout(timer);
       if (sig) sig.removeEventListener("abort", onAbort);
     };
-    var out = d.fetch("http://127.0.0.1:" + st.port + "/fetch", {
+    var deadline = new Promise(function(_ok, no) {
+      ac.signal.addEventListener("abort", function() {
+        no(Object.assign(new Error("aborted"), { name: "AbortError" }));
+      });
+    });
+    var out = Promise.race([deadline, d.fetch("http://127.0.0.1:" + st.port + "/fetch", {
       method: "POST",
       headers: { Authorization: "Bearer " + st.token, "Content-Type": "application/json" },
       body: JSON.stringify(req.job),
       signal: ac.signal
-    }).then(function(res) {
+    })]).then(function(res) {
       var refused = res.status === 503 || res.status === 401 || res.status === 403;
-      if (!refused) mode[h] = "tab";
-      return res.json().then(function(j) {
+      return Promise.race([deadline, res.json()]).then(function(j) {
+        if (!j || typeof j !== "object") throw new Error("not a reply");
         return j;
-      }, function() {
+      }).then(null, function() {
+        if (!refused) mode[h] = "tab";
         if (!read2 && !refused) throw fail((gaveUp ? "the script aborted the request while the write was out" : dropped) + ". " + MAYBE);
         if (gaveUp) throw aborted(sig);
+        if (!refused) throw fail(dropped + ". Run again");
         return { error: "bridge HTTP " + res.status };
       }).then(function(r) {
+        if (r.handed) mode[h] = "tab";
         if (res.status === 503) return none(url, r.error || "no tab attached", r.detachedMs);
         if (refused) return none(url, "the tab bridge restarted (" + (r.error || res.status) + ")");
+        if (r.duplicate) throw fail(dropped + ". " + (read2 ? "Run again" : MAYBE));
         if (r.dead) {
           throw fail(r.error + ". No live tab for " + h + ": attach a fresh one (`" + attachCmd(url) + "`, then the line it prints), then " + (r.maybeSent ? "re-read before anything else. " + MAYBE : "run again"));
         }
         if (r.busy) throw fail(r.error + ". Other scripts are using this site's tab: let them finish, then run again once");
         if (r.error && r.maybeSent) throw fail(r.error + ". " + MAYBE);
         if (!res.ok || r.error) throw fail((r.error || "HTTP " + res.status) + ". Not retried");
+        mode[h] = "tab";
         return response(r, read2, req.method);
       });
     }, function(e) {
       var code = String(e && (e.code || e.cause && e.cause.code) || "");
       var never = !timedOut && !gaveUp && /ECONNREFUSED|ConnectionRefused|ENOTFOUND|EADDRNOTAVAIL|UND_ERR_CONNECT_TIMEOUT/.test(code);
-      if (!read2 && !never) mode[h] = "tab";
+      if (!never) mode[h] = "tab";
       if (timedOut) throw fail("no answer in " + WAIT_MS / 1e3 + " s for " + h + ". Restart it: `iframer bridge stop`, then attach again" + (read2 ? "" : ". " + MAYBE));
       if (gaveUp) {
         if (read2) throw aborted(sig);
         throw fail("the script aborted the request while the write was out. " + MAYBE);
       }
       down = true;
-      if (!read2 && !never) throw fail(dropped + ". " + MAYBE);
+      if (!never) throw fail(dropped + ". " + (read2 ? "Run again" : MAYBE));
       return none(url, "the tab bridge is not running");
     });
     out.then(clear, clear);
@@ -14764,7 +14789,7 @@ var init_state = __esm({
     import_fs12 = __toESM(require("fs"));
     import_path13 = __toESM(require("path"));
     init_paths();
-    BRIDGE_VERSION = 2;
+    BRIDGE_VERSION = 3;
     DEFAULT_PORT = 47625;
     bridgePort = () => Number(process.env.IFRAMER_BRIDGE_PORT) || DEFAULT_PORT;
     stateFile = () => import_path13.default.join(getDataDir(), "bridge.json");
@@ -15035,8 +15060,65 @@ function renderClient(host, map, auth, specs, dir) {
     } catch {
     }
   }
-  const TAB = "__tab", TAB_FETCH = "__tabFetch", HOME = "__tabHome";
-  const MODULE_NAMES = /* @__PURE__ */ new Set([
+  const taken = new Set(specs.map((r) => r.name));
+  const free = (base) => {
+    let n = base;
+    while (taken.has(n)) n += "_";
+    return n;
+  };
+  const TAB = free("__tab"), TAB_FETCH = free("__tabFetch"), HOME = free("__tabHome");
+  const RESERVED_WORDS = [
+    "arguments",
+    "await",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "debugger",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "enum",
+    "eval",
+    "export",
+    "extends",
+    "false",
+    "finally",
+    "for",
+    "function",
+    "if",
+    "implements",
+    "import",
+    "in",
+    "instanceof",
+    "interface",
+    "let",
+    "new",
+    "null",
+    "package",
+    "private",
+    "protected",
+    "public",
+    "return",
+    "static",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "typeof",
+    "undefined",
+    "var",
+    "void",
+    "while",
+    "with",
+    "yield"
+  ];
+  const MODULE_DECLARED = [
     "fs",
     "path",
     "fileURLToPath",
@@ -15066,67 +15148,44 @@ function renderClient(host, map, auth, specs, dir) {
     "args",
     "show",
     "main",
-    "isMain",
-    TAB,
-    TAB_FETCH,
-    HOME,
+    "isMain"
+  ];
+  const GLOBALS_USED = [
+    "AbortController",
+    "AbortSignal",
+    "Array",
+    "ArrayBuffer",
+    "Buffer",
+    "Date",
+    "Error",
+    "Headers",
+    "JSON",
+    "Math",
+    "Number",
+    "Object",
+    "Promise",
+    "RegExp",
+    "Response",
+    "String",
+    "Symbol",
+    "TextDecoder",
+    "URL",
+    "URLSearchParams",
+    "Uint8Array",
+    "clearTimeout",
+    "console",
+    "decodeURIComponent",
+    "encodeURIComponent",
     "fetch",
     "globalThis",
+    "isNaN",
+    "parseFloat",
+    "parseInt",
     "process",
-    "console",
-    "Buffer",
-    "undefined",
-    "arguments",
-    "eval",
-    "await",
-    "async",
-    "let",
-    "static",
-    "yield",
-    "break",
-    "case",
-    "catch",
-    "class",
-    "const",
-    "continue",
-    "debugger",
-    "default",
-    "delete",
-    "do",
-    "else",
-    "enum",
-    "export",
-    "extends",
-    "false",
-    "finally",
-    "for",
-    "function",
-    "if",
-    "implements",
-    "import",
-    "in",
-    "instanceof",
-    "interface",
-    "new",
-    "null",
-    "package",
-    "private",
-    "protected",
-    "public",
-    "return",
-    "super",
-    "switch",
-    "this",
-    "throw",
-    "true",
-    "try",
-    "typeof",
-    "var",
-    "void",
-    "while",
-    "with"
-  ]);
-  const clashes = (n) => MODULE_NAMES.has(n) || n in globalThis || /^__recipe\d+$/.test(n);
+    "setTimeout"
+  ];
+  const NOT_BINDINGS = /* @__PURE__ */ new Set([...RESERVED_WORDS, ...MODULE_DECLARED, ...GLOBALS_USED]);
+  const clashes = (n) => NOT_BINDINGS.has(n);
   const out = [];
   out.push(`#!/usr/bin/env node`);
   out.push(`// ${host} API client, generated by iframer from a capture of ${origin}. Node 18+, no browser.`);
@@ -15195,7 +15254,7 @@ function renderClient(host, map, auth, specs, dir) {
   out.push(`};`);
   out.push(`/** Saved recipes: each takes its args object and resolves to one short line ("error: ..." on failure). */`);
   out.push(`export const recipes = Object.fromEntries(Object.keys(SPECS).map((n) => [n, (a, max) => ready.then(() => run(SPECS[n], a, max))]));`);
-  specs.forEach((r, i) => out.push(clashes(r.name) ? `const __recipe${i} = recipes[${JSON.stringify(r.name)}]; export { __recipe${i} as ${r.name} };` : `export const ${r.name} = recipes[${JSON.stringify(r.name)}];`));
+  specs.forEach((r, i) => out.push(clashes(r.name) ? `const ${free(`__recipe${i}`)} = recipes[${JSON.stringify(r.name)}]; export { ${free(`__recipe${i}`)} as ${r.name} };` : `export const ${r.name} = recipes[${JSON.stringify(r.name)}];`));
   out.push(``);
   out.push(CLI_SOURCE.replace(/__HOST__/g, host).replace(/__TAB__/g, TAB));
   return out.join("\n") + "\n";
@@ -15992,7 +16051,7 @@ function tabRelay(c) {
     if (q.notAfter && Date.now() > q.notAfter) return reply({ expired: 1 });
     var method = String(q.method || "GET").toUpperCase(), read2 = method === "GET" || method === "HEAD";
     function run2() {
-      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null, timer, started = false;
+      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null, timer, started = false, answered = false, redirectGuard = "";
       Promise.resolve().then(function() {
         var u = new URL(q.url, location.href);
         if (!mine(u)) throw new Error("not this tab's site: " + u.hostname);
@@ -16015,9 +16074,11 @@ function tabRelay(c) {
           var v = stored(s);
           if (v != null) headers[name] = v;
         });
-        var own = u.origin === location.origin, want = q.redirect || "follow";
-        var init = { method, headers, credentials: "include", redirect: "manual", cache: "no-store" };
+        var own = u.origin === location.origin;
+        var redirect = q.redirect === "error" ? "error" : read2 && own ? q.redirect || "follow" : "manual";
+        var init = { method, headers, credentials: "include", redirect, cache: "no-store" };
         if (read2 && own) init.mode = "same-origin";
+        redirectGuard = redirect === "error" ? "error" : read2 && own ? "origin" : "";
         if (referrer) init.referrer = referrer;
         if (!read2 && q.body64 != null) init.body = bytes(q.body64);
         else if (!read2 && q.body != null) init.body = q.body;
@@ -16030,19 +16091,7 @@ function tabRelay(c) {
         }
         started = true;
         return fetch(u.href, init).then(function(res) {
-          if (res.type !== "opaqueredirect") return res;
-          if (want === "error") throw new Error("the site answered with a redirect, and the request asked for redirect: error");
-          if (!read2 || !own || want === "manual") return res;
-          var follow = {};
-          Object.keys(init).forEach(function(k) {
-            follow[k] = init[k];
-          });
-          follow.redirect = "follow";
-          return fetch(u.href, follow).then(null, function(e) {
-            if (ctl && ctl.signal.aborted) throw e;
-            return res;
-          });
-        }).then(function(res) {
+          answered = true;
           function drop(why) {
             try {
               res.body && res.body.cancel();
@@ -16067,6 +16116,7 @@ function tabRelay(c) {
         });
       }).catch(function(e) {
         var out = { error: read2 && ctl && ctl.signal.aborted ? "aborted: the read was stopped or timed out" : String(e && e.message || e) };
+        if (started && !answered && redirectGuard && !(ctl && ctl.signal.aborted)) out.error += " (the tab could not reach the site, or the site redirected this request" + (redirectGuard === "error" ? "" : " to another origin, for example a login on another host") + ", which the bridge does not follow)";
         if (!started) out.unsent = 1;
         reply(out);
       }).then(function() {
@@ -16100,7 +16150,7 @@ function tabRelay(c) {
     request(ws, q);
   }
   st.first = new Promise(function(done) {
-    var blocked = false;
+    var blocked = false, misses = 0;
     function onCsp(ev) {
       if (String(ev.blockedURI || "").indexOf("127.0.0.1") < 0 || st.ever) return;
       blocked = true;
@@ -16126,6 +16176,7 @@ function tabRelay(c) {
       ws.onopen = function() {
         st.open = st.ever = true;
         st.connecting = false;
+        misses = 0;
         try {
           ws.send(JSON.stringify({ hello: location.href, v: c.v }));
         } catch (e) {
@@ -16143,7 +16194,7 @@ function tabRelay(c) {
         });
         if (st.stopped) return;
         if (st.ever) {
-          setTimeout(connect, 3e3);
+          if (++misses <= 400) setTimeout(connect, 3e3);
           return;
         }
         st.connecting = false;
@@ -16348,7 +16399,8 @@ ${x.name}`))].map((key) => {
   return [
     `tab bridge running (pid ${s.pid}, 127.0.0.1:${st.port})${s.v === BRIDGE_VERSION ? "" : " (older version: `iframer bridge attach <host>` replaces it)"}`,
     `attached: ${pools.join(", ") || "none"}`,
-    ...gone.length ? [`detached: ${gone.join(", ")}`] : []
+    ...gone.length ? [`detached: ${gone.join(", ")}`] : [],
+    ...s.oldRelayMs !== void 0 && s.oldRelayMs < 12e4 ? ["a tab is still running the snippet of another iframer version (it tried to attach in the last 2 min and was refused): evaluate the fresh expression from `iframer bridge attach <host>` in it"] : []
   ].join("\n");
 }
 function writeClientModule(file = import_path18.default.join(getDataDir(), "bridge", "tab-bridge.mjs")) {

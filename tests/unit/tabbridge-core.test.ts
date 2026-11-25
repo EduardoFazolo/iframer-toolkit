@@ -332,6 +332,27 @@ describe("tabs and sites", () => {
     expect(b.status().detached.length).toBe(0);
   });
 
+  test("one read-only tab makes the whole pool refuse writes, even with an older writable tab", async () => {
+    const b = make(), writable = fake(b), viewer = fake(b, { readOnly: true });
+    const w = (await ask(b, "POST")) as Reply;
+    expect(w.error).toContain("read-only");
+    expect(writable.got).toBe(0);
+    expect(viewer.got).toBe(0);
+    expect(((await ask(b)) as Reply).status).toBe(200);
+  });
+
+  test("a reply says whether a tab was given the request", async () => {
+    const b = make(), t = fake(b);
+    expect(((await ask(b)) as Reply).handed).toBe(true);
+    b.detach(t);
+    const frozen = fake(b, { frozen: true });
+    expect(((await ask(b)) as Reply).handed).toBe(true); // given to the frozen tab, which never confirmed
+    const again = (await ask(b)) as Reply; // every tab is stalled now: refused at once, nothing was given to a tab
+    expect(again.dead).toBe(true);
+    expect(again.handed).toBeUndefined();
+    expect(frozen.got).toBe(1);
+  });
+
   test("a read-only tab refuses writes and still reads", async () => {
     const b = make(), t = fake(b, { readOnly: true });
     const w = (await ask(b, "POST")) as Reply;

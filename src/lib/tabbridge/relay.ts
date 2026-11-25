@@ -92,7 +92,7 @@ export function tabRelay(c) {
     if (q.notAfter && Date.now() > q.notAfter) return reply({ expired: 1 });
     var method = String(q.method || "GET").toUpperCase(), read = method === "GET" || method === "HEAD";
     function run() {
-      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null, timer, started = false;
+      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null, timer, started = false, answered = false, redirectGuard = "";
       Promise.resolve().then(function () {
         var u = new URL(q.url, location.href);
         if (!mine(u)) throw new Error("not this tab's site: " + u.hostname);
@@ -114,15 +114,18 @@ export function tabRelay(c) {
           var v = stored(s);
           if (v != null) headers[name] = v;
         });
-        // Redirects never take a request off this tab's ground. Every request is first sent without following:
-        // - no redirect (nearly always): that answer is the answer, one request;
+        // Redirects never take a request off this tab's ground, and every request is sent exactly once:
         // - a write is never followed (its body would go wherever the answer points): it comes back as a 302;
-        // - a read to this page's own origin is then followed in "same-origin" mode, where the browser itself refuses
-        //   a hop to another origin before requesting it; if it leaves the origin, the redirect comes back as a 302;
+        // - a read to this page's own origin is followed in "same-origin" mode: the browser itself refuses a hop to
+        //   another origin before requesting it. That refusal looks like a failed fetch (the browser does not say
+        //   which it was), so the error names both causes;
         // - a read to another host of the site (an API subdomain) is not followed: it comes back as a 302.
-        var own = u.origin === location.origin, want = q.redirect || "follow";
-        var init = { method: method, headers: headers, credentials: "include", redirect: "manual", cache: "no-store" };
+        // (Mode "same-origin" shows in the Sec-Fetch-Mode header: "same-origin" where the page's own fetch says "cors".)
+        var own = u.origin === location.origin;
+        var redirect = q.redirect === "error" ? "error" : read && own ? (q.redirect || "follow") : "manual";
+        var init = { method: method, headers: headers, credentials: "include", redirect: redirect, cache: "no-store" };
         if (read && own) init.mode = "same-origin";
+        redirectGuard = redirect === "error" ? "error" : read && own ? "origin" : "";
         if (referrer) init.referrer = referrer;
         if (!read && q.body64 != null) init.body = bytes(q.body64);
         else if (!read && q.body != null) init.body = q.body;
@@ -134,15 +137,7 @@ export function tabRelay(c) {
         }
         started = true;
         return fetch(u.href, init).then(function (res) {
-          if (res.type !== "opaqueredirect") return res;
-          if (want === "error") throw new Error("the site answered with a redirect, and the request asked for redirect: error");
-          if (!read || !own || want === "manual") return res;
-          var follow = {};
-          Object.keys(init).forEach(function (k) { follow[k] = init[k]; });
-          follow.redirect = "follow";
-          // A hop off this origin is refused by the browser: the redirect itself is then the answer.
-          return fetch(u.href, follow).then(null, function (e) { if (ctl && ctl.signal.aborted) throw e; return res; });
-        }).then(function (res) {
+          answered = true;
           function drop(why) { try { res.body && res.body.cancel(); } catch (e) {} throw new Error(why); }
           // A followed redirect that ended on another site: this tab only answers for its own.
           if (res.url) { var end = new URL(res.url); if (!mine(end)) drop("redirected to another site (" + end.hostname + "): refused"); }
@@ -157,6 +152,10 @@ export function tabRelay(c) {
         });
       }).catch(function (e) {
         var out = { error: read && ctl && ctl.signal.aborted ? "aborted: the read was stopped or timed out" : String((e && e.message) || e) };
+        // A fetch that failed after it started, in a mode that refuses redirects off this origin (or all redirects).
+        // The fetch itself failed, in a mode where the browser refuses a redirect (off this origin, or any): it does
+        // not say which it was.
+        if (started && !answered && redirectGuard && !(ctl && ctl.signal.aborted)) out.error += " (the tab could not reach the site, or the site redirected this request" + (redirectGuard === "error" ? "" : " to another origin, for example a login on another host") + ", which the bridge does not follow)";
         // Refused before any fetch: certain not to be on the site (the daemon tells a write's caller so).
         if (!started) out.unsent = 1;
         reply(out);
@@ -175,7 +174,7 @@ export function tabRelay(c) {
   }
 
   st.first = new Promise(function (done) {
-    var blocked = false;
+    var blocked = false, misses = 0;
     // The browser reports the block at once; the socket's own close event can come seconds later.
     function onCsp(ev) {
       if (String(ev.blockedURI || "").indexOf("127.0.0.1") < 0 || st.ever) return;
@@ -191,7 +190,7 @@ export function tabRelay(c) {
       catch (e) { st.connecting = false; return done(blocked ? CSP : "NO_BRIDGE: the browser refused the connection to 127.0.0.1 (" + ((e && e.message) || e) + ")."); }
       st.ws = ws;
       ws.onopen = function () {
-        st.open = st.ever = true; st.connecting = false;
+        st.open = st.ever = true; st.connecting = false; misses = 0;
         try { ws.send(JSON.stringify({ hello: location.href, v: c.v })); } catch (e) {}
         done("ATTACHED");
       };
@@ -202,7 +201,9 @@ export function tabRelay(c) {
         Object.keys(held).forEach(release);
         Object.keys(running).forEach(function (k) { try { running[k].abort(); } catch (e) {} });
         if (st.stopped) return;
-        if (st.ever) { setTimeout(connect, 3000); return; }
+        // Keeps trying while the page lives, for a daemon restart. Not forever: 20 min of refusals means this relay
+        // is not wanted any more (stopped bridge, or a daemon of another version).
+        if (st.ever) { if (++misses <= 400) setTimeout(connect, 3000); return; }
         st.connecting = false;
         // The violation event arrives just after the close: give it a moment.
         setTimeout(function () {

@@ -44,6 +44,10 @@ export function startBridgeServer(o: ServerOptions): Promise<BridgeServer> {
   const scale = o.scale ?? 1;
   const bridge = new Bridge(timings(scale), covers);
   const sockets = new Map<WebSocket, { tab: Tab; pong: number }>();
+  // Request ids seen lately. Some HTTP clients re-send a POST by themselves when a reused connection drops: the
+  // second copy must never become a second request to the site.
+  const seen = new Map<string, number>();
+  let oldRelayAt = 0; // when a relay of another version last tried to attach
 
   const send = (res: http.ServerResponse, code: number, body: unknown) => {
     if (res.destroyed || res.writableEnded) return;
@@ -56,7 +60,7 @@ export function startBridgeServer(o: ServerOptions): Promise<BridgeServer> {
     const host = String(req.headers.host || "");
     if (req.headers.origin !== undefined || !/^(127\.0\.0\.1|localhost):\d+$/.test(host)) return send(res, 403, { error: "forbidden" });
     if (!safeEqual(String(req.headers.authorization || ""), `Bearer ${o.token}`)) return send(res, 401, { error: "bad token" });
-    if (req.method === "GET" && req.url === "/status") return send(res, 200, { pid: process.pid, v: BRIDGE_VERSION, ...bridge.status() });
+    if (req.method === "GET" && req.url === "/status") return send(res, 200, { pid: process.pid, v: BRIDGE_VERSION, ...bridge.status(), ...(oldRelayAt ? { oldRelayMs: Date.now() - oldRelayAt } : {}) });
     if (req.method !== "POST") return send(res, 404, { error: "not found" });
     if (req.url === "/shutdown") { res.on("finish", () => o.onIdle?.()); send(res, 200, { ok: true }); return; }
     if (req.url !== "/fetch" && req.url !== "/probe") return send(res, 404, { error: "not found" });
@@ -69,7 +73,7 @@ export function startBridgeServer(o: ServerOptions): Promise<BridgeServer> {
       chunks.push(c);
     });
     req.on("end", () => {
-      let q: { url?: string; method?: string; headers?: Record<string, string>; body?: string | null; body64?: string | null; redirect?: string; tab?: string; auth?: Record<string, unknown> };
+      let q: { url?: string; method?: string; headers?: Record<string, string>; body?: string | null; body64?: string | null; redirect?: string; tab?: string; auth?: Record<string, unknown>; rid?: string };
       try { q = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return send(res, 400, { error: "bad json" }); }
       if (!q || typeof q.url !== "string") return send(res, 400, { error: "url is required" });
       const name = q.tab || "default";
@@ -78,6 +82,12 @@ export function startBridgeServer(o: ServerOptions): Promise<BridgeServer> {
       if (req.url === "/probe") return send(res, 200, "none" in route ? { attached: false, why: route.none, detachedMs: route.detachedMs } : { attached: true, site: route.site });
       // 503 = nothing attached for this site: the caller uses its other way (saved session).
       if ("none" in route) return send(res, 503, { error: route.none, detachedMs: route.detachedMs });
+      if (typeof q.rid === "string" && q.rid) {
+        const now = Date.now();
+        for (const [k, at] of seen) if (now - at > 300_000) seen.delete(k);
+        if (seen.has(q.rid)) return send(res, 409, { error: "this request was already received once (the client re-sent it after its connection dropped)", duplicate: true, handed: true });
+        seen.set(q.rid, now);
+      }
       const job: Job = { url: q.url, method: String(q.method || "GET").toUpperCase(), headers: q.headers || {}, body: q.body ?? null, body64: q.body64 ?? null, redirect: q.redirect, ...(q.auth && typeof q.auth === "object" ? { auth: q.auth } : {}) };
       const id = bridge.request(route, job, (reply) => { if (reply) send(res, 200, reply); });
       res.on("close", () => bridge.cancel(id));
@@ -96,8 +106,10 @@ export function startBridgeServer(o: ServerOptions): Promise<BridgeServer> {
     const site = u.searchParams.get("s") || "", name = u.searchParams.get("n") || "default", readOnly = u.searchParams.get("ro") === "1";
     const origin = String(req.headers.origin || "");
     // A relay from another version (an older snippet still running in a tab) is refused: it would not hold writes
-    // for a go, or keep to the redirect rules. The tab then needs the fresh expression.
-    const ok = u.pathname === "/relay" && u.searchParams.get("v") === String(BRIDGE_VERSION) && validSite(site) && validName(name)
+    // for a go, or keep to the redirect rules. The tab then needs the fresh expression; status says so.
+    const current = u.searchParams.get("v") === String(BRIDGE_VERSION);
+    if (u.pathname === "/relay" && !current && covers(site, origin)) oldRelayAt = Date.now();
+    const ok = u.pathname === "/relay" && current && validSite(site) && validName(name)
       && covers(site, origin)
       && safeEqual(u.searchParams.get("k") || "", tabKey(o.masterKey, origin, site, name, readOnly));
     if (!ok) { sock.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"); return; }
