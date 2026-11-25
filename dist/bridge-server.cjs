@@ -502,11 +502,13 @@ function startBridgeServer(o) {
       if (!validName(name)) return send(res, 400, { error: "bad tab name" });
       const route = bridge.route(q.url, name);
       if (req.url === "/probe") return send(res, 200, "none" in route ? { attached: false, why: route.none, detachedMs: route.detachedMs } : { attached: true, site: route.site });
+      if (typeof q.rid === "string" && q.rid && seen.has(q.rid)) {
+        return send(res, 409, { error: "this request was already received once (the client re-sent it after its connection dropped)", duplicate: true, handed: true });
+      }
       if ("none" in route) return send(res, 503, { error: route.none, detachedMs: route.detachedMs });
       if (typeof q.rid === "string" && q.rid) {
         const now = Date.now();
         for (const [k, at] of seen) if (now - at > 3e5) seen.delete(k);
-        if (seen.has(q.rid)) return send(res, 409, { error: "this request was already received once (the client re-sent it after its connection dropped)", duplicate: true, handed: true });
         seen.set(q.rid, now);
       }
       const job = { url: q.url, method: String(q.method || "GET").toUpperCase(), headers: q.headers || {}, body: q.body ?? null, body64: q.body64 ?? null, redirect: q.redirect, ...q.auth && typeof q.auth === "object" ? { auth: q.auth } : {} };

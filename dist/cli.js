@@ -14456,7 +14456,8 @@ function tabBridgeClient(d) {
     }
   }
   function response(r, read2, method) {
-    var status = r.type === "opaqueredirect" || !r.status ? 302 : r.status;
+    var redirect = r.type === "opaqueredirect" || !r.status;
+    var status = redirect ? 302 : r.status;
     var empty = status === 204 || status === 205 || status === 304 || method === "HEAD";
     try {
       var headers = new Headers();
@@ -14467,6 +14468,7 @@ function tabBridgeClient(d) {
         } catch (e) {
         }
       });
+      if (redirect) headers.set("x-iframer-bridge", "redirect-not-followed");
       var res = new Response(empty ? null : Buffer.from(r.body64 || "", "base64"), { status, headers });
       try {
         Object.defineProperty(res, "url", { value: r.url || "" });
@@ -14699,7 +14701,8 @@ function clientModuleSource(version) {
     `// this process, so falling back is safe for writes too. Every other problem is thrown ("stopped: tab bridge: ..."`,
     `// with the next step); when it says a write may have reached the site, check the site, never re-send blindly.`,
     `// One session per host per run: the first request to a host decides (tab, or your own way) and it never changes.`,
-    `// Redirects: a write is never followed (status 302 comes back); a read is followed only inside the tab's own origin.`,
+    `// Redirects are never followed: status 302 comes back, with the header x-iframer-bridge: redirect-not-followed and`,
+    `// no Location (the browser hides it). A site that redirects a logged-in API call usually means: session expired.`,
     `// Env: IFRAMER_BRIDGE=off, IFRAMER_BRIDGE_TAB=<name> (tabs attached with --name), IFRAMER_DATA_DIR.`,
     `import fs from "node:fs";`,
     `import os from "node:os";`,
@@ -15155,34 +15158,49 @@ function renderClient(host, map, auth, specs, dir) {
     "AbortSignal",
     "Array",
     "ArrayBuffer",
+    "BigInt",
+    "Boolean",
     "Buffer",
     "Date",
     "Error",
+    "Function",
     "Headers",
+    "Infinity",
     "JSON",
+    "Map",
     "Math",
+    "NaN",
     "Number",
     "Object",
     "Promise",
     "RegExp",
     "Response",
+    "Set",
     "String",
     "Symbol",
     "TextDecoder",
+    "TextEncoder",
     "URL",
     "URLSearchParams",
     "Uint8Array",
     "clearTimeout",
     "console",
     "decodeURIComponent",
+    "document",
     "encodeURIComponent",
     "fetch",
     "globalThis",
     "isNaN",
+    "localStorage",
+    "location",
+    "navigator",
     "parseFloat",
     "parseInt",
+    "performance",
     "process",
-    "setTimeout"
+    "sessionStorage",
+    "setTimeout",
+    "window"
   ];
   const NOT_BINDINGS = /* @__PURE__ */ new Set([...RESERVED_WORDS, ...MODULE_DECLARED, ...GLOBALS_USED]);
   const clashes = (n) => NOT_BINDINGS.has(n);
@@ -15222,6 +15240,8 @@ function renderClient(host, map, auth, specs, dir) {
   out.push(`const ${TAB} = (${tabBridgeClient.toString()})({ fs, path, home: ${HOME}(), env, fetch: globalThis.fetch, v: ${BRIDGE_VERSION}, auth: AUTH });`);
   out.push(`const ${TAB_FETCH} = (url, init) => ${TAB}.fetch(url, init).then((r) => {`);
   out.push(`  if (!r) return globalThis.fetch(url, init);`);
+  out.push(`  // The tab never follows a redirect and the browser hides where it points. For a logged-in API call that nearly always means the login page.`);
+  out.push(`  if (r.headers.get("x-iframer-bridge") === "redirect-not-followed") throw new Error(${JSON.stringify(`session expired, or the page moved: ${host} answered with a redirect, which the tab bridge does not follow. Log in to ${host} in the attached tab, then run again`)});`);
   out.push(`  core.setTransport({ relogin: ${JSON.stringify(`log in to ${host} in the attached tab, then run again`)} });`);
   out.push(`  return r;`);
   out.push(`});`);
@@ -16051,7 +16071,7 @@ function tabRelay(c) {
     if (q.notAfter && Date.now() > q.notAfter) return reply({ expired: 1 });
     var method = String(q.method || "GET").toUpperCase(), read2 = method === "GET" || method === "HEAD";
     function run2() {
-      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null, timer, started = false, answered = false, redirectGuard = "";
+      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null, timer, started = false;
       Promise.resolve().then(function() {
         var u = new URL(q.url, location.href);
         if (!mine(u)) throw new Error("not this tab's site: " + u.hostname);
@@ -16074,11 +16094,7 @@ function tabRelay(c) {
           var v = stored(s);
           if (v != null) headers[name] = v;
         });
-        var own = u.origin === location.origin;
-        var redirect = q.redirect === "error" ? "error" : read2 && own ? q.redirect || "follow" : "manual";
-        var init = { method, headers, credentials: "include", redirect, cache: "no-store" };
-        if (read2 && own) init.mode = "same-origin";
-        redirectGuard = redirect === "error" ? "error" : read2 && own ? "origin" : "";
+        var init = { method, headers, credentials: "include", redirect: "manual", cache: "no-store" };
         if (referrer) init.referrer = referrer;
         if (!read2 && q.body64 != null) init.body = bytes(q.body64);
         else if (!read2 && q.body != null) init.body = q.body;
@@ -16091,7 +16107,6 @@ function tabRelay(c) {
         }
         started = true;
         return fetch(u.href, init).then(function(res) {
-          answered = true;
           function drop(why) {
             try {
               res.body && res.body.cancel();
@@ -16099,10 +16114,7 @@ function tabRelay(c) {
             }
             throw new Error(why);
           }
-          if (res.url) {
-            var end = new URL(res.url);
-            if (!mine(end)) drop("redirected to another site (" + end.hostname + "): refused");
-          }
+          if (res.type === "opaqueredirect" && q.redirect === "error") drop("the site answered with a redirect, and the request asked for redirect: error");
           var type = res.headers.get("content-type") || "";
           if (/text\/event-stream/i.test(type)) drop("streamed response (" + type + "): not supported through the tab bridge");
           if (+res.headers.get("content-length") > MAX) drop("response larger than 32 MB: too large for the tab bridge");
@@ -16116,7 +16128,6 @@ function tabRelay(c) {
         });
       }).catch(function(e) {
         var out = { error: read2 && ctl && ctl.signal.aborted ? "aborted: the read was stopped or timed out" : String(e && e.message || e) };
-        if (started && !answered && redirectGuard && !(ctl && ctl.signal.aborted)) out.error += " (the tab could not reach the site, or the site redirected this request" + (redirectGuard === "error" ? "" : " to another origin, for example a login on another host") + ", which the bridge does not follow)";
         if (!started) out.unsent = 1;
         reply(out);
       }).then(function() {
@@ -16368,7 +16379,7 @@ async function attach(o) {
     `- A daemon restart does not drop it: the tab reconnects by itself (a background tab can take a minute).`,
     `- Scripts print "stopped: tab bridge: ..." with the next step when the tab can't answer. A write is never sent twice: when an error says it may have reached the site, check the site before running it again.`,
     `- A script decides once per run: one that started on its saved session stays on it. Attach first, then start the script.`,
-    `- A write never follows a redirect (it comes back as HTTP 302); a read that ends on another site is refused.`,
+    `- Redirects are never followed. A script sees "session expired, or the page moved" (HTTP 302 with the 1-file client): usually the tab is logged out.`,
     `- Stop using the tab: iframer bridge stop (scripts go back to the saved session).`,
     ``,
     `Expression:`,

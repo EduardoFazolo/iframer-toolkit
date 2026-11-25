@@ -168,6 +168,9 @@ let text = cli(["bridge", "status"]);
 check("iframer bridge status lists the attached sites", /tab bridge running/.test(text) && /app\.example\.com/.test(text) && /ro\.example\.com \(.*read-only/.test(text) && /name work/.test(text), text);
 for (const t of [a, ro, named]) t.ws.close();
 await sleep(100);
+r = await viaTab("https://app.example.com/once", { rid: "same-id-1" });
+check("a second copy of a request is refused even after its tab is gone (never 'no tab': that would send it again the other way)", r.http === 409 && r.duplicate === true, r);
+await sleep(100);
 text = cli(["bridge", "status"]);
 check("...and says when a tab detached", /detached: .*app\.example\.com \(detached/.test(text), text);
 
@@ -334,7 +337,7 @@ else kit.saveRecipe({ name: "composed", host, run: "async (core, args) => 'compo
 if (CLI) cli(["recipe", host, "composed2", "--run", "async (core, args) => [String(await toString({})).length > 40, String(await __tabHome({})).length > 40, String(await Bun({})).length > 40].join()", "--quiet"]);
 else kit.saveRecipe({ name: "composed2", host, run: "async (core, args) => [String(await toString({})).length > 40, String(await __tabHome({})).length > 40, String(await Bun({})).length > 40].join()" });
 // Recipes named like the client's own internals must not break the regenerated module.
-for (const name of ["os", "__tab", "__tabFetch", "__tabHome", "globalThis", "fetch", "process", "env", "path", "fs", "toString", "Bun", "async"]) {
+for (const name of ["os", "__tab", "__tabFetch", "__tabHome", "globalThis", "fetch", "process", "env", "path", "fs", "toString", "Bun", "async", "TextEncoder", "document", "Map"]) {
   if (CLI) cli(["recipe", host, name, "--path", "/api/x", "--quiet"]); else kit.saveRecipe({ name, host, path: "/api/x" });
 }
 const client = path.join(dir, "client.mjs");
@@ -420,6 +423,8 @@ console.log(JSON.stringify({ first: first.sentCookie, second: second.sentCookie 
   check("...also recipes named toString, __tabHome or Bun (they stay module bindings)", r === "true,true,true", r);
   r = await node(["action", "getRestaurants", JSON.stringify([{ communitySlug: "acme" }]), "--approved"]);
   check("a write (Server Action, id re-found from the page's JS) runs through the tab", r.includes("Bistro") && r.includes("acme"), r);
+  r = await node(["get", "/api/redirect-me"]);
+  check("the generated client reports a redirect as a session that expired or a page that moved", /session expired, or the page moved/.test(r), r);
   r = await node(["get", "/api/rate-limited"]);
   check("a 429 from the site still stops the client", /stopped: HTTP 429/.test(r), r);
   r = await node(["get", "/api/private"], { IFRAMER_BRIDGE: "off" });
@@ -432,7 +437,7 @@ console.log(JSON.stringify({ first: first.sentCookie, second: second.sentCookie 
   const use = path.join(bin, "use.mjs");
   fs.writeFileSync(use, `import { bridgeFetch, tabAttached } from "./tab-bridge.mjs";
 const o = ${JSON.stringify(origin)};
-const j = async (p, init) => { const r = await bridgeFetch(o + p, init); return r && { status: r.status, redirected: r.redirected, url: r.url, body: await r.text() }; };
+const j = async (p, init) => { const r = await bridgeFetch(o + p, init); return r && { status: r.status, redirected: r.redirected, url: r.url, marked: r.headers.get("x-iframer-bridge"), body: await r.text() }; };
 const out = {};
 out.attached = await tabAttached(o);
 out.other = await bridgeFetch("https://not-attached.example/x");
@@ -461,15 +466,15 @@ console.log(JSON.stringify(out));
   check("Referer is sent the way a page may set it", echo.referer === origin + "/from-here", echo);
   check("a bytes body arrives as bytes", (() => { try { const e = JSON.parse(out.bin.body); return e.method === "PUT" && e.body === "hi"; } catch { return false; } })(), out.bin);
   check("a binary response comes back byte for byte", JSON.stringify(out.bytes) === "[0,255,1,254,128,10,13]", out.bytes);
-  check("a followed redirect is reported", out.redirect?.redirected === true && /redirect-target/.test(out.redirect.url), out.redirect);
+  check("a redirect is not followed: it comes back as a marked 302", out.redirect?.status === 302 && out.redirect.marked === "redirect-not-followed", out.redirect);
   check("a manual redirect shows as 302", out.manual?.status === 302, out.manual);
   check("a streamed response is refused, not left hanging", /streamed response/.test(String(out.stream)), out.stream);
   check("a response over 32 MB is refused", /32 MB/.test(String(out.huge)), out.huge);
   check("another host with no tab is null, whatever this one uses", out.cross === null, out.cross);
-  check("a write never follows a redirect: it comes back as 302 and the target is not requested", out.writeRedirect?.status === 302 && !log.some((l) => l.path === "/api/redirect-target" && l.method === "POST") && log.filter((l) => l.path === "/api/redirect-target").length === 1, { r: out.writeRedirect, hits: log.filter((l) => /redirect/.test(l.path)) });
-  check("a read redirected to another origin is refused by the browser: the other site is never requested, the source once, and the error says why", /redirected this request to another origin/.test(String(out.out)) && !log.some((l) => l.path === "/api/cors-echo") && log.filter((l) => l.path === "/api/redirect-out").length === 1, { out: out.out, hits: log.filter((l) => /cors-echo|redirect-out/.test(l.path)) });
-  check("a redirecting read is requested once, not twice", log.filter((l) => l.path === "/api/redirect-me" && l.method === "GET").length === 3 && log.filter((l) => l.path === "/api/redirect-target").length === 1, log.filter((l) => /redirect-(me|target)/.test(l.path)));
-  check("redirect: error on a redirect names the redirect as a cause, and the tab keeps answering", /redirected this request/.test(String(out.asError)) && out.afterError?.status === 200, { e: out.asError, after: out.afterError });
+  check("a write never follows a redirect: it comes back as 302 and the target is not requested", out.writeRedirect?.status === 302 && !log.some((l) => l.path === "/api/redirect-target"), { r: out.writeRedirect, hits: log.filter((l) => /redirect/.test(l.path)) });
+  check("a read redirected to another site comes back as 302: the other site is never requested, the source once", out.out?.status === 302 && !log.some((l) => l.path === "/api/cors-echo") && log.filter((l) => l.path === "/api/redirect-out").length === 1, { out: out.out, hits: log.filter((l) => /cors-echo|redirect-out/.test(l.path)) });
+  check("a redirecting read is requested once, and its target never", log.filter((l) => l.path === "/api/redirect-me" && l.method === "GET").length === 4 && log.filter((l) => l.path === "/api/redirect-target").length === 0, log.filter((l) => /redirect-(me|target)/.test(l.path)));
+  check("redirect: error on a redirect is an error about the redirect, not a dead tab, and the tab keeps answering", /redirect: error/.test(String(out.asError)) && !/No live tab/.test(String(out.asError)) && out.afterError?.status === 200, { e: out.asError, after: out.afterError });
   check("a request that is not redirected is sent once", log.filter((l) => l.path === "/api/echo-head").length === 1 && out.head?.status === 200, { head: out.head, hits: log.filter((l) => l.path === "/api/echo-head") });
   check("a write that reached the site and then failed (answer too large) says it may have reached it", /32 MB.*may have reached the site/.test(String(out.hugeWrite)) && log.some((l) => l.path === "/api/huge" && l.method === "POST"), out.hugeWrite);
   text = cli(["bridge", "status"]);

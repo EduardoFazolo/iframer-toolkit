@@ -92,7 +92,7 @@ export function tabRelay(c) {
     if (q.notAfter && Date.now() > q.notAfter) return reply({ expired: 1 });
     var method = String(q.method || "GET").toUpperCase(), read = method === "GET" || method === "HEAD";
     function run() {
-      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null, timer, started = false, answered = false, redirectGuard = "";
+      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null, timer, started = false;
       Promise.resolve().then(function () {
         var u = new URL(q.url, location.href);
         if (!mine(u)) throw new Error("not this tab's site: " + u.hostname);
@@ -114,18 +114,10 @@ export function tabRelay(c) {
           var v = stored(s);
           if (v != null) headers[name] = v;
         });
-        // Redirects never take a request off this tab's ground, and every request is sent exactly once:
-        // - a write is never followed (its body would go wherever the answer points): it comes back as a 302;
-        // - a read to this page's own origin is followed in "same-origin" mode: the browser itself refuses a hop to
-        //   another origin before requesting it. That refusal looks like a failed fetch (the browser does not say
-        //   which it was), so the error names both causes;
-        // - a read to another host of the site (an API subdomain) is not followed: it comes back as a 302.
-        // (Mode "same-origin" shows in the Sec-Fetch-Mode header: "same-origin" where the page's own fetch says "cors".)
-        var own = u.origin === location.origin;
-        var redirect = q.redirect === "error" ? "error" : read && own ? (q.redirect || "follow") : "manual";
-        var init = { method: method, headers: headers, credentials: "include", redirect: redirect, cache: "no-store" };
-        if (read && own) init.mode = "same-origin";
-        redirectGuard = redirect === "error" ? "error" : read && own ? "origin" : "";
+        // Redirects are never followed: the answer comes back as it is (a 302 for the caller). So a request is sent
+        // exactly once and can never leave this tab's site, and a fetch that fails is a tab that can't reach its site,
+        // nothing else (which is what lets a read move to another tab safely). The fetch is otherwise the page's own.
+        var init = { method: method, headers: headers, credentials: "include", redirect: "manual", cache: "no-store" };
         if (referrer) init.referrer = referrer;
         if (!read && q.body64 != null) init.body = bytes(q.body64);
         else if (!read && q.body != null) init.body = q.body;
@@ -137,10 +129,8 @@ export function tabRelay(c) {
         }
         started = true;
         return fetch(u.href, init).then(function (res) {
-          answered = true;
           function drop(why) { try { res.body && res.body.cancel(); } catch (e) {} throw new Error(why); }
-          // A followed redirect that ended on another site: this tab only answers for its own.
-          if (res.url) { var end = new URL(res.url); if (!mine(end)) drop("redirected to another site (" + end.hostname + "): refused"); }
+          if (res.type === "opaqueredirect" && q.redirect === "error") drop("the site answered with a redirect, and the request asked for redirect: error");
           var type = res.headers.get("content-type") || "";
           if (/text\/event-stream/i.test(type)) drop("streamed response (" + type + "): not supported through the tab bridge");
           if (+res.headers.get("content-length") > MAX) drop("response larger than 32 MB: too large for the tab bridge");
@@ -153,9 +143,6 @@ export function tabRelay(c) {
       }).catch(function (e) {
         var out = { error: read && ctl && ctl.signal.aborted ? "aborted: the read was stopped or timed out" : String((e && e.message) || e) };
         // A fetch that failed after it started, in a mode that refuses redirects off this origin (or all redirects).
-        // The fetch itself failed, in a mode where the browser refuses a redirect (off this origin, or any): it does
-        // not say which it was.
-        if (started && !answered && redirectGuard && !(ctl && ctl.signal.aborted)) out.error += " (the tab could not reach the site, or the site redirected this request" + (redirectGuard === "error" ? "" : " to another origin, for example a login on another host") + ", which the bridge does not follow)";
         // Refused before any fetch: certain not to be on the site (the daemon tells a write's caller so).
         if (!started) out.unsent = 1;
         reply(out);

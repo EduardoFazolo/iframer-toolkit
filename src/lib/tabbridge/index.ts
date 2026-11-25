@@ -141,7 +141,7 @@ export async function attach(o: AttachOptions): Promise<{ site: string; name: st
     `- A daemon restart does not drop it: the tab reconnects by itself (a background tab can take a minute).`,
     `- Scripts print "stopped: tab bridge: ..." with the next step when the tab can't answer. A write is never sent twice: when an error says it may have reached the site, check the site before running it again.`,
     `- A script decides once per run: one that started on its saved session stays on it. Attach first, then start the script.`,
-    `- A write never follows a redirect (it comes back as HTTP 302); a read that ends on another site is refused.`,
+    `- Redirects are never followed. A script sees "session expired, or the page moved" (HTTP 302 with the 1-file client): usually the tab is logged out.`,
     `- Stop using the tab: iframer bridge stop (scripts go back to the saved session).`,
     ``,
     `Expression:`,

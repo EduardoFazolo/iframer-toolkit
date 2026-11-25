@@ -79,8 +79,10 @@ export function tabBridgeClient(d) {
   function settled(f) { try { return Promise.resolve(f()); } catch (e) { return Promise.reject(e); } }
 
   function response(r, read, method) {
-    // A redirect that was not followed is opaque in the tab (status 0); report it as a 302 so callers see "redirected".
-    var status = r.type === "opaqueredirect" || !r.status ? 302 : r.status;
+    // The tab never follows a redirect, and the browser hides where it points (status 0, no Location). It is reported
+    // as a 302, marked so callers can tell it from a 302 the site sent as a plain answer.
+    var redirect = r.type === "opaqueredirect" || !r.status;
+    var status = redirect ? 302 : r.status;
     var empty = status === 204 || status === 205 || status === 304 || method === "HEAD";
     try {
       var headers = new Headers();
@@ -89,6 +91,7 @@ export function tabBridgeClient(d) {
         if (/^content-(encoding|length)$/i.test(k)) return;
         try { headers.set(k, r.headers[k]); } catch (e) {}
       });
+      if (redirect) headers.set("x-iframer-bridge", "redirect-not-followed");
       var res = new Response(empty ? null : Buffer.from(r.body64 || "", "base64"), { status: status, headers: headers });
       try {
         Object.defineProperty(res, "url", { value: r.url || "" });
@@ -284,7 +287,8 @@ export function clientModuleSource(version: number): string {
     `// this process, so falling back is safe for writes too. Every other problem is thrown ("stopped: tab bridge: ..."`,
     `// with the next step); when it says a write may have reached the site, check the site, never re-send blindly.`,
     `// One session per host per run: the first request to a host decides (tab, or your own way) and it never changes.`,
-    `// Redirects: a write is never followed (status 302 comes back); a read is followed only inside the tab's own origin.`,
+    `// Redirects are never followed: status 302 comes back, with the header x-iframer-bridge: redirect-not-followed and`,
+    `// no Location (the browser hides it). A site that redirects a logged-in API call usually means: session expired.`,
     `// Env: IFRAMER_BRIDGE=off, IFRAMER_BRIDGE_TAB=<name> (tabs attached with --name), IFRAMER_DATA_DIR.`,
     `import fs from "node:fs";`,
     `import os from "node:os";`,

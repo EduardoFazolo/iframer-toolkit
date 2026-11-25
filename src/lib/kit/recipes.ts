@@ -296,9 +296,12 @@ export function renderClient(host: string, map: MapLite, auth: Record<string, un
     "while", "with", "yield"];
   const MODULE_DECLARED = ["fs", "path", "fileURLToPath", "DIR", "ORIGIN", "AUTH", "ACTIONS", "PAGES", "readEnv", "HOST", "IFRAMER", "env", "refreshed",
     "refreshSession", "core", "FP", "fps", "run", "ready", "get", "page", "action", "actions", "SPECS", "recipes", "flags", "args", "show", "main", "isMain"];
-  const GLOBALS_USED = ["AbortController", "AbortSignal", "Array", "ArrayBuffer", "Buffer", "Date", "Error", "Headers", "JSON", "Math", "Number", "Object",
-    "Promise", "RegExp", "Response", "String", "Symbol", "TextDecoder", "URL", "URLSearchParams", "Uint8Array", "clearTimeout", "console",
-    "decodeURIComponent", "encodeURIComponent", "fetch", "globalThis", "isNaN", "parseFloat", "parseInt", "process", "setTimeout"];
+  // Every global the generated module's own code reads (the inlined request core included: it also probes the page
+  // globals to see where it runs). Keep in step with recipe-core.ts and tabbridge/client.ts.
+  const GLOBALS_USED = ["AbortController", "AbortSignal", "Array", "ArrayBuffer", "BigInt", "Boolean", "Buffer", "Date", "Error", "Function", "Headers",
+    "Infinity", "JSON", "Map", "Math", "NaN", "Number", "Object", "Promise", "RegExp", "Response", "Set", "String", "Symbol", "TextDecoder", "TextEncoder",
+    "URL", "URLSearchParams", "Uint8Array", "clearTimeout", "console", "decodeURIComponent", "document", "encodeURIComponent", "fetch", "globalThis",
+    "isNaN", "localStorage", "location", "navigator", "parseFloat", "parseInt", "performance", "process", "sessionStorage", "setTimeout", "window"];
   const NOT_BINDINGS = new Set([...RESERVED_WORDS, ...MODULE_DECLARED, ...GLOBALS_USED]);
   const clashes = (n: string) => NOT_BINDINGS.has(n);
   const out: string[] = [];
@@ -337,6 +340,8 @@ export function renderClient(host: string, map: MapLite, auth: Record<string, un
   out.push(`const ${TAB} = (${tabBridgeClient.toString()})({ fs, path, home: ${HOME}(), env, fetch: globalThis.fetch, v: ${BRIDGE_VERSION}, auth: AUTH });`);
   out.push(`const ${TAB_FETCH} = (url, init) => ${TAB}.fetch(url, init).then((r) => {`);
   out.push(`  if (!r) return globalThis.fetch(url, init);`);
+  out.push(`  // The tab never follows a redirect and the browser hides where it points. For a logged-in API call that nearly always means the login page.`);
+  out.push(`  if (r.headers.get("x-iframer-bridge") === "redirect-not-followed") throw new Error(${JSON.stringify(`session expired, or the page moved: ${host} answered with a redirect, which the tab bridge does not follow. Log in to ${host} in the attached tab, then run again`)});`);
   out.push(`  core.setTransport({ relogin: ${JSON.stringify(`log in to ${host} in the attached tab, then run again`)} });`);
   out.push(`  return r;`);
   out.push(`});`);
