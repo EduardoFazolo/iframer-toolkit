@@ -1498,6 +1498,39 @@ async function main() {
       process.exit(r.status ?? 1);
     }
 
+    case "bridge": {
+      // Tab bridge: Node scripts send their requests through a tab that is already logged in (any browser where
+      // one line of JS can run). The tab does the fetch with its own login; the browser's cookies are never exported or saved.
+      // Own small daemon (127.0.0.1, token); off unless a tab is attached. src/lib/tabbridge/.
+      const bridge = await import("../src/lib/tabbridge/index.ts");
+      const sub = args[0];
+      if (sub === "attach") {
+        const host = args[1] && !args[1].startsWith("--") ? args[1] : null;
+        const target = parseFlag(args, "--for") || "t3";
+        if (!host || !bridge.BRIDGE_TARGETS.includes(target)) {
+          console.error("  Usage: iframer bridge attach <host> [--for t3|playwright-mcp|any] [--site <domain>] [--name <n>] [--read-only]");
+          console.error("    Starts the bridge if needed and prints the one expression to evaluate in the logged-in tab.");
+          console.error("    --site <domain>      Cover a parent domain too (default: the host, without www.)");
+          console.error("    --name <n>           Tab name, when 2 profiles are logged in to the same site (scripts: IFRAMER_BRIDGE_TAB=<n>)");
+          console.error("    --read-only          The bridge refuses anything but GET/HEAD for this tab");
+          process.exit(1);
+        }
+        const r = await bridge.attach({ host, target, site: parseFlag(args, "--site"), name: parseFlag(args, "--name"), readOnly: hasFlag(args, "--read-only") });
+        console.log(hasFlag(args, "--print") ? r.expression : r.text);
+        break;
+      }
+      if (sub === "status") { console.log(await bridge.statusText()); break; }
+      if (sub === "stop") { console.log((await bridge.stop()) ? "tab bridge stopped (scripts use their saved session)" : "tab bridge not running"); break; }
+      if (sub === "client") {
+        const out = parseFlag(args, "--out");
+        console.log(`  ${bridge.writeClientModule(out ? path.resolve(out) : undefined)}`);
+        console.log("  import { bridgeFetch } from that file: (await bridgeFetch(url, init)) ?? <your own request with the saved session>");
+        break;
+      }
+      console.error("  Usage: iframer bridge attach <host> | status | stop | client [--out <file>]");
+      process.exit(1);
+    }
+
     case "kit": {
       const kit = await import("../src/lib/kit/index.ts");
       const target = parseFlag(args, "--for") || "t3";
@@ -2030,6 +2063,17 @@ async function main() {
       --quiet                       One line back: the run command
       --rm                          Delete a recipe; no name lists them
 
+  Tab bridge: Node scripts (client.mjs, recipes, any script) send their requests through a tab that is
+  already logged in. The tab does the fetch with its own login; the browser's cookies are never exported or saved:
+    bridge attach <host>            Start the bridge, print the one expression to evaluate in the logged-in tab
+      --for <t3|playwright-mcp|any> Which browser tool's steps to print (default: t3)
+      --site <domain>               Cover a parent domain too (default: the host, without www.)
+      --name <n>                    Tab name when 2 profiles use the same site (scripts: IFRAMER_BRIDGE_TAB=<n>)
+      --read-only                   Refuse anything but GET/HEAD for this tab
+    bridge status                   Is it running, which sites have a tab attached
+    bridge stop                     Stop it (scripts go back to the saved session)
+    bridge client [--out <file>]    Write the 1-file client (bridgeFetch) for scripts that are not a client.mjs
+
   Session:
     session stop                    Save state + close idle browsers on the shared daemon
     session clear                   Wipe all stored session data
@@ -2083,6 +2127,8 @@ async function main() {
   Environment:
     IFRAMER_SECRET                  Encryption and pairing secret (default: ~/.iframer/secret)
     IFRAMER_DATA_DIR                Data directory (default: ~/.iframer)
+    IFRAMER_BRIDGE                  off = client.mjs never uses the tab bridge
+    IFRAMER_BRIDGE_PORT             Tab bridge port (default: 47625)
     ANTHROPIC_API_KEY               Needed by the solve-captcha step
 `);
       break;

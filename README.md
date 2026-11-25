@@ -224,6 +224,13 @@ The browser only maps the site; the output is a local folder with a Node client:
     --max-result <n>               Chars a call returns before switching to an overview (default: 4000)
     --hard-max <n>                 Chars a call can ever return, even with {full:true} (default: 30000)
     --print                        Print the kit source instead (tools without upload)
+  bridge attach <host>             Tab bridge: print the one expression that attaches a logged-in tab
+    --for <t3|playwright-mcp|any>  Which browser tool's steps to print (default: t3)
+    --site <domain>                Cover a parent domain too (default: the host, without www.)
+    --name <n>                     Tab name when 2 profiles use the same site (IFRAMER_BRIDGE_TAB=<n>)
+    --read-only                    Refuse anything but GET/HEAD for this tab
+  bridge status | stop             Which sites have a tab attached / stop the bridge
+  bridge client [--out <file>]     Write the 1-file client (bridgeFetch) for other Node scripts
   ingest <file|-|--latest>         Capture -> folder: index.txt, api.json, auth.json, client.mjs (Node)
     --latest                       Newest capture in T3 Code's downloads or ~/Downloads
     --out <dir>                    Output folder (default: ~/.iframer/apis/<host>/)
@@ -366,7 +373,29 @@ What it guarantees:
 - **Next.js specifics.** Route segments named from the app's route data (`/{org}/{project}/issues`), RSC flight parsing including React's path references, server-rendered HTML as `--nodes a`, Server Actions called by export name (`node client.mjs action <name> --approved`, recipes `--action`) with the id re-found after deploys, inline actions via `--action-prop`.
 - **Safe defaults.** Same-site requests only. Actions need `--approved`. Stops on 403, 429 or a captcha; retries GETs on 5xx; reports "session expired" on a login redirect or 401, with the `iframer auth` command to refresh it. The `.env` is never printed, and is gitignored.
 - **Not complete.** Worker traffic, redirect hops, cross-origin iframes, and calls a page makes before the kit is installed are invisible to it.
-- **Bot walls.** For sites that block requests from Node, `iframer recipe … --in-page` builds the same recipes as a bundle that runs inside a logged-in tab. It's a fallback, not the default.
+- **Bot walls.** For sites that block requests from Node, `iframer recipe … --in-page` builds the same recipes as a bundle that runs inside a logged-in tab. It's a fallback, not the default. The tab bridge below is the other way: the Node client keeps running and the tab only carries its requests.
+
+### Tab bridge: Node scripts through a logged-in tab
+
+When the session can't be exported (on Windows a running T3 Code or Chrome locks its cookie store), or you don't want any cookie taken out of the browser, a Node script can send its requests through a tab that is already logged in. The tab does the fetch with its own login, HttpOnly cookies included. The browser's cookies are never exported or saved, and the agent makes no tool call per request, so scheduled scripts work.
+
+```bash
+iframer bridge attach www.example.com   # starts the bridge, prints ONE expression
+# evaluate that expression once in the logged-in tab  ->  ATTACHED
+node ~/.iframer/apis/www.example.com/client.mjs <recipe>   # picks the tab by itself
+iframer bridge status
+```
+
+```
+Node script -> POST 127.0.0.1/fetch (token) -> bridge daemon -> WebSocket -> relay in the tab -> same-site fetch
+```
+
+- **Off unless a tab is attached.** With nothing attached, `client.mjs` runs exactly as before.
+- **Any browser where one line of JS can run**: T3 Code (`preview_evaluate`), Playwright MCP (`browser_evaluate`), a DevTools console. The relay patches nothing: one WebSocket and the page's own `fetch`.
+- **Safe by construction.** 127.0.0.1 only; scripts need a per-run token and web pages are refused; a tab is accepted only with the key minted for its exact origin; a request goes only to a tab of its own site and never follows a redirect off it. Nothing is stored.
+- **Built for tabs that misbehave.** A frozen background tab is detected in 5 s, remembered and skipped. At most 4 reads per site are in flight, the rest wait in line. A read may move to another tab; a write is never sent twice (the tab holds it until the bridge says go), and the error says whether it may have reached the site. A run decides once, tab or saved session, and never switches half-way.
+- **Limits.** Sites whose CSP forbids connecting to 127.0.0.1 answer `CSP_BLOCKED` (use `iframer auth`, in-page replay or the extension there). A page reload drops the relay: evaluate the expression again. A bridge restart does not: the tab reconnects by itself. Responses are capped at 32 MB and streams are refused. Redirects are not followed (a script sees "session expired, or the page moved"). It carries requests only: no clicks, navigation or screenshots.
+- **Other scripts.** `iframer bridge client --out tab-bridge.mjs` writes a 1-file module: `(await bridgeFetch(url, init)) ?? <your own request>`.
 
 ## Captcha solving
 
@@ -390,6 +419,9 @@ If it can't solve the captcha, the run fails with `captcha-unsolvable` and the r
 | `IFRAMER_TELEMETRY` | No       | Set to `0` in the MCP env to disable the local token-telemetry log (`iframer telemetry` reads it). |
 | `IFRAMER_LOCAL_PORT`| No       | Base port for the shared local server (default: `3022`, loopback only). |
 | `IFRAMER_DATA_DIR`  | No       | Override the data directory. Default: `~/.iframer`. |
+| `IFRAMER_BRIDGE`    | No       | `off` makes `client.mjs` ignore the tab bridge. |
+| `IFRAMER_BRIDGE_TAB`| No       | Name of the attached tab to use (tabs attached with `--name`). |
+| `IFRAMER_BRIDGE_PORT`| No      | Tab bridge port (default: `47625`, loopback only). |
 
 ## Architecture
 

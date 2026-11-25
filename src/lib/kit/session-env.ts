@@ -130,7 +130,7 @@ export async function refreshSession(host: string, dir: string, opts: { extra?: 
       ok: false,
       locked: true,
       envFile,
-      note: `${host}'s session is open in a browser that locks its cookie store, so it can't be exported to a file (${looked}). This is normal on Windows with T3 Code running. Run the recipes inside the logged-in tab instead (in-page replay): iframer recipe ${host} --in-page`,
+      note: `${host}'s session is open in a browser that locks its cookie store, so it can't be exported to a file (${looked}). This is normal on Windows with T3 Code running. Run the recipes inside the logged-in tab instead (in-page replay): iframer recipe ${host} --in-page. Or keep running client.mjs from Node and let that tab carry its requests (no cookie export): iframer bridge attach ${host}`,
     };
   }
   return {

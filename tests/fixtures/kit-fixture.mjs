@@ -137,6 +137,20 @@ export function startFixture() {
         return res.end(`<!doctype html><title>inner</title><button id="inner">inner</button><script src="/inner.js"></script>`);
       }
       if (p === "/inner.js") { res.writeHead(200, { "content-type": "text/javascript" }); return res.end(`document.getElementById('inner').onclick=()=>fetch('/api/from-frame/77',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({note:'x'})});`); }
+      // ── Tab bridge (tests/integration/tab-bridge.mjs) ──────────────────
+      if (p === "/open") {
+        // A logged-in page with no CSP: the relay can connect to 127.0.0.1 from here.
+        res.writeHead(200, { "content-type": "text/html", "set-cookie": `sid=${SECRETS.cookie}; HttpOnly; Path=/; SameSite=Lax` });
+        return res.end(`<!doctype html><title>open</title><h1>open</h1><script src="/app.js"></script>`);
+      }
+      if (p === "/api/echo") return json(200, { method: req.method, cookieOk, body: raw, contentType: req.headers["content-type"] || null, referer: req.headers.referer || null, sentCookie: req.headers.cookie || null, x: req.headers["x-test"] || null });
+      // A redirect that leaves the site, to a target that allows it (CORS): the relay must refuse the answer.
+      if (p === "/api/redirect-out") { res.writeHead(302, { location: `http://localhost:${server.address().port}/api/cors-echo` }); return res.end(); }
+      if (p === "/api/cors-echo") return json(200, { reached: "another site" }, { "access-control-allow-origin": req.headers.origin || "*", "access-control-allow-credentials": "true" });
+      if (p === "/api/fake-marker") return json(200, { ok: true }, { "x-iframer-bridge": "redirect-not-followed" });
+      if (p === "/api/stream") { res.writeHead(200, { "content-type": "text/event-stream" }); res.write("data: 1\n\n"); return; }
+      if (p === "/api/huge") { res.writeHead(200, { "content-type": "application/octet-stream", "content-length": String(40 * 1024 * 1024) }); res.write("x"); return; }
+      if (p === "/api/bytes") { res.writeHead(200, { "content-type": "application/octet-stream" }); return res.end(Buffer.from([0, 255, 1, 254, 128, 10, 13])); }
       if (p === "/api/me") return req.headers.authorization === "Bearer " + SECRETS.lsToken ? json(200, { id: 7, name: "Seeded Person" }) : json(401, { error: "no token" });
       if (p === "/api/users-by-email") return json(200, { [SECRETS.email]: { id: 1, role: "admin" }, ["other.person@example.com"]: { id: 2, role: "user" } });
       if (p === "/api/wall") { res.writeHead(200, { "content-type": "text/html" }); return res.end("<div class='cf-chl'>Are you a robot?</div>"); }

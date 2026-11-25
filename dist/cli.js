@@ -267,11 +267,11 @@ async function healthCheck(baseUrl) {
     return false;
   }
 }
-function findFreePort(start, attempts) {
+function findFreePort(start2, attempts) {
   return new Promise((resolve, reject) => {
     const tryPort = (p) => {
-      if (p >= start + attempts) {
-        reject(new Error(`No free port found in ${start}-${start + attempts}`));
+      if (p >= start2 + attempts) {
+        reject(new Error(`No free port found in ${start2}-${start2 + attempts}`));
         return;
       }
       const srv = import_net.default.createServer();
@@ -284,7 +284,7 @@ function findFreePort(start, attempts) {
       });
       srv.listen(p, "127.0.0.1");
     };
-    tryPort(start);
+    tryPort(start2);
   });
 }
 var import_child_process2, import_net, import_fs2, import_path3, BASE_PORT, PORT_SCAN_ATTEMPTS, STARTUP_TIMEOUT_MS, HEALTH_POLL_MS, SPAWN_LOCK_STALE_MS, LocalServerManager;
@@ -2259,8 +2259,8 @@ async function humanMove(page, toX, toY) {
   const lastPos = mousePositions.get(page);
   const fromX = lastPos?.x ?? randRange(TIMING.IDLE_MOUSE_X);
   const fromY = lastPos?.y ?? randRange(TIMING.IDLE_MOUSE_Y);
-  const path18 = generatePath(fromX, fromY, toX, toY);
-  for (const point of path18) {
+  const path20 = generatePath(fromX, fromY, toX, toY);
+  for (const point of path20) {
     await mouse.move(point.x, point.y);
     await sleep4(rand(2, 12));
   }
@@ -2909,7 +2909,7 @@ async function download(page, step) {
   const status = resp.status();
   if (!resp.ok()) throw new Error(`download: HTTP ${status} for ${step.url}`);
   const buf = await resp.body();
-  const fs17 = await import("fs");
+  const fs19 = await import("fs");
   const pathMod = await import("path");
   const { getDataDir: getDataDir2 } = await Promise.resolve().then(() => (init_paths(), paths_exports));
   let outPath;
@@ -2923,8 +2923,8 @@ async function download(page, step) {
     }
     outPath = pathMod.join(getDataDir2(), "downloads", step.path || name);
   }
-  fs17.mkdirSync(pathMod.dirname(outPath), { recursive: true });
-  fs17.writeFileSync(outPath, buf);
+  fs19.mkdirSync(pathMod.dirname(outPath), { recursive: true });
+  fs19.writeFileSync(outPath, buf);
   return { path: outPath, size: buf.length, status };
 }
 async function typeCode(page, step, ctx) {
@@ -2987,12 +2987,12 @@ async function find(page, step, ctx) {
   const elInfo = await element.evaluate((el) => {
     const tag = el.tagName.toLowerCase();
     const text = (el.textContent?.trim() || "").slice(0, 60);
-    const path18 = [];
+    const path20 = [];
     let current = el;
     while (current && current !== document.body && current !== document.documentElement) {
       let seg = current.tagName.toLowerCase();
       if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-        path18.unshift(`#${current.id}`);
+        path20.unshift(`#${current.id}`);
         break;
       }
       const parent = current.parentElement;
@@ -3004,10 +3004,10 @@ async function find(page, step, ctx) {
           seg += `:nth-of-type(${idx})`;
         }
       }
-      path18.unshift(seg);
+      path20.unshift(seg);
       current = parent;
     }
-    return { tag, text, selector: path18.join(" > ") };
+    return { tag, text, selector: path20.join(" > ") };
   });
   const ref = `@e${ctx.nextRefId++}`;
   const displayRole = step.role || elInfo.tag;
@@ -3201,12 +3201,12 @@ async function takeSnapshot(page, ctx, options) {
       return textual && el.getAttribute("tabindex") === "-1";
     }
     function buildSelector(el) {
-      const path18 = [];
+      const path20 = [];
       let current = el;
       while (current && current !== document.body && current !== document.documentElement) {
         let seg = current.tagName.toLowerCase();
         if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-          path18.unshift(`#${current.id}`);
+          path20.unshift(`#${current.id}`);
           break;
         }
         const parent = current.parentElement;
@@ -3218,10 +3218,10 @@ async function takeSnapshot(page, ctx, options) {
             seg += `:nth-of-type(${idx})`;
           }
         }
-        path18.unshift(seg);
+        path20.unshift(seg);
         current = parent;
       }
-      return path18.join(" > ");
+      return path20.join(" > ");
     }
     function getName(el) {
       const ariaLabel = el.getAttribute("aria-label");
@@ -3358,12 +3358,12 @@ async function annotatedScreenshot(page, ctx) {
       return true;
     }
     function buildSelector(el) {
-      const path18 = [];
+      const path20 = [];
       let current = el;
       while (current && current !== document.body && current !== document.documentElement) {
         let seg = current.tagName.toLowerCase();
         if (current.id && /^[a-zA-Z][\w-]*$/.test(current.id)) {
-          path18.unshift(`#${current.id}`);
+          path20.unshift(`#${current.id}`);
           break;
         }
         const parent = current.parentElement;
@@ -3375,10 +3375,10 @@ async function annotatedScreenshot(page, ctx) {
             seg += `:nth-of-type(${idx})`;
           }
         }
-        path18.unshift(seg);
+        path20.unshift(seg);
         current = parent;
       }
-      return path18.join(" > ");
+      return path20.join(" > ");
     }
     function getName(el) {
       const ariaLabel = el.getAttribute("aria-label");
@@ -4390,10 +4390,10 @@ function extractSection(body, heading) {
   const re = new RegExp(`^##\\s+${heading}\\s*$`, "m");
   const match = body.match(re);
   if (!match || match.index === void 0) return null;
-  const start = match.index + match[0].length;
-  const nextSection = body.slice(start).match(/^##\s+/m);
-  const end = nextSection?.index != null ? start + nextSection.index : body.length;
-  return body.slice(start, end);
+  const start2 = match.index + match[0].length;
+  const nextSection = body.slice(start2).match(/^##\s+/m);
+  const end = nextSection?.index != null ? start2 + nextSection.index : body.length;
+  return body.slice(start2, end);
 }
 function extractBackticks(re, text) {
   const m = text.match(re);
@@ -4755,13 +4755,13 @@ var init_login = __esm({
 
 // src/lib/actions/registry.ts
 async function executeAction(page, step, ctx, monitor) {
-  const start = Date.now();
+  const start2 = Date.now();
   try {
     const handler = registry[step.type];
     const result = await handler(page, step, ctx, monitor);
-    return { stepIndex: -1, step, ok: true, result, durationMs: Date.now() - start };
+    return { stepIndex: -1, step, ok: true, result, durationMs: Date.now() - start2 };
   } catch (err) {
-    return failedStepResult(step, getErrorMessage(err), Date.now() - start);
+    return failedStepResult(step, getErrorMessage(err), Date.now() - start2);
   }
 }
 var registry, registeredStepTypes;
@@ -5220,8 +5220,8 @@ function isLikelyId(segment) {
 function isRecord(x) {
   return typeof x === "object" && x !== null && !Array.isArray(x);
 }
-function parameterizePath(path18) {
-  const parts = path18.split("/");
+function parameterizePath(path20) {
+  const parts = path20.split("/");
   let idCount = 0;
   const parameterized = parts.map((part) => {
     if (part && isLikelyId(part)) {
@@ -5310,16 +5310,16 @@ function gqlActionFromBody(body) {
   return void 0;
 }
 function classifyRequest(req) {
-  const path18 = req.path;
-  const lowerPath = path18.toLowerCase();
+  const path20 = req.path;
+  const lowerPath = path20.toLowerCase();
   const ct = (req.requestHeaders["content-type"] || req.requestHeaders["Content-Type"] || "").toLowerCase();
   const body = req.requestBody;
   if (ct.includes("application/grpc")) {
-    return { protocol: "grpc-web", action: path18.replace(/^\//, "") };
+    return { protocol: "grpc-web", action: path20.replace(/^\//, "") };
   }
   const soapAction = req.requestHeaders["soapaction"] || req.requestHeaders["SOAPAction"];
   if (soapAction || ct.includes("text/xml") || ct.includes("application/soap+xml")) {
-    return { protocol: "soap", action: (soapAction || path18).replace(/^["/]|["/]$/g, "") };
+    return { protocol: "soap", action: (soapAction || path20).replace(/^["/]|["/]$/g, "") };
   }
   if (/\/graphql\b/.test(lowerPath) || hasGraphQLShape(body)) {
     return { protocol: "graphql", action: gqlActionFromBody(body) ?? "anonymous" };
@@ -5334,7 +5334,7 @@ function classifyRequest(req) {
     const friendly = gqlActionFromBody(body);
     if (friendly) return { protocol: "form-rpc", action: friendly };
   }
-  return { protocol: "rest", action: `${req.method} ${parameterizePath(path18)}` };
+  return { protocol: "rest", action: `${req.method} ${parameterizePath(path20)}` };
 }
 function inferVerb(protocol, action, method, responseBody) {
   const lower = action.toLowerCase();
@@ -5369,8 +5369,8 @@ function buildFunctionName(protocol, action, method, verb) {
   if (protocol === "rest") {
     const parts = action.split(" ");
     const httpMethod = parts[0];
-    const path18 = parts.slice(1).join(" ");
-    const segs = path18.split("/").filter((s) => s && !s.startsWith("{"));
+    const path20 = parts.slice(1).join(" ");
+    const segs = path20.split("/").filter((s) => s && !s.startsWith("{"));
     const verbPrefix = httpMethod === "GET" ? verb === "list" ? "list" : "get" : httpMethod === "POST" ? "create" : httpMethod === "PUT" ? "update" : httpMethod === "PATCH" ? "patch" : httpMethod === "DELETE" ? "delete" : httpMethod.toLowerCase();
     return camelCase(`${verbPrefix} ${segs.join(" ")}`) || camelCase(action);
   }
@@ -6312,9 +6312,9 @@ var init_extract_from_run = __esm({
   }
 });
 
-// node_modules/ws/lib/constants.js
+// ../../../node_modules/ws/lib/constants.js
 var require_constants = __commonJS({
-  "node_modules/ws/lib/constants.js"(exports2, module2) {
+  "../../../node_modules/ws/lib/constants.js"(exports2, module2) {
     "use strict";
     var BINARY_TYPES = ["nodebuffer", "arraybuffer", "fragments"];
     var hasBlob = typeof Blob !== "undefined";
@@ -6335,9 +6335,9 @@ var require_constants = __commonJS({
   }
 });
 
-// node_modules/ws/lib/buffer-util.js
+// ../../../node_modules/ws/lib/buffer-util.js
 var require_buffer_util = __commonJS({
-  "node_modules/ws/lib/buffer-util.js"(exports2, module2) {
+  "../../../node_modules/ws/lib/buffer-util.js"(exports2, module2) {
     "use strict";
     var { EMPTY_BUFFER } = require_constants();
     var FastBuffer = Buffer[Symbol.species];
@@ -6410,9 +6410,9 @@ var require_buffer_util = __commonJS({
   }
 });
 
-// node_modules/ws/lib/limiter.js
+// ../../../node_modules/ws/lib/limiter.js
 var require_limiter = __commonJS({
-  "node_modules/ws/lib/limiter.js"(exports2, module2) {
+  "../../../node_modules/ws/lib/limiter.js"(exports2, module2) {
     "use strict";
     var kDone = /* @__PURE__ */ Symbol("kDone");
     var kRun = /* @__PURE__ */ Symbol("kRun");
@@ -6460,9 +6460,9 @@ var require_limiter = __commonJS({
   }
 });
 
-// node_modules/ws/lib/permessage-deflate.js
+// ../../../node_modules/ws/lib/permessage-deflate.js
 var require_permessage_deflate = __commonJS({
-  "node_modules/ws/lib/permessage-deflate.js"(exports2, module2) {
+  "../../../node_modules/ws/lib/permessage-deflate.js"(exports2, module2) {
     "use strict";
     var zlib = require("zlib");
     var bufferUtil = require_buffer_util();
@@ -6843,9 +6843,9 @@ var require_permessage_deflate = __commonJS({
   }
 });
 
-// node_modules/ws/lib/validation.js
+// ../../../node_modules/ws/lib/validation.js
 var require_validation = __commonJS({
-  "node_modules/ws/lib/validation.js"(exports2, module2) {
+  "../../../node_modules/ws/lib/validation.js"(exports2, module2) {
     "use strict";
     var { isUtf8 } = require("buffer");
     var { hasBlob } = require_constants();
@@ -7044,9 +7044,9 @@ var require_validation = __commonJS({
   }
 });
 
-// node_modules/ws/lib/receiver.js
+// ../../../node_modules/ws/lib/receiver.js
 var require_receiver = __commonJS({
-  "node_modules/ws/lib/receiver.js"(exports2, module2) {
+  "../../../node_modules/ws/lib/receiver.js"(exports2, module2) {
     "use strict";
     var { Writable } = require("stream");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -7667,9 +7667,9 @@ var require_receiver = __commonJS({
   }
 });
 
-// node_modules/ws/lib/sender.js
+// ../../../node_modules/ws/lib/sender.js
 var require_sender = __commonJS({
-  "node_modules/ws/lib/sender.js"(exports2, module2) {
+  "../../../node_modules/ws/lib/sender.js"(exports2, module2) {
     "use strict";
     var { Duplex } = require("stream");
     var { randomFillSync } = require("crypto");
@@ -8160,9 +8160,9 @@ var require_sender = __commonJS({
   }
 });
 
-// node_modules/ws/lib/event-target.js
+// ../../../node_modules/ws/lib/event-target.js
 var require_event_target = __commonJS({
-  "node_modules/ws/lib/event-target.js"(exports2, module2) {
+  "../../../node_modules/ws/lib/event-target.js"(exports2, module2) {
     "use strict";
     var { kForOnEventAttribute, kListener } = require_constants();
     var kCode = /* @__PURE__ */ Symbol("kCode");
@@ -8389,9 +8389,9 @@ var require_event_target = __commonJS({
   }
 });
 
-// node_modules/ws/lib/extension.js
+// ../../../node_modules/ws/lib/extension.js
 var require_extension = __commonJS({
-  "node_modules/ws/lib/extension.js"(exports2, module2) {
+  "../../../node_modules/ws/lib/extension.js"(exports2, module2) {
     "use strict";
     var { tokenChars } = require_validation();
     function push(dest, name, elem) {
@@ -8406,7 +8406,7 @@ var require_extension = __commonJS({
       let inQuotes = false;
       let extensionName;
       let paramName;
-      let start = -1;
+      let start2 = -1;
       let code = -1;
       let end = -1;
       let i = 0;
@@ -8414,45 +8414,45 @@ var require_extension = __commonJS({
         code = header.charCodeAt(i);
         if (extensionName === void 0) {
           if (end === -1 && tokenChars[code] === 1) {
-            if (start === -1) start = i;
+            if (start2 === -1) start2 = i;
           } else if (i !== 0 && (code === 32 || code === 9)) {
-            if (end === -1 && start !== -1) end = i;
+            if (end === -1 && start2 !== -1) end = i;
           } else if (code === 59 || code === 44) {
-            if (start === -1) {
+            if (start2 === -1) {
               throw new SyntaxError(`Unexpected character at index ${i}`);
             }
             if (end === -1) end = i;
-            const name = header.slice(start, end);
+            const name = header.slice(start2, end);
             if (code === 44) {
               push(offers, name, params);
               params = /* @__PURE__ */ Object.create(null);
             } else {
               extensionName = name;
             }
-            start = end = -1;
+            start2 = end = -1;
           } else {
             throw new SyntaxError(`Unexpected character at index ${i}`);
           }
         } else if (paramName === void 0) {
           if (end === -1 && tokenChars[code] === 1) {
-            if (start === -1) start = i;
+            if (start2 === -1) start2 = i;
           } else if (code === 32 || code === 9) {
-            if (end === -1 && start !== -1) end = i;
+            if (end === -1 && start2 !== -1) end = i;
           } else if (code === 59 || code === 44) {
-            if (start === -1) {
+            if (start2 === -1) {
               throw new SyntaxError(`Unexpected character at index ${i}`);
             }
             if (end === -1) end = i;
-            push(params, header.slice(start, end), true);
+            push(params, header.slice(start2, end), true);
             if (code === 44) {
               push(offers, extensionName, params);
               params = /* @__PURE__ */ Object.create(null);
               extensionName = void 0;
             }
-            start = end = -1;
-          } else if (code === 61 && start !== -1 && end === -1) {
-            paramName = header.slice(start, i);
-            start = end = -1;
+            start2 = end = -1;
+          } else if (code === 61 && start2 !== -1 && end === -1) {
+            paramName = header.slice(start2, i);
+            start2 = end = -1;
           } else {
             throw new SyntaxError(`Unexpected character at index ${i}`);
           }
@@ -8461,13 +8461,13 @@ var require_extension = __commonJS({
             if (tokenChars[code] !== 1) {
               throw new SyntaxError(`Unexpected character at index ${i}`);
             }
-            if (start === -1) start = i;
+            if (start2 === -1) start2 = i;
             else if (!mustUnescape) mustUnescape = true;
             isEscaping = false;
           } else if (inQuotes) {
             if (tokenChars[code] === 1) {
-              if (start === -1) start = i;
-            } else if (code === 34 && start !== -1) {
+              if (start2 === -1) start2 = i;
+            } else if (code === 34 && start2 !== -1) {
               inQuotes = false;
               end = i;
             } else if (code === 92) {
@@ -8478,15 +8478,15 @@ var require_extension = __commonJS({
           } else if (code === 34 && header.charCodeAt(i - 1) === 61) {
             inQuotes = true;
           } else if (end === -1 && tokenChars[code] === 1) {
-            if (start === -1) start = i;
-          } else if (start !== -1 && (code === 32 || code === 9)) {
+            if (start2 === -1) start2 = i;
+          } else if (start2 !== -1 && (code === 32 || code === 9)) {
             if (end === -1) end = i;
           } else if (code === 59 || code === 44) {
-            if (start === -1) {
+            if (start2 === -1) {
               throw new SyntaxError(`Unexpected character at index ${i}`);
             }
             if (end === -1) end = i;
-            let value = header.slice(start, end);
+            let value = header.slice(start2, end);
             if (mustUnescape) {
               value = value.replace(/\\/g, "");
               mustUnescape = false;
@@ -8498,17 +8498,17 @@ var require_extension = __commonJS({
               extensionName = void 0;
             }
             paramName = void 0;
-            start = end = -1;
+            start2 = end = -1;
           } else {
             throw new SyntaxError(`Unexpected character at index ${i}`);
           }
         }
       }
-      if (start === -1 || inQuotes || code === 32 || code === 9) {
+      if (start2 === -1 || inQuotes || code === 32 || code === 9) {
         throw new SyntaxError("Unexpected end of input");
       }
       if (end === -1) end = i;
-      const token = header.slice(start, end);
+      const token = header.slice(start2, end);
       if (extensionName === void 0) {
         push(offers, token, params);
       } else {
@@ -8542,9 +8542,9 @@ var require_extension = __commonJS({
   }
 });
 
-// node_modules/ws/lib/websocket.js
+// ../../../node_modules/ws/lib/websocket.js
 var require_websocket = __commonJS({
-  "node_modules/ws/lib/websocket.js"(exports2, module2) {
+  "../../../node_modules/ws/lib/websocket.js"(exports2, module2) {
     "use strict";
     var EventEmitter = require("events");
     var https = require("https");
@@ -8578,7 +8578,7 @@ var require_websocket = __commonJS({
     var protocolVersions = [8, 13];
     var readyStates = ["CONNECTING", "OPEN", "CLOSING", "CLOSED"];
     var subprotocolRegex = /^[!#$%&'*+\-.0-9A-Z^_`|a-z~]+$/;
-    var WebSocket2 = class _WebSocket extends EventEmitter {
+    var WebSocket3 = class _WebSocket extends EventEmitter {
       /**
        * Create a new `WebSocket`.
        *
@@ -8954,35 +8954,35 @@ var require_websocket = __commonJS({
         }
       }
     };
-    Object.defineProperty(WebSocket2, "CONNECTING", {
+    Object.defineProperty(WebSocket3, "CONNECTING", {
       enumerable: true,
       value: readyStates.indexOf("CONNECTING")
     });
-    Object.defineProperty(WebSocket2.prototype, "CONNECTING", {
+    Object.defineProperty(WebSocket3.prototype, "CONNECTING", {
       enumerable: true,
       value: readyStates.indexOf("CONNECTING")
     });
-    Object.defineProperty(WebSocket2, "OPEN", {
+    Object.defineProperty(WebSocket3, "OPEN", {
       enumerable: true,
       value: readyStates.indexOf("OPEN")
     });
-    Object.defineProperty(WebSocket2.prototype, "OPEN", {
+    Object.defineProperty(WebSocket3.prototype, "OPEN", {
       enumerable: true,
       value: readyStates.indexOf("OPEN")
     });
-    Object.defineProperty(WebSocket2, "CLOSING", {
+    Object.defineProperty(WebSocket3, "CLOSING", {
       enumerable: true,
       value: readyStates.indexOf("CLOSING")
     });
-    Object.defineProperty(WebSocket2.prototype, "CLOSING", {
+    Object.defineProperty(WebSocket3.prototype, "CLOSING", {
       enumerable: true,
       value: readyStates.indexOf("CLOSING")
     });
-    Object.defineProperty(WebSocket2, "CLOSED", {
+    Object.defineProperty(WebSocket3, "CLOSED", {
       enumerable: true,
       value: readyStates.indexOf("CLOSED")
     });
-    Object.defineProperty(WebSocket2.prototype, "CLOSED", {
+    Object.defineProperty(WebSocket3.prototype, "CLOSED", {
       enumerable: true,
       value: readyStates.indexOf("CLOSED")
     });
@@ -8995,10 +8995,10 @@ var require_websocket = __commonJS({
       "readyState",
       "url"
     ].forEach((property) => {
-      Object.defineProperty(WebSocket2.prototype, property, { enumerable: true });
+      Object.defineProperty(WebSocket3.prototype, property, { enumerable: true });
     });
     ["open", "error", "close", "message"].forEach((method) => {
-      Object.defineProperty(WebSocket2.prototype, `on${method}`, {
+      Object.defineProperty(WebSocket3.prototype, `on${method}`, {
         enumerable: true,
         get() {
           for (const listener of this.listeners(method)) {
@@ -9020,9 +9020,9 @@ var require_websocket = __commonJS({
         }
       });
     });
-    WebSocket2.prototype.addEventListener = addEventListener;
-    WebSocket2.prototype.removeEventListener = removeEventListener;
-    module2.exports = WebSocket2;
+    WebSocket3.prototype.addEventListener = addEventListener;
+    WebSocket3.prototype.removeEventListener = removeEventListener;
+    module2.exports = WebSocket3;
     function initAsClient(websocket, address, protocols, options) {
       const opts = {
         allowSynchronousEvents: true,
@@ -9212,7 +9212,7 @@ var require_websocket = __commonJS({
       });
       req.on("upgrade", (res, socket, head) => {
         websocket.emit("upgrade", res);
-        if (websocket.readyState !== WebSocket2.CONNECTING) return;
+        if (websocket.readyState !== WebSocket3.CONNECTING) return;
         req = websocket._req = null;
         const upgrade = res.headers.upgrade;
         if (upgrade === void 0 || upgrade.toLowerCase() !== "websocket") {
@@ -9286,7 +9286,7 @@ var require_websocket = __commonJS({
       }
     }
     function emitErrorAndClose(websocket, err) {
-      websocket._readyState = WebSocket2.CLOSING;
+      websocket._readyState = WebSocket3.CLOSING;
       websocket._errorEmitted = true;
       websocket.emit("error", err);
       websocket.emitClose();
@@ -9303,7 +9303,7 @@ var require_websocket = __commonJS({
       return tls.connect(options);
     }
     function abortHandshake(websocket, stream, message) {
-      websocket._readyState = WebSocket2.CLOSING;
+      websocket._readyState = WebSocket3.CLOSING;
       const err = new Error(message);
       Error.captureStackTrace(err, abortHandshake);
       if (stream.setHeader) {
@@ -9378,9 +9378,9 @@ var require_websocket = __commonJS({
     }
     function senderOnError(err) {
       const websocket = this[kWebSocket];
-      if (websocket.readyState === WebSocket2.CLOSED) return;
-      if (websocket.readyState === WebSocket2.OPEN) {
-        websocket._readyState = WebSocket2.CLOSING;
+      if (websocket.readyState === WebSocket3.CLOSED) return;
+      if (websocket.readyState === WebSocket3.OPEN) {
+        websocket._readyState = WebSocket3.CLOSING;
         setCloseTimer(websocket);
       }
       this._socket.end();
@@ -9400,7 +9400,7 @@ var require_websocket = __commonJS({
       this.removeListener("close", socketOnClose);
       this.removeListener("data", socketOnData);
       this.removeListener("end", socketOnEnd);
-      websocket._readyState = WebSocket2.CLOSING;
+      websocket._readyState = WebSocket3.CLOSING;
       if (!this._readableState.endEmitted && !websocket._closeFrameReceived && !websocket._receiver._writableState.errorEmitted && this._readableState.length !== 0) {
         const chunk = this.read(this._readableState.length);
         websocket._receiver.write(chunk);
@@ -9422,7 +9422,7 @@ var require_websocket = __commonJS({
     }
     function socketOnEnd() {
       const websocket = this[kWebSocket];
-      websocket._readyState = WebSocket2.CLOSING;
+      websocket._readyState = WebSocket3.CLOSING;
       websocket._receiver.end();
       this.end();
     }
@@ -9431,18 +9431,18 @@ var require_websocket = __commonJS({
       this.removeListener("error", socketOnError);
       this.on("error", NOOP);
       if (websocket) {
-        websocket._readyState = WebSocket2.CLOSING;
+        websocket._readyState = WebSocket3.CLOSING;
         this.destroy();
       }
     }
   }
 });
 
-// node_modules/ws/lib/stream.js
+// ../../../node_modules/ws/lib/stream.js
 var require_stream = __commonJS({
-  "node_modules/ws/lib/stream.js"(exports2, module2) {
+  "../../../node_modules/ws/lib/stream.js"(exports2, module2) {
     "use strict";
-    var WebSocket2 = require_websocket();
+    var WebSocket3 = require_websocket();
     var { Duplex } = require("stream");
     function emitClose(stream) {
       stream.emit("close");
@@ -9536,41 +9536,41 @@ var require_stream = __commonJS({
   }
 });
 
-// node_modules/ws/lib/subprotocol.js
+// ../../../node_modules/ws/lib/subprotocol.js
 var require_subprotocol = __commonJS({
-  "node_modules/ws/lib/subprotocol.js"(exports2, module2) {
+  "../../../node_modules/ws/lib/subprotocol.js"(exports2, module2) {
     "use strict";
     var { tokenChars } = require_validation();
     function parse(header) {
       const protocols = /* @__PURE__ */ new Set();
-      let start = -1;
+      let start2 = -1;
       let end = -1;
       let i = 0;
       for (i; i < header.length; i++) {
         const code = header.charCodeAt(i);
         if (end === -1 && tokenChars[code] === 1) {
-          if (start === -1) start = i;
+          if (start2 === -1) start2 = i;
         } else if (i !== 0 && (code === 32 || code === 9)) {
-          if (end === -1 && start !== -1) end = i;
+          if (end === -1 && start2 !== -1) end = i;
         } else if (code === 44) {
-          if (start === -1) {
+          if (start2 === -1) {
             throw new SyntaxError(`Unexpected character at index ${i}`);
           }
           if (end === -1) end = i;
-          const protocol2 = header.slice(start, end);
+          const protocol2 = header.slice(start2, end);
           if (protocols.has(protocol2)) {
             throw new SyntaxError(`The "${protocol2}" subprotocol is duplicated`);
           }
           protocols.add(protocol2);
-          start = end = -1;
+          start2 = end = -1;
         } else {
           throw new SyntaxError(`Unexpected character at index ${i}`);
         }
       }
-      if (start === -1 || end !== -1) {
+      if (start2 === -1 || end !== -1) {
         throw new SyntaxError("Unexpected end of input");
       }
-      const protocol = header.slice(start, i);
+      const protocol = header.slice(start2, i);
       if (protocols.has(protocol)) {
         throw new SyntaxError(`The "${protocol}" subprotocol is duplicated`);
       }
@@ -9581,9 +9581,9 @@ var require_subprotocol = __commonJS({
   }
 });
 
-// node_modules/ws/lib/websocket-server.js
+// ../../../node_modules/ws/lib/websocket-server.js
 var require_websocket_server = __commonJS({
-  "node_modules/ws/lib/websocket-server.js"(exports2, module2) {
+  "../../../node_modules/ws/lib/websocket-server.js"(exports2, module2) {
     "use strict";
     var EventEmitter = require("events");
     var http2 = require("http");
@@ -9592,7 +9592,7 @@ var require_websocket_server = __commonJS({
     var extension2 = require_extension();
     var PerMessageDeflate2 = require_permessage_deflate();
     var subprotocol2 = require_subprotocol();
-    var WebSocket2 = require_websocket();
+    var WebSocket3 = require_websocket();
     var { CLOSE_TIMEOUT, GUID, kWebSocket } = require_constants();
     var keyRegex = /^[+/0-9A-Za-z]{22}==$/;
     var RUNNING = 0;
@@ -9658,7 +9658,7 @@ var require_websocket_server = __commonJS({
           host: null,
           path: null,
           port: null,
-          WebSocket: WebSocket2,
+          WebSocket: WebSocket3,
           ...options
         };
         if (options.port == null && !options.server && !options.noServer || options.port != null && (options.server || options.noServer) || options.server && options.noServer) {
@@ -9982,10 +9982,10 @@ var require_websocket_server = __commonJS({
   }
 });
 
-// node_modules/ws/wrapper.mjs
+// ../../../node_modules/ws/wrapper.mjs
 var import_stream, import_extension, import_permessage_deflate, import_receiver, import_sender, import_subprotocol, import_websocket, import_websocket_server;
 var init_wrapper = __esm({
-  "node_modules/ws/wrapper.mjs"() {
+  "../../../node_modules/ws/wrapper.mjs"() {
     import_stream = __toESM(require_stream(), 1);
     import_extension = __toESM(require_extension(), 1);
     import_permessage_deflate = __toESM(require_permessage_deflate(), 1);
@@ -11401,7 +11401,7 @@ var init_iframer = __esm({
 var require_native_host_setup = __commonJS({
   "src/lib/extension/native-host-setup.cjs"(exports2, module2) {
     "use strict";
-    var { spawn: spawn3 } = require("child_process");
+    var { spawn: spawn4 } = require("child_process");
     var HOST_NAME = "com.iframer.token";
     var WINDOWS_BROWSERS = [
       { browser: "Chrome", root: "Software\\Google\\Chrome" },
@@ -11468,7 +11468,7 @@ var require_native_host_setup = __commonJS({
           resolve(result);
         };
         try {
-          child = platform === "win32" ? spawn3("cmd.exe", ["/d", "/s", "/c", `"${wrapperPath}"`], { env, windowsVerbatimArguments: true, windowsHide: true }) : spawn3(wrapperPath, [], { env });
+          child = platform === "win32" ? spawn4("cmd.exe", ["/d", "/s", "/c", `"${wrapperPath}"`], { env, windowsVerbatimArguments: true, windowsHide: true }) : spawn4(wrapperPath, [], { env });
         } catch (e) {
           finish({ ok: false, error: e.message });
           return;
@@ -12154,8 +12154,8 @@ function pageKit(opts, core) {
       try {
         var j = JSON.parse(v);
         if (j === needle) return { from, key: k, json: true };
-        var path18 = findPath(j, needle, 0);
-        if (path18) return { from, key: k, path: path18 };
+        var path20 = findPath(j, needle, 0);
+        if (path20) return { from, key: k, path: path20 };
       } catch (e) {
       }
     }
@@ -12605,14 +12605,14 @@ function pageKit(opts, core) {
     // Replays through the page so the browser attaches its own cookies,
     // including HttpOnly ones. Same-origin, GET/HEAD only unless approved,
     // capped per session, and it stops for good on 403/429 or a bot wall.
-    call: function(method, path18, o) {
+    call: function(method, path20, o) {
       o = o || {};
       method = String(method || "GET").toUpperCase();
       if (budget.stopped) return Promise.resolve({ error: "stopped", reason: budget.stopped });
       if (method !== "GET" && method !== "HEAD" && !o.approved) {
         return Promise.resolve({ error: "write needs approval", hint: "ask the user, then pass {approved:true} for this one request" });
       }
-      var u = abs(path18);
+      var u = abs(path20);
       if (!u) return Promise.resolve({ error: "bad url" });
       if (u.origin !== location.origin && !o.crossOrigin) return Promise.resolve({ error: "cross-origin", hint: "navigate to " + u.origin + " first" });
       if (budget.calls >= MAX_CALLS) {
@@ -12622,7 +12622,7 @@ function pageKit(opts, core) {
       }
       budget.calls++;
       var init = { method, credentials: "include", headers: o.headers || {} };
-      if ((o.rsc || /[?&]_rsc=/.test(String(path18))) && !Object.keys(init.headers).some(function(k) {
+      if ((o.rsc || /[?&]_rsc=/.test(String(path20))) && !Object.keys(init.headers).some(function(k) {
         return k.toLowerCase() === "rsc";
       })) init.headers.rsc = "1";
       var used = [];
@@ -12693,7 +12693,7 @@ function pageKit(opts, core) {
                   });
                 out.serverErrors = data.errors;
               }
-              o.__path = path18;
+              o.__path = path20;
               return finish(out, data, o);
             }
             var parsed;
@@ -13354,36 +13354,36 @@ function recipeCore() {
   function schema(data, o) {
     o = o || {};
     var lines = [], LIMIT = 1500;
-    function walk(path18, v, d) {
+    function walk(path20, v, d) {
       if (d > 8 || v == null || typeof v !== "object") return;
       if (v.$action) {
-        lines.push(path18 + " = Server Action prop (recipe: --action-prop " + path18.split(".").pop() + ")");
+        lines.push(path20 + " = Server Action prop (recipe: --action-prop " + path20.split(".").pop() + ")");
         return;
       }
       if (Array.isArray(v)) {
         if (!isRecordList(v)) return;
-        lines.push(path18 + "[" + v.length + "] " + fmtBytes(size(v)) + "  " + sampleVal(v[0], 0));
+        lines.push(path20 + "[" + v.length + "] " + fmtBytes(size(v)) + "  " + sampleVal(v[0], 0));
         Object.keys(v[0]).forEach(function(k) {
-          walk(path18 + "[]." + k, v[0][k], d + 1);
+          walk(path20 + "[]." + k, v[0][k], d + 1);
         });
         return;
       }
       Object.keys(v).forEach(function(k) {
-        walk(path18 ? path18 + "." + k : k, v[k], d + 1);
+        walk(path20 ? path20 + "." + k : k, v[k], d + 1);
       });
     }
     if (data && data.components) {
       Object.keys(data.components).forEach(function(n) {
         var c = data.components[n];
         if (o.under && n !== o.under.split(".")[0]) return;
-        var start = Array.isArray(c) ? c[0] : c, base = n;
+        var start2 = Array.isArray(c) ? c[0] : c, base = n;
         var distinct = Array.isArray(c) ? findAll(data.components, n).length : 1;
         if (distinct > 1 && !o.under) lines.push(n + " \xD7" + distinct + " instances with different data (paths below are [0]); select one with find:'" + n + "[i]'");
         if (o.under && o.under.indexOf(".") > 0) {
-          start = pick(start, o.under.split(".").slice(1).join("."));
+          start2 = pick(start2, o.under.split(".").slice(1).join("."));
           base = o.under;
         }
-        walk(base, start, 0);
+        walk(base, start2, 0);
       });
     } else walk(o.under || "", o.under ? pick(data, o.under) : data, 0);
     if (data && data.rows) {
@@ -13722,13 +13722,13 @@ function recipeCore() {
     if (NET.cookie) init.headers = Object.assign({ cookie: NET.cookie }, init.headers || {});
     return fetch(abs(url), init);
   }
-  function sleep6(ms) {
+  function sleep7(ms) {
     return new Promise(function(r) {
       setTimeout(r, ms);
     });
   }
   var LOGIN2 = /\/(login|log-in|signin|sign-in|auth|sso)(\/|\?|$)/i;
-  function get(path18, o, attempt) {
+  function get(path20, o, attempt) {
     o = o || {};
     attempt = attempt || 0;
     var method = o.method || "GET";
@@ -13737,18 +13737,18 @@ function recipeCore() {
     if (o.rsc) h.RSC = "1";
     var again = function(why) {
       if (attempt >= retries) throw new Error(why);
-      return sleep6(300 * Math.pow(2, attempt)).then(function() {
-        return get(path18, o, attempt + 1);
+      return sleep7(300 * Math.pow(2, attempt)).then(function() {
+        return get(path20, o, attempt + 1);
       });
     };
     var refreshed = function(e) {
       if (o._fresh || !NET.onExpired || !/^(session expired|HTTP 401)/.test(e && e.message || "")) throw e;
       return Promise.resolve(NET.onExpired()).then(function(ok) {
         if (!ok) throw e;
-        return get(path18, Object.assign({}, o, { _fresh: true }), attempt);
+        return get(path20, Object.assign({}, o, { _fresh: true }), attempt);
       });
     };
-    return send(path18, { method, headers: h, body: o.body }).then(function(r) {
+    return send(path20, { method, headers: h, body: o.body }).then(function(r) {
       return r.text().then(function(t) {
         if (r.redirected && LOGIN2.test(new URL(r.url).pathname)) throw new Error("session expired: " + NET.relogin);
         if (r.status === 401) throw new Error("HTTP 401: not logged in, or the session expired: " + NET.relogin);
@@ -13763,7 +13763,7 @@ function recipeCore() {
           d = flightData(parseFlight(t));
           if (d.redirect && LOGIN2.test(d.redirect)) throw new Error("session expired: " + NET.relogin);
           if (d.redirect) throw new Error("redirected to " + d.redirect);
-          if (d.denied) throw new Error("session expired, or this account can't see " + path18 + " (the page answered " + d.denied + "): " + NET.relogin);
+          if (d.denied) throw new Error("session expired, or this account can't see " + path20 + " (the page answered " + d.denied + "): " + NET.relogin);
           if (d.action !== void 0) d = d.action;
           else if (d.errors && o.find !== void 0 && find2(d.components, o.find) === void 0) {
             return again("page errored on the server (" + d.errors[0] + ") after " + (attempt + 1) + " tries");
@@ -13783,11 +13783,11 @@ function recipeCore() {
       return again("network: " + e.message);
     }).catch(refreshed);
   }
-  function action(target, args2, path18) {
+  function action(target, args2, path20) {
     var resolveRef = target && typeof target === "object" ? target.$action ? Promise.resolve(target) : actionRef(target).then(function(r) {
-      path18 = path18 || target.path;
+      path20 = path20 || target.path;
       return r;
-    }) : actionId(target, false, path18).then(function(id) {
+    }) : actionId(target, false, path20).then(function(id) {
       if (!id) throw new Error("action " + target + " not found" + (inPage && !NET.base ? " on this page: open a page that uses it" : ": pass the page that uses it"));
       return { $action: id, bound: [] };
     });
@@ -13795,7 +13795,7 @@ function recipeCore() {
       var body = reEncode(ref.bound || []).concat(encodeArgs(args2 || []));
       var known = typeof target === "string" && NET.actions[target];
       var post = function(id) {
-        return get(path18 || known && known.page || here(), {
+        return get(path20 || known && known.page || here(), {
           method: "POST",
           body: JSON.stringify(body),
           headers: { "next-action": id, accept: "text/x-component", "content-type": "text/plain;charset=UTF-8" }
@@ -13807,7 +13807,7 @@ function recipeCore() {
           body = reEncode(r2.bound || []).concat(encodeArgs(args2 || []));
           return post(r2.$action);
         });
-        if (typeof target === "string") return actionId(target, true, path18).then(function(id) {
+        if (typeof target === "string") return actionId(target, true, path20).then(function(id) {
           if (!id || id === ref.$action) throw e;
           return post(id);
         });
@@ -13826,7 +13826,7 @@ function recipeCore() {
     encodeArgs,
     reEncode,
     size,
-    sleep: sleep6,
+    sleep: sleep7,
     actionId,
     query,
     cond,
@@ -14379,34 +14379,517 @@ var init_capture = __esm({
   }
 });
 
+// src/lib/tabbridge/client.ts
+function tabBridgeClient(d) {
+  var WAIT_MS = 15e4;
+  var down = false, skipped = "", hinted = false;
+  var mode = {};
+  var deciding = {};
+  var env = d.env || {};
+  function fail(msg) {
+    return new Error("stopped: tab bridge: " + msg);
+  }
+  function hostOf(url) {
+    try {
+      return new URL(url).host;
+    } catch (e) {
+      return String(url);
+    }
+  }
+  function attachCmd(url) {
+    return "iframer bridge attach " + hostOf(url);
+  }
+  function aborted(sig) {
+    return sig.reason || new Error("This operation was aborted");
+  }
+  var MAYBE = "A write may have reached the site: check it, never re-send it blindly";
+  function state() {
+    if (env.IFRAMER_BRIDGE === "off") {
+      skipped = "IFRAMER_BRIDGE=off";
+      return null;
+    }
+    if (down) return null;
+    try {
+      var st = JSON.parse(d.fs.readFileSync(d.path.join(env.IFRAMER_DATA_DIR || d.path.join(d.home, ".iframer"), "bridge.json"), "utf8"));
+      if (!st || !st.port || !st.token) throw new Error("empty");
+      try {
+        process.kill(st.pid, 0);
+      } catch (e) {
+        if (e.code !== "EPERM") throw e;
+      }
+      if (d.v && st.v !== d.v) {
+        down = true;
+        skipped = "the tab bridge runs another version (" + st.v + ", this client is " + d.v + "): run `iframer bridge attach <host>` and `iframer refresh` with the same iframer";
+        return null;
+      }
+      return st;
+    } catch (e) {
+      down = true;
+      skipped = "the tab bridge is not running";
+      return null;
+    }
+  }
+  function post(st, route2, body, ms) {
+    return d.fetch("http://127.0.0.1:" + st.port + route2, {
+      method: "POST",
+      headers: { Authorization: "Bearer " + st.token, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(ms)
+    });
+  }
+  function none(url, why, detachedMs) {
+    var h = hostOf(url);
+    skipped = why;
+    if (mode[h] === "tab") throw fail(why + ". This run was using the tab for " + h + ": attach it again (`" + attachCmd(url) + "`, then the line it prints), then run again");
+    mode[h] = "direct";
+    if (detachedMs != null && !hinted) {
+      hinted = true;
+      console.error("tab bridge: " + why + ", so this run uses the saved session. To use the tab again: `" + attachCmd(url) + "`, then the line it prints.");
+    }
+    return null;
+  }
+  function settled(f) {
+    try {
+      return Promise.resolve(f());
+    } catch (e) {
+      return Promise.reject(e);
+    }
+  }
+  function response(r, read2, method) {
+    var redirect = r.type === "opaqueredirect" || !r.status;
+    var status = redirect ? 302 : r.status;
+    var empty = status === 204 || status === 205 || status === 304 || method === "HEAD";
+    try {
+      var headers = new Headers();
+      Object.keys(r.headers || {}).forEach(function(k) {
+        if (/^(content-(encoding|length)|x-iframer-bridge)$/i.test(k)) return;
+        try {
+          headers.set(k, r.headers[k]);
+        } catch (e) {
+        }
+      });
+      if (redirect) headers.set("x-iframer-bridge", "redirect-not-followed");
+      var res = new Response(empty ? null : Buffer.from(r.body64 || "", "base64"), { status, headers });
+      try {
+        Object.defineProperty(res, "url", { value: r.url || "" });
+        Object.defineProperty(res, "redirected", { value: !!r.redirected });
+      } catch (e) {
+      }
+      return res;
+    } catch (e) {
+      throw fail("the site answered HTTP " + r.status + ", which can't be passed on (" + (e && e.message || e) + "). " + (read2 ? "Not retried" : MAYBE));
+    }
+  }
+  function attached(url) {
+    var st = state();
+    if (!st) return Promise.resolve(false);
+    var body = { url: String(url) };
+    if (env.IFRAMER_BRIDGE_TAB) body.tab = env.IFRAMER_BRIDGE_TAB;
+    return post(st, "/probe", body, 5e3).then(function(res) {
+      return res.json();
+    }).then(
+      function(r) {
+        if (!r || !r.attached) {
+          if (r && r.why) skipped = r.why;
+          return false;
+        }
+        var h = hostOf(url);
+        if (!mode[h]) mode[h] = "tab";
+        return true;
+      },
+      function() {
+        down = true;
+        skipped = "the tab bridge is not running";
+        return false;
+      }
+    );
+  }
+  function snapshot2(url, init) {
+    var method = String(init.method || "GET").toUpperCase(), read2 = method === "GET" || method === "HEAD";
+    var headers = {};
+    var src = init.headers || {};
+    var each = typeof src.forEach === "function" && !Array.isArray(src) ? function(f) {
+      src.forEach(function(v, k) {
+        f(k, v);
+      });
+    } : function(f) {
+      (Array.isArray(src) ? src : Object.keys(src).map(function(k) {
+        return [k, src[k]];
+      })).forEach(function(p) {
+        f(p[0], p[1]);
+      });
+    };
+    each(function(k, v) {
+      if (String(k).toLowerCase() !== "cookie" && v != null) headers[k] = String(v);
+    });
+    Object.keys(d.auth || {}).forEach(function(name) {
+      if (!d.auth[name] || !d.auth[name].from) return;
+      Object.keys(headers).forEach(function(k) {
+        if (k.toLowerCase() === name.toLowerCase()) delete headers[k];
+      });
+    });
+    var job = { url, method, headers, rid: Date.now().toString(36) + Math.random().toString(36).slice(2, 12) };
+    if (init.redirect) job.redirect = String(init.redirect);
+    if (env.IFRAMER_BRIDGE_TAB) job.tab = env.IFRAMER_BRIDGE_TAB;
+    if (d.auth && Object.keys(d.auth).length) job.auth = d.auth;
+    var b = init.body, unsupported = false;
+    if (b != null && !read2) {
+      if (typeof b === "string") job.body = b;
+      else if (typeof URLSearchParams !== "undefined" && b instanceof URLSearchParams) {
+        job.body = b.toString();
+        if (!Object.keys(headers).some(function(k) {
+          return k.toLowerCase() === "content-type";
+        })) headers["content-type"] = "application/x-www-form-urlencoded;charset=UTF-8";
+      } else if (b instanceof ArrayBuffer) job.body64 = Buffer.from(b).toString("base64");
+      else if (ArrayBuffer.isView(b)) job.body64 = Buffer.from(b.buffer, b.byteOffset, b.byteLength).toString("base64");
+      else unsupported = true;
+    }
+    return { url, host: hostOf(url), method, read: read2, job, unsupported, sig: init.signal || null };
+  }
+  function bridgeFetch(url, init) {
+    var req;
+    try {
+      req = snapshot2(String(url), init || {});
+    } catch (e) {
+      return Promise.reject(e);
+    }
+    return route(req);
+  }
+  function route(req) {
+    var h = req.host;
+    if (req.sig && req.sig.aborted) return Promise.reject(aborted(req.sig));
+    if (!deciding[h] && mode[h]) return settled(function() {
+      return send(req);
+    });
+    if (deciding[h]) {
+      var gate = deciding[h];
+      var wait2 = !req.sig ? gate : new Promise(function(ok, no) {
+        var on = function() {
+          no(aborted(req.sig));
+        };
+        req.sig.addEventListener("abort", on);
+        gate.then(function() {
+          req.sig.removeEventListener("abort", on);
+          ok();
+        });
+      });
+      return wait2.then(function() {
+        return route(req);
+      });
+    }
+    var open;
+    var mine = new Promise(function(ok) {
+      open = ok;
+    });
+    deciding[h] = mine;
+    var first = settled(function() {
+      return send(req);
+    });
+    var done = function() {
+      if (deciding[h] === mine) delete deciding[h];
+      open();
+    };
+    first.then(done, done);
+    return first;
+  }
+  function send(req) {
+    var url = req.url, h = req.host, read2 = req.read, sig = req.sig;
+    if (mode[h] === "direct") return Promise.resolve(null);
+    if (sig && sig.aborted) return Promise.reject(aborted(sig));
+    var st = state();
+    if (!st) return settled(function() {
+      return none(url, skipped);
+    });
+    if (req.unsupported) {
+      return attached(url).then(function(on) {
+        if (!on) return none(url, skipped || "no tab attached");
+        throw fail("this request body can't go through the tab (send a string or bytes, not a stream or FormData). Not sent");
+      });
+    }
+    var dropped = "the connection to the tab bridge dropped while the request was out";
+    var ac = new AbortController(), timedOut = false, gaveUp = false;
+    var timer = setTimeout(function() {
+      timedOut = true;
+      ac.abort();
+    }, WAIT_MS);
+    var onAbort = function() {
+      gaveUp = true;
+      ac.abort();
+    };
+    if (sig) sig.addEventListener("abort", onAbort);
+    var clear = function() {
+      clearTimeout(timer);
+      if (sig) sig.removeEventListener("abort", onAbort);
+    };
+    var deadline = new Promise(function(_ok, no) {
+      ac.signal.addEventListener("abort", function() {
+        no(Object.assign(new Error("aborted"), { name: "AbortError" }));
+      });
+    });
+    var out = Promise.race([deadline, d.fetch("http://127.0.0.1:" + st.port + "/fetch", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + st.token, "Content-Type": "application/json" },
+      body: JSON.stringify(req.job),
+      signal: ac.signal
+    })]).then(function(res) {
+      var refused = res.status === 503 || res.status === 401 || res.status === 403;
+      return Promise.race([deadline, res.json()]).then(function(j) {
+        if (!j || typeof j !== "object") throw new Error("not a reply");
+        return j;
+      }).then(null, function() {
+        if (!refused) mode[h] = "tab";
+        if (!read2 && !refused) throw fail((gaveUp ? "the script aborted the request while the write was out" : dropped) + ". " + MAYBE);
+        if (gaveUp) throw aborted(sig);
+        if (!refused) throw fail(dropped + ". Run again");
+        return { error: "bridge HTTP " + res.status };
+      }).then(function(r) {
+        if (r.handed) mode[h] = "tab";
+        if (res.status === 503) return none(url, r.error || "no tab attached", r.detachedMs);
+        if (refused) return none(url, "the tab bridge restarted (" + (r.error || res.status) + ")");
+        if (r.duplicate) throw fail(dropped + ". " + (read2 ? "Run again" : MAYBE));
+        if (r.dead) {
+          throw fail(r.error + ". No live tab for " + h + ": attach a fresh one (`" + attachCmd(url) + "`, then the line it prints), then " + (r.maybeSent ? "re-read before anything else. " + MAYBE : "run again"));
+        }
+        if (r.busy) throw fail(r.error + ". Other scripts are using this site's tab: let them finish, then run again once");
+        if (r.error && r.maybeSent) throw fail(r.error + ". " + MAYBE);
+        if (!res.ok || r.error) throw fail((r.error || "HTTP " + res.status) + ". Not retried");
+        mode[h] = "tab";
+        return response(r, read2, req.method);
+      });
+    }, function(e) {
+      var code = String(e && (e.code || e.cause && e.cause.code) || "");
+      var never = !timedOut && !gaveUp && /ECONNREFUSED|ConnectionRefused|ENOTFOUND|EADDRNOTAVAIL|UND_ERR_CONNECT_TIMEOUT/.test(code);
+      if (!never) mode[h] = "tab";
+      if (timedOut) throw fail("no answer in " + WAIT_MS / 1e3 + " s for " + h + ". Restart it: `iframer bridge stop`, then attach again" + (read2 ? "" : ". " + MAYBE));
+      if (gaveUp) {
+        if (read2) throw aborted(sig);
+        throw fail("the script aborted the request while the write was out. " + MAYBE);
+      }
+      down = true;
+      if (!never) throw fail(dropped + ". " + (read2 ? "Run again" : MAYBE));
+      return none(url, "the tab bridge is not running");
+    });
+    out.then(clear, clear);
+    return out;
+  }
+  return {
+    fetch: bridgeFetch,
+    attached,
+    /** True once a request of this run went through a tab. */
+    used: function() {
+      return Object.keys(mode).some(function(k) {
+        return mode[k] === "tab";
+      });
+    },
+    /** Why the last request did not go through a tab. */
+    skipped: function() {
+      return skipped;
+    }
+  };
+}
+function clientModuleSource(version) {
+  return [
+    `// iframer tab bridge client. Generated by \`iframer bridge client\`: don't edit, run it again after updating iframer.`,
+    `// Sends a request through the logged-in browser tab attached with \`iframer bridge attach <host>\`: the tab does the`,
+    `// fetch with its own login. The browser's cookies are never exported or saved.`,
+    `//`,
+    `//   import { bridgeFetch } from "./tab-bridge.mjs";`,
+    `//   const res = (await bridgeFetch(url, init)) ?? (await fetch(url, initWithYourSavedSession));`,
+    `//`,
+    `// bridgeFetch resolves to a Response, or to null when no tab can take the request (bridge not running, no tab`,
+    `// attached for that site, IFRAMER_BRIDGE=off): use your other way then. null always means the request did not leave`,
+    `// this process, so falling back is safe for writes too. Every other problem is thrown ("stopped: tab bridge: ..."`,
+    `// with the next step); when it says a write may have reached the site, check the site, never re-send blindly.`,
+    `// One session per host per run: the first request to a host decides (tab, or your own way) and it never changes.`,
+    `// Redirects are never followed: status 302 comes back, with the header x-iframer-bridge: redirect-not-followed and`,
+    `// no Location (the browser hides it). A site that redirects a logged-in API call usually means: session expired.`,
+    `// Env: IFRAMER_BRIDGE=off, IFRAMER_BRIDGE_TAB=<name> (tabs attached with --name), IFRAMER_DATA_DIR.`,
+    `import fs from "node:fs";`,
+    `import os from "node:os";`,
+    `import path from "node:path";`,
+    ``,
+    `const bridge = (${tabBridgeClient.toString()})({ fs, path, home: os.homedir(), env: process.env, fetch: globalThis.fetch, v: ${version} });`,
+    `export const bridgeFetch = bridge.fetch;`,
+    `/** True when a tab is attached for this URL's site. */`,
+    `export const tabAttached = bridge.attached;`,
+    `/** Why the last request did not go through a tab. */`,
+    `export const bridgeSkipped = bridge.skipped;`,
+    ``
+  ].join("\n");
+}
+var init_client = __esm({
+  "src/lib/tabbridge/client.ts"() {
+    "use strict";
+  }
+});
+
+// src/lib/tabbridge/state.ts
+function readState() {
+  try {
+    const st = JSON.parse(import_fs12.default.readFileSync(stateFile(), "utf8"));
+    return st && st.port && st.token && st.pid ? st : null;
+  } catch {
+    return null;
+  }
+}
+function clearState(pid) {
+  try {
+    if (readState()?.pid === pid) import_fs12.default.rmSync(stateFile());
+  } catch {
+  }
+}
+function masterKey() {
+  import_fs12.default.mkdirSync(getDataDir(), { recursive: true, mode: 448 });
+  try {
+    const k2 = import_fs12.default.readFileSync(keyFile(), "utf8").trim();
+    if (/^[0-9a-f]{64}$/.test(k2)) return k2;
+  } catch {
+  }
+  const k = import_crypto13.default.randomBytes(32).toString("hex");
+  import_fs12.default.writeFileSync(keyFile(), k, { mode: 384 });
+  try {
+    import_fs12.default.chmodSync(keyFile(), 384);
+  } catch {
+  }
+  return k;
+}
+function tabKey(master, origin, site, name, readOnly) {
+  return import_crypto13.default.createHmac("sha256", master).update(`${origin.toLowerCase()}
+${site}
+${name}
+${readOnly ? "ro" : "rw"}`).digest("hex").slice(0, 32);
+}
+function siteFor(host) {
+  return host.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^www\./, "");
+}
+function validSite(site) {
+  const [host, port, extra] = site.split(":");
+  if (extra !== void 0 || port !== void 0 && !/^\d{1,5}$/.test(port)) return false;
+  if (LOOPBACK.test(host)) return true;
+  if (SHARED_SUFFIXES.has(host)) return false;
+  if (/^(co|com|net|org|gov|edu|ac|or|ne|go|mil|nom|gob|sch)\.[a-z]{2}$/.test(host)) return false;
+  return port === void 0 && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host) && !IP.test(host);
+}
+function covers(site, url) {
+  let u;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  const [host, port] = site.split(":");
+  const loop = LOOPBACK.test(u.hostname);
+  if (u.protocol !== "https:" && !(u.protocol === "http:" && loop)) return false;
+  if (port !== void 0 && u.port !== port) return false;
+  if (u.hostname === host) return true;
+  return !loop && !IP.test(host) && u.hostname.endsWith("." + host);
+}
+var import_crypto13, import_fs12, import_path13, BRIDGE_VERSION, DEFAULT_PORT, bridgePort, stateFile, keyFile, LOOPBACK, IP, SHARED_SUFFIXES, validName;
+var init_state = __esm({
+  "src/lib/tabbridge/state.ts"() {
+    "use strict";
+    import_crypto13 = __toESM(require("crypto"));
+    import_fs12 = __toESM(require("fs"));
+    import_path13 = __toESM(require("path"));
+    init_paths();
+    BRIDGE_VERSION = 4;
+    DEFAULT_PORT = 47625;
+    bridgePort = () => Number(process.env.IFRAMER_BRIDGE_PORT) || DEFAULT_PORT;
+    stateFile = () => import_path13.default.join(getDataDir(), "bridge.json");
+    keyFile = () => import_path13.default.join(getDataDir(), "bridge.key");
+    LOOPBACK = /^(127\.0\.0\.1|localhost)$/;
+    IP = /^\d{1,3}(\.\d{1,3}){3}$/;
+    SHARED_SUFFIXES = /* @__PURE__ */ new Set([
+      "co.uk",
+      "org.uk",
+      "ac.uk",
+      "gov.uk",
+      "me.uk",
+      "com.br",
+      "net.br",
+      "org.br",
+      "com.au",
+      "net.au",
+      "org.au",
+      "co.nz",
+      "co.jp",
+      "ne.jp",
+      "or.jp",
+      "co.in",
+      "co.kr",
+      "co.za",
+      "com.mx",
+      "com.ar",
+      "com.co",
+      "com.tr",
+      "com.cn",
+      "com.hk",
+      "com.sg",
+      "com.tw",
+      "co.il",
+      "co.id",
+      "com.my",
+      "com.ph",
+      "github.io",
+      "gitlab.io",
+      "vercel.app",
+      "netlify.app",
+      "herokuapp.com",
+      "pages.dev",
+      "workers.dev",
+      "web.app",
+      "firebaseapp.com",
+      "appspot.com",
+      "cloudfront.net",
+      "amazonaws.com",
+      "azurewebsites.net",
+      "onrender.com",
+      "fly.dev",
+      "glitch.me",
+      "repl.co",
+      "blogspot.com",
+      "wordpress.com",
+      "ngrok.io",
+      "ngrok-free.app",
+      "trycloudflare.com",
+      "s3.amazonaws.com",
+      "myshopify.com",
+      "webflow.io",
+      "framer.app",
+      "lovable.app"
+    ]);
+    validName = (name) => /^[A-Za-z0-9_.-]{1,40}$/.test(name);
+  }
+});
+
 // src/lib/kit/recipes.ts
 function iframerCli() {
   try {
-    let d = import_path13.default.dirname((0, import_url.fileURLToPath)(importMetaUrl));
+    let d = import_path14.default.dirname((0, import_url.fileURLToPath)(importMetaUrl));
     for (let i = 0; i < 6; i++) {
-      const pkg = import_path13.default.join(d, "package.json");
-      if (import_fs12.default.existsSync(pkg) && JSON.parse(import_fs12.default.readFileSync(pkg, "utf8")).name === "iframer-toolkit") {
-        const dev = import_path13.default.join(d, "bin", "iframer-dev");
-        if (import_fs12.default.existsSync(dev)) return dev;
-        const cli = import_path13.default.join(d, "dist", "cli.js");
-        return import_fs12.default.existsSync(cli) ? cli : null;
+      const pkg = import_path14.default.join(d, "package.json");
+      if (import_fs13.default.existsSync(pkg) && JSON.parse(import_fs13.default.readFileSync(pkg, "utf8")).name === "iframer-toolkit") {
+        const dev = import_path14.default.join(d, "bin", "iframer-dev");
+        if (import_fs13.default.existsSync(dev)) return dev;
+        const cli = import_path14.default.join(d, "dist", "cli.js");
+        return import_fs13.default.existsSync(cli) ? cli : null;
       }
-      d = import_path13.default.dirname(d);
+      d = import_path14.default.dirname(d);
     }
   } catch {
   }
   return null;
 }
 function apisDir(host) {
-  return import_path13.default.join(getDataDir(), "apis", normalizeHost(host));
+  return import_path14.default.join(getDataDir(), "apis", normalizeHost(host));
 }
 function normalizeHost(host) {
   return host.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
 }
 function listRecipes(host) {
   const dir = recipesDir(host);
-  if (!import_fs12.default.existsSync(dir)) return [];
-  return import_fs12.default.readdirSync(dir).filter((f) => f.endsWith(".json")).sort().map((f) => JSON.parse(import_fs12.default.readFileSync(import_path13.default.join(dir, f), "utf8")));
+  if (!import_fs13.default.existsSync(dir)) return [];
+  return import_fs13.default.readdirSync(dir).filter((f) => f.endsWith(".json")).sort().map((f) => JSON.parse(import_fs13.default.readFileSync(import_path14.default.join(dir, f), "utf8")));
 }
 function saveRecipe(spec) {
   if (!/^[A-Za-z_$][\w$]*$/.test(spec.name)) throw new Error(`recipe name must be a JS identifier: ${spec.name}`);
@@ -14419,82 +14902,82 @@ function saveRecipe(spec) {
     checkCode(spec.run, "run");
   }
   const dir = recipesDir(spec.host);
-  import_fs12.default.mkdirSync(dir, { recursive: true });
-  import_fs12.default.writeFileSync(import_path13.default.join(dir, `${spec.name}.json`), JSON.stringify(spec, null, 2) + "\n");
+  import_fs13.default.mkdirSync(dir, { recursive: true });
+  import_fs13.default.writeFileSync(import_path14.default.join(dir, `${spec.name}.json`), JSON.stringify(spec, null, 2) + "\n");
   writeOutputs(spec.host);
   return clientPath(spec.host);
 }
 function removeRecipe(host, name) {
-  const f = import_path13.default.join(recipesDir(host), `${name}.json`);
-  if (!import_fs12.default.existsSync(f)) return false;
-  import_fs12.default.unlinkSync(f);
+  const f = import_path14.default.join(recipesDir(host), `${name}.json`);
+  if (!import_fs13.default.existsSync(f)) return false;
+  import_fs13.default.unlinkSync(f);
   writeOutputs(host);
   return true;
 }
 function outputsFile(host) {
-  return import_path13.default.join(apisDir(host), "outputs.json");
+  return import_path14.default.join(apisDir(host), "outputs.json");
 }
 function outputDirs(host) {
   const dirs = [apisDir(host)];
   try {
-    for (const d of JSON.parse(import_fs12.default.readFileSync(outputsFile(host), "utf8"))) if (!dirs.includes(d)) dirs.push(d);
+    for (const d of JSON.parse(import_fs13.default.readFileSync(outputsFile(host), "utf8"))) if (!dirs.includes(d)) dirs.push(d);
   } catch {
   }
   return dirs;
 }
 function addOutputDir(host, dir) {
-  const abs = import_path13.default.resolve(dir);
-  if (abs === import_path13.default.resolve(apisDir(host))) return;
-  const extra = outputDirs(host).slice(1).filter((d) => import_fs12.default.existsSync(d));
+  const abs = import_path14.default.resolve(dir);
+  if (abs === import_path14.default.resolve(apisDir(host))) return;
+  const extra = outputDirs(host).slice(1).filter((d) => import_fs13.default.existsSync(d));
   if (!extra.includes(abs)) extra.push(abs);
-  import_fs12.default.mkdirSync(apisDir(host), { recursive: true });
-  import_fs12.default.writeFileSync(outputsFile(host), JSON.stringify(extra, null, 2) + "\n");
+  import_fs13.default.mkdirSync(apisDir(host), { recursive: true });
+  import_fs13.default.writeFileSync(outputsFile(host), JSON.stringify(extra, null, 2) + "\n");
 }
 function clientPath(host, dir = apisDir(host)) {
-  return import_path13.default.join(dir, "client.mjs");
+  return import_path14.default.join(dir, "client.mjs");
 }
 function writeOutputs(host) {
   const written = [];
   for (const dir of outputDirs(host)) {
-    if (dir !== apisDir(host) && !import_fs12.default.existsSync(dir)) continue;
+    if (dir !== apisDir(host) && !import_fs13.default.existsSync(dir)) continue;
     written.push(...writeClient(host, dir));
   }
-  if (import_fs12.default.existsSync(import_path13.default.join(apisDir(host), "recipes.js"))) written.push(writeBundle(host));
+  if (import_fs13.default.existsSync(import_path14.default.join(apisDir(host), "recipes.js"))) written.push(writeBundle(host));
   return written;
 }
 function writeClient(host, dir = apisDir(host)) {
-  import_fs12.default.mkdirSync(dir, { recursive: true });
+  import_fs13.default.mkdirSync(dir, { recursive: true });
   const map = readMap(host, dir);
   const auth = readAuth(host, dir);
   const specs = listRecipes(host);
   const out = [];
   const put = (name, body, mode) => {
-    const p = import_path13.default.join(dir, name);
-    import_fs12.default.writeFileSync(p, body, mode ? { mode } : void 0);
+    const p = import_path14.default.join(dir, name);
+    import_fs13.default.writeFileSync(p, body, mode ? { mode } : void 0);
     out.push(p);
   };
   put("client.mjs", renderClient(host, map, auth, specs, dir), 493);
   put(".env.example", envExample(host, auth));
-  const gi = import_path13.default.join(dir, ".gitignore");
-  const cur = import_fs12.default.existsSync(gi) ? import_fs12.default.readFileSync(gi, "utf8") : "";
-  for (const line of [".env", ".fingerprints.json"]) if (!cur.split("\n").includes(line)) import_fs12.default.appendFileSync(gi, (cur && !cur.endsWith("\n") ? "\n" : "") + line + "\n");
+  const gi = import_path14.default.join(dir, ".gitignore");
+  const cur = import_fs13.default.existsSync(gi) ? import_fs13.default.readFileSync(gi, "utf8") : "";
+  for (const line of [".env", ".fingerprints.json"]) if (!cur.split("\n").includes(line)) import_fs13.default.appendFileSync(gi, (cur && !cur.endsWith("\n") ? "\n" : "") + line + "\n");
   return out;
 }
 function writeBundle(host) {
-  const file = import_path13.default.join(apisDir(host), "recipes.js");
-  import_fs12.default.mkdirSync(import_path13.default.dirname(file), { recursive: true });
-  import_fs12.default.writeFileSync(file, renderRecipes(listRecipes(host), readAuth(host)));
+  const file = import_path14.default.join(apisDir(host), "recipes.js");
+  import_fs13.default.mkdirSync(import_path14.default.dirname(file), { recursive: true });
+  import_fs13.default.writeFileSync(file, renderRecipes(listRecipes(host), readAuth(host)));
   return file;
 }
 function rebuildAllBundles() {
-  const root = import_path13.default.join(getDataDir(), "apis");
-  if (!import_fs12.default.existsSync(root)) return [];
-  return import_fs12.default.readdirSync(root).filter((h) => !h.includes(".bak-") && (import_fs12.default.existsSync(import_path13.default.join(root, h, "api.json")) || import_fs12.default.existsSync(import_path13.default.join(root, h, "recipes")))).flatMap((h) => writeOutputs(h));
+  const root = import_path14.default.join(getDataDir(), "apis");
+  if (!import_fs13.default.existsSync(root)) return [];
+  return import_fs13.default.readdirSync(root).filter((h) => !h.includes(".bak-") && (import_fs13.default.existsSync(import_path14.default.join(root, h, "api.json")) || import_fs13.default.existsSync(import_path14.default.join(root, h, "recipes")))).flatMap((h) => writeOutputs(h));
 }
 function readMap(host, dir) {
   for (const d of [dir, apisDir(host)]) {
     try {
-      return JSON.parse(import_fs12.default.readFileSync(import_path13.default.join(d, "api.json"), "utf8"));
+      return JSON.parse(import_fs13.default.readFileSync(import_path14.default.join(d, "api.json"), "utf8"));
     } catch {
     }
   }
@@ -14516,7 +14999,7 @@ function describeSource(s) {
 function readAuth(host, dir = apisDir(host)) {
   for (const d of [dir, apisDir(host)]) {
     try {
-      return JSON.parse(import_fs12.default.readFileSync(import_path13.default.join(d, "auth.json"), "utf8"));
+      return JSON.parse(import_fs13.default.readFileSync(import_path14.default.join(d, "auth.json"), "utf8"));
     } catch {
     }
   }
@@ -14580,12 +15063,141 @@ function renderClient(host, map, auth, specs, dir) {
     } catch {
     }
   }
+  const taken = new Set(specs.map((r) => r.name));
+  const free = (base) => {
+    let n = base;
+    while (taken.has(n)) n += "_";
+    return n;
+  };
+  const TAB = free("__tab"), TAB_FETCH = free("__tabFetch"), HOME = free("__tabHome");
+  const RESERVED_WORDS = [
+    "arguments",
+    "await",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "debugger",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "enum",
+    "eval",
+    "export",
+    "extends",
+    "false",
+    "finally",
+    "for",
+    "function",
+    "if",
+    "implements",
+    "import",
+    "in",
+    "instanceof",
+    "interface",
+    "let",
+    "new",
+    "null",
+    "package",
+    "private",
+    "protected",
+    "public",
+    "return",
+    "static",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "typeof",
+    "undefined",
+    "var",
+    "void",
+    "while",
+    "with",
+    "yield"
+  ];
+  const MODULE_DECLARED = [
+    "fs",
+    "path",
+    "fileURLToPath",
+    "DIR",
+    "ORIGIN",
+    "AUTH",
+    "ACTIONS",
+    "PAGES",
+    "readEnv",
+    "HOST",
+    "IFRAMER",
+    "env",
+    "refreshed",
+    "refreshSession",
+    "core",
+    "FP",
+    "fps",
+    "run",
+    "ready",
+    "get",
+    "page",
+    "action",
+    "actions",
+    "SPECS",
+    "recipes",
+    "flags",
+    "args",
+    "show",
+    "main",
+    "isMain"
+  ];
+  const GLOBALS_USED = [
+    "AbortController",
+    "AbortSignal",
+    "Array",
+    "ArrayBuffer",
+    "Boolean",
+    "Buffer",
+    "Date",
+    "Error",
+    "Headers",
+    "Infinity",
+    "JSON",
+    "Math",
+    "NaN",
+    "Number",
+    "Object",
+    "Promise",
+    "Response",
+    "String",
+    "TextDecoder",
+    "TextEncoder",
+    "URL",
+    "URLSearchParams",
+    "clearTimeout",
+    "console",
+    "decodeURIComponent",
+    "document",
+    "encodeURIComponent",
+    "globalThis",
+    "location",
+    "parseInt",
+    "performance",
+    "process",
+    "setTimeout",
+    "window"
+  ];
+  const NOT_BINDINGS = /* @__PURE__ */ new Set([...RESERVED_WORDS, ...MODULE_DECLARED, ...GLOBALS_USED]);
+  const clashes = (n) => NOT_BINDINGS.has(n);
   const out = [];
   out.push(`#!/usr/bin/env node`);
   out.push(`// ${host} API client, generated by iframer from a capture of ${origin}. Node 18+, no browser.`);
   out.push(`// Regenerated by \`iframer ingest\` and \`iframer recipe\`: don't edit, add recipes instead.`);
   out.push(`//`);
   out.push(`// Auth: .env next to this file (see .env.example). Refresh it with: iframer auth ${host} --out ${JSON.stringify(dir)}`);
+  out.push(`// Or no saved cookie at all: \`iframer bridge attach ${host}\` attaches a logged-in tab, and these requests go through it.`);
   out.push(`//`);
   out.push(`// CLI:     node client.mjs                         everything this client knows`);
   out.push(`//          node client.mjs <recipe> '{"arg":"x"}'  one saved task, one line`);
@@ -14594,6 +15206,7 @@ function renderClient(host, map, auth, specs, dir) {
   out.push(`// Library: import { get, page, action, recipes } from "./client.mjs"`);
   out.push(``);
   out.push(`import fs from "node:fs";`);
+  out.push(`import { homedir as ${HOME} } from "node:os";`);
   out.push(`import path from "node:path";`);
   out.push(`import { fileURLToPath } from "node:url";`);
   out.push(``);
@@ -14608,9 +15221,20 @@ function renderClient(host, map, auth, specs, dir) {
   out.push(`const IFRAMER = process.env.IFRAMER_BIN || ${JSON.stringify(iframerCli() || "iframer")}; // the iframer that wrote this client`);
   out.push(`const env = { ...readEnv(path.join(DIR, ".env")), ...process.env };`);
   out.push(REFRESH);
-  out.push(`export const core = (${recipeCore.toString()})();`);
+  out.push(`// Tab bridge: when a logged-in tab is attached for this site (iframer bridge attach ${host}), every request goes`);
+  out.push(`// through that tab and the saved cookie is not used. Nothing attached: it answers null and the request runs as it`);
+  out.push(`// always did. The first request decides for the whole run: it never switches session half-way. Off: IFRAMER_BRIDGE=off.`);
+  out.push(`const ${TAB} = (${tabBridgeClient.toString()})({ fs, path, home: ${HOME}(), env, fetch: globalThis.fetch, v: ${BRIDGE_VERSION}, auth: AUTH });`);
+  out.push(`const ${TAB_FETCH} = (url, init) => ${TAB}.fetch(url, init).then((r) => {`);
+  out.push(`  if (!r) return globalThis.fetch(url, init);`);
+  out.push(`  // The tab never follows a redirect and the browser hides where it points. For a logged-in API call that nearly always means the login page.`);
+  out.push(`  if (r.headers.get("x-iframer-bridge") === "redirect-not-followed") throw new Error(${JSON.stringify(`session expired, or the page moved: ${host} answered with a redirect, which the tab bridge does not follow. Log in to ${host} in the attached tab, then run again`)});`);
+  out.push(`  core.setTransport({ relogin: ${JSON.stringify(`log in to ${host} in the attached tab, then run again`)} });`);
+  out.push(`  return r;`);
+  out.push(`});`);
+  out.push(`export const core = ((fetch) => (${recipeCore.toString()})())(${TAB_FETCH});`);
   out.push(`core.setAuth(AUTH);`);
-  out.push(`core.setTransport({ base: ORIGIN, cookie: env.COOKIE || null, env, actions: ACTIONS, relogin: ${JSON.stringify(`log in to ${host} in a browser on this machine, then: iframer auth ${host} --out ${dir}`)}, onExpired: refreshSession });`);
+  out.push(`core.setTransport({ base: ORIGIN, cookie: env.COOKIE || null, env, actions: ACTIONS, relogin: ${JSON.stringify(`log in to ${host} in a browser on this machine, then: iframer auth ${host} --out ${dir}`)}, onExpired: () => (${TAB}.used() ? false : refreshSession()) });`);
   out.push(``);
   out.push(`const FP = path.join(DIR, ".fingerprints.json");`);
   out.push(`const fps = {`);
@@ -14620,8 +15244,8 @@ function renderClient(host, map, auth, specs, dir) {
   out.push(`const run = (${recipeRunner.toString()})(core, fps);`);
   out.push(``);
   out.push(`/** Any same-site request. Next.js page data: {rsc: true}. Returns parsed data. */`);
-  out.push(`// No session yet: take it from a logged-in browser before the first call.`);
-  out.push(`const ready = env.COOKIE ? Promise.resolve() : refreshSession();`);
+  out.push(`// No session yet: take it from a logged-in browser before the first call. Not needed when a tab is attached.`);
+  out.push(`const ready = ${TAB}.attached(ORIGIN).then((on) => (on || env.COOKIE ? undefined : refreshSession()));`);
   out.push(`export const get = (p, o) => ready.then(() => core.get(p, o));`);
   out.push(`/** A Next.js page's data: {components: {Name: props}, rows, ...}. */`);
   out.push(`export const page = (p, o) => get(p, { ...o, rsc: true });`);
@@ -14637,9 +15261,9 @@ function renderClient(host, map, auth, specs, dir) {
   out.push(`};`);
   out.push(`/** Saved recipes: each takes its args object and resolves to one short line ("error: ..." on failure). */`);
   out.push(`export const recipes = Object.fromEntries(Object.keys(SPECS).map((n) => [n, (a, max) => ready.then(() => run(SPECS[n], a, max))]));`);
-  for (const r of specs) out.push(`export const ${r.name} = recipes[${JSON.stringify(r.name)}];`);
+  specs.forEach((r, i) => out.push(clashes(r.name) ? `const ${free(`__recipe${i}`)} = recipes[${JSON.stringify(r.name)}]; export { ${free(`__recipe${i}`)} as ${r.name} };` : `export const ${r.name} = recipes[${JSON.stringify(r.name)}];`));
   out.push(``);
-  out.push(CLI_SOURCE.replace(/__HOST__/g, host));
+  out.push(CLI_SOURCE.replace(/__HOST__/g, host).replace(/__TAB__/g, TAB));
   return out.join("\n") + "\n";
 }
 function renderRecipes(specs, auth = {}) {
@@ -14672,18 +15296,20 @@ function renderRecipes(specs, auth = {}) {
   out.push(`})();`);
   return out.join("\n") + "\n";
 }
-var import_fs12, import_path13, import_crypto13, import_url, RUNTIME, recipesDir, RESERVED, envName, isCode, lit, READ_ENV, REFRESH, CLI_SOURCE;
+var import_fs13, import_path14, import_crypto14, import_url, RUNTIME, recipesDir, RESERVED, envName, isCode, lit, READ_ENV, REFRESH, CLI_SOURCE;
 var init_recipes = __esm({
   "src/lib/kit/recipes.ts"() {
     "use strict";
-    import_fs12 = __toESM(require("fs"));
-    import_path13 = __toESM(require("path"));
+    import_fs13 = __toESM(require("fs"));
+    import_path14 = __toESM(require("path"));
     init_paths();
-    import_crypto13 = __toESM(require("crypto"));
+    import_crypto14 = __toESM(require("crypto"));
     import_url = require("url");
     init_recipe_core();
-    RUNTIME = import_crypto13.default.createHash("sha1").update(recipeCore.toString()).update(recipeRunner.toString()).update(renderRecipes.toString()).digest("hex").slice(0, 8);
-    recipesDir = (host) => import_path13.default.join(apisDir(host), "recipes");
+    init_client();
+    init_state();
+    RUNTIME = import_crypto14.default.createHash("sha1").update(recipeCore.toString()).update(recipeRunner.toString()).update(renderRecipes.toString()).digest("hex").slice(0, 8);
+    recipesDir = (host) => import_path14.default.join(apisDir(host), "recipes");
     RESERVED = /* @__PURE__ */ new Set(["get", "page", "action", "actions", "recipes", "schema", "core", "run", "default"]);
     envName = (h) => h.replace(/[^A-Za-z0-9]+/g, "_").toUpperCase();
     isCode = (s) => /=>|^\s*(async\s+)?function\b/.test(s);
@@ -14746,7 +15372,8 @@ async function main(argv) {
     const need = ["COOKIE", ...Object.keys(AUTH).map(core.envName)];
     console.log("__HOST__ (" + ORIGIN + ")");
     await ready;
-    console.log("auth: " + need.map((n) => n + (env[n] ? " set" : " missing")).join(", ") + (need.some((n) => !env[n]) ? "  -> log in to __HOST__ in a browser here, then iframer auth __HOST__" : ""));
+    if (await __TAB__.attached(ORIGIN)) console.log("tab: attached (requests go through the logged-in tab, no cookie needed)");
+    else console.log("auth: " + need.map((n) => n + (env[n] ? " set" : " missing")).join(", ") + (need.some((n) => !env[n]) ? "  -> log in to __HOST__ in a browser here, then iframer auth __HOST__" : ""));
     console.log("recipes: " + (Object.keys(SPECS).join(", ") || "none yet (iframer recipe __HOST__ <name> ...)"));
     console.log("actions: " + (Object.keys(ACTIONS).join(", ") || "none"));
     console.log("pages/endpoints (" + PAGES.length + "): " + PAGES.slice(0, 30).join(" | ") + (PAGES.length > 30 ? " | ..." : ""));
@@ -14792,27 +15419,27 @@ if (isMain) {
 // src/lib/kit/browser-cookies.ts
 function copyOpenFile(src, dst) {
   try {
-    import_fs13.default.copyFileSync(src, dst);
+    import_fs14.default.copyFileSync(src, dst);
     return;
   } catch (e) {
     const code = e.code;
     if (code !== "EBUSY" && code !== "EPERM" && code !== "EACCES") throw e;
   }
-  const fd = import_fs13.default.openSync(src, "r");
+  const fd = import_fs14.default.openSync(src, "r");
   try {
     const buf = Buffer.allocUnsafe(1 << 20);
     let pos = 0, n = 0;
-    const out = import_fs13.default.openSync(dst, "w");
+    const out = import_fs14.default.openSync(dst, "w");
     try {
-      while ((n = import_fs13.default.readSync(fd, buf, 0, buf.length, pos)) > 0) {
-        import_fs13.default.writeSync(out, buf, 0, n);
+      while ((n = import_fs14.default.readSync(fd, buf, 0, buf.length, pos)) > 0) {
+        import_fs14.default.writeSync(out, buf, 0, n);
         pos += n;
       }
     } finally {
-      import_fs13.default.closeSync(out);
+      import_fs14.default.closeSync(out);
     }
   } finally {
-    import_fs13.default.closeSync(fd);
+    import_fs14.default.closeSync(fd);
   }
 }
 function getSqlAll() {
@@ -14856,18 +15483,18 @@ function getSqlAll() {
   };
 }
 function readRows(file, sql) {
-  const tmp = import_fs13.default.mkdtempSync(import_path14.default.join(import_os5.default.tmpdir(), "ifk-ck-"));
+  const tmp = import_fs14.default.mkdtempSync(import_path15.default.join(import_os5.default.tmpdir(), "ifk-ck-"));
   try {
-    const db = import_path14.default.join(tmp, "c");
+    const db = import_path15.default.join(tmp, "c");
     copyOpenFile(file, db);
-    if (import_fs13.default.existsSync(file + "-journal")) copyOpenFile(file + "-journal", db + "-journal");
-    if (import_fs13.default.existsSync(file + "-wal")) copyOpenFile(file + "-wal", db + "-wal");
+    if (import_fs14.default.existsSync(file + "-journal")) copyOpenFile(file + "-journal", db + "-journal");
+    if (import_fs14.default.existsSync(file + "-wal")) copyOpenFile(file + "-wal", db + "-wal");
     return getSqlAll()(db, sql);
   } catch (e) {
     unreadable.set(file, e.message.split("\n")[0].slice(0, 80));
     return [];
   } finally {
-    import_fs13.default.rmSync(tmp, { recursive: true, force: true });
+    import_fs14.default.rmSync(tmp, { recursive: true, force: true });
   }
 }
 function matches(host, cookieHost) {
@@ -14878,28 +15505,28 @@ function matches(host, cookieHost) {
 }
 function appRoots() {
   const home = import_os5.default.homedir();
-  if (process.platform === "darwin") return [import_path14.default.join(home, "Library", "Application Support")];
+  if (process.platform === "darwin") return [import_path15.default.join(home, "Library", "Application Support")];
   if (process.platform === "win32") return [process.env.APPDATA, process.env.LOCALAPPDATA].filter(Boolean);
-  return [process.env.XDG_CONFIG_HOME || import_path14.default.join(home, ".config")];
+  return [process.env.XDG_CONFIG_HOME || import_path15.default.join(home, ".config")];
 }
 function profiles() {
   const win = process.platform === "win32";
   const out = [];
   const ls = (d) => {
     try {
-      return import_fs13.default.readdirSync(d);
+      return import_fs14.default.readdirSync(d);
     } catch {
       return [];
     }
   };
   const add = (source, dir, opts = {}) => {
-    for (const f of [import_path14.default.join(dir, "Cookies"), import_path14.default.join(dir, "Network", "Cookies")]) out.push({ source, file: f, keychain: opts.keychain, localState: opts.localState });
+    for (const f of [import_path15.default.join(dir, "Cookies"), import_path15.default.join(dir, "Network", "Cookies")]) out.push({ source, file: f, keychain: opts.keychain, localState: opts.localState });
   };
   for (const root of appRoots()) {
     for (const app of ls(root).filter((a) => /^t3[\s_-]?code/i.test(a))) {
-      const appDir = import_path14.default.join(root, app);
-      const localState = import_path14.default.join(appDir, "Local State");
-      for (const p of ls(import_path14.default.join(appDir, "Partitions"))) add(`T3 Code tab (${p})`, import_path14.default.join(appDir, "Partitions", p), { localState });
+      const appDir = import_path15.default.join(root, app);
+      const localState = import_path15.default.join(appDir, "Local State");
+      for (const p of ls(import_path15.default.join(appDir, "Partitions"))) add(`T3 Code tab (${p})`, import_path15.default.join(appDir, "Partitions", p), { localState });
       add(`T3 Code (${app})`, appDir, { localState });
     }
     const chromes = process.platform === "darwin" ? [
@@ -14910,12 +15537,12 @@ function profiles() {
       ["Chromium", "Chromium", "Chromium Safe Storage"]
     ] : win ? [["Chrome", "Google/Chrome/User Data", ""], ["Edge", "Microsoft/Edge/User Data", ""], ["Brave", "BraveSoftware/Brave-Browser/User Data", ""], ["Chromium", "Chromium/User Data", ""]] : [["Chrome", "google-chrome", ""], ["Chromium", "chromium", ""], ["Brave", "BraveSoftware/Brave-Browser", ""]];
     for (const [name, dir] of chromes) {
-      const r = import_path14.default.join(root, dir);
-      const localState = win ? import_path14.default.join(r, "Local State") : void 0;
-      for (const prof of ls(r)) if (prof !== "Local State") add(`${name} (${prof})`, import_path14.default.join(r, prof), { keychain: process.platform === "darwin" ? `${name} Safe Storage` : void 0, localState });
+      const r = import_path15.default.join(root, dir);
+      const localState = win ? import_path15.default.join(r, "Local State") : void 0;
+      for (const prof of ls(r)) if (prof !== "Local State") add(`${name} (${prof})`, import_path15.default.join(r, prof), { keychain: process.platform === "darwin" ? `${name} Safe Storage` : void 0, localState });
     }
   }
-  return out.filter((p) => import_fs13.default.existsSync(p.file));
+  return out.filter((p) => import_fs14.default.existsSync(p.file));
 }
 function cookieStores() {
   return profiles().map((p) => unreadable.has(p.file) ? `${p.source} [unreadable: ${unreadable.get(p.file)}]` : p.source);
@@ -14937,7 +15564,7 @@ function cookieKey(p) {
     if (keys.has(p.localState)) return keys.get(p.localState);
     let k2 = null;
     try {
-      const b = Buffer.from(JSON.parse(import_fs13.default.readFileSync(p.localState, "utf8")).os_crypt.encrypted_key, "base64");
+      const b = Buffer.from(JSON.parse(import_fs14.default.readFileSync(p.localState, "utf8")).os_crypt.encrypted_key, "base64");
       const blob = b.subarray(0, 5).toString() === "DPAPI" ? b.subarray(5) : b;
       const key = dpapiUnprotect(blob.toString("base64"));
       if (key && key.length === 32) k2 = { key, algo: "gcm" };
@@ -14946,13 +15573,13 @@ function cookieKey(p) {
     keys.set(p.localState, k2);
     return k2;
   }
-  if (process.platform === "linux") return { key: import_crypto14.default.pbkdf2Sync("peanuts", "saltysalt", 1, 16, "sha1"), algo: "cbc" };
+  if (process.platform === "linux") return { key: import_crypto15.default.pbkdf2Sync("peanuts", "saltysalt", 1, 16, "sha1"), algo: "cbc" };
   if (!p.keychain) return null;
   if (keys.has(p.keychain)) return keys.get(p.keychain);
   let k = null;
   try {
     const pw = (0, import_child_process5.execFileSync)("security", ["find-generic-password", "-w", "-s", p.keychain], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 6e4 }).trim();
-    if (pw) k = { key: import_crypto14.default.pbkdf2Sync(pw, "saltysalt", 1003, 16, "sha1"), algo: "cbc" };
+    if (pw) k = { key: import_crypto15.default.pbkdf2Sync(pw, "saltysalt", 1003, 16, "sha1"), algo: "cbc" };
   } catch {
   }
   keys.set(p.keychain, k);
@@ -14966,11 +15593,11 @@ function decrypt2(enc, ck, hostHashed) {
     if (ck.algo === "gcm") {
       const iv = enc.subarray(3, 15);
       const tag = enc.subarray(enc.length - 16);
-      const d = import_crypto14.default.createDecipheriv("aes-256-gcm", ck.key, iv);
+      const d = import_crypto15.default.createDecipheriv("aes-256-gcm", ck.key, iv);
       d.setAuthTag(tag);
       out = Buffer.concat([d.update(enc.subarray(15, enc.length - 16)), d.final()]);
     } else {
-      const d = import_crypto14.default.createDecipheriv("aes-128-cbc", ck.key, Buffer.alloc(16, " "));
+      const d = import_crypto15.default.createDecipheriv("aes-128-cbc", ck.key, Buffer.alloc(16, " "));
       out = Buffer.concat([d.update(enc.subarray(3)), d.final()]);
     }
     if (hostHashed && out.length >= 32) out = out.subarray(32);
@@ -15019,14 +15646,14 @@ function cookieHeader(jar) {
   }
   return [...seen].map(([n, v]) => `${n}=${v.value}`).join("; ");
 }
-var import_crypto14, import_fs13, import_os5, import_path14, import_child_process5, IS_BUN2, unreadable, sqlAll, chromeMs, keys;
+var import_crypto15, import_fs14, import_os5, import_path15, import_child_process5, IS_BUN2, unreadable, sqlAll, chromeMs, keys;
 var init_browser_cookies = __esm({
   "src/lib/kit/browser-cookies.ts"() {
     "use strict";
-    import_crypto14 = __toESM(require("crypto"));
-    import_fs13 = __toESM(require("fs"));
+    import_crypto15 = __toESM(require("crypto"));
+    import_fs14 = __toESM(require("fs"));
     import_os5 = __toESM(require("os"));
-    import_path14 = __toESM(require("path"));
+    import_path15 = __toESM(require("path"));
     import_child_process5 = require("child_process");
     IS_BUN2 = typeof globalThis.Bun !== "undefined";
     unreadable = /* @__PURE__ */ new Map();
@@ -15043,7 +15670,7 @@ function storeLocked(store) {
 function candidatePaths(host, dir) {
   for (const d of [dir, apisDir(host)]) {
     try {
-      const map = JSON.parse(import_fs14.default.readFileSync(import_path15.default.join(d, "api.json"), "utf8"));
+      const map = JSON.parse(import_fs15.default.readFileSync(import_path16.default.join(d, "api.json"), "utf8"));
       const out = [];
       const add = (p, rsc) => {
         if (!/\{/.test(p) && !out.some((x) => x.path === p)) out.push({ path: p, rsc });
@@ -15083,29 +15710,29 @@ async function findProbe(origin, paths) {
   return null;
 }
 function writeEnv(dir, vals) {
-  import_fs14.default.mkdirSync(dir, { recursive: true });
-  const envFile = import_path15.default.join(dir, ".env");
+  import_fs15.default.mkdirSync(dir, { recursive: true });
+  const envFile = import_path16.default.join(dir, ".env");
   const cur = {};
   try {
-    for (const l of import_fs14.default.readFileSync(envFile, "utf8").split(/\r?\n/)) {
+    for (const l of import_fs15.default.readFileSync(envFile, "utf8").split(/\r?\n/)) {
       const m = /^([A-Za-z_]\w*)=(.*)$/.exec(l);
       if (m) cur[m[1]] = m[2];
     }
   } catch {
   }
   Object.assign(cur, vals);
-  import_fs14.default.writeFileSync(envFile, Object.entries(cur).map(([k, v]) => `${k}=${v}`).join("\n") + "\n", { mode: 384 });
-  import_fs14.default.chmodSync(envFile, 384);
-  const gi = import_path15.default.join(dir, ".gitignore");
-  const giCur = import_fs14.default.existsSync(gi) ? import_fs14.default.readFileSync(gi, "utf8") : "";
-  if (!giCur.split("\n").includes(".env")) import_fs14.default.appendFileSync(gi, (giCur && !giCur.endsWith("\n") ? "\n" : "") + ".env\n");
+  import_fs15.default.writeFileSync(envFile, Object.entries(cur).map(([k, v]) => `${k}=${v}`).join("\n") + "\n", { mode: 384 });
+  import_fs15.default.chmodSync(envFile, 384);
+  const gi = import_path16.default.join(dir, ".gitignore");
+  const giCur = import_fs15.default.existsSync(gi) ? import_fs15.default.readFileSync(gi, "utf8") : "";
+  if (!giCur.split("\n").includes(".env")) import_fs15.default.appendFileSync(gi, (giCur && !giCur.endsWith("\n") ? "\n" : "") + ".env\n");
   return envFile;
 }
 async function refreshSession(host, dir, opts = {}) {
-  const envFile = import_path15.default.join(dir, ".env");
+  const envFile = import_path16.default.join(dir, ".env");
   let origin = `https://${host}`;
   try {
-    origin = JSON.parse(import_fs14.default.readFileSync(import_path15.default.join(apisDir(host), "api.json"), "utf8")).origin || origin;
+    origin = JSON.parse(import_fs15.default.readFileSync(import_path16.default.join(apisDir(host), "api.json"), "utf8")).origin || origin;
   } catch {
   }
   const probe = await findProbe(origin, candidatePaths(host, dir));
@@ -15136,7 +15763,7 @@ async function refreshSession(host, dir, opts = {}) {
       ok: false,
       locked: true,
       envFile,
-      note: `${host}'s session is open in a browser that locks its cookie store, so it can't be exported to a file (${looked}). This is normal on Windows with T3 Code running. Run the recipes inside the logged-in tab instead (in-page replay): iframer recipe ${host} --in-page`
+      note: `${host}'s session is open in a browser that locks its cookie store, so it can't be exported to a file (${looked}). This is normal on Windows with T3 Code running. Run the recipes inside the logged-in tab instead (in-page replay): iframer recipe ${host} --in-page. Or keep running client.mjs from Node and let that tab carry its requests (no cookie export): iframer bridge attach ${host}`
     };
   }
   return {
@@ -15145,12 +15772,12 @@ async function refreshSession(host, dir, opts = {}) {
     note: tried.length ? `no logged-in session found (${tried.join("; ")}). Log in to ${host} in the browser tab, then run this again` : `no cookies for ${host} on this machine (${looked}). Log in to ${host} in a T3 Code tab or Chrome, then run this again. If you are logged in and this still fails, report it as an iframer bug with this message; do not ask for the cookie`
   };
 }
-var import_fs14, import_path15, LOGIN;
+var import_fs15, import_path16, LOGIN;
 var init_session_env = __esm({
   "src/lib/kit/session-env.ts"() {
     "use strict";
-    import_fs14 = __toESM(require("fs"));
-    import_path15 = __toESM(require("path"));
+    import_fs15 = __toESM(require("fs"));
+    import_path16 = __toESM(require("path"));
     init_browser_cookies();
     init_recipes();
     LOGIN = /\/(login|log-in|signin|sign-in|auth|sso)(\/|\?|$)/i;
@@ -15212,16 +15839,16 @@ function kitSource(opts = {}) {
   if (opts.hardMax) clean.hardMax = opts.hardMax;
   const fn = pageKit.toString();
   const core = recipeCore.toString();
-  const build = import_crypto15.default.createHash("sha1").update(fn).update(core).digest("hex").slice(0, 10);
+  const build = import_crypto16.default.createHash("sha1").update(fn).update(core).digest("hex").slice(0, 10);
   return `(${fn})(${JSON.stringify({ ...clean, build })}, (${core})());
 `;
 }
 function kitDir() {
-  return import_path16.default.join(getDataDir(), "kit");
+  return import_path17.default.join(getDataDir(), "kit");
 }
-function writeKit(opts = {}, file = import_path16.default.join(kitDir(), "iframer-kit.js")) {
-  import_fs15.default.mkdirSync(import_path16.default.dirname(file), { recursive: true });
-  import_fs15.default.writeFileSync(file, kitSource(opts), "utf8");
+function writeKit(opts = {}, file = import_path17.default.join(kitDir(), "iframer-kit.js")) {
+  import_fs16.default.mkdirSync(import_path17.default.dirname(file), { recursive: true });
+  import_fs16.default.writeFileSync(file, kitSource(opts), "utf8");
   return file;
 }
 function kitInstructions(target, kitPath) {
@@ -15303,13 +15930,13 @@ function drainFallback() {
     `until next is null, write the joined chunks to a file, then \`iframer ingest <file>\`.`
   ].join("\n");
 }
-var import_crypto15, import_fs15, import_path16, KIT_TARGETS, MAKE_INPUT, SS, stash, STASH, INSTALL, STATUS, LS, recipeRun, recipeRunFallback;
+var import_crypto16, import_fs16, import_path17, KIT_TARGETS, MAKE_INPUT, SS, stash, STASH, INSTALL, STATUS, LS, recipeRun, recipeRunFallback;
 var init_kit = __esm({
   "src/lib/kit/index.ts"() {
     "use strict";
-    import_crypto15 = __toESM(require("crypto"));
-    import_fs15 = __toESM(require("fs"));
-    import_path16 = __toESM(require("path"));
+    import_crypto16 = __toESM(require("crypto"));
+    import_fs16 = __toESM(require("fs"));
+    import_path17 = __toESM(require("path"));
     init_paths();
     init_page_kit();
     init_recipe_core();
@@ -15329,35 +15956,512 @@ var init_kit = __esm({
   }
 });
 
+// src/lib/tabbridge/relay.ts
+function tabRelay(c) {
+  var MAX = 32 * 1024 * 1024;
+  if (location.origin !== c.o) return "WRONG_TAB: this expression is for " + c.o + " and this tab is on " + location.origin + ". Open the tab on " + c.o + ", or run `iframer bridge attach " + location.host + "` for this one.";
+  var KEY = /* @__PURE__ */ Symbol.for("iframer.bridge");
+  var id = [c.v, c.port, c.site, c.name, c.ro ? 1 : 0].join("|");
+  var old = window[KEY];
+  if (old && old.id === id && !old.stopped && (old.open || old.connecting)) return old.open ? "ALREADY_ATTACHED" : old.first;
+  if (old) {
+    old.stopped = true;
+    try {
+      old.ws && old.ws.close();
+    } catch (e) {
+    }
+  }
+  var st = { id, open: false, ever: false, stopped: false, connecting: true, ws: null, first: null };
+  try {
+    Object.defineProperty(window, KEY, { value: st, configurable: true, enumerable: false, writable: true });
+  } catch (e) {
+    window[KEY] = st;
+  }
+  var host = c.site.split(":")[0];
+  function mine(u) {
+    if (u.protocol !== location.protocol) return false;
+    if (c.site.indexOf(":") > 0 && u.host !== c.site) return false;
+    return u.hostname === host || u.hostname.slice(-host.length - 1) === "." + host;
+  }
+  function b64(buf) {
+    var s = "";
+    for (var i = 0; i < buf.length; i += 32768) s += String.fromCharCode.apply(null, buf.subarray(i, i + 32768));
+    return btoa(s);
+  }
+  function bytes(s) {
+    var bin = atob(s), out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  function readBody(res) {
+    if (!res.body || !res.body.getReader) return res.arrayBuffer().then(function(b) {
+      return new Uint8Array(b);
+    });
+    var reader = res.body.getReader(), parts = [], n = 0;
+    function step() {
+      return reader.read().then(function(r) {
+        if (r.done) {
+          var out = new Uint8Array(n), at = 0;
+          for (var i = 0; i < parts.length; i++) {
+            out.set(parts[i], at);
+            at += parts[i].length;
+          }
+          return out;
+        }
+        n += r.value.length;
+        if (n > MAX) {
+          try {
+            reader.cancel();
+          } catch (e) {
+          }
+          throw new Error("response larger than 32 MB: too large for the tab bridge");
+        }
+        parts.push(r.value);
+        return step();
+      });
+    }
+    return step();
+  }
+  function stored(s) {
+    var v = null;
+    try {
+      if (s.from === "localStorage" || s.from === "sessionStorage") {
+        v = window[s.from] && window[s.from].getItem(s.key);
+        if (v != null && (s.json || s.path)) {
+          v = JSON.parse(v);
+          (s.path || []).forEach(function(k) {
+            v = v == null ? v : v[k];
+          });
+        }
+      } else if (s.from === "cookie") {
+        document.cookie.split(/;\s*/).forEach(function(ck) {
+          if (ck.indexOf(s.key + "=") === 0) v = decodeURIComponent(ck.slice(s.key.length + 1));
+        });
+      } else if (s.from === "meta") {
+        var m = document.querySelector('meta[name="' + s.key + '"]');
+        v = m && m.getAttribute("content");
+      }
+    } catch (e) {
+      v = null;
+    }
+    return typeof v === "string" && v ? (s.prefix || "") + v : null;
+  }
+  var held = {}, running = {};
+  function request(ws, q) {
+    function reply(o) {
+      o.id = q.id;
+      try {
+        ws.send(JSON.stringify(o));
+      } catch (e) {
+      }
+    }
+    if (q.notAfter && Date.now() > q.notAfter) return reply({ expired: 1 });
+    var method = String(q.method || "GET").toUpperCase(), read2 = method === "GET" || method === "HEAD";
+    function run2() {
+      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null, timer, started = false, fetchFailed = false, cross = "";
+      Promise.resolve().then(function() {
+        var u = new URL(q.url, location.href);
+        if (u.origin !== location.origin) cross = u.host;
+        if (!mine(u)) throw new Error("not this tab's site: " + u.hostname);
+        if (c.ro && !read2) throw new Error("this tab is attached read-only: " + method + " refused");
+        var headers = {}, referrer;
+        Object.keys(q.headers || {}).forEach(function(k) {
+          if (k.toLowerCase() === "referer") {
+            try {
+              if (new URL(q.headers[k], location.href).origin === location.origin) referrer = q.headers[k];
+            } catch (e) {
+            }
+          } else headers[k] = q.headers[k];
+        });
+        Object.keys(q.auth || {}).forEach(function(name) {
+          var s = q.auth[name] || {};
+          if (!s.from) return;
+          Object.keys(headers).forEach(function(k) {
+            if (k.toLowerCase() === name.toLowerCase()) delete headers[k];
+          });
+          var v = stored(s);
+          if (v != null) headers[name] = v;
+        });
+        var init = { method, headers, credentials: "include", redirect: "manual", cache: "no-store" };
+        if (referrer) init.referrer = referrer;
+        if (!read2 && q.body64 != null) init.body = bytes(q.body64);
+        else if (!read2 && q.body != null) init.body = q.body;
+        if (read2 && ctl) {
+          init.signal = ctl.signal;
+          running[q.id] = ctl;
+          timer = setTimeout(function() {
+            ctl.abort();
+          }, 2e4);
+        }
+        started = true;
+        return fetch(u.href, init).then(null, function(e) {
+          fetchFailed = true;
+          throw e;
+        }).then(function(res) {
+          function drop(why) {
+            try {
+              res.body && res.body.cancel();
+            } catch (e) {
+            }
+            throw new Error(why);
+          }
+          if (res.type === "opaqueredirect" && q.redirect === "error") drop("the site answered with a redirect, and the request asked for redirect: error");
+          var type = res.headers.get("content-type") || "";
+          if (/text\/event-stream/i.test(type)) drop("streamed response (" + type + "): not supported through the tab bridge");
+          if (+res.headers.get("content-length") > MAX) drop("response larger than 32 MB: too large for the tab bridge");
+          return readBody(res).then(function(body) {
+            var h = {};
+            res.headers.forEach(function(v, k) {
+              h[k] = v;
+            });
+            reply({ status: res.status, type: res.type, redirected: res.redirected, url: res.url, headers: h, body64: b64(body) });
+          });
+        });
+      }).catch(function(e) {
+        var stopped = !!(read2 && ctl && ctl.signal.aborted);
+        var out = { error: stopped ? "aborted: the read was stopped or timed out" : String(e && e.message || e) };
+        if (stopped || fetchFailed && !cross) out.net = 1;
+        if (fetchFailed && cross && !stopped) out.error = "the request to " + cross + " could not be completed from this tab: that host does not accept requests from " + location.host + " (CORS), or it is unreachable. Attach a tab on " + cross + " itself";
+        if (!started) out.unsent = 1;
+        reply(out);
+      }).then(function() {
+        clearTimeout(timer);
+        delete running[q.id];
+      });
+    }
+    reply({ ack: 1 });
+    if (read2) return run2();
+    held[q.id] = { run: run2, timer: setTimeout(function() {
+      delete held[q.id];
+    }, 3e4) };
+  }
+  function release(id2) {
+    var h = held[id2];
+    if (!h) return null;
+    clearTimeout(h.timer);
+    delete held[id2];
+    return h.run;
+  }
+  function handle(ws, q) {
+    if (q.go) {
+      var run2 = release(q.id);
+      if (run2) run2();
+      return;
+    }
+    if (q.abort) {
+      if (running[q.id]) running[q.id].abort();
+      return;
+    }
+    request(ws, q);
+  }
+  st.first = new Promise(function(done) {
+    var blocked = false, misses = 0;
+    function onCsp(ev) {
+      if (String(ev.blockedURI || "").indexOf("127.0.0.1") < 0 || st.ever) return;
+      blocked = true;
+      st.stopped = true;
+      st.connecting = false;
+      done(CSP);
+    }
+    try {
+      document.addEventListener("securitypolicyviolation", onCsp);
+    } catch (e) {
+    }
+    var CSP = "CSP_BLOCKED: this site's content security policy blocks the page from connecting to 127.0.0.1, so the tab bridge can't attach here. Use iframer auth, or run recipes in the tab (iframer recipe <host> --in-page).";
+    function connect() {
+      if (st.stopped) return;
+      var ws;
+      try {
+        ws = new WebSocket("ws://127.0.0.1:" + c.port + "/relay?s=" + encodeURIComponent(c.site) + "&n=" + encodeURIComponent(c.name) + (c.ro ? "&ro=1" : "") + "&v=" + c.v + "&k=" + c.k);
+      } catch (e) {
+        st.connecting = false;
+        return done(blocked ? CSP : "NO_BRIDGE: the browser refused the connection to 127.0.0.1 (" + (e && e.message || e) + ").");
+      }
+      st.ws = ws;
+      ws.onopen = function() {
+        st.open = st.ever = true;
+        st.connecting = false;
+        misses = 0;
+        try {
+          ws.send(JSON.stringify({ hello: location.href, v: c.v }));
+        } catch (e) {
+        }
+        done("ATTACHED");
+      };
+      ws.onclose = function() {
+        st.open = false;
+        Object.keys(held).forEach(release);
+        Object.keys(running).forEach(function(k) {
+          try {
+            running[k].abort();
+          } catch (e) {
+          }
+        });
+        if (st.stopped) return;
+        if (st.ever) {
+          if (++misses <= 400) setTimeout(connect, 3e3);
+          return;
+        }
+        st.connecting = false;
+        setTimeout(function() {
+          done(blocked ? CSP : "NO_BRIDGE: this page could not connect to the tab bridge on 127.0.0.1:" + c.port + '. Run `iframer bridge attach` again and use the fresh line it prints. If `iframer bridge status` says it is running, the browser is blocking local connections (Chrome 147+: allow "local network access" for this site).');
+        }, 150);
+      };
+      ws.onmessage = function(ev) {
+        var q;
+        try {
+          q = JSON.parse(ev.data);
+        } catch (e) {
+          return;
+        }
+        if (q && q.id) handle(ws, q);
+      };
+    }
+    connect();
+    setTimeout(function() {
+      done(blocked ? CSP : "WAITING: no answer from 127.0.0.1:" + c.port + " yet. If the browser is asking to allow local network access for this site, allow it, then check `iframer bridge status`.");
+    }, 4e3);
+  });
+  return st.first;
+}
+function relaySource(cfg) {
+  const c = { v: cfg.version, port: cfg.port, o: cfg.origin, site: cfg.site, name: cfg.name, k: cfg.key };
+  if (cfg.readOnly) c.ro = 1;
+  return `(${tabRelay.toString().replace(/\n\s+/g, "\n")})(${JSON.stringify(c)})`;
+}
+var init_relay = __esm({
+  "src/lib/tabbridge/relay.ts"() {
+    "use strict";
+  }
+});
+
+// src/lib/tabbridge/index.ts
+var tabbridge_exports = {};
+__export(tabbridge_exports, {
+  BRIDGE_TARGETS: () => BRIDGE_TARGETS,
+  BRIDGE_VERSION: () => BRIDGE_VERSION,
+  attach: () => attach,
+  clientModuleSource: () => clientModuleSource,
+  covers: () => covers,
+  ping: () => ping,
+  readState: () => readState,
+  relaySource: () => relaySource,
+  siteFor: () => siteFor,
+  start: () => start,
+  statusText: () => statusText,
+  stop: () => stop,
+  tabBridgeClient: () => tabBridgeClient,
+  validName: () => validName,
+  validSite: () => validSite,
+  writeClientModule: () => writeClientModule
+});
+async function ping(st = readState()) {
+  if (!st) return null;
+  try {
+    const r = await fetch(`http://127.0.0.1:${st.port}/status`, { headers: { Authorization: `Bearer ${st.token}` }, signal: AbortSignal.timeout(3e3) });
+    return r.ok ? await r.json() : null;
+  } catch {
+    return null;
+  }
+}
+function packageRoot() {
+  let d = import_path18.default.dirname((0, import_url2.fileURLToPath)(importMetaUrl));
+  for (let i = 0; i < 6; i++) {
+    try {
+      if (JSON.parse(import_fs17.default.readFileSync(import_path18.default.join(d, "package.json"), "utf8")).name === "iframer-toolkit") return d;
+    } catch {
+    }
+    d = import_path18.default.dirname(d);
+  }
+  return import_path18.default.resolve(import_path18.default.dirname((0, import_url2.fileURLToPath)(importMetaUrl)), "..");
+}
+function serverCommand() {
+  const root = packageRoot();
+  const cjs = import_path18.default.join(root, "dist", "bridge-server.cjs");
+  const ts = import_path18.default.join(root, "src", "lib", "tabbridge", "server-main.ts");
+  const bun = !!process.versions.bun;
+  if (bun && import_fs17.default.existsSync(ts) && !/[\\/]dist[\\/]/.test((0, import_url2.fileURLToPath)(importMetaUrl))) return { cmd: process.execPath, args: ["run", ts] };
+  if (import_fs17.default.existsSync(cjs)) return { cmd: process.execPath, args: [cjs] };
+  if (import_fs17.default.existsSync(ts)) return bun ? { cmd: process.execPath, args: ["run", ts] } : { cmd: process.execPath, args: ["--import", "tsx", ts] };
+  throw new Error("the tab bridge daemon is missing from this install (dist/bridge-server.cjs): reinstall iframer-toolkit");
+}
+async function stopPid(st) {
+  try {
+    await fetch(`http://127.0.0.1:${st.port}/shutdown`, { method: "POST", headers: { Authorization: `Bearer ${st.token}` }, signal: AbortSignal.timeout(3e3) });
+  } catch {
+  }
+  for (let i = 0; i < 20 && await ping(st); i++) await sleep6(150);
+  if (await ping(st)) {
+    try {
+      process.kill(st.pid, "SIGTERM");
+    } catch {
+    }
+  }
+  for (let i = 0; i < 20 && await ping(st); i++) await sleep6(150);
+  clearState(st.pid);
+}
+async function start() {
+  const now = readState();
+  if (now && await ping(now)) {
+    if (now.v === BRIDGE_VERSION) return now;
+    await stopPid(now);
+  }
+  const { cmd, args: args2 } = serverCommand();
+  const child = (0, import_child_process6.spawn)(cmd, args2, { detached: true, stdio: "ignore", windowsHide: true, env: { ...process.env, IFRAMER_DATA_DIR: getDataDir() } });
+  child.on("error", () => {
+  });
+  child.unref();
+  for (let i = 0; i < 60; i++) {
+    await sleep6(150);
+    const st = readState();
+    if (st && st.v === BRIDGE_VERSION && await ping(st)) return st;
+  }
+  throw new Error(`the tab bridge did not start on 127.0.0.1:${bridgePort()} (port in use? set IFRAMER_BRIDGE_PORT). Scripts still work the old way`);
+}
+async function stop() {
+  const st = readState();
+  if (!st || !await ping(st)) {
+    if (st) clearState(st.pid);
+    return false;
+  }
+  await stopPid(st);
+  return true;
+}
+async function attach(o) {
+  const given = o.host.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  let origin, host;
+  try {
+    const u = new URL(`${/^(127\.0\.0\.1|localhost)(:|$)/.test(given) ? "http" : "https"}://${given}`);
+    origin = u.origin;
+    host = u.host;
+  } catch {
+    throw new Error(`not a host: ${o.host}. Give the host of the logged-in tab, e.g. iframer bridge attach www.example.com`);
+  }
+  const site = o.site ? siteFor(o.site) : siteFor(host);
+  const name = o.name || "default";
+  if (!validSite(site)) throw new Error(`not a site: ${site} (one label, or a suffix anyone can register under). Give the host of the logged-in tab, e.g. iframer bridge attach www.example.com`);
+  if (!validName(name)) throw new Error(`--name takes letters, digits, dot, dash and underscore: ${name}`);
+  if (!covers(site, origin)) throw new Error(`--site ${site} does not cover ${host}: it must be ${host} or a parent domain of it`);
+  const st = await start();
+  const expression = relaySource({ version: BRIDGE_VERSION, port: st.port, origin, site, name, readOnly: !!o.readOnly, key: tabKey(masterKey(), origin, site, name, !!o.readOnly) });
+  const target = o.target || "t3";
+  const scope = `${site}${site === host ? "" : " and its subdomains"}${name === "default" ? "" : `, tab name "${name}"`}${o.readOnly ? ", read-only" : ""}`;
+  const steps = target === "t3" ? [
+    `1. A T3 Code tab on ${host}, logged in (preview_open ${origin}/ if this thread has none; reuse the same tabId).`,
+    `2. preview_evaluate in that tab, with the expression below. It answers ATTACHED (or ALREADY_ATTACHED).`
+  ] : target === "playwright-mcp" ? [
+    `1. A Playwright MCP tab on ${host}, logged in (browser_navigate ${origin}/).`,
+    `2. browser_evaluate with function: () => <the expression below>. It answers ATTACHED (or ALREADY_ATTACHED).`
+  ] : [
+    `1. A browser tab on ${host}, logged in.`,
+    `2. Evaluate the expression below in that page (any tool that runs JS in the page, or the DevTools console). It answers ATTACHED (or ALREADY_ATTACHED).`
+  ];
+  const text = [
+    `Tab bridge for ${scope}. Node scripts (client.mjs, recipes, any script) then send their requests through that tab: the tab does the fetch with its own login. The browser's cookies are never exported or saved.`,
+    ``,
+    ...steps,
+    `3. Check: iframer bridge status   ->   ${site} listed under "attached".`,
+    ``,
+    `Answers:`,
+    `- WRONG_TAB: the tab is on another host than ${host}. The expression only works on ${origin}: open that, or run attach with the tab's own host.`,
+    `- CSP_BLOCKED: this site forbids the connection. The bridge can't be used here: use iframer auth ${host}, or iframer recipe ${host} --in-page.`,
+    `- NO_BRIDGE or WAITING: run this command again and use the fresh expression. Chrome 147+ may ask to allow local network access for the site: allow it.`,
+    `- The tab shows a login page: the user logs in there, then evaluate the expression again.`,
+    ``,
+    `Rules:`,
+    `- Leave the tab open. A page reload, navigation to another page load or a closed tab drops it: evaluate the same expression again (it stays valid).`,
+    `- A daemon restart does not drop it: the tab reconnects by itself (a background tab can take a minute).`,
+    `- Scripts print "stopped: tab bridge: ..." with the next step when the tab can't answer. A write is never sent twice: when an error says it may have reached the site, check the site before running it again.`,
+    `- A script decides once per run: one that started on its saved session stays on it. Attach first, then start the script.`,
+    `- Redirects are never followed. A script sees "session expired, or the page moved" (HTTP 302 with the 1-file client): usually the tab is logged out.`,
+    `- Stop using the tab: iframer bridge stop (scripts go back to the saved session).`,
+    ``,
+    `Expression:`,
+    expression
+  ].join("\n");
+  return { site, name, expression, text };
+}
+async function statusText() {
+  const st = readState();
+  const s = await ping(st);
+  if (!s) return "tab bridge not running (scripts use their saved session). Start it by attaching a tab: iframer bridge attach <host>";
+  const now = Date.now();
+  const pools = [...new Set(s.tabs.map((x) => `${x.site}
+${x.name}`))].map((key) => {
+    const [site, name] = key.split("\n");
+    const tabs = s.tabs.filter((x) => x.site === site && x.name === name);
+    const last = Math.max(...tabs.map((x) => x.since));
+    const stuck = tabs.filter((x) => x.stalled).length;
+    const bits = [
+      tabs.length > 1 ? `${tabs.length} tabs, newest attached ${Math.round((now - last) / 6e4)} min ago` : `attached ${Math.round((now - last) / 6e4)} min ago`,
+      ...name === "default" ? [] : [`name ${name}`],
+      ...tabs.every((x) => x.readOnly) ? ["read-only"] : [],
+      ...stuck ? [stuck === tabs.length ? "NOT ANSWERING: evaluate the attach expression in a fresh tab" : `${stuck} not answering`] : []
+    ];
+    return `${site} (${bits.join("; ")})`;
+  });
+  const gone = s.detached.map((x) => `${x.site}${x.name === "default" ? "" : ` [${x.name}]`} (detached ${Math.round((now - x.at) / 6e4)} min ago: page reloaded, navigated or closed. Attach again)`);
+  return [
+    `tab bridge running (pid ${s.pid}, 127.0.0.1:${st.port})${s.v === BRIDGE_VERSION ? "" : " (older version: `iframer bridge attach <host>` replaces it)"}`,
+    `attached: ${pools.join(", ") || "none"}`,
+    ...gone.length ? [`detached: ${gone.join(", ")}`] : [],
+    ...s.oldRelayMs !== void 0 && s.oldRelayMs < 12e4 ? ["a tab is still running the snippet of another iframer version (it tried to attach in the last 2 min and was refused): evaluate the fresh expression from `iframer bridge attach <host>` in it"] : []
+  ].join("\n");
+}
+function writeClientModule(file = import_path18.default.join(getDataDir(), "bridge", "tab-bridge.mjs")) {
+  import_fs17.default.mkdirSync(import_path18.default.dirname(file), { recursive: true });
+  import_fs17.default.writeFileSync(file, clientModuleSource(BRIDGE_VERSION));
+  return file;
+}
+var import_child_process6, import_fs17, import_path18, import_url2, sleep6, BRIDGE_TARGETS;
+var init_tabbridge = __esm({
+  "src/lib/tabbridge/index.ts"() {
+    "use strict";
+    import_child_process6 = require("child_process");
+    import_fs17 = __toESM(require("fs"));
+    import_path18 = __toESM(require("path"));
+    import_url2 = require("url");
+    init_paths();
+    init_client();
+    init_relay();
+    init_state();
+    init_state();
+    init_relay();
+    init_client();
+    sleep6 = (ms) => new Promise((r) => setTimeout(r, ms));
+    BRIDGE_TARGETS = ["t3", "playwright-mcp", "any"];
+  }
+});
+
 // bin/cli.js
-var fs16 = require("fs");
+var fs18 = require("fs");
 var os6 = require("os");
-var path17 = require("path");
+var path19 = require("path");
 var { execSync: execSync3 } = require("child_process");
 var readline = require("readline");
 var HOME_DIR = os6.homedir();
-var CONFIG_DIR = process.env.IFRAMER_DATA_DIR || path17.join(HOME_DIR, ".iframer");
-var CLAUDE_CONFIG_PATH = path17.join(HOME_DIR, ".claude.json");
-var CODEX_CONFIG_PATH = path17.join(HOME_DIR, ".codex", "config.toml");
+var CONFIG_DIR = process.env.IFRAMER_DATA_DIR || path19.join(HOME_DIR, ".iframer");
+var CLAUDE_CONFIG_PATH = path19.join(HOME_DIR, ".claude.json");
+var CODEX_CONFIG_PATH = path19.join(HOME_DIR, ".codex", "config.toml");
 var LOCAL_USER_ID = "iframer-local";
 function resolveLocalToken() {
   if (process.env.IFRAMER_SECRET) return process.env.IFRAMER_SECRET;
   const candidates = [
-    path17.join(CONFIG_DIR, "secret"),
-    path17.join(process.env.XDG_RUNTIME_DIR || os6.tmpdir(), "iframer-secret")
+    path19.join(CONFIG_DIR, "secret"),
+    path19.join(process.env.XDG_RUNTIME_DIR || os6.tmpdir(), "iframer-secret")
   ];
   for (const file of candidates) {
     try {
-      const existing = fs16.readFileSync(file, "utf8").trim();
+      const existing = fs18.readFileSync(file, "utf8").trim();
       if (existing) return existing;
     } catch {
     }
   }
   for (const file of candidates) {
     try {
-      fs16.mkdirSync(path17.dirname(file), { recursive: true });
+      fs18.mkdirSync(path19.dirname(file), { recursive: true });
       const secret = require("crypto").randomBytes(32).toString("hex");
-      fs16.writeFileSync(file, secret, { mode: 384 });
+      fs18.writeFileSync(file, secret, { mode: 384 });
       return secret;
     } catch {
     }
@@ -15408,21 +16512,21 @@ function promptHidden(question) {
   });
 }
 function resolveMcpRuntime() {
-  const mcpServerTS = path17.join(__dirname, "..", "src", "mcp", "server.ts");
-  const mcpServerCJS = path17.join(__dirname, "mcp-server.cjs");
+  const mcpServerTS = path19.join(__dirname, "..", "src", "mcp", "server.ts");
+  const mcpServerCJS = path19.join(__dirname, "mcp-server.cjs");
   let bunPath;
   try {
     bunPath = execSync3("which bun", { encoding: "utf8" }).trim();
   } catch {
   }
-  if (bunPath && fs16.existsSync(mcpServerTS)) {
+  if (bunPath && fs18.existsSync(mcpServerTS)) {
     return {
       command: bunPath,
       args: ["run", mcpServerTS],
       message: "  Using bun to run MCP server from source (no build needed)"
     };
   }
-  if (fs16.existsSync(mcpServerCJS)) {
+  if (fs18.existsSync(mcpServerCJS)) {
     return {
       command: "node",
       args: [mcpServerCJS],
@@ -15437,8 +16541,8 @@ function resolveIframerSecret() {
   let secret = process.env.IFRAMER_SECRET;
   if (secret) return secret;
   try {
-    const envPath = path17.join(__dirname, "..", ".env");
-    const envContent = fs16.readFileSync(envPath, "utf8");
+    const envPath = path19.join(__dirname, "..", ".env");
+    const envContent = fs18.readFileSync(envPath, "utf8");
     const match = envContent.match(/^IFRAMER_SECRET=(.+)$/m);
     if (match) secret = match[1].trim();
   } catch {
@@ -15447,12 +16551,12 @@ function resolveIframerSecret() {
 }
 function installSkill() {
   const candidates = [
-    path17.join(__dirname, "..", "skills", "iframer.md"),
-    path17.join(__dirname, "skills", "iframer.md")
+    path19.join(__dirname, "..", "skills", "iframer.md"),
+    path19.join(__dirname, "skills", "iframer.md")
   ];
   let source = null;
   for (const c of candidates) {
-    if (fs16.existsSync(c)) {
+    if (fs18.existsSync(c)) {
       source = c;
       break;
     }
@@ -15460,11 +16564,11 @@ function installSkill() {
   if (!source) return false;
   try {
     for (const dir of skillDirs()) {
-      fs16.mkdirSync(dir, { recursive: true });
-      fs16.copyFileSync(source, path17.join(dir, "SKILL.md"));
+      fs18.mkdirSync(dir, { recursive: true });
+      fs18.copyFileSync(source, path19.join(dir, "SKILL.md"));
     }
-    const legacy = path17.join(HOME_DIR, ".claude", "commands", "iframer.md");
-    if (fs16.existsSync(legacy)) fs16.unlinkSync(legacy);
+    const legacy = path19.join(HOME_DIR, ".claude", "commands", "iframer.md");
+    if (fs18.existsSync(legacy)) fs18.unlinkSync(legacy);
     return true;
   } catch (err) {
     console.error(`  Warning: could not install skill: ${err.message}`);
@@ -15472,25 +16576,25 @@ function installSkill() {
   }
 }
 function skillDirs() {
-  const dirs = [path17.join(HOME_DIR, ".claude", "skills", "iframer")];
-  if (fs16.existsSync(path17.join(HOME_DIR, ".codex"))) dirs.push(path17.join(HOME_DIR, ".codex", "skills", "iframer"));
+  const dirs = [path19.join(HOME_DIR, ".claude", "skills", "iframer")];
+  if (fs18.existsSync(path19.join(HOME_DIR, ".codex"))) dirs.push(path19.join(HOME_DIR, ".codex", "skills", "iframer"));
   return dirs;
 }
 function removeSkill() {
   let removed = false;
   for (const dir of skillDirs()) {
     try {
-      if (fs16.existsSync(path17.join(dir, "SKILL.md"))) {
-        fs16.rmSync(dir, { recursive: true, force: true });
+      if (fs18.existsSync(path19.join(dir, "SKILL.md"))) {
+        fs18.rmSync(dir, { recursive: true, force: true });
         removed = true;
       }
     } catch {
     }
   }
-  const legacy = path17.join(HOME_DIR, ".claude", "commands", "iframer.md");
+  const legacy = path19.join(HOME_DIR, ".claude", "commands", "iframer.md");
   try {
-    if (fs16.existsSync(legacy)) {
-      fs16.unlinkSync(legacy);
+    if (fs18.existsSync(legacy)) {
+      fs18.unlinkSync(legacy);
       removed = true;
     }
   } catch {
@@ -15499,8 +16603,8 @@ function removeSkill() {
 }
 function writeMachineSecret(secret) {
   try {
-    fs16.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs16.writeFileSync(path17.join(CONFIG_DIR, "secret"), secret, { mode: 384 });
+    fs18.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs18.writeFileSync(path19.join(CONFIG_DIR, "secret"), secret, { mode: 384 });
     return true;
   } catch (err) {
     console.error(`  Warning: could not write ~/.iframer/secret: ${err.message}`);
@@ -15509,7 +16613,7 @@ function writeMachineSecret(secret) {
 }
 function loadClaudeConfig() {
   try {
-    return JSON.parse(fs16.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    return JSON.parse(fs18.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
   } catch {
     return {};
   }
@@ -15518,13 +16622,13 @@ function installClaudeMcp(mcpName, mcpEntry) {
   const config = loadClaudeConfig();
   if (!config.mcpServers) config.mcpServers = {};
   config.mcpServers[mcpName] = mcpEntry;
-  fs16.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
+  fs18.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
   return CLAUDE_CONFIG_PATH;
 }
 function removeClaudeMcp(mcpName) {
   let config;
   try {
-    config = JSON.parse(fs16.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    config = JSON.parse(fs18.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
   } catch {
     return { removed: false, path: CLAUDE_CONFIG_PATH };
   }
@@ -15532,7 +16636,7 @@ function removeClaudeMcp(mcpName) {
     return { removed: false, path: CLAUDE_CONFIG_PATH };
   }
   delete config.mcpServers[mcpName];
-  fs16.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
+  fs18.writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2));
   return { removed: true, path: CLAUDE_CONFIG_PATH };
 }
 function escapeTomlString(value) {
@@ -15542,23 +16646,23 @@ function findCodexMcpSection(content, mcpName) {
   const lines = content.split("\n");
   const mainHeader = `[mcp_servers.${mcpName}]`;
   const nestedPrefix = `[mcp_servers.${mcpName}.`;
-  let start = -1;
+  let start2 = -1;
   for (let i = 0; i < lines.length; i += 1) {
     if (lines[i].trim() === mainHeader) {
-      start = i;
+      start2 = i;
       break;
     }
   }
-  if (start === -1) return null;
+  if (start2 === -1) return null;
   let end = lines.length;
-  for (let i = start + 1; i < lines.length; i += 1) {
+  for (let i = start2 + 1; i < lines.length; i += 1) {
     const line = lines[i].trim();
     if (line.startsWith("[") && line.endsWith("]") && !line.startsWith(nestedPrefix)) {
       end = i;
       break;
     }
   }
-  let removeStart = start;
+  let removeStart = start2;
   if (removeStart > 0 && lines[removeStart - 1].trim() === "") removeStart -= 1;
   let removeEnd = end;
   if (removeEnd < lines.length && lines[removeEnd].trim() === "") removeEnd += 1;
@@ -15579,10 +16683,10 @@ function renderCodexMcpBlock(mcpName, mcpEntry) {
   return lines.join("\n");
 }
 function installCodexMcp(mcpName, mcpEntry) {
-  fs16.mkdirSync(path17.dirname(CODEX_CONFIG_PATH), { recursive: true });
+  fs18.mkdirSync(path19.dirname(CODEX_CONFIG_PATH), { recursive: true });
   let content = "";
   try {
-    content = fs16.readFileSync(CODEX_CONFIG_PATH, "utf8");
+    content = fs18.readFileSync(CODEX_CONFIG_PATH, "utf8");
   } catch {
   }
   const existing = findCodexMcpSection(content, mcpName);
@@ -15591,7 +16695,7 @@ function installCodexMcp(mcpName, mcpEntry) {
   }
   const trimmed = content.trimEnd();
   const block = renderCodexMcpBlock(mcpName, mcpEntry);
-  fs16.writeFileSync(CODEX_CONFIG_PATH, trimmed ? `${trimmed}
+  fs18.writeFileSync(CODEX_CONFIG_PATH, trimmed ? `${trimmed}
 
 ${block}
 ` : `${block}
@@ -15601,7 +16705,7 @@ ${block}
 function removeCodexMcp(mcpName) {
   let content;
   try {
-    content = fs16.readFileSync(CODEX_CONFIG_PATH, "utf8");
+    content = fs18.readFileSync(CODEX_CONFIG_PATH, "utf8");
   } catch {
     return { removed: false, path: CODEX_CONFIG_PATH };
   }
@@ -15610,7 +16714,7 @@ function removeCodexMcp(mcpName) {
     return { removed: false, path: CODEX_CONFIG_PATH };
   }
   const next = [...existing.lines.slice(0, existing.start), ...existing.lines.slice(existing.end)].join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
-  fs16.writeFileSync(CODEX_CONFIG_PATH, next ? `${next}
+  fs18.writeFileSync(CODEX_CONFIG_PATH, next ? `${next}
 ` : "");
   return { removed: true, path: CODEX_CONFIG_PATH };
 }
@@ -15628,7 +16732,7 @@ async function executeViaWarmServer(steps, options) {
     if (info && isPidAlive2(info.pid)) {
       let ownVersion = null;
       try {
-        ownVersion = JSON.parse(fs16.readFileSync(path17.join(__dirname, "..", "package.json"), "utf8")).version;
+        ownVersion = JSON.parse(fs18.readFileSync(path19.join(__dirname, "..", "package.json"), "utf8")).version;
       } catch {
       }
       if (ownVersion && info.version !== ownVersion) {
@@ -15670,9 +16774,9 @@ async function getLocalIframer() {
   if (_iframer) return _iframer;
   try {
     const { Iframer: Iframer2 } = await Promise.resolve().then(() => (init_iframer(), iframer_exports));
-    const publicDir = path17.join(os6.tmpdir(), "iframer-screenshots");
-    const screenshotDir = path17.join(publicDir, "screenshots");
-    fs16.mkdirSync(screenshotDir, { recursive: true });
+    const publicDir = path19.join(os6.tmpdir(), "iframer-screenshots");
+    const screenshotDir = path19.join(publicDir, "screenshots");
+    fs18.mkdirSync(screenshotDir, { recursive: true });
     _iframer = new Iframer2({
       screenshotDir,
       publicUrl: `file://${publicDir}`
@@ -15766,7 +16870,7 @@ async function installChrome() {
 }
 function isMcpInstalled(mcpName) {
   try {
-    const config = JSON.parse(fs16.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
+    const config = JSON.parse(fs18.readFileSync(CLAUDE_CONFIG_PATH, "utf8"));
     return !!(config.mcpServers && config.mcpServers[mcpName]);
   } catch {
     return false;
@@ -15774,7 +16878,7 @@ function isMcpInstalled(mcpName) {
 }
 var EXTENSION_ID = "mjfdkiicioigljhenkgaldhihllfdpll";
 function extensionDir() {
-  return path17.join(__dirname, "..", "extension");
+  return path19.join(__dirname, "..", "extension");
 }
 function semverNewer(a, b) {
   const pa = String(a).split(".").map((n) => parseInt(n, 10) || 0);
@@ -15788,7 +16892,7 @@ function semverNewer(a, b) {
 async function reloadAndRestartServer(reloadExtension) {
   let info = null;
   try {
-    info = JSON.parse(fs16.readFileSync(path17.join(CONFIG_DIR, "server.json"), "utf8"));
+    info = JSON.parse(fs18.readFileSync(path19.join(CONFIG_DIR, "server.json"), "utf8"));
   } catch {
   }
   if (!info || !info.port) {
@@ -15817,34 +16921,34 @@ async function reloadAndRestartServer(reloadExtension) {
 var NM_HOST_NAME = "com.iframer.token";
 function nativeMessagingBrowserDirs() {
   if (process.platform === "darwin") {
-    const as = path17.join(HOME_DIR, "Library", "Application Support");
+    const as = path19.join(HOME_DIR, "Library", "Application Support");
     return [
-      { browser: "Chrome", dir: path17.join(as, "Google", "Chrome"), always: true },
-      { browser: "Chrome Beta", dir: path17.join(as, "Google", "Chrome Beta") },
-      { browser: "Chrome Canary", dir: path17.join(as, "Google", "Chrome Canary") },
-      { browser: "Chromium", dir: path17.join(as, "Chromium") },
-      { browser: "Brave", dir: path17.join(as, "BraveSoftware", "Brave-Browser") },
-      { browser: "Edge", dir: path17.join(as, "Microsoft Edge") },
-      { browser: "Vivaldi", dir: path17.join(as, "Vivaldi") },
-      { browser: "Arc", dir: path17.join(as, "Arc", "User Data") }
+      { browser: "Chrome", dir: path19.join(as, "Google", "Chrome"), always: true },
+      { browser: "Chrome Beta", dir: path19.join(as, "Google", "Chrome Beta") },
+      { browser: "Chrome Canary", dir: path19.join(as, "Google", "Chrome Canary") },
+      { browser: "Chromium", dir: path19.join(as, "Chromium") },
+      { browser: "Brave", dir: path19.join(as, "BraveSoftware", "Brave-Browser") },
+      { browser: "Edge", dir: path19.join(as, "Microsoft Edge") },
+      { browser: "Vivaldi", dir: path19.join(as, "Vivaldi") },
+      { browser: "Arc", dir: path19.join(as, "Arc", "User Data") }
     ];
   }
-  const cfg = process.env.XDG_CONFIG_HOME || path17.join(HOME_DIR, ".config");
+  const cfg = process.env.XDG_CONFIG_HOME || path19.join(HOME_DIR, ".config");
   return [
-    { browser: "Chrome", dir: path17.join(cfg, "google-chrome"), always: true },
-    { browser: "Chrome Beta", dir: path17.join(cfg, "google-chrome-beta") },
-    { browser: "Chromium", dir: path17.join(cfg, "chromium") },
-    { browser: "Brave", dir: path17.join(cfg, "BraveSoftware", "Brave-Browser") },
-    { browser: "Edge", dir: path17.join(cfg, "microsoft-edge") },
-    { browser: "Vivaldi", dir: path17.join(cfg, "vivaldi") }
+    { browser: "Chrome", dir: path19.join(cfg, "google-chrome"), always: true },
+    { browser: "Chrome Beta", dir: path19.join(cfg, "google-chrome-beta") },
+    { browser: "Chromium", dir: path19.join(cfg, "chromium") },
+    { browser: "Brave", dir: path19.join(cfg, "BraveSoftware", "Brave-Browser") },
+    { browser: "Edge", dir: path19.join(cfg, "microsoft-edge") },
+    { browser: "Vivaldi", dir: path19.join(cfg, "vivaldi") }
   ];
 }
 function extensionMarkerPath() {
-  return path17.join(CONFIG_DIR, "extension.json");
+  return path19.join(CONFIG_DIR, "extension.json");
 }
 function readExtensionMarker() {
   try {
-    return JSON.parse(fs16.readFileSync(extensionMarkerPath(), "utf8"));
+    return JSON.parse(fs18.readFileSync(extensionMarkerPath(), "utf8"));
   } catch {
     return null;
   }
@@ -15853,12 +16957,12 @@ function extensionInstalled() {
   return !!readExtensionMarker();
 }
 function writeExtensionMarker(flavor, browsers) {
-  fs16.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs16.writeFileSync(extensionMarkerPath(), JSON.stringify({ installed: true, flavor, browsers, installedAt: (/* @__PURE__ */ new Date()).toISOString() }, null, 2));
+  fs18.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs18.writeFileSync(extensionMarkerPath(), JSON.stringify({ installed: true, flavor, browsers, installedAt: (/* @__PURE__ */ new Date()).toISOString() }, null, 2));
 }
 function clearExtensionMarker() {
   try {
-    fs16.unlinkSync(extensionMarkerPath());
+    fs18.unlinkSync(extensionMarkerPath());
   } catch {
   }
 }
@@ -15870,27 +16974,27 @@ var EXTENSION_FLAVORS = {
 function installExtensionHost() {
   const setup = require_native_host_setup();
   resolveLocalToken();
-  const srcHost = path17.join(__dirname, "..", "extension", "native-host.cjs");
-  if (!fs16.existsSync(srcHost)) {
+  const srcHost = path19.join(__dirname, "..", "extension", "native-host.cjs");
+  if (!fs18.existsSync(srcHost)) {
     console.error(`  Host script not found: ${srcHost}`);
     process.exit(1);
   }
-  fs16.mkdirSync(CONFIG_DIR, { recursive: true });
-  const hostScript = path17.join(CONFIG_DIR, "extension-token-host.cjs");
-  fs16.copyFileSync(srcHost, hostScript);
+  fs18.mkdirSync(CONFIG_DIR, { recursive: true });
+  const hostScript = path19.join(CONFIG_DIR, "extension-token-host.cjs");
+  fs18.copyFileSync(srcHost, hostScript);
   const dataDir = process.env.IFRAMER_DATA_DIR || void 0;
   const isWindows = process.platform === "win32";
-  const wrapper = path17.join(CONFIG_DIR, isWindows ? "extension-token-host.bat" : "extension-token-host.sh");
+  const wrapper = path19.join(CONFIG_DIR, isWindows ? "extension-token-host.bat" : "extension-token-host.sh");
   if (isWindows) {
-    fs16.writeFileSync(wrapper, setup.windowsWrapper({ execPath: process.execPath, homeDir: HOME_DIR, dataDir }));
+    fs18.writeFileSync(wrapper, setup.windowsWrapper({ execPath: process.execPath, homeDir: HOME_DIR, dataDir }));
   } else {
-    fs16.writeFileSync(wrapper, setup.posixWrapper({ execPath: process.execPath, hostScript, dataDir }), { mode: 493 });
+    fs18.writeFileSync(wrapper, setup.posixWrapper({ execPath: process.execPath, hostScript, dataDir }), { mode: 493 });
   }
   const manifest = setup.hostManifest(wrapper, EXTENSION_ID);
   const installed = [];
   if (isWindows) {
-    const manifestPath = path17.join(CONFIG_DIR, `${NM_HOST_NAME}.json`);
-    fs16.writeFileSync(manifestPath, manifest);
+    const manifestPath = path19.join(CONFIG_DIR, `${NM_HOST_NAME}.json`);
+    fs18.writeFileSync(manifestPath, manifest);
     for (const { browser, root } of setup.WINDOWS_BROWSERS) {
       try {
         require("child_process").execFileSync(
@@ -15907,11 +17011,11 @@ function installExtensionHost() {
     return { installed, wrapper };
   }
   for (const { browser, dir, always } of nativeMessagingBrowserDirs()) {
-    if (!always && !fs16.existsSync(dir)) continue;
+    if (!always && !fs18.existsSync(dir)) continue;
     try {
-      const nmDir = path17.join(dir, "NativeMessagingHosts");
-      fs16.mkdirSync(nmDir, { recursive: true });
-      fs16.writeFileSync(path17.join(nmDir, `${NM_HOST_NAME}.json`), manifest);
+      const nmDir = path19.join(dir, "NativeMessagingHosts");
+      fs18.mkdirSync(nmDir, { recursive: true });
+      fs18.writeFileSync(path19.join(nmDir, `${NM_HOST_NAME}.json`), manifest);
       installed.push(browser);
     } catch (e) {
       console.error(`  ${browser}: failed (${e.message})`);
@@ -15933,10 +17037,10 @@ function removeExtensionHost() {
     }
   } else {
     for (const { browser, dir } of nativeMessagingBrowserDirs()) {
-      const file = path17.join(dir, "NativeMessagingHosts", `${NM_HOST_NAME}.json`);
+      const file = path19.join(dir, "NativeMessagingHosts", `${NM_HOST_NAME}.json`);
       try {
-        if (fs16.existsSync(file)) {
-          fs16.unlinkSync(file);
+        if (fs18.existsSync(file)) {
+          fs18.unlinkSync(file);
           removed.push(browser);
         }
       } catch {
@@ -15945,19 +17049,19 @@ function removeExtensionHost() {
   }
   for (const f of ["extension-token-host.cjs", "extension-token-host.sh", "extension-token-host.bat", `${NM_HOST_NAME}.json`]) {
     try {
-      fs16.unlinkSync(path17.join(CONFIG_DIR, f));
+      fs18.unlinkSync(path19.join(CONFIG_DIR, f));
     } catch {
     }
   }
   return removed;
 }
 async function removeChrome() {
-  const chromeDir = path17.join(CONFIG_DIR, "chrome");
-  if (!fs16.existsSync(chromeDir)) {
+  const chromeDir = path19.join(CONFIG_DIR, "chrome");
+  if (!fs18.existsSync(chromeDir)) {
     console.log("  Chrome for Testing not found, nothing to remove.");
     return;
   }
-  fs16.rmSync(chromeDir, { recursive: true, force: true });
+  fs18.rmSync(chromeDir, { recursive: true, force: true });
   console.log(`  Removed ${chromeDir}`);
 }
 async function main() {
@@ -15967,7 +17071,7 @@ async function main() {
     case "-v":
     case "version": {
       try {
-        console.log(JSON.parse(fs16.readFileSync(path17.join(__dirname, "..", "package.json"), "utf8")).version);
+        console.log(JSON.parse(fs18.readFileSync(path19.join(__dirname, "..", "package.json"), "utf8")).version);
       } catch (e) {
         console.error(`  Could not read the version: ${e.message}`);
         process.exit(1);
@@ -15978,7 +17082,7 @@ async function main() {
     case "status": {
       let server = "not running";
       try {
-        const info = JSON.parse(fs16.readFileSync(path17.join(CONFIG_DIR, "server.json"), "utf8"));
+        const info = JSON.parse(fs18.readFileSync(path19.join(CONFIG_DIR, "server.json"), "utf8"));
         const res = await fetch(`http://127.0.0.1:${info.port}/health`, { signal: AbortSignal.timeout(1500) });
         if (res.ok) server = `http://127.0.0.1:${info.port}`;
       } catch {
@@ -16004,7 +17108,7 @@ async function main() {
       let instances = null;
       let serverUp = false;
       try {
-        const info = JSON.parse(fs16.readFileSync(path17.join(CONFIG_DIR, "server.json"), "utf8"));
+        const info = JSON.parse(fs18.readFileSync(path19.join(CONFIG_DIR, "server.json"), "utf8"));
         if (info && info.port) {
           serverUp = true;
           const res = await fetch(`http://127.0.0.1:${info.port}/instances`, {
@@ -16178,8 +17282,8 @@ async function main() {
         const parsed = JSON.parse(input);
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
         if (!Array.isArray(parsed) && parsed.options) inputOptions = parsed.options;
-      } else if (fs16.existsSync(input)) {
-        const parsed = JSON.parse(fs16.readFileSync(input, "utf-8"));
+      } else if (fs18.existsSync(input)) {
+        const parsed = JSON.parse(fs18.readFileSync(input, "utf-8"));
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
         if (!Array.isArray(parsed) && parsed.options) inputOptions = parsed.options;
       } else {
@@ -16216,10 +17320,10 @@ async function main() {
           try {
             const res = await fetch(shot, { signal: AbortSignal.timeout(1e4) });
             if (res.ok) {
-              const dir = path17.join(os6.tmpdir(), "iframer-screenshots", "screenshots");
-              fs16.mkdirSync(dir, { recursive: true });
-              const file = path17.join(dir, `state-${Date.now()}.jpg`);
-              fs16.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
+              const dir = path19.join(os6.tmpdir(), "iframer-screenshots", "screenshots");
+              fs18.mkdirSync(dir, { recursive: true });
+              const file = path19.join(dir, `state-${Date.now()}.jpg`);
+              fs18.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
               shot = `file://${file}`;
             }
           } catch {
@@ -16289,7 +17393,7 @@ Screenshot: ${shot}`);
       if (sub === "stop") {
         let stopped = false;
         try {
-          const info = JSON.parse(fs16.readFileSync(path17.join(CONFIG_DIR, "server.json"), "utf8"));
+          const info = JSON.parse(fs18.readFileSync(path19.join(CONFIG_DIR, "server.json"), "utf8"));
           if (info && info.port) {
             const res = await fetch(`http://127.0.0.1:${info.port}/interactive/stop`, {
               method: "POST",
@@ -16404,8 +17508,8 @@ Screenshot: ${shot}`);
       } else if (input.startsWith("[") || input.startsWith("{")) {
         const parsed = JSON.parse(input);
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
-      } else if (fs16.existsSync(input)) {
-        const parsed = JSON.parse(fs16.readFileSync(input, "utf-8"));
+      } else if (fs18.existsSync(input)) {
+        const parsed = JSON.parse(fs18.readFileSync(input, "utf-8"));
         steps = Array.isArray(parsed) ? parsed : parsed.steps;
       } else {
         console.error(`  Not a URL or file: ${input}`);
@@ -16418,8 +17522,8 @@ Screenshot: ${shot}`);
       const result = await iframer.execute(LOCAL_USER_ID, LOCAL_TOKEN, { steps, options });
       if (result.capturedApi && result.capturedApi.length > 0) {
         const outputDir = parseFlag(args, "--output") || `./${result.capturedApi[0].domain}`;
-        fs16.mkdirSync(outputDir, { recursive: true });
-        fs16.writeFileSync(path17.join(outputDir, "captured-api.json"), JSON.stringify(result.capturedApi, null, 2));
+        fs18.mkdirSync(outputDir, { recursive: true });
+        fs18.writeFileSync(path19.join(outputDir, "captured-api.json"), JSON.stringify(result.capturedApi, null, 2));
         console.log(`  Captured ${result.capturedApi.reduce((sum, api) => sum + api.endpoints.length, 0)} endpoints`);
         console.log(`  Saved to: ${outputDir}/captured-api.json`);
         for (const api of result.capturedApi) {
@@ -16456,7 +17560,7 @@ Screenshot: ${shot}`);
       }
       let map;
       try {
-        map = JSON.parse(fs16.readFileSync(path17.join(kit.apisDir(host), "api.json"), "utf8"));
+        map = JSON.parse(fs18.readFileSync(path19.join(kit.apisDir(host), "api.json"), "utf8"));
       } catch {
         console.error(`  No capture for ${host}. Map it first: iframer kit, then iframer ingest.`);
         process.exit(1);
@@ -16482,7 +17586,7 @@ Screenshot: ${shot}`);
         console.error("    --in-page            Also build the in-page bundle, for sites that block requests from Node");
         process.exit(1);
       }
-      const clients = () => kit.outputDirs(host).filter((d) => fs16.existsSync(path17.join(d, "client.mjs"))).map((d) => path17.join(d, "client.mjs"));
+      const clients = () => kit.outputDirs(host).filter((d) => fs18.existsSync(path19.join(d, "client.mjs"))).map((d) => path19.join(d, "client.mjs"));
       if (!name) {
         const all = kit.listRecipes(host);
         if (!all.length) {
@@ -16571,7 +17675,7 @@ Screenshot: ${shot}`);
         console.error("    --auto               One quiet line, no keychain prompt, exit 1 if nothing works (client.mjs uses this)");
         process.exit(1);
       }
-      const dir = path17.resolve(parseFlag(args, "--out") || kit.apisDir(host));
+      const dir = path19.resolve(parseFlag(args, "--out") || kit.apisDir(host));
       const auto = hasFlag(args, "--auto");
       const say = (m) => {
         if (!auto) console.log(m);
@@ -16581,7 +17685,7 @@ Screenshot: ${shot}`);
       const vals = {};
       let source = "";
       if (from) {
-        const t = fs16.readFileSync(path17.resolve(from), "utf8").trim();
+        const t = fs18.readFileSync(path19.resolve(from), "utf8").trim();
         if (/^[A-Za-z_]\w*=/.test(t) && t.split(/\r?\n/).every((l) => !l.trim() || /^\s*(#|[A-Za-z_]\w*=)/.test(l))) {
           for (const l of t.split(/\r?\n/)) {
             const m = /^\s*([A-Za-z_]\w*)=(.*)$/.exec(l);
@@ -16651,7 +17755,7 @@ Screenshot: ${shot}`);
       }
       const cur = {};
       try {
-        for (const l of fs16.readFileSync(path17.join(dir, ".env"), "utf8").split(/\r?\n/)) {
+        for (const l of fs18.readFileSync(path19.join(dir, ".env"), "utf8").split(/\r?\n/)) {
           const m = /^([A-Za-z_]\w*)=(.*)$/.exec(l);
           if (m) cur[m[1]] = m[2];
         }
@@ -16659,7 +17763,7 @@ Screenshot: ${shot}`);
       }
       const missing = wanted.filter((v) => !cur[v]);
       if (missing.length) say(`  Still missing: ${missing.join(", ")} (headers the site sends; add them to .env)`);
-      if (fs16.existsSync(path17.join(dir, "client.mjs"))) say(`  Check: node ${path17.join(dir, "client.mjs")}`);
+      if (fs18.existsSync(path19.join(dir, "client.mjs"))) say(`  Check: node ${path19.join(dir, "client.mjs")}`);
       break;
     }
     case "run": {
@@ -16670,8 +17774,8 @@ Screenshot: ${shot}`);
         process.exit(1);
       }
       const out = parseFlag(args, "--out");
-      const client = out ? path17.join(path17.resolve(out), "client.mjs") : kit.clientPath(host);
-      if (!fs16.existsSync(client)) {
+      const client = out ? path19.join(path19.resolve(out), "client.mjs") : kit.clientPath(host);
+      if (!fs18.existsSync(client)) {
         console.error(`  No client at ${client}. Map the site first: iframer kit, then iframer ingest.`);
         process.exit(1);
       }
@@ -16679,6 +17783,41 @@ Screenshot: ${shot}`);
       const rest = args.slice(1).filter((a, i, all) => a !== "--out" && all[i - 1] !== "--out");
       const r = spawnSync(process.execPath, [client, ...rest], { stdio: "inherit" });
       process.exit(r.status ?? 1);
+    }
+    case "bridge": {
+      const bridge = await Promise.resolve().then(() => (init_tabbridge(), tabbridge_exports));
+      const sub = args[0];
+      if (sub === "attach") {
+        const host = args[1] && !args[1].startsWith("--") ? args[1] : null;
+        const target = parseFlag(args, "--for") || "t3";
+        if (!host || !bridge.BRIDGE_TARGETS.includes(target)) {
+          console.error("  Usage: iframer bridge attach <host> [--for t3|playwright-mcp|any] [--site <domain>] [--name <n>] [--read-only]");
+          console.error("    Starts the bridge if needed and prints the one expression to evaluate in the logged-in tab.");
+          console.error("    --site <domain>      Cover a parent domain too (default: the host, without www.)");
+          console.error("    --name <n>           Tab name, when 2 profiles are logged in to the same site (scripts: IFRAMER_BRIDGE_TAB=<n>)");
+          console.error("    --read-only          The bridge refuses anything but GET/HEAD for this tab");
+          process.exit(1);
+        }
+        const r = await bridge.attach({ host, target, site: parseFlag(args, "--site"), name: parseFlag(args, "--name"), readOnly: hasFlag(args, "--read-only") });
+        console.log(hasFlag(args, "--print") ? r.expression : r.text);
+        break;
+      }
+      if (sub === "status") {
+        console.log(await bridge.statusText());
+        break;
+      }
+      if (sub === "stop") {
+        console.log(await bridge.stop() ? "tab bridge stopped (scripts use their saved session)" : "tab bridge not running");
+        break;
+      }
+      if (sub === "client") {
+        const out = parseFlag(args, "--out");
+        console.log(`  ${bridge.writeClientModule(out ? path19.resolve(out) : void 0)}`);
+        console.log("  import { bridgeFetch } from that file: (await bridgeFetch(url, init)) ?? <your own request with the saved session>");
+        break;
+      }
+      console.error("  Usage: iframer bridge attach <host> | status | stop | client [--out <file>]");
+      process.exit(1);
     }
     case "kit": {
       const kit = await Promise.resolve().then(() => (init_kit(), kit_exports));
@@ -16708,7 +17847,7 @@ Screenshot: ${shot}`);
         break;
       }
       const outFile = parseFlag(args, "--out");
-      const kitPath = kit.writeKit(opts, outFile ? path17.resolve(outFile) : void 0);
+      const kitPath = kit.writeKit(opts, outFile ? path19.resolve(outFile) : void 0);
       console.log(kit.kitInstructions(target, kitPath));
       break;
     }
@@ -16737,11 +17876,11 @@ Screenshot: ${shot}`);
         process.exit(1);
       }
       const fromStdin = input === "-";
-      const raw = fromStdin ? fs16.readFileSync(0, "utf8") : fs16.readFileSync(input, "utf8");
+      const raw = fromStdin ? fs18.readFileSync(0, "utf8") : fs18.readFileSync(input, "utf8");
       const removeInput = () => {
         if (fromStdin || hasFlag(args, "--keep")) return;
         try {
-          fs16.unlinkSync(input);
+          fs18.unlinkSync(input);
         } catch {
         }
       };
@@ -16769,24 +17908,24 @@ Screenshot: ${shot}`);
       ({ report, dropped } = kit.cleanCapture(report, { all: hasFlag(args, "--all") }));
       const map = kit.buildApiMap(report);
       const host = new URL(report.origin).host;
-      const outDir = path17.resolve(parseFlag(args, "--out") || kit.apisDir(host));
-      fs16.mkdirSync(outDir, { recursive: true });
+      const outDir = path19.resolve(parseFlag(args, "--out") || kit.apisDir(host));
+      fs18.mkdirSync(outDir, { recursive: true });
       const written = [];
       const write2 = (name, body) => {
-        const p = path17.join(outDir, name);
-        fs16.writeFileSync(p, body);
+        const p = path19.join(outDir, name);
+        fs18.writeFileSync(p, body);
         written.push(p);
       };
       write2("index.txt", kit.renderIndex(map));
       write2("auth.json", JSON.stringify(report.auth?.headers ?? {}, null, 2) + "\n");
       write2("api.json", JSON.stringify(map, null, 2) + "\n");
-      const hostDir = path17.resolve(kit.apisDir(host));
+      const hostDir = path19.resolve(kit.apisDir(host));
       if (outDir !== hostDir) {
-        fs16.mkdirSync(hostDir, { recursive: true });
-        for (const f of ["index.txt", "auth.json", "api.json"]) fs16.copyFileSync(path17.join(outDir, f), path17.join(hostDir, f));
+        fs18.mkdirSync(hostDir, { recursive: true });
+        for (const f of ["index.txt", "auth.json", "api.json"]) fs18.copyFileSync(path19.join(outDir, f), path19.join(hostDir, f));
         kit.addOutputDir(host, outDir);
       }
-      for (const f of kit.writeOutputs(host)) if (f.startsWith(outDir + path17.sep) && !written.includes(f)) written.push(f);
+      for (const f of kit.writeOutputs(host)) if (f.startsWith(outDir + path19.sep) && !written.includes(f)) written.push(f);
       if (!hasFlag(args, "--no-knowledge")) {
         const { mergeKnowledge: mergeKnowledge2 } = await Promise.resolve().then(() => (init_knowledge(), knowledge_exports));
         const authHeaders = [...new Set(map.endpoints.flatMap((e) => e.authHeaders))];
@@ -16799,27 +17938,27 @@ Screenshot: ${shot}`);
             method: e.method,
             path: e.origin === map.origin ? e.path : `${e.origin}${e.path}`,
             description: kit.describeEndpoint(e),
-            example: e.origin === map.origin ? `node ${path17.join(outDir, "client.mjs")} get ${e.path}${e.rsc ? " --rsc" : ""}` : void 0,
+            example: e.origin === map.origin ? `node ${path19.join(outDir, "client.mjs")} get ${e.path}${e.rsc ? " --rsc" : ""}` : void 0,
             firstSeen: report.capturedAt
           })),
           notes: [
             `In-page capture: ${c2.seen} seen, ${c2.withPayload} with payload, ${c2.pathOnly} path only. Not complete: ${c2.blindSpots.join(", ")}.`,
-            `Local client: ${path17.join(outDir, "client.mjs")} (Node). Session in .env next to it: iframer auth ${host}${outDir !== path17.resolve(kit.apisDir(host)) ? ` --out ${outDir}` : ""}.`,
+            `Local client: ${path19.join(outDir, "client.mjs")} (Node). Session in .env next to it: iframer auth ${host}${outDir !== path19.resolve(kit.apisDir(host)) ? ` --out ${outDir}` : ""}.`,
             ...map.identity.headers.map((h) => `Auth header ${h.name}: ${h.source}.`),
             ...redacted.length ? [`Private values replaced with placeholders in ${new Set(redacted.map((r) => r.where)).size} endpoint(s); see privateValues in api.json and pass them per call.`] : []
           ]
         });
       }
       removeInput();
-      let sessionLine = `  Session: ${path17.join(outDir, ".env")} (kept)`;
+      let sessionLine = `  Session: ${path19.join(outDir, ".env")} (kept)`;
       if (hasFlag(args, "--no-session")) sessionLine = `  Session: skipped (iframer auth ${host} when needed)`;
-      else if (!fs16.existsSync(path17.join(outDir, ".env"))) {
+      else if (!fs18.existsSync(path19.join(outDir, ".env"))) {
         const s = await kit.refreshSession(host, outDir, { keychain: false });
-        sessionLine = s.ok ? `  Session: from ${s.source} -> ${s.envFile} (values not shown)` : `  Session: ${s.note}: iframer auth ${host}${outDir !== path17.resolve(kit.apisDir(host)) ? ` --out ${outDir}` : ""}`;
+        sessionLine = s.ok ? `  Session: from ${s.source} -> ${s.envFile} (values not shown)` : `  Session: ${s.note}: iframer auth ${host}${outDir !== path19.resolve(kit.apisDir(host)) ? ` --out ${outDir}` : ""}`;
       }
       const c = report.coverage;
       if (json) {
-        console.log(JSON.stringify({ ok: true, origin: report.origin, session: sessionLine.trim(), endpoints: map.endpoints.length, dropped: dropped.length, index: path17.join(outDir, "index.txt"), coverage: { seen: c.seen, withPayload: c.withPayload, pathOnly: c.pathOnly }, redacted: redacted.map((r) => ({ kind: r.kind, at: r.where })), files: written, inputDeleted: !fromStdin && !hasFlag(args, "--keep") }));
+        console.log(JSON.stringify({ ok: true, origin: report.origin, session: sessionLine.trim(), endpoints: map.endpoints.length, dropped: dropped.length, index: path19.join(outDir, "index.txt"), coverage: { seen: c.seen, withPayload: c.withPayload, pathOnly: c.pathOnly }, redacted: redacted.map((r) => ({ kind: r.kind, at: r.where })), files: written, inputDeleted: !fromStdin && !hasFlag(args, "--keep") }));
       } else {
         console.log(`  ${report.origin}: ${map.endpoints.length} endpoints (${c.withPayload} with payload, ${c.pathOnly} path only). Not complete.`);
         for (const h of map.identity.headers) console.log(`  Identity: ${h.name} <- ${h.source}`);
@@ -16828,14 +17967,14 @@ Screenshot: ${shot}`);
           for (const r of redacted.slice(0, 10)) console.log(`    ${r.kind} at ${r.where}`);
         }
         if (dropped.length) console.log(`  Left out ${dropped.length} third-party or asset request(s). --all keeps them.`);
-        console.log(`  One line per endpoint: ${path17.join(outDir, "index.txt")}`);
+        console.log(`  One line per endpoint: ${path19.join(outDir, "index.txt")}`);
         console.log(`  Wrote: ${written.join(", ")}`);
         if (!fromStdin && !hasFlag(args, "--keep")) console.log("  Capture file deleted.");
         console.log(sessionLine);
         console.log(`
   Next (no browser needed):`);
-        console.log(`    node ${path17.join(outDir, "client.mjs")}                  what it can do`);
-        console.log(`    node ${path17.join(outDir, "client.mjs")} get <path> --rsc --schema   learn a page's data`);
+        console.log(`    node ${path19.join(outDir, "client.mjs")}                  what it can do`);
+        console.log(`    node ${path19.join(outDir, "client.mjs")} get <path> --rsc --schema   learn a page's data`);
       }
       break;
     }
@@ -16848,7 +17987,7 @@ Screenshot: ${shot}`);
       let secretSource = secret ? "env/.env" : null;
       if (!secret) {
         try {
-          secret = fs16.readFileSync(path17.join(CONFIG_DIR, "secret"), "utf8").trim();
+          secret = fs18.readFileSync(path19.join(CONFIG_DIR, "secret"), "utf8").trim();
           if (secret) secretSource = "~/.iframer/secret";
         } catch {
         }
@@ -16888,10 +18027,10 @@ Screenshot: ${shot}`);
     }
     // ─── Telemetry report ────────────────────────────────────────────
     case "telemetry": {
-      const file = path17.join(CONFIG_DIR, "telemetry.jsonl");
+      const file = path19.join(CONFIG_DIR, "telemetry.jsonl");
       if (args.includes("--clear")) {
         try {
-          fs16.unlinkSync(file);
+          fs18.unlinkSync(file);
         } catch {
         }
         console.log("  Telemetry log cleared.");
@@ -16899,7 +18038,7 @@ Screenshot: ${shot}`);
       }
       let lines;
       try {
-        lines = fs16.readFileSync(file, "utf8").trim().split("\n").filter(Boolean);
+        lines = fs18.readFileSync(file, "utf8").trim().split("\n").filter(Boolean);
       } catch {
         console.log("  No telemetry recorded yet. It logs automatically as agents use iframer");
         console.log("  (new MCP sessions only \u2014 restart a session if it predates telemetry).");
@@ -17024,11 +18163,11 @@ Screenshot: ${shot}`);
     // ─── Update (npm as the extension update channel) ────────────────
     case "update": {
       const checkOnly = args.includes("--check");
-      const pkgRoot = path17.join(__dirname, "..");
-      const isDev = fs16.existsSync(path17.join(pkgRoot, ".git"));
+      const pkgRoot = path19.join(__dirname, "..");
+      const isDev = fs18.existsSync(path19.join(pkgRoot, ".git"));
       let installed = "unknown";
       try {
-        installed = JSON.parse(fs16.readFileSync(path17.join(pkgRoot, "package.json"), "utf8")).version;
+        installed = JSON.parse(fs18.readFileSync(path19.join(pkgRoot, "package.json"), "utf8")).version;
       } catch {
       }
       let latest = null;
@@ -17055,12 +18194,12 @@ Screenshot: ${shot}`);
         break;
       }
       const cp = require("child_process");
-      const real = fs16.realpathSync(pkgRoot);
+      const real = fs18.realpathSync(pkgRoot);
       const pm = real.match(/^(.*)[\\/]lib[\\/]node_modules[\\/]iframer-toolkit$/) || process.platform === "win32" && real.match(/^(.*)[\\/]node_modules[\\/]iframer-toolkit$/);
       const prefix = pm ? pm[1] : null;
       const npmBin = (() => {
-        const near = path17.join(path17.dirname(process.execPath), process.platform === "win32" ? "npm.cmd" : "npm");
-        return fs16.existsSync(near) ? JSON.stringify(near) : "npm";
+        const near = path19.join(path19.dirname(process.execPath), process.platform === "win32" ? "npm.cmd" : "npm");
+        return fs18.existsSync(near) ? JSON.stringify(near) : "npm";
       })();
       const cmd = `${npmBin} install -g iframer-toolkit@latest${prefix ? ` --prefix ${JSON.stringify(prefix)}` : ""}`;
       console.log(`
@@ -17074,8 +18213,8 @@ Screenshot: ${shot}`);
       }
       try {
         const onPath = cp.execSync(process.platform === "win32" ? "where iframer" : "command -v iframer", { encoding: "utf8", shell: process.platform === "win32" ? void 0 : "/bin/sh" }).split(/\r?\n/)[0].trim();
-        const target = onPath && fs16.realpathSync(onPath);
-        if (target && !target.startsWith(real + path17.sep)) {
+        const target = onPath && fs18.realpathSync(onPath);
+        if (target && !target.startsWith(real + path19.sep)) {
           const v = cp.execSync(`${JSON.stringify(onPath)} --version`, { encoding: "utf8" }).trim();
           if (v !== latest) {
             console.warn(`
@@ -17196,6 +18335,17 @@ Screenshot: ${shot}`);
       --quiet                       One line back: the run command
       --rm                          Delete a recipe; no name lists them
 
+  Tab bridge: Node scripts (client.mjs, recipes, any script) send their requests through a tab that is
+  already logged in. The tab does the fetch with its own login; the browser's cookies are never exported or saved:
+    bridge attach <host>            Start the bridge, print the one expression to evaluate in the logged-in tab
+      --for <t3|playwright-mcp|any> Which browser tool's steps to print (default: t3)
+      --site <domain>               Cover a parent domain too (default: the host, without www.)
+      --name <n>                    Tab name when 2 profiles use the same site (scripts: IFRAMER_BRIDGE_TAB=<n>)
+      --read-only                   Refuse anything but GET/HEAD for this tab
+    bridge status                   Is it running, which sites have a tab attached
+    bridge stop                     Stop it (scripts go back to the saved session)
+    bridge client [--out <file>]    Write the 1-file client (bridgeFetch) for scripts that are not a client.mjs
+
   Session:
     session stop                    Save state + close idle browsers on the shared daemon
     session clear                   Wipe all stored session data
@@ -17249,6 +18399,8 @@ Screenshot: ${shot}`);
   Environment:
     IFRAMER_SECRET                  Encryption and pairing secret (default: ~/.iframer/secret)
     IFRAMER_DATA_DIR                Data directory (default: ~/.iframer)
+    IFRAMER_BRIDGE                  off = client.mjs never uses the tab bridge
+    IFRAMER_BRIDGE_PORT             Tab bridge port (default: 47625)
     ANTHROPIC_API_KEY               Needed by the solve-captcha step
 `);
       break;
