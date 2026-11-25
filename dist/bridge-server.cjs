@@ -129,14 +129,17 @@ var Bridge = class {
       w.timer = setTimeout(() => {
         tab.stalled = tab.probed = this.now();
         w.last = `the ${w.site} tab did not answer in ${secs(ms)} s`;
-        if (w.read) this.dispatch(id, w);
-        else this.finish(id, w, { error: w.last, dead: true, maybeSent: true });
+        if (w.read) {
+          this.letGo(tab, id);
+          this.dispatch(id, w);
+        } else this.finish(id, w, { error: w.last, dead: true, maybeSent: true });
       }, ms);
       return;
     }
     if (m.expired) {
       w.last = `the ${w.site} tab was frozen and dropped the request`;
       if (w.read) this.dispatch(id, w);
+      else if (w.released) this.finish(id, w, { error: w.last, dead: true, maybeSent: true });
       else this.finish(id, w, { error: `${w.last}. The write was not sent`, dead: true });
       return;
     }
@@ -148,8 +151,16 @@ var Bridge = class {
       else this.finish(id, w, { error: `${w.last}. The write was not sent`, dead: true });
       return;
     }
-    const { id: _id, ack: _ack, expired: _expired, ...reply } = m;
+    const { id: _id, ack: _ack, expired: _expired, unsent: _unsent, ...reply } = m;
+    if (!w.read && err && w.released && !m.unsent) reply.maybeSent = true;
     this.finish(id, w, reply);
+  }
+  /** A read is leaving this tab for another one: stop it here, so it does not keep running on the site next to its retry. */
+  letGo(tab, id) {
+    try {
+      tab.send({ id, abort: 1 });
+    } catch {
+    }
   }
   // ── Requests ────────────────────────────────────────────────────────────
   /** The attached site that owns this URL (the most specific one), for tabs with this name. */
@@ -265,8 +276,10 @@ var Bridge = class {
         if (this.waiting.get(id) !== w || w.tab !== tab.id || w.acked) return;
         tab.stalled = tab.probed = this.now();
         w.last = `the ${w.site} tab did not confirm the request in ${secs(this.t.ackMs)} s (frozen in the background?)`;
-        if (w.read) this.dispatch(id, w);
-        else this.finish(id, w, { error: `${w.last}. The write was not sent`, dead: true });
+        if (w.read) {
+          this.letGo(tab, id);
+          this.dispatch(id, w);
+        } else this.finish(id, w, { error: `${w.last}. The write was not sent`, dead: true });
       });
     }, this.t.ackMs);
     try {
@@ -302,7 +315,7 @@ var Bridge = class {
 var import_crypto = __toESM(require("crypto"));
 var import_fs = __toESM(require("fs"));
 var import_path2 = __toESM(require("path"));
-var BRIDGE_VERSION = 1;
+var BRIDGE_VERSION = 2;
 var DEFAULT_PORT = 47625;
 var bridgePort = () => Number(process.env.IFRAMER_BRIDGE_PORT) || DEFAULT_PORT;
 var stateFile = () => import_path2.default.join(getDataDir(), "bridge.json");
@@ -420,6 +433,7 @@ function validSite(site) {
   if (extra !== void 0 || port !== void 0 && !/^\d{1,5}$/.test(port)) return false;
   if (LOOPBACK.test(host)) return true;
   if (SHARED_SUFFIXES.has(host)) return false;
+  if (/^(co|com|net|org|gov|edu|ac|or|ne|go|mil|nom|gob|sch)\.[a-z]{2}$/.test(host)) return false;
   return port === void 0 && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host) && !IP.test(host);
 }
 var validName = (name) => /^[A-Za-z0-9_.-]{1,40}$/.test(name);

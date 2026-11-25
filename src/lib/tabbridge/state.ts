@@ -9,8 +9,12 @@ import fs from "fs";
 import path from "path";
 import { getDataDir } from "../paths";
 
-/** Raise when the daemon's behaviour changes: `iframer bridge attach` then replaces a running older daemon. */
-export const BRIDGE_VERSION = 1;
+/**
+ * Raise when the daemon's behaviour or the daemon <-> relay messages change: `iframer bridge attach` then replaces a
+ * running older daemon, so an old daemon never serves a new relay or the other way round.
+ * 2: tab keys bound to the origin; writes held until {go}; {abort}.
+ */
+export const BRIDGE_VERSION = 2;
 
 /** Fixed, because the port is baked into the relay running in the tab. Outside the extension's 3022-3042 scan. */
 export const DEFAULT_PORT = 47625;
@@ -91,6 +95,8 @@ export function validSite(site: string): boolean {
   if (extra !== undefined || (port !== undefined && !/^\d{1,5}$/.test(port))) return false;
   if (LOOPBACK.test(host)) return true;
   if (SHARED_SUFFIXES.has(host)) return false;
+  // The usual shape of a country's shared second level (co.ke, com.ng, org.nz, ac.za, ...).
+  if (/^(co|com|net|org|gov|edu|ac|or|ne|go|mil|nom|gob|sch)\.[a-z]{2}$/.test(host)) return false;
   return port === undefined && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host) && !IP.test(host);
 }
 

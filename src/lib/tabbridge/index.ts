@@ -93,12 +93,17 @@ export interface AttachOptions { host: string; site?: string; name?: string; rea
 
 /** Starts the daemon and returns what the agent has to do: one evaluate call in the logged-in tab. */
 export async function attach(o: AttachOptions): Promise<{ site: string; name: string; expression: string; text: string }> {
-  const host = o.host.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  const given = o.host.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  // The origin exactly as a browser writes it (no default port): the key is bound to that string.
+  let origin: string, host: string;
+  try {
+    const u = new URL(`${/^(127\.0\.0\.1|localhost)(:|$)/.test(given) ? "http" : "https"}://${given}`);
+    origin = u.origin; host = u.host;
+  } catch { throw new Error(`not a host: ${o.host}. Give the host of the logged-in tab, e.g. iframer bridge attach www.example.com`); }
   const site = o.site ? siteFor(o.site) : siteFor(host);
   const name = o.name || "default";
   if (!validSite(site)) throw new Error(`not a site: ${site} (one label, or a suffix anyone can register under). Give the host of the logged-in tab, e.g. iframer bridge attach www.example.com`);
   if (!validName(name)) throw new Error(`--name takes letters, digits, dot, dash and underscore: ${name}`);
-  const origin = `${/^(127\.0\.0\.1|localhost)(:|$)/.test(host) ? "http" : "https"}://${host}`;
   if (!covers(site, origin)) throw new Error(`--site ${site} does not cover ${host}: it must be ${host} or a parent domain of it`);
   const st = await start();
   // The key only works from this exact origin: the page can see it, so it must open nothing anywhere else.
@@ -120,7 +125,7 @@ export async function attach(o: AttachOptions): Promise<{ site: string; name: st
         `2. Evaluate the expression below in that page (any tool that runs JS in the page, or the DevTools console). It answers ATTACHED (or ALREADY_ATTACHED).`,
       ];
   const text = [
-    `Tab bridge for ${scope}. Node scripts (client.mjs, recipes, any script) then send their requests through that tab: the tab does the fetch with its own login. No cookie leaves the browser, nothing is exported or saved.`,
+    `Tab bridge for ${scope}. Node scripts (client.mjs, recipes, any script) then send their requests through that tab: the tab does the fetch with its own login. The browser's cookies are never exported or saved.`,
     ``,
     ...steps,
     `3. Check: iframer bridge status   ->   ${site} listed under "attached".`,

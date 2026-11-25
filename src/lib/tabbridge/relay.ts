@@ -16,6 +16,7 @@
  *
  * Messages from the daemon: {id, url, method, ..., notAfter} a request,
  * {id, go} release a held write, {id, abort} stop a read nobody waits for.
+ * Replies: {id, ack}, then the response, or {id, error} (+ unsent: failed before any fetch), or {id, expired}.
  * A read is confirmed ({id, ack}) and fetched at once. A write is confirmed and
  * then HELD until its go: the daemon only sends the go while it still waits, so
  * a write the daemon gave up on never starts.
@@ -90,7 +91,7 @@ export function tabRelay(c) {
     if (q.notAfter && Date.now() > q.notAfter) return reply({ expired: 1 });
     var method = String(q.method || "GET").toUpperCase(), read = method === "GET" || method === "HEAD";
     function run() {
-      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null, timer;
+      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null, timer, started = false;
       Promise.resolve().then(function () {
         var u = new URL(q.url, location.href);
         if (!mine(u)) throw new Error("not this tab's site: " + u.hostname);
@@ -101,18 +102,26 @@ export function tabRelay(c) {
           if (k.toLowerCase() === "referer") { try { if (new URL(q.headers[k], location.href).origin === location.origin) referrer = q.headers[k]; } catch (e) {} }
           else headers[k] = q.headers[k];
         });
-        // Auth headers the site's own code sends (a token in localStorage, a CSRF <meta>): the value this page holds
-        // wins over one the script brought from a saved session, so a request never carries another account's token.
-        // The value never leaves the page. What the page does not hold stays as the script sent it (an API key).
+        // Auth headers the site's own code sends (a token in localStorage, a CSRF <meta>). Where the page is known to
+        // keep one, only this page's value is ever sent: one the script brought from a saved session is dropped, even
+        // when the page has none, so a request never carries another account's token. The value never leaves the page.
+        // A header with no known place in the page (an API key set by hand) stays as the script sent it.
         Object.keys(q.auth || {}).forEach(function (name) {
-          var v = stored(q.auth[name] || {});
-          if (v == null) return;
+          var s = q.auth[name] || {};
+          if (!s.from) return;
           Object.keys(headers).forEach(function (k) { if (k.toLowerCase() === name.toLowerCase()) delete headers[k]; });
-          headers[name] = v;
+          var v = stored(s);
+          if (v != null) headers[name] = v;
         });
-        // A write never follows a redirect: its body would go wherever the answer points. It comes back as a 302.
-        var redirect = read ? (q.redirect || "follow") : (q.redirect === "error" ? "error" : "manual");
+        // Redirects never take a request off this tab's ground:
+        // - a write never follows one (its body would go wherever the answer points): it comes back as a 302;
+        // - a read to this page's own origin follows them in "same-origin" mode, where the browser itself refuses a
+        //   hop to another origin before requesting it;
+        // - a read to another host of the site (an API subdomain) does not follow them: it comes back as a 302.
+        var own = u.origin === location.origin;
+        var redirect = q.redirect === "error" ? "error" : read && own ? (q.redirect || "follow") : "manual";
         var init = { method: method, headers: headers, credentials: "include", redirect: redirect, cache: "no-store" };
+        if (read && own) init.mode = "same-origin";
         if (referrer) init.referrer = referrer;
         if (!read && q.body64 != null) init.body = bytes(q.body64);
         else if (!read && q.body != null) init.body = q.body;
@@ -122,7 +131,16 @@ export function tabRelay(c) {
           // A read gives up after 20 s (the bridge then asks another tab); a write is never cut off mid-way.
           timer = setTimeout(function () { ctl.abort(); }, 20000);
         }
-        return fetch(u.href, init).then(function (res) {
+        started = true;
+        return fetch(u.href, init).catch(function (e) {
+          // A followed redirect that pointed off this origin fails like a dead network. Look once without following:
+          // if the site answers with a redirect, report that (a 302) instead of a tab that can't reach its site.
+          if (!(read && own && redirect === "follow") || (ctl && ctl.signal.aborted)) throw e;
+          var look = {};
+          Object.keys(init).forEach(function (k) { look[k] = init[k]; });
+          look.redirect = "manual";
+          return fetch(u.href, look).then(function (r) { if (r.type === "opaqueredirect") return r; throw e; }, function () { throw e; });
+        }).then(function (res) {
           function drop(why) { try { res.body && res.body.cancel(); } catch (e) {} throw new Error(why); }
           // A followed redirect that ended on another site: this tab only answers for its own.
           if (res.url) { var end = new URL(res.url); if (!mine(end)) drop("redirected to another site (" + end.hostname + "): refused"); }
@@ -136,16 +154,20 @@ export function tabRelay(c) {
           });
         });
       }).catch(function (e) {
-        reply({ error: read && ctl && ctl.signal.aborted ? "aborted: the read was stopped or timed out" : String((e && e.message) || e) });
+        var out = { error: read && ctl && ctl.signal.aborted ? "aborted: the read was stopped or timed out" : String((e && e.message) || e) };
+        // Refused before any fetch: certain not to be on the site (the daemon tells a write's caller so).
+        if (!started) out.unsent = 1;
+        reply(out);
       }).then(function () { clearTimeout(timer); delete running[q.id]; });
     }
     reply({ ack: 1 });
     if (read) return run();
-    held[q.id] = run;
-    setTimeout(function () { delete held[q.id]; }, 30000);
+    // Dropped if no go comes: the daemon gave up on it, so it must never start.
+    held[q.id] = { run: run, timer: setTimeout(function () { delete held[q.id]; }, 30000) };
   }
+  function release(id) { var h = held[id]; if (!h) return null; clearTimeout(h.timer); delete held[id]; return h.run; }
   function handle(ws, q) {
-    if (q.go) { var run = held[q.id]; delete held[q.id]; if (run) run(); return; }
+    if (q.go) { var run = release(q.id); if (run) run(); return; }
     if (q.abort) { if (running[q.id]) running[q.id].abort(); return; }
     request(ws, q);
   }
@@ -168,13 +190,15 @@ export function tabRelay(c) {
       st.ws = ws;
       ws.onopen = function () {
         st.open = st.ever = true; st.connecting = false;
-        try { ws.send(JSON.stringify({ hello: location.href, v: 1 })); } catch (e) {}
+        try { ws.send(JSON.stringify({ hello: location.href, v: 2 })); } catch (e) {}
         done("ATTACHED");
       };
       ws.onclose = function () {
         st.open = false;
-        // Writes held for a go that can no longer come are dropped: they were never sent.
-        held = {};
+        // Writes held for a go that can no longer come are dropped: they were never sent. Reads nobody can get the
+        // answer of are stopped.
+        Object.keys(held).forEach(release);
+        Object.keys(running).forEach(function (k) { try { running[k].abort(); } catch (e) {} });
         if (st.stopped) return;
         if (st.ever) { setTimeout(connect, 3000); return; }
         st.connecting = false;

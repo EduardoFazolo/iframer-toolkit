@@ -191,14 +191,17 @@ export class Bridge {
       w.timer = setTimeout(() => {
         tab.stalled = tab.probed = this.now();
         w.last = `the ${w.site} tab did not answer in ${secs(ms)} s`;
-        if (w.read) this.dispatch(id, w); else this.finish(id, w, { error: w.last, dead: true, maybeSent: true });
+        if (w.read) { this.letGo(tab, id); this.dispatch(id, w); }
+        else this.finish(id, w, { error: w.last, dead: true, maybeSent: true });
       }, ms);
       return;
     }
     if (m.expired) {
-      // The tab woke up after the deadline and dropped the request: it was not sent.
+      // The tab woke up after the deadline and dropped the request.
       w.last = `the ${w.site} tab was frozen and dropped the request`;
-      if (w.read) this.dispatch(id, w); else this.finish(id, w, { error: `${w.last}. The write was not sent`, dead: true });
+      if (w.read) this.dispatch(id, w);
+      else if (w.released) this.finish(id, w, { error: w.last, dead: true, maybeSent: true });
+      else this.finish(id, w, { error: `${w.last}. The write was not sent`, dead: true });
       return;
     }
     const err = typeof m.error === "string" ? m.error : "";
@@ -209,8 +212,17 @@ export class Bridge {
       else this.finish(id, w, { error: `${w.last}. The write was not sent`, dead: true });
       return;
     }
-    const { id: _id, ack: _ack, expired: _expired, ...reply } = m;
+    const { id: _id, ack: _ack, expired: _expired, unsent: _unsent, ...reply } = m;
+    // A write the tab was told to send, that then failed for any reason (too large an answer, a refused redirect,
+    // an error while reading the body): it may be on the site. Only a failure the tab marks as before its fetch
+    // ({unsent}) is certain not to be.
+    if (!w.read && err && w.released && !m.unsent) (reply as Reply).maybeSent = true;
     this.finish(id, w, reply as Reply);
+  }
+
+  /** A read is leaving this tab for another one: stop it here, so it does not keep running on the site next to its retry. */
+  private letGo(tab: Tab, id: string): void {
+    try { tab.send({ id, abort: 1 }); } catch { /* the tab is gone */ }
   }
 
   // ── Requests ────────────────────────────────────────────────────────────
@@ -328,7 +340,8 @@ export class Bridge {
         if (this.waiting.get(id) !== w || w.tab !== tab.id || w.acked) return;
         tab.stalled = tab.probed = this.now();
         w.last = `the ${w.site} tab did not confirm the request in ${secs(this.t.ackMs)} s (frozen in the background?)`;
-        if (w.read) this.dispatch(id, w); else this.finish(id, w, { error: `${w.last}. The write was not sent`, dead: true });
+        if (w.read) { this.letGo(tab, id); this.dispatch(id, w); }
+        else this.finish(id, w, { error: `${w.last}. The write was not sent`, dead: true });
       });
     }, this.t.ackMs);
     try { tab.send({ id, ...w.job, notAfter }); }

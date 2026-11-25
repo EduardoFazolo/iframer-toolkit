@@ -43,6 +43,23 @@ const cli = (args, env = {}) => {
 
 // ── 1. The daemon against fake tabs ───────────────────────────────────────
 console.log("daemon, fake tabs");
+// An older daemon (another protocol version) is already running: starting must replace it, never reuse it.
+{
+  const dummy = spawn("node", ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" }); // the pid a kill would hit
+  let asked = false;
+  const old = http.createServer((req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    if (req.url === "/shutdown") { asked = true; res.end("{}"); old.close(); old.closeAllConnections?.(); return; }
+    res.end(JSON.stringify({ pid: dummy.pid, v: 1, tabs: [], detached: [] }));
+  });
+  await new Promise((ok) => old.listen(PORT, "127.0.0.1", ok));
+  fs.writeFileSync(path.join(data, "bridge.json"), JSON.stringify({ port: PORT, token: "old-token", pid: dummy.pid, started: "", v: 1 }));
+  const fresh = await bridge.start();
+  check("a running daemon of an older version is replaced, not reused", asked && fresh.v === state.BRIDGE_VERSION && fresh.v > 1 && fresh.pid !== dummy.pid && fresh.token !== "old-token", fresh);
+  try { dummy.kill(); } catch { /* gone */ }
+  await bridge.stop();
+}
+
 // With BRIDGE_CLI the daemon is the built bundle (dist/bridge-server.cjs), started by the built CLI.
 const startDaemon = async () => { if (CLI) cli(["bridge", "attach", "boot.example.com", "--print"]); return bridge.start(); };
 let st = await startDaemon();
@@ -128,7 +145,7 @@ check("iframer bridge status lists the attached sites", /tab bridge running/.tes
 for (const t of [a, ro, named]) t.ws.close();
 await sleep(100);
 text = cli(["bridge", "status"]);
-check("...and says when a tab detached", /detached: app\.example\.com/.test(text), text);
+check("...and says when a tab detached", /detached: .*app\.example\.com \(detached/.test(text), text);
 
 text = cli(["bridge", "attach", "com"]);
 check("attach refuses a bare suffix as a site", /^EXIT 1/.test(text) && /not a site/.test(text), text);
@@ -136,6 +153,8 @@ text = cli(["bridge", "attach", "app.example.com", "--site", "other.com"]);
 check("attach refuses a --site that does not cover the host", /^EXIT 1/.test(text) && /does not cover/.test(text), text);
 text = cli(["bridge", "attach", "www.example.com", "--for", "playwright-mcp", "--read-only", "--name", "work"]);
 check("attach prints the steps for the chosen tool", /browser_evaluate/.test(text) && /example\.com and its subdomains/.test(text) && /read-only/.test(text) && /"ro":1/.test(text) && text.includes(key("https://www.example.com", "example.com", "work", true)), text);
+text = cli(["bridge", "attach", "example.com:443", "--site", "example.com", "--print"]);
+check("attach writes the origin the way a browser does (no default port)", /"o":"https:\/\/example\.com"/.test(text) && text.includes(key("https://example.com", "example.com")), text.slice(-200));
 text = cli(["bridge", "attach", "shop.co.uk", "--site", "co.uk"]);
 check("attach refuses a shared suffix as --site", /^EXIT 1/.test(text) && /not a site/.test(text), text);
 
@@ -157,6 +176,8 @@ console.log("client, scripted daemon");
       if (step === "drop") return req.socket.destroy(); // the daemon took the request, then the connection died
       if (step === "cut") { res.writeHead(200, { "content-type": "application/json" }); res.write('{"status":2'); return req.socket.destroy(); }
       if (step === "none") return json(res, 503, { error: "no tab attached for x" });
+      if (step === "slow-none") return setTimeout(() => json(res, 503, { error: "no tab attached for x" }), 150);
+      if (step === "sent-then-failed") return json(res, 200, { error: "response larger than 32 MB: too large for the tab bridge", maybeSent: true });
       json(res, 200, { status: 200, type: "basic", headers: {}, body64: Buffer.from("via-tab").toString("base64") });
     });
   });
@@ -199,6 +220,13 @@ console.log(JSON.stringify(out));
   check("a host that started on its saved session stays there, even when a tab shows up", o[0] === null && o[1] === null && seen.length === 1, { o, seen: [...seen] });
   o = await run(["ok", "none"], `out.push(await one(A)); out.push(await one(B));`);
   check("each host decides for itself", o[0] === "via-tab" && o[1] === null, o);
+
+  o = await run(["slow-none", "ok"], `out.push(...(await Promise.all([one(A), one(A)])));`);
+  check("two first requests fired together decide once: both on the saved session, one asked", o[0] === null && o[1] === null && seen.length === 1, { o, seen: [...seen] });
+  o = await run(["sent-then-failed"], `out.push(await one(A, ${post}));`);
+  check("a write the tab sent and then failed on says it may have reached the site", /^ERR .*32 MB.*may have reached the site/.test(String(o[0])), o);
+  o = await run(["ok"], `const c = new AbortController(); c.abort(); out.push(await one(A, { method: "POST", body: "{}", signal: c.signal }));`);
+  check("a request the script already aborted is never sent", /^ERR /.test(String(o[0])) && seen.length === 0, { o, seen: [...seen] });
 
   o = await run([], `const f = new FormData(); f.set("a", "1"); out.push(await one(A, { method: "POST", body: f }));`, { attached: false });
   check("a FormData body with no tab attached falls back (null)", o[0] === null && seen.length === 0, o);
@@ -246,7 +274,7 @@ kit.writeOutputs(host);
 if (CLI) cli(["recipe", host, "activeCampaigns", "--path", "/{community}/dashboard/campaigns", "--rsc", "--find", "campaigns", "--pick", "campaigns.{title}", "--where", "active=true", "--count", "--quiet"]);
 else kit.saveRecipe({ name: "activeCampaigns", host, path: "/{community}/dashboard/campaigns", rsc: true, find: "campaigns", pick: "campaigns.{title}", where: "active=true", count: true });
 // Recipes named like the client's own internals must not break the regenerated module.
-for (const name of ["os", "__tab", "__tabFetch", "__tabHome"]) {
+for (const name of ["os", "__tab", "__tabFetch", "__tabHome", "globalThis", "fetch", "process", "env", "path", "fs"]) {
   if (CLI) cli(["recipe", host, name, "--path", "/api/x", "--quiet"]); else kit.saveRecipe({ name, host, path: "/api/x" });
 }
 const client = path.join(dir, "client.mjs");
@@ -267,7 +295,7 @@ try {
   check("no tab attached: client.mjs runs as before (asks iframer auth, then 401)", /401/.test(r) && fs.existsSync(asked), r);
   fs.rmSync(asked, { force: true });
   r = await node([]);
-  check("recipes named os, __tab, ... do not break the client", /recipes: .*\bos\b/.test(r) && /__tabFetch/.test(r), r);
+  check("recipes named os, globalThis, fetch, env, ... do not break the client", /recipes: .*\bos\b/.test(r) && /__tabFetch/.test(r) && /globalThis/.test(r), r);
   fs.rmSync(asked, { force: true });
 
   // A run that starts on its saved session while no tab is attached: it must stay there after one attaches.
@@ -354,6 +382,7 @@ out.huge = await j("/api/huge").catch((e) => e.message);
 out.cross = await j("/api/x").then(() => bridgeFetch("https://evil.example/x")).then((r) => r, (e) => e.message);
 out.writeRedirect = await j("/api/redirect-me", { method: "POST", body: "{}" });
 out.out = await j("/api/redirect-out").catch((e) => e.message);
+out.hugeWrite = await j("/api/huge", { method: "POST", body: "{}" }).catch((e) => e.message);
 console.log(JSON.stringify(out));
 `);
   let out = {};
@@ -371,9 +400,17 @@ console.log(JSON.stringify(out));
   check("a response over 32 MB is refused", /32 MB/.test(String(out.huge)), out.huge);
   check("another host with no tab is null, whatever this one uses", out.cross === null, out.cross);
   check("a write never follows a redirect: it comes back as 302 and the target is not requested", out.writeRedirect?.status === 302 && !log.some((l) => l.path === "/api/redirect-target" && l.method === "POST") && log.filter((l) => l.path === "/api/redirect-target").length === 1, { r: out.writeRedirect, hits: log.filter((l) => /redirect/.test(l.path)) });
-  check("a read that is redirected to another site is refused", /redirected to another site/.test(String(out.out)), out.out);
+  check("a read redirected to another site comes back as 302 and the other site is never requested", out.out?.status === 302 && !log.some((l) => l.path === "/api/cors-echo"), { out: out.out, hits: log.filter((l) => /cors-echo|redirect-out/.test(l.path)) });
+  check("a write that reached the site and then failed (answer too large) says it may have reached it", /32 MB.*may have reached the site/.test(String(out.hugeWrite)) && log.some((l) => l.path === "/api/huge" && l.method === "POST"), out.hugeWrite);
   text = cli(["bridge", "status"]);
   check("the tab is still answering after the refused stream and download", /attached/.test(text) && !/NOT ANSWERING/.test(text), text);
+
+  // The page no longer holds its token: a saved one from .env must not be sent in its place.
+  await tab.evaluate(`localStorage.removeItem("session")`);
+  fs.writeFileSync(path.join(dir, ".env"), `AUTHORIZATION=${SECRETS.lsToken}\n`);
+  r = await node(["get", "/api/me"]);
+  check("a saved auth header is never sent through the tab when the page has none of its own", /401/.test(r), r);
+  fs.rmSync(path.join(dir, ".env"));
 
   // A daemon restart: the tab reconnects by itself (same key).
   const before = (await bridge.ping()).pid;

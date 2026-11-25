@@ -219,7 +219,7 @@ The result of reverse engineering is always LOCAL files: an API map, auth config
 
 ### Tab bridge: Node scripts through a logged-in tab (no cookie)
 
-`client.mjs`, recipes and any Node script can send their requests through a tab that is already logged in. The tab does the fetch with its own login (HttpOnly included); no cookie leaves the browser, nothing is exported or saved, and no tool call is needed per request. Use it when `iframer auth` says the session is locked (exit 2), for scheduled or long script runs, and whenever the user says not to touch cookies.
+`client.mjs`, recipes and any Node script can send their requests through a tab that is already logged in. The tab does the fetch with its own login (HttpOnly included); the browser's cookies are never exported or saved, and no tool call is needed per request. Use it when `iframer auth` says the session is locked (exit 2), for scheduled or long script runs, and whenever the user says not to touch cookies.
 
 ```
 1. iframer bridge attach <host> [--for t3|playwright-mcp|any]   starts the bridge, prints ONE expression

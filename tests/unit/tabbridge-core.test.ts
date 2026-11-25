@@ -27,16 +27,18 @@ interface Fake extends Tab {
   aborted: number;
   /** Writes it was told to send ({go}). */
   released: number;
+  /** The error is one the relay raises before any fetch ({unsent}). */
+  unsent: boolean;
 }
 
 let n = 0;
-function fake(b: Bridge, o: Partial<Pick<Fake, "frozen" | "silent" | "delay" | "site" | "name" | "readOnly" | "error" | "lateAck" | "ignoreAbort">> = {}): Fake {
+function fake(b: Bridge, o: Partial<Pick<Fake, "frozen" | "silent" | "delay" | "site" | "name" | "readOnly" | "error" | "lateAck" | "ignoreAbort" | "unsent">> = {}): Fake {
   const waitingForGo = new Map<string, () => void>();
   const stop = new Map<string, () => void>();
   const t: Fake = {
     id: `t${++n}`, site: o.site ?? "dnnr.io", name: o.name ?? "default", readOnly: !!o.readOnly, url: "", since: Date.now(), stalled: 0, probed: 0,
     frozen: !!o.frozen, silent: !!o.silent, delay: o.delay ?? 0, got: 0, fetched: 0, inFlight: 0, peak: 0, held: [], error: o.error,
-    lateAck: o.lateAck ?? 0, ignoreAbort: !!o.ignoreAbort, aborted: 0, released: 0,
+    lateAck: o.lateAck ?? 0, ignoreAbort: !!o.ignoreAbort, aborted: 0, released: 0, unsent: !!o.unsent,
     send(m) {
       const id = m.id as string;
       if (m.go) { t.released++; const go = waitingForGo.get(id); waitingForGo.delete(id); go?.(); return; }
@@ -59,7 +61,7 @@ function fake(b: Bridge, o: Partial<Pick<Fake, "frozen" | "silent" | "delay" | "
       const stopped = await new Promise<boolean>((ok) => { const timer = setTimeout(() => ok(false), t.delay); stop.set(id, () => { clearTimeout(timer); ok(true); }); });
       stop.delete(id);
       t.inFlight--;
-      b.message(t, stopped ? { id, error: "aborted: the read was stopped or timed out" } : t.error ? { id, error: t.error } : { id, status: 200, type: "basic", headers: {}, body64: "" });
+      b.message(t, stopped ? { id, error: "aborted: the read was stopped or timed out" } : t.error ? { id, error: t.error, ...(t.unsent ? { unsent: 1 } : {}) } : { id, status: 200, type: "basic", headers: {}, body64: "" });
     };
     if (method !== "GET" && method !== "HEAD") waitingForGo.set(id, fetchIt);
     if (t.lateAck) await sleep(t.lateAck);
@@ -121,6 +123,14 @@ describe("frozen tabs", () => {
     expect(b.status().tabs.find((x) => x.stalled)).toBeTruthy();
     expect(live.fetched).toBe(1);
     expect(silent.got).toBe(1);
+    expect(silent.aborted).toBe(1); // the read was stopped there before it went to the other tab
+  });
+
+  test("a read that leaves a frozen tab is stopped there too", async () => {
+    const b = make(), live = fake(b), frozen = fake(b, { frozen: true });
+    expect(((await ask(b)) as Reply).status).toBe(200);
+    expect(frozen.aborted).toBe(1);
+    expect(live.aborted).toBe(0);
   });
 });
 
@@ -192,6 +202,24 @@ describe("writes are never sent twice", () => {
     expect(w.maybeSent).toBe(true);
     expect(older.fetched).toBe(1); // only the read
     expect(offline.fetched).toBe(2);
+  });
+
+  test("a write that fails after its go may have reached the site, whatever the error", async () => {
+    const b = make();
+    fake(b, { error: "response larger than 32 MB: too large for the tab bridge" });
+    const w = (await ask(b, "POST")) as Reply;
+    expect(w.error).toContain("32 MB");
+    expect(w.maybeSent).toBe(true);
+    const r = (await ask(b)) as Reply; // the same error on a read is just the answer
+    expect(r.maybeSent).toBeUndefined();
+  });
+
+  test("a write the tab refused before any fetch is certain not to be on the site", async () => {
+    const b = make();
+    fake(b, { error: "not this tab's site: evil.example", unsent: true });
+    const w = (await ask(b, "POST")) as Reply;
+    expect(w.error).toContain("not this tab's site");
+    expect(w.maybeSent).toBeUndefined();
   });
 
   test("another error from the tab is the answer, not a dead tab", async () => {
@@ -336,6 +364,9 @@ describe("sites and keys", () => {
     expect(validSite("1.2.3.4")).toBe(false);
     expect(validSite("a b.io")).toBe(false);
     expect(validSite("co.uk")).toBe(false); // anyone can register under it
+    expect(validSite("co.ke")).toBe(false); // not on the list, caught by its shape
+    expect(validSite("com.ng")).toBe(false);
+    expect(validSite("shop.co.ke")).toBe(true);
     expect(validSite("github.io")).toBe(false);
     expect(validSite("shop.co.uk")).toBe(true);
   });

@@ -377,7 +377,7 @@ What it guarantees:
 
 ### Tab bridge: Node scripts through a logged-in tab
 
-When the session can't be exported (on Windows a running T3 Code or Chrome locks its cookie store), or you don't want any cookie taken out of the browser, a Node script can send its requests through a tab that is already logged in. The tab does the fetch with its own login, HttpOnly cookies included. No cookie leaves the browser, nothing is exported or saved, and the agent makes no tool call per request, so scheduled scripts work.
+When the session can't be exported (on Windows a running T3 Code or Chrome locks its cookie store), or you don't want any cookie taken out of the browser, a Node script can send its requests through a tab that is already logged in. The tab does the fetch with its own login, HttpOnly cookies included. The browser's cookies are never exported or saved, and the agent makes no tool call per request, so scheduled scripts work.
 
 ```bash
 iframer bridge attach www.example.com   # starts the bridge, prints ONE expression

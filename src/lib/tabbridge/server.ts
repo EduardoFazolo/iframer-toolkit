@@ -1,7 +1,7 @@
 /**
  * Tab bridge daemon: lets Node scripts make requests with the login of a tab
- * that is already logged in, in any browser where one line of JS can run. No
- * cookie leaves the browser: nothing is exported or saved.
+ * that is already logged in, in any browser where one line of JS can run. The
+ * browser's cookies are never exported or saved.
  *
  *   Node script --POST /fetch (bearer token)--> this daemon (127.0.0.1 only)
  *     --WebSocket--> relay in the tab (relay.ts) --same-site fetch--> the site
