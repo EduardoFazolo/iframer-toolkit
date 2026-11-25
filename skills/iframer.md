@@ -219,7 +219,7 @@ The result of reverse engineering is always LOCAL files: an API map, auth config
 
 ### Tab bridge: Node scripts through a logged-in tab (no cookie)
 
-`client.mjs`, recipes and any Node script can send their requests through a tab that is already logged in. The tab does the fetch with its own login (HttpOnly included); no cookie is read, exported or saved, and no tool call is needed per request. Use it when `iframer auth` says the session is locked (exit 2), for scheduled or long script runs, and whenever the user says not to touch cookies.
+`client.mjs`, recipes and any Node script can send their requests through a tab that is already logged in. The tab does the fetch with its own login (HttpOnly included); no cookie leaves the browser, nothing is exported or saved, and no tool call is needed per request. Use it when `iframer auth` says the session is locked (exit 2), for scheduled or long script runs, and whenever the user says not to touch cookies.
 
 ```
 1. iframer bridge attach <host> [--for t3|playwright-mcp|any]   starts the bridge, prints ONE expression
@@ -232,6 +232,8 @@ The result of reverse engineering is always LOCAL files: an API map, auth config
 - `CSP_BLOCKED`: the site forbids the page from connecting to 127.0.0.1 (many big sites do). The bridge can't be used there: use `iframer auth`, in-page replay, or the extension. Do not retry.
 - `NO_BRIDGE` / `WAITING`: run `iframer bridge attach <host>` again and evaluate the fresh expression. Chrome 147+ may ask to allow local network access for the site: the user allows it once.
 - A page reload, a navigation to another page load or a closed tab drops it: evaluate the same expression again. A bridge restart does not: the tab reconnects by itself (a background tab can take a minute).
+- Attach first, then start the script: a run decides once (tab or saved session) and never switches half-way.
+- A write never follows a redirect (it comes back as HTTP 302); a read that ends on another site is refused. `WRONG_TAB`: the expression only works on the exact host it was made for.
 - `stopped: tab bridge: ...` from a script: do the one step it names. `A write may have reached the site`: check the site first, never re-send it blindly. `was not sent`: safe to run again once the tab is back.
 - It only carries same-site requests from the page. It can't click, navigate, take screenshots or read cookies: that is still `execute` / extension mode.
 - Other scripts (not a generated client): `iframer bridge client --out <file>` writes a 1-file module; `(await bridgeFetch(url, init)) ?? <own request with the saved session>`.

@@ -50,12 +50,14 @@ export function masterKey(): string {
 }
 
 /**
- * The key a tab presents. It is bound to the site, the tab name and read-only,
- * so a key seen by one site's page opens nothing for another site, and a page
- * can't drop its own read-only limit.
+ * The key a tab presents. It is bound to the exact origin of the tab, the site
+ * it may fetch, the tab name and read-only. The page can see its own key (it
+ * opens the socket), so the key must be useless anywhere else: another origin,
+ * even a sibling subdomain, can't attach with it, and a page can't drop its
+ * own read-only limit.
  */
-export function tabKey(master: string, site: string, name: string, readOnly: boolean): string {
-  return crypto.createHmac("sha256", master).update(`${site}\n${name}\n${readOnly ? "ro" : "rw"}`).digest("hex").slice(0, 32);
+export function tabKey(master: string, origin: string, site: string, name: string, readOnly: boolean): string {
+  return crypto.createHmac("sha256", master).update(`${origin.toLowerCase()}\n${site}\n${name}\n${readOnly ? "ro" : "rw"}`).digest("hex").slice(0, 32);
 }
 
 export function safeEqual(a: string, b: string): boolean {
@@ -71,11 +73,24 @@ export function siteFor(host: string): string {
   return host.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^www\./, "");
 }
 
-/** A site is a hostname (with a port only for loopback test sites). One label alone ("com") is refused. */
+/**
+ * Suffixes under which anyone can register a name: a site must be narrower than these. Not the whole public suffix
+ * list (iframer ships no such list): the common ones, so a slip like --site co.uk is refused.
+ */
+const SHARED_SUFFIXES = new Set([
+  "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "com.br", "net.br", "org.br", "com.au", "net.au", "org.au", "co.nz", "co.jp", "ne.jp", "or.jp",
+  "co.in", "co.kr", "co.za", "com.mx", "com.ar", "com.co", "com.tr", "com.cn", "com.hk", "com.sg", "com.tw", "co.il", "co.id", "com.my", "com.ph",
+  "github.io", "gitlab.io", "vercel.app", "netlify.app", "herokuapp.com", "pages.dev", "workers.dev", "web.app", "firebaseapp.com", "appspot.com",
+  "cloudfront.net", "amazonaws.com", "azurewebsites.net", "onrender.com", "fly.dev", "glitch.me", "repl.co", "blogspot.com", "wordpress.com",
+  "ngrok.io", "ngrok-free.app", "trycloudflare.com", "s3.amazonaws.com", "myshopify.com", "webflow.io", "framer.app", "lovable.app",
+]);
+
+/** A site is a hostname (with a port only for loopback test sites). One label alone ("com") or a shared suffix ("co.uk") is refused. */
 export function validSite(site: string): boolean {
   const [host, port, extra] = site.split(":");
   if (extra !== undefined || (port !== undefined && !/^\d{1,5}$/.test(port))) return false;
   if (LOOPBACK.test(host)) return true;
+  if (SHARED_SUFFIXES.has(host)) return false;
   return port === undefined && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host) && !IP.test(host);
 }
 

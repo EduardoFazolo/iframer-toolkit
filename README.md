@@ -377,7 +377,7 @@ What it guarantees:
 
 ### Tab bridge: Node scripts through a logged-in tab
 
-When the session can't be exported (on Windows a running T3 Code or Chrome locks its cookie store), or you don't want any cookie read at all, a Node script can send its requests through a tab that is already logged in. The tab does the fetch with its own login, HttpOnly cookies included. No cookie is read, exported or saved, and the agent makes no tool call per request, so scheduled scripts work.
+When the session can't be exported (on Windows a running T3 Code or Chrome locks its cookie store), or you don't want any cookie taken out of the browser, a Node script can send its requests through a tab that is already logged in. The tab does the fetch with its own login, HttpOnly cookies included. No cookie leaves the browser, nothing is exported or saved, and the agent makes no tool call per request, so scheduled scripts work.
 
 ```bash
 iframer bridge attach www.example.com   # starts the bridge, prints ONE expression
@@ -392,8 +392,8 @@ Node script -> POST 127.0.0.1/fetch (token) -> bridge daemon -> WebSocket -> rel
 
 - **Off unless a tab is attached.** With nothing attached, `client.mjs` runs exactly as before.
 - **Any browser where one line of JS can run**: T3 Code (`preview_evaluate`), Playwright MCP (`browser_evaluate`), a DevTools console. The relay patches nothing: one WebSocket and the page's own `fetch`.
-- **Safe by construction.** 127.0.0.1 only; scripts need a per-run token and web pages are refused; a tab is accepted only with the key minted for its site and from that site's Origin; a request goes only to a tab of its own site. Nothing is stored.
-- **Built for tabs that misbehave.** A frozen background tab is detected in 5 s, remembered and skipped. At most 4 reads per site are in flight, the rest wait in line. A read may move to another tab; a write is never sent twice, and the error says whether it may have reached the site.
+- **Safe by construction.** 127.0.0.1 only; scripts need a per-run token and web pages are refused; a tab is accepted only with the key minted for its exact origin; a request goes only to a tab of its own site, a write never follows a redirect and a read that ends on another site is refused. Nothing is stored.
+- **Built for tabs that misbehave.** A frozen background tab is detected in 5 s, remembered and skipped. At most 4 reads per site are in flight, the rest wait in line. A read may move to another tab; a write is never sent twice (the tab holds it until the bridge says go), and the error says whether it may have reached the site. A run decides once, tab or saved session, and never switches half-way.
 - **Limits.** Sites whose CSP forbids connecting to 127.0.0.1 answer `CSP_BLOCKED` (use `iframer auth`, in-page replay or the extension there). A page reload drops the relay: evaluate the expression again. A bridge restart does not: the tab reconnects by itself. Responses are capped at 32 MB and streams are refused. It carries requests only: no clicks, navigation or screenshots.
 - **Other scripts.** `iframer bridge client --out tab-bridge.mjs` writes a 1-file module: `(await bridgeFetch(url, init)) ?? <your own request>`.
 

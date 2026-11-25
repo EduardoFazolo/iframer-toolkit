@@ -66,13 +66,15 @@ check("a foreign Host header (DNS rebinding) -> 403", rawHost === 403, rawHost);
 check("no /health for the extension's port scan to find", (await fetch(base + "/health")).status !== 200);
 
 const master = fs.readFileSync(path.join(data, "bridge.key"), "utf8").trim();
-const key = (site, name = "default", ro = false) => state.tabKey(master, site, name, ro);
+const key = (origin, site, name = "default", ro = false) => state.tabKey(master, origin, site, name, ro);
+const APP = "https://app.example.com";
 // A fake tab: a WebSocket client that says which page it is (Origin) and answers like the relay.
 function fakeTab({ site, origin, k, name = "default", ro = false, answer = (q) => ({ status: 200, type: "basic", headers: { "content-type": "text/plain" }, body64: Buffer.from(`${q.method} ${q.url}`).toString("base64") }) }) {
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/relay?s=${encodeURIComponent(site)}&n=${name}${ro ? "&ro=1" : ""}&k=${k}`, { headers: origin ? { Origin: origin } : {} });
   const t = { ws, got: [], opened: new Promise((ok) => { ws.on("open", () => ok(true)); ws.on("error", () => ok(false)); ws.on("unexpected-response", () => ok(false)); }) };
   ws.on("message", (d) => {
     const q = JSON.parse(String(d));
+    if (q.go || q.abort) return;
     t.got.push(q);
     ws.send(JSON.stringify({ id: q.id, ack: 1 }));
     ws.send(JSON.stringify({ id: q.id, ...answer(q) }));
@@ -81,16 +83,19 @@ function fakeTab({ site, origin, k, name = "default", ro = false, answer = (q) =
 }
 const refused = async (o) => !(await fakeTab(o).opened);
 check("relay with a wrong key is refused", await refused({ site: "app.example.com", origin: "https://app.example.com", k: "0".repeat(32) }));
-check("relay from another site's page is refused, even with a valid key", await refused({ site: "app.example.com", origin: "https://evil.example", k: key("app.example.com") }));
-check("one site's key opens nothing for another site", await refused({ site: "other.example.com", origin: "https://other.example.com", k: key("app.example.com") }));
-check("relay without an Origin is refused", await refused({ site: "app.example.com", origin: null, k: key("app.example.com") }));
-check("a page can't drop its own read-only limit", await refused({ site: "app.example.com", origin: "https://app.example.com", k: key("app.example.com", "default", true) }));
-check("a plain-http page is refused", await refused({ site: "app.example.com", origin: "http://app.example.com", k: key("app.example.com") }));
+check("relay from another site's page is refused, even with a valid key", await refused({ site: "app.example.com", origin: "https://evil.example", k: key(APP, "app.example.com") }));
+check("one site's key opens nothing for another site", await refused({ site: "other.example.com", origin: "https://other.example.com", k: key(APP, "app.example.com") }));
+check("a key is useless from a sibling subdomain of the same site", await refused({ site: "example.com", origin: "https://evil.example.com", k: key(APP, "example.com") }));
+check("relay without an Origin is refused", await refused({ site: "app.example.com", origin: null, k: key(APP, "app.example.com") }));
+check("a page can't drop its own read-only limit", await refused({ site: "app.example.com", origin: APP, k: key(APP, "app.example.com", "default", true) }));
+check("a plain-http page is refused", await refused({ site: "app.example.com", origin: "http://app.example.com", k: key("http://app.example.com", "app.example.com") }));
+check("a shared suffix is refused as a site, even with a key for it", await refused({ site: "co.uk", origin: "https://shop.co.uk", k: key("https://shop.co.uk", "co.uk") }));
+check("the daemon is still up after the refusals", (await call("/status")).status === 200);
 
 let r = await viaTab("https://app.example.com/x");
 check("nothing attached -> 503 (the caller uses its saved session)", r.http === 503 && /no tab attached/.test(r.error), r);
 
-const a = fakeTab({ site: "app.example.com", origin: "https://app.example.com", k: key("app.example.com") });
+const a = fakeTab({ site: "app.example.com", origin: APP, k: key(APP, "app.example.com") });
 check("relay with its site's key and Origin is accepted", await a.opened);
 r = await viaTab("https://app.example.com/x?y=1", { headers: { "x-test": "1" } });
 check("a request is carried by the tab", r.http === 200 && Buffer.from(r.body64, "base64").toString() === "GET https://app.example.com/x?y=1" && a.got[0].headers["x-test"] === "1" && a.got[0].notAfter > Date.now() - 100, r);
@@ -99,7 +104,7 @@ check("a request for another site never reaches this tab", r.http === 503 && a.g
 r = await viaTab("https://evil.example/app.example.com");
 check("...whatever its path says", r.http === 503 && a.got.length === 1, r);
 
-const b = fakeTab({ site: "app.example.com", origin: "https://sub.app.example.com", k: key("app.example.com") });
+const b = fakeTab({ site: "app.example.com", origin: "https://sub.app.example.com", k: key("https://sub.app.example.com", "app.example.com") });
 await b.opened;
 r = await viaTab("https://app.example.com/2");
 check("a second tab attaches, the older one stays, the newest answers", r.http === 200 && b.got.length === 1 && a.ws.readyState === WebSocket.OPEN && (await (await call("/status")).json()).tabs.length === 2, r);
@@ -107,13 +112,13 @@ b.ws.close(); await sleep(100);
 r = await viaTab("https://app.example.com/3");
 check("...and the older one still answers when the newest is gone", r.http === 200 && a.got.length === 2, r);
 
-const ro = fakeTab({ site: "ro.example.com", origin: "https://ro.example.com", k: key("ro.example.com", "default", true), ro: true });
+const ro = fakeTab({ site: "ro.example.com", origin: "https://ro.example.com", k: key("https://ro.example.com", "ro.example.com", "default", true), ro: true });
 await ro.opened;
 r = await viaTab("https://ro.example.com/x", { method: "POST", body: "{}" });
 check("a read-only tab: the daemon refuses a write before it reaches the tab", r.http === 200 && /read-only/.test(r.error) && ro.got.length === 0, r);
 check("...and still reads", (await viaTab("https://ro.example.com/x")).status === 200);
 
-const named = fakeTab({ site: "app.example.com", origin: "https://app.example.com", k: key("app.example.com", "work"), name: "work" });
+const named = fakeTab({ site: "app.example.com", origin: APP, k: key(APP, "app.example.com", "work"), name: "work" });
 await named.opened;
 r = await viaTab("https://app.example.com/n", { tab: "work" });
 check("--name: a request for tab \"work\" goes to that tab only", r.http === 200 && named.got.length === 1 && a.got.length === 2, r);
@@ -130,9 +135,80 @@ check("attach refuses a bare suffix as a site", /^EXIT 1/.test(text) && /not a s
 text = cli(["bridge", "attach", "app.example.com", "--site", "other.com"]);
 check("attach refuses a --site that does not cover the host", /^EXIT 1/.test(text) && /does not cover/.test(text), text);
 text = cli(["bridge", "attach", "www.example.com", "--for", "playwright-mcp", "--read-only", "--name", "work"]);
-check("attach prints the steps for the chosen tool", /browser_evaluate/.test(text) && /example\.com and its subdomains/.test(text) && /read-only/.test(text) && /"ro":1/.test(text) && text.includes(key("example.com", "work", true)), text);
+check("attach prints the steps for the chosen tool", /browser_evaluate/.test(text) && /example\.com and its subdomains/.test(text) && /read-only/.test(text) && /"ro":1/.test(text) && text.includes(key("https://www.example.com", "example.com", "work", true)), text);
+text = cli(["bridge", "attach", "shop.co.uk", "--site", "co.uk"]);
+check("attach refuses a shared suffix as --site", /^EXIT 1/.test(text) && /not a site/.test(text), text);
 
-// ── 2. Real Chrome: the relay, client.mjs through the tab ─────────────────
+// ── 2. The Node client against a scripted daemon: what it does when things break half-way ──
+console.log("client, scripted daemon");
+{
+  const fdata = fs.mkdtempSync(path.join(os.tmpdir(), "ifb-fake-"));
+  let steps = [], probeAttached = false;
+  const seen = [];
+  const json = (res, code, body) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(body)); };
+  const fakeDaemon = http.createServer((req, res) => {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => {
+      const q = JSON.parse(raw || "{}");
+      if (req.url === "/probe") return json(res, 200, { attached: probeAttached });
+      seen.push(`${q.method} ${q.url}`);
+      const step = steps.shift() || "ok";
+      if (step === "drop") return req.socket.destroy(); // the daemon took the request, then the connection died
+      if (step === "cut") { res.writeHead(200, { "content-type": "application/json" }); res.write('{"status":2'); return req.socket.destroy(); }
+      if (step === "none") return json(res, 503, { error: "no tab attached for x" });
+      json(res, 200, { status: 200, type: "basic", headers: {}, body64: Buffer.from("via-tab").toString("base64") });
+    });
+  });
+  await new Promise((ok) => fakeDaemon.listen(0, "127.0.0.1", ok));
+  const fport = fakeDaemon.address().port;
+  const mod = path.join(fdata, "tab-bridge.mjs");
+  if (CLI) cli(["bridge", "client", "--out", mod]); else bridge.writeClientModule(mod);
+  const A = "https://a.example.com/x", B = "https://b.example.com/x";
+  const run = (plan, body, o = {}) => new Promise((ok) => {
+    steps = [...plan]; seen.length = 0; probeAttached = !!o.attached;
+    fs.writeFileSync(path.join(fdata, "bridge.json"), JSON.stringify({ port: o.port || fport, token: "t", pid: process.pid, started: "", v: 1 }));
+    const file = path.join(fdata, "case.mjs");
+    fs.writeFileSync(file, `import { bridgeFetch } from "./tab-bridge.mjs";
+const A = ${JSON.stringify(A)}, B = ${JSON.stringify(B)};
+const one = (url, init) => bridgeFetch(url, init).then(async (r) => (r ? await r.text() : null), (e) => "ERR " + e.message);
+const out = [];
+${body}
+console.log(JSON.stringify(out));
+`);
+    const c = spawn("node", [file], { env: { PATH: process.env.PATH, HOME: os.homedir(), IFRAMER_DATA_DIR: fdata } });
+    let o2 = "";
+    c.stdout.on("data", (d) => (o2 += d)); c.stderr.on("data", (d) => (o2 += d));
+    c.on("close", () => { try { ok(JSON.parse(o2.trim().split("\n").pop())); } catch { ok([o2]); } });
+  });
+  const post = `{ method: "POST", body: "{}" }`;
+
+  let o = await run(["drop"], `out.push(await one(A, ${post}));`);
+  check("a write whose connection to the daemon dies half-way is an error, never null (no second send)", /^ERR .*may have reached the site/.test(String(o[0])) && seen.length === 1, o);
+  o = await run(["cut"], `out.push(await one(A, ${post}));`);
+  check("...same when the daemon's answer is cut off", /^ERR .*may have reached the site/.test(String(o[0])), o);
+  o = await run(["drop"], `out.push(await one(A));`);
+  check("a read in the same spot falls back (null)", o[0] === null, o);
+  const closed = await freePort();
+  o = await run([], `out.push(await one(A, ${post}));`, { port: closed });
+  check("a write the daemon never got (connection refused) is null: safe to send the other way", o[0] === null && seen.length === 0, o);
+
+  o = await run(["ok", "none"], `out.push(await one(A)); out.push(await one(A));`);
+  check("a host that used the tab never falls back half-way", o[0] === "via-tab" && /^ERR .*was using the tab/.test(String(o[1])), o);
+  o = await run(["none", "ok"], `out.push(await one(A)); out.push(await one(A));`);
+  check("a host that started on its saved session stays there, even when a tab shows up", o[0] === null && o[1] === null && seen.length === 1, { o, seen: [...seen] });
+  o = await run(["ok", "none"], `out.push(await one(A)); out.push(await one(B));`);
+  check("each host decides for itself", o[0] === "via-tab" && o[1] === null, o);
+
+  o = await run([], `const f = new FormData(); f.set("a", "1"); out.push(await one(A, { method: "POST", body: f }));`, { attached: false });
+  check("a FormData body with no tab attached falls back (null)", o[0] === null && seen.length === 0, o);
+  o = await run([], `const f = new FormData(); f.set("a", "1"); out.push(await one(A, { method: "POST", body: f }));`, { attached: true });
+  check("a FormData body with a tab attached is refused before it is sent", /^ERR .*can't go through the tab/.test(String(o[0])) && seen.length === 0, o);
+  fakeDaemon.close();
+  fs.rmSync(fdata, { recursive: true, force: true });
+}
+
+// ── 3. Real Chrome: the relay, client.mjs through the tab ─────────────────
 console.log("real Chrome");
 const { server, log, port } = await startFixture();
 const origin = `http://127.0.0.1:${port}`;
@@ -166,7 +242,13 @@ fs.writeFileSync(path.join(dir, "api.json"), JSON.stringify({ origin, endpoints:
 ] }));
 fs.writeFileSync(path.join(dir, "auth.json"), JSON.stringify({ authorization: { from: "localStorage", key: "session", json: true, path: ["user", "token"], prefix: "Bearer " } }));
 kit.writeOutputs(host);
-kit.saveRecipe({ name: "activeCampaigns", host, path: "/{community}/dashboard/campaigns", rsc: true, find: "campaigns", pick: "campaigns.{title}", where: "active=true", count: true });
+// With BRIDGE_CLI the client.mjs is written by the built CLI, so the bundled template is what runs below.
+if (CLI) cli(["recipe", host, "activeCampaigns", "--path", "/{community}/dashboard/campaigns", "--rsc", "--find", "campaigns", "--pick", "campaigns.{title}", "--where", "active=true", "--count", "--quiet"]);
+else kit.saveRecipe({ name: "activeCampaigns", host, path: "/{community}/dashboard/campaigns", rsc: true, find: "campaigns", pick: "campaigns.{title}", where: "active=true", count: true });
+// Recipes named like the client's own internals must not break the regenerated module.
+for (const name of ["os", "__tab", "__tabFetch", "__tabHome"]) {
+  if (CLI) cli(["recipe", host, name, "--path", "/api/x", "--quiet"]); else kit.saveRecipe({ name, host, path: "/api/x" });
+}
 const client = path.join(dir, "client.mjs");
 // A stub iframer: if the client ever asks for a cookie (iframer auth), this file appears.
 const bin = fs.mkdtempSync(path.join(os.tmpdir(), "ifb-bin-"));
@@ -184,6 +266,29 @@ try {
   r = await node(["get", "/api/private"]);
   check("no tab attached: client.mjs runs as before (asks iframer auth, then 401)", /401/.test(r) && fs.existsSync(asked), r);
   fs.rmSync(asked, { force: true });
+  r = await node([]);
+  check("recipes named os, __tab, ... do not break the client", /recipes: .*\bos\b/.test(r) && /__tabFetch/.test(r), r);
+  fs.rmSync(asked, { force: true });
+
+  // A run that starts on its saved session while no tab is attached: it must stay there after one attaches.
+  const marker = path.join(bin, "go");
+  const pinned = path.join(dir, "pinned.mjs");
+  fs.writeFileSync(pinned, `import fs from "node:fs";
+import { get } from "./client.mjs";
+const first = await get("/api/echo");
+console.log("first");
+while (!fs.existsSync(${JSON.stringify(marker)})) await new Promise((r) => setTimeout(r, 50));
+const second = await get("/api/echo");
+console.log(JSON.stringify({ first: first.sentCookie, second: second.sentCookie }));
+`);
+  fs.writeFileSync(path.join(dir, ".env"), `COOKIE=sid=${SECRETS.cookie}; saved=1\nAUTHORIZATION=WRONG-ACCOUNT\n`);
+  let pinnedOut = "";
+  const pinnedRun = new Promise((ok) => {
+    const c = spawn("node", [pinned], { env: { PATH: process.env.PATH, HOME: os.homedir(), IFRAMER_DATA_DIR: data, IFRAMER_NO_AUTO_AUTH: "1" } });
+    c.stdout.on("data", (d) => (pinnedOut += d)); c.stderr.on("data", (d) => (pinnedOut += d));
+    c.on("close", () => ok(pinnedOut.trim()));
+  });
+  await until(() => /first/.test(pinnedOut), 8000);
 
   const strict = await openTab("/page1?csp=strict");
   let t0 = Date.now();
@@ -196,6 +301,13 @@ try {
   t0 = Date.now();
   res = await tab.evaluate(EXPR);
   check("one evaluate call attaches the tab", res === "ATTACHED" && Date.now() - t0 < 3000, `${res} (${Date.now() - t0} ms)`);
+  fs.writeFileSync(marker, "1");
+  r = await pinnedRun;
+  const pin = (() => { try { return JSON.parse(r.split("\n").pop()); } catch { return {}; } })();
+  check("a run that started on the saved session stays on it after a tab attaches", /saved=1/.test(String(pin.first)) && /saved=1/.test(String(pin.second)), r);
+  const wrongTab = cli(["bridge", "attach", "www.example.com", "--print"]);
+  res = await tab.evaluate(wrongTab);
+  check("an expression made for another host answers WRONG_TAB", String(res).startsWith("WRONG_TAB") && (await bridge.ping()).tabs.length === 1, res);
   check("a second evaluate is a no-op", (await tab.evaluate(EXPR)) === "ALREADY_ATTACHED");
   check("the relay leaves no enumerable global and patches nothing", await tab.evaluate(`Object.keys(window).every((k) => !/ifb|bridge|relay/i.test(k)) && /\\[native code\\]/.test(String(window.fetch)) && /\\[native code\\]/.test(String(window.WebSocket))`));
   text = cli(["bridge", "status"]);
@@ -207,6 +319,9 @@ try {
   check("...and never asked for a cookie (no iframer auth)", !fs.existsSync(asked));
   r = await node([]);
   check("the client says requests go through the tab", /tab: attached/.test(r) && !/COOKIE missing/.test(r), r);
+  r = await node(["get", "/api/me"]);
+  check("the page's own auth token wins over a saved one from another account (.env has a wrong one)", r.includes("Seeded Person"), r);
+  fs.rmSync(path.join(dir, ".env"));
   r = await node(["get", "/api/me"]);
   check("an auth header the page keeps in localStorage is filled in by the tab", r.includes("Seeded Person"), r);
   r = await node(["activeCampaigns", "community=acme"]);
@@ -237,6 +352,8 @@ out.manual = await j("/api/redirect-me", { redirect: "manual" });
 out.stream = await j("/api/stream").catch((e) => e.message);
 out.huge = await j("/api/huge").catch((e) => e.message);
 out.cross = await j("/api/x").then(() => bridgeFetch("https://evil.example/x")).then((r) => r, (e) => e.message);
+out.writeRedirect = await j("/api/redirect-me", { method: "POST", body: "{}" });
+out.out = await j("/api/redirect-out").catch((e) => e.message);
 console.log(JSON.stringify(out));
 `);
   let out = {};
@@ -252,7 +369,9 @@ console.log(JSON.stringify(out));
   check("a manual redirect shows as 302", out.manual?.status === 302, out.manual);
   check("a streamed response is refused, not left hanging", /streamed response/.test(String(out.stream)), out.stream);
   check("a response over 32 MB is refused", /32 MB/.test(String(out.huge)), out.huge);
-  check("after a request used the tab, a site with no tab is an error, not a silent fallback", /stopped: tab bridge/.test(String(out.cross)), out.cross);
+  check("another host with no tab is null, whatever this one uses", out.cross === null, out.cross);
+  check("a write never follows a redirect: it comes back as 302 and the target is not requested", out.writeRedirect?.status === 302 && !log.some((l) => l.path === "/api/redirect-target" && l.method === "POST") && log.filter((l) => l.path === "/api/redirect-target").length === 1, { r: out.writeRedirect, hits: log.filter((l) => /redirect/.test(l.path)) });
+  check("a read that is redirected to another site is refused", /redirected to another site/.test(String(out.out)), out.out);
   text = cli(["bridge", "status"]);
   check("the tab is still answering after the refused stream and download", /attached/.test(text) && !/NOT ANSWERING/.test(text), text);
 

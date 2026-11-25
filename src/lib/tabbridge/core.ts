@@ -17,11 +17,18 @@
  * - At most MAX_ACTIVE reads per site are in flight, across every script. The
  *   rest wait in line. Writes never wait.
  *
- * Receipt and deadline: the tab confirms each request before it fetches
- * ({id, ack}). No receipt in ACK_MS means the page is frozen, so a frozen tab
- * costs seconds instead of a full request timeout. Each request also carries
- * `notAfter`; a tab that wakes up later drops it. So a write nobody confirmed
- * was not sent, and is reported that way.
+ * Receipt: the tab confirms each request ({id, ack}). No receipt in ACK_MS means
+ * the page is frozen, so a frozen tab costs seconds instead of a full request
+ * timeout. Each request also carries `notAfter`; a tab that wakes up later
+ * drops it.
+ *
+ * Writes go in two steps: the tab confirms, then waits for {id, go} before it
+ * fetches. Only this side sends the go, and only while it is still waiting. So
+ * "no receipt" is certain to mean "not sent" (a late receipt gets no go), and
+ * from the go on, any failure is reported as "may have reached the site".
+ *
+ * A read whose script went away is aborted in the tab ({id, abort}); it keeps
+ * its slot until the tab answers, so the site never sees more than MAX_ACTIVE.
  */
 
 export interface Tab {
@@ -105,6 +112,10 @@ interface Wait {
   /** The tab that has the request now. */
   tab?: string;
   acked: boolean;
+  /** A write the tab was told to send ({go}). Before that it was certainly not sent. */
+  released: boolean;
+  /** The script went away; the read is only kept until its tab lets go of it. */
+  cancelled: boolean;
   tried: Set<string>;
   last: string;
   active: boolean;
@@ -152,8 +163,10 @@ export class Bridge {
     for (const [id, w] of this.waiting) {
       if (w.tab !== tab.id) continue;
       w.last = `the ${w.site} tab closed before answering`;
-      // The page may have sent the request before it went away.
-      if (w.read) this.dispatch(id, w); else this.finish(id, w, { error: w.last, dead: true, maybeSent: true });
+      if (w.read) this.dispatch(id, w);
+      // Released: the page may have sent it before it went away. Not released: it never started.
+      else if (w.released) this.finish(id, w, { error: w.last, dead: true, maybeSent: true });
+      else this.finish(id, w, { error: `${w.last}. The write was not sent`, dead: true });
     }
   }
 
@@ -165,8 +178,15 @@ export class Bridge {
     const w = this.waiting.get(id);
     if (!w || w.tab !== tab.id) return; // late answer from a tab we already moved on from
     if (m.ack) {
+      if (w.acked) return;
       w.acked = true;
       clearTimeout(w.timer);
+      if (!w.read) {
+        // The tab holds a write until this go. From here on it may reach the site.
+        try { tab.send({ id, go: 1 }); }
+        catch { return this.finish(id, w, { error: `the ${w.site} tab closed before the write was released. The write was not sent`, dead: true }); }
+        w.released = true;
+      }
       const ms = w.read ? this.t.tryMs : this.t.writeMs;
       w.timer = setTimeout(() => {
         tab.stalled = tab.probed = this.now();
@@ -184,7 +204,9 @@ export class Bridge {
     const err = typeof m.error === "string" ? m.error : "";
     if (err && NETWORK_ERR.test(err)) {
       w.last = `the ${w.site} tab could not reach ${w.site} (${err})`;
-      if (w.read) this.dispatch(id, w); else this.finish(id, w, { error: w.last, dead: true, maybeSent: true });
+      if (w.read) this.dispatch(id, w);
+      else if (w.released) this.finish(id, w, { error: w.last, dead: true, maybeSent: true });
+      else this.finish(id, w, { error: `${w.last}. The write was not sent`, dead: true });
       return;
     }
     const { id: _id, ack: _ack, expired: _expired, ...reply } = m;
@@ -218,17 +240,26 @@ export class Bridge {
   /** Starts a request. `done` gets the reply, or null after cancel(). Returns the id for cancel(). */
   request(route: { site: string; pool: string }, job: Job, done: Done): string {
     const id = `${(++this.seq).toString(36)}${Math.random().toString(36).slice(2, 10)}`;
-    const w: Wait = { done, site: route.site, pool: route.pool, job, read: isRead(job.method), acked: false, tried: new Set(), last: "", active: false };
+    const w: Wait = { done, site: route.site, pool: route.pool, job, read: isRead(job.method), acked: false, released: false, cancelled: false, tried: new Set(), last: "", active: false };
     this.waiting.set(id, w);
     this.lastUse = this.now();
     this.run(id, w);
     return id;
   }
 
-  /** The script went away (killed, timed out): give its slot or its place in line back. */
+  /**
+   * The script went away (killed, timed out). A read waiting in line just leaves. A read already in a tab is aborted
+   * there and keeps its slot until the tab answers (or goes away, or its timer runs out): freeing it at once would put
+   * a fifth request on the site while the cancelled one still runs. A write is never cut off: it only stops waiting.
+   */
   cancel(id: string): void {
     const w = this.waiting.get(id);
-    if (w) this.finish(id, w, null);
+    if (!w) return;
+    const tab = w.tab ? (this.pools.get(w.pool) ?? []).find((x) => x.id === w.tab) : undefined;
+    if (!w.read || !w.active || !tab) return this.finish(id, w, null);
+    w.cancelled = true;
+    w.done = () => {};
+    try { tab.send({ id, abort: 1 }); } catch { this.finish(id, w, null); }
   }
 
   private finish(id: string, w: Wait, reply: Reply | null): void {
@@ -267,6 +298,7 @@ export class Bridge {
    */
   private dispatch(id: string, w: Wait): void {
     clearTimeout(w.timer);
+    if (w.cancelled) return this.finish(id, w, null); // nobody is waiting: never try another tab
     const now = this.now();
     const all = this.pools.get(w.pool) ?? [];
     const usable = all.filter((x) => w.read || !x.readOnly);
@@ -286,6 +318,7 @@ export class Bridge {
     if (tab.stalled) tab.probed = now;
     w.tab = tab.id;
     w.acked = false;
+    w.released = false;
     w.tried.add(tab.id);
     // The tab drops the request if it only wakes up after this, so "no receipt" below means "not sent".
     const notAfter = Date.now() + Math.round(this.t.ackMs * 0.8);

@@ -144,6 +144,9 @@ export function startFixture() {
         return res.end(`<!doctype html><title>open</title><h1>open</h1><script src="/app.js"></script>`);
       }
       if (p === "/api/echo") return json(200, { method: req.method, cookieOk, body: raw, contentType: req.headers["content-type"] || null, referer: req.headers.referer || null, sentCookie: req.headers.cookie || null, x: req.headers["x-test"] || null });
+      // A redirect that leaves the site, to a target that allows it (CORS): the relay must refuse the answer.
+      if (p === "/api/redirect-out") { res.writeHead(302, { location: `http://localhost:${server.address().port}/api/cors-echo` }); return res.end(); }
+      if (p === "/api/cors-echo") return json(200, { reached: "another site" }, { "access-control-allow-origin": req.headers.origin || "*", "access-control-allow-credentials": "true" });
       if (p === "/api/stream") { res.writeHead(200, { "content-type": "text/event-stream" }); res.write("data: 1\n\n"); return; }
       if (p === "/api/huge") { res.writeHead(200, { "content-type": "application/octet-stream", "content-length": String(40 * 1024 * 1024) }); res.write("x"); return; }
       if (p === "/api/bytes") { res.writeHead(200, { "content-type": "application/octet-stream" }); return res.end(Buffer.from([0, 255, 1, 254, 128, 10, 13])); }

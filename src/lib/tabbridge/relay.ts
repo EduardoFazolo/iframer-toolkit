@@ -9,18 +9,26 @@
  * Serialized with Function.prototype.toString, so it must stay self-contained
  * plain JavaScript: no imports, no outer variables, no TypeScript syntax.
  *
- * Answers (a string, within ~4 s): ATTACHED, ALREADY_ATTACHED, CSP_BLOCKED: ...,
- * NO_BRIDGE: ..., WAITING: ...
+ * Answers (a string, within ~4 s): ATTACHED, ALREADY_ATTACHED, WRONG_TAB: ...,
+ * CSP_BLOCKED: ..., NO_BRIDGE: ..., WAITING: ...
  * It reconnects by itself every 3 s while the page lives (a background tab can
  * take a minute). A page reload or navigation ends it: attach again.
+ *
+ * Messages from the daemon: {id, url, method, ..., notAfter} a request,
+ * {id, go} release a held write, {id, abort} stop a read nobody waits for.
+ * A read is confirmed ({id, ack}) and fetched at once. A write is confirmed and
+ * then HELD until its go: the daemon only sends the go while it still waits, so
+ * a write the daemon gave up on never starts.
  */
 export function tabRelay(c) {
   var MAX = 32 * 1024 * 1024;
+  if (location.origin !== c.o) return "WRONG_TAB: this expression is for " + c.o + " and this tab is on " + location.origin + ". Open the tab on " + c.o + ", or run `iframer bridge attach " + location.host + "` for this one.";
   var KEY = Symbol.for("iframer.bridge");
+  var id = [c.port, c.site, c.name, c.ro ? 1 : 0].join("|");
   var old = window[KEY];
-  if (old && old.k === c.k && old.port === c.port && !old.stopped && (old.open || old.connecting)) return old.open ? "ALREADY_ATTACHED" : old.first;
+  if (old && old.id === id && !old.stopped && (old.open || old.connecting)) return old.open ? "ALREADY_ATTACHED" : old.first;
   if (old) { old.stopped = true; try { old.ws && old.ws.close(); } catch (e) {} }
-  var st = { k: c.k, port: c.port, open: false, ever: false, stopped: false, connecting: true, ws: null, first: null };
+  var st = { id: id, open: false, ever: false, stopped: false, connecting: true, ws: null, first: null };
   try { Object.defineProperty(window, KEY, { value: st, configurable: true, enumerable: false, writable: true }); } catch (e) { window[KEY] = st; }
 
   var host = c.site.split(":")[0];
@@ -58,58 +66,88 @@ export function tabRelay(c) {
     }
     return step();
   }
+  // Where the page keeps an auth value its own code sends as a header (names only were recorded when the site was mapped).
+  function stored(s) {
+    var v = null;
+    try {
+      if (s.from === "localStorage" || s.from === "sessionStorage") {
+        v = window[s.from] && window[s.from].getItem(s.key);
+        if (v != null && (s.json || s.path)) { v = JSON.parse(v); (s.path || []).forEach(function (k) { v = v == null ? v : v[k]; }); }
+      } else if (s.from === "cookie") {
+        document.cookie.split(/;\s*/).forEach(function (ck) { if (ck.indexOf(s.key + "=") === 0) v = decodeURIComponent(ck.slice(s.key.length + 1)); });
+      } else if (s.from === "meta") {
+        var m = document.querySelector('meta[name="' + s.key + '"]');
+        v = m && m.getAttribute("content");
+      }
+    } catch (e) { v = null; }
+    return typeof v === "string" && v ? (s.prefix || "") + v : null;
+  }
 
-  function handle(ws, q) {
+  var held = {}, running = {};
+  function request(ws, q) {
     function reply(o) { o.id = q.id; try { ws.send(JSON.stringify(o)); } catch (e) {} }
     // Woke up after the deadline (the tab was frozen): the daemon already gave up on this one. Do not send it.
     if (q.notAfter && Date.now() > q.notAfter) return reply({ expired: 1 });
-    reply({ ack: 1 });
-    Promise.resolve().then(function () {
-      var method = String(q.method || "GET").toUpperCase(), read = method === "GET" || method === "HEAD";
-      var u = new URL(q.url, location.href);
-      if (!mine(u)) throw new Error("not this tab's site: " + u.hostname);
-      if (c.ro && !read) throw new Error("this tab is attached read-only: " + method + " refused");
-      var headers = {}, referrer;
-      Object.keys(q.headers || {}).forEach(function (k) {
-        // A page can't set Referer as a header; a same-origin one goes in as the fetch referrer.
-        if (k.toLowerCase() === "referer") { try { if (new URL(q.headers[k], location.href).origin === location.origin) referrer = q.headers[k]; } catch (e) {} }
-        else headers[k] = q.headers[k];
-      });
-      // Auth headers the site's own code sends (a token in localStorage, a CSRF <meta>): filled in here from where the
-      // page keeps them, unless the script already set them. The values never leave the page.
-      Object.keys(q.auth || {}).forEach(function (name) {
-        if (Object.keys(headers).some(function (k) { return k.toLowerCase() === name.toLowerCase(); })) return;
-        var s = q.auth[name] || {}, v = null;
-        try {
-          if (s.from === "localStorage" || s.from === "sessionStorage") {
-            v = window[s.from] && window[s.from].getItem(s.key);
-            if (v != null && (s.json || s.path)) { v = JSON.parse(v); (s.path || []).forEach(function (k) { v = v == null ? v : v[k]; }); }
-          } else if (s.from === "cookie") {
-            document.cookie.split(/;\s*/).forEach(function (ck) { if (ck.indexOf(s.key + "=") === 0) v = decodeURIComponent(ck.slice(s.key.length + 1)); });
-          } else if (s.from === "meta") {
-            var m = document.querySelector('meta[name="' + s.key + '"]');
-            v = m && m.getAttribute("content");
-          }
-        } catch (e) { v = null; }
-        if (typeof v === "string" && v) headers[name] = (s.prefix || "") + v;
-      });
-      var init = { method: method, headers: headers, credentials: "include", redirect: q.redirect || "follow", cache: "no-store" };
-      if (referrer) init.referrer = referrer;
-      if (!read && q.body64 != null) init.body = bytes(q.body64);
-      else if (!read && q.body != null) init.body = q.body;
-      // A read gives up after 20 s (the bridge then asks another tab); a write is never cut off mid-way.
-      if (read && typeof AbortSignal !== "undefined" && AbortSignal.timeout) init.signal = AbortSignal.timeout(20000);
-      return fetch(u.href, init).then(function (res) {
-        var type = res.headers.get("content-type") || "";
-        if (/text\/event-stream/i.test(type)) { try { res.body && res.body.cancel(); } catch (e) {} throw new Error("streamed response (" + type + "): not supported through the tab bridge"); }
-        if (+res.headers.get("content-length") > MAX) { try { res.body && res.body.cancel(); } catch (e) {} throw new Error("response larger than 32 MB: too large for the tab bridge"); }
-        return readBody(res).then(function (body) {
-          var h = {};
-          res.headers.forEach(function (v, k) { h[k] = v; });
-          reply({ status: res.status, type: res.type, redirected: res.redirected, url: res.url, headers: h, body64: b64(body) });
+    var method = String(q.method || "GET").toUpperCase(), read = method === "GET" || method === "HEAD";
+    function run() {
+      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null, timer;
+      Promise.resolve().then(function () {
+        var u = new URL(q.url, location.href);
+        if (!mine(u)) throw new Error("not this tab's site: " + u.hostname);
+        if (c.ro && !read) throw new Error("this tab is attached read-only: " + method + " refused");
+        var headers = {}, referrer;
+        Object.keys(q.headers || {}).forEach(function (k) {
+          // A page can't set Referer as a header; a same-origin one goes in as the fetch referrer.
+          if (k.toLowerCase() === "referer") { try { if (new URL(q.headers[k], location.href).origin === location.origin) referrer = q.headers[k]; } catch (e) {} }
+          else headers[k] = q.headers[k];
         });
-      });
-    }).catch(function (e) { reply({ error: String((e && e.message) || e) }); });
+        // Auth headers the site's own code sends (a token in localStorage, a CSRF <meta>): the value this page holds
+        // wins over one the script brought from a saved session, so a request never carries another account's token.
+        // The value never leaves the page. What the page does not hold stays as the script sent it (an API key).
+        Object.keys(q.auth || {}).forEach(function (name) {
+          var v = stored(q.auth[name] || {});
+          if (v == null) return;
+          Object.keys(headers).forEach(function (k) { if (k.toLowerCase() === name.toLowerCase()) delete headers[k]; });
+          headers[name] = v;
+        });
+        // A write never follows a redirect: its body would go wherever the answer points. It comes back as a 302.
+        var redirect = read ? (q.redirect || "follow") : (q.redirect === "error" ? "error" : "manual");
+        var init = { method: method, headers: headers, credentials: "include", redirect: redirect, cache: "no-store" };
+        if (referrer) init.referrer = referrer;
+        if (!read && q.body64 != null) init.body = bytes(q.body64);
+        else if (!read && q.body != null) init.body = q.body;
+        if (read && ctl) {
+          init.signal = ctl.signal;
+          running[q.id] = ctl;
+          // A read gives up after 20 s (the bridge then asks another tab); a write is never cut off mid-way.
+          timer = setTimeout(function () { ctl.abort(); }, 20000);
+        }
+        return fetch(u.href, init).then(function (res) {
+          function drop(why) { try { res.body && res.body.cancel(); } catch (e) {} throw new Error(why); }
+          // A followed redirect that ended on another site: this tab only answers for its own.
+          if (res.url) { var end = new URL(res.url); if (!mine(end)) drop("redirected to another site (" + end.hostname + "): refused"); }
+          var type = res.headers.get("content-type") || "";
+          if (/text\/event-stream/i.test(type)) drop("streamed response (" + type + "): not supported through the tab bridge");
+          if (+res.headers.get("content-length") > MAX) drop("response larger than 32 MB: too large for the tab bridge");
+          return readBody(res).then(function (body) {
+            var h = {};
+            res.headers.forEach(function (v, k) { h[k] = v; });
+            reply({ status: res.status, type: res.type, redirected: res.redirected, url: res.url, headers: h, body64: b64(body) });
+          });
+        });
+      }).catch(function (e) {
+        reply({ error: read && ctl && ctl.signal.aborted ? "aborted: the read was stopped or timed out" : String((e && e.message) || e) });
+      }).then(function () { clearTimeout(timer); delete running[q.id]; });
+    }
+    reply({ ack: 1 });
+    if (read) return run();
+    held[q.id] = run;
+    setTimeout(function () { delete held[q.id]; }, 30000);
+  }
+  function handle(ws, q) {
+    if (q.go) { var run = held[q.id]; delete held[q.id]; if (run) run(); return; }
+    if (q.abort) { if (running[q.id]) running[q.id].abort(); return; }
+    request(ws, q);
   }
 
   st.first = new Promise(function (done) {
@@ -135,6 +173,8 @@ export function tabRelay(c) {
       };
       ws.onclose = function () {
         st.open = false;
+        // Writes held for a go that can no longer come are dropped: they were never sent.
+        held = {};
         if (st.stopped) return;
         if (st.ever) { setTimeout(connect, 3000); return; }
         st.connecting = false;
@@ -158,8 +198,8 @@ export function tabRelay(c) {
 }
 
 /** The relay as one evaluable expression. Its value is a promise of the attach answer. */
-export function relaySource(cfg: { port: number; site: string; name: string; readOnly: boolean; key: string }): string {
-  const c: Record<string, unknown> = { port: cfg.port, site: cfg.site, name: cfg.name, k: cfg.key };
+export function relaySource(cfg: { port: number; origin: string; site: string; name: string; readOnly: boolean; key: string }): string {
+  const c: Record<string, unknown> = { port: cfg.port, o: cfg.origin, site: cfg.site, name: cfg.name, k: cfg.key };
   if (cfg.readOnly) c.ro = 1;
   // One evaluate call: drop the indentation, keep the lines (no minifier at run time).
   return `(${tabRelay.toString().replace(/\n\s+/g, "\n")})(${JSON.stringify(c)})`;

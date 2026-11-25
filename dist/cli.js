@@ -14382,7 +14382,8 @@ var init_capture = __esm({
 // src/lib/tabbridge/client.ts
 function tabBridgeClient(d) {
   var WAIT_MS = 15e4;
-  var down = false, used = false, skipped = "", hinted = false;
+  var down = false, skipped = "", hinted = false;
+  var mode = {};
   var env = d.env || {};
   function fail(msg) {
     return new Error("stopped: tab bridge: " + msg);
@@ -14397,6 +14398,7 @@ function tabBridgeClient(d) {
   function attachCmd(url) {
     return "iframer bridge attach " + hostOf(url);
   }
+  var MAYBE = "A write may have reached the site: check it, never re-send it blindly";
   function state() {
     if (env.IFRAMER_BRIDGE === "off") {
       skipped = "IFRAMER_BRIDGE=off";
@@ -14427,13 +14429,22 @@ function tabBridgeClient(d) {
     });
   }
   function none(url, why, detachedMs) {
+    var h = hostOf(url);
     skipped = why;
-    if (used) throw fail(why + ". This run was using the tab: attach it again (`" + attachCmd(url) + "`, then the line it prints), then run again");
+    if (mode[h] === "tab") throw fail(why + ". This run was using the tab for " + h + ": attach it again (`" + attachCmd(url) + "`, then the line it prints), then run again");
+    mode[h] = "direct";
     if (detachedMs != null && !hinted) {
       hinted = true;
       console.error("tab bridge: " + why + ", so this run uses the saved session. To use the tab again: `" + attachCmd(url) + "`, then the line it prints.");
     }
     return null;
+  }
+  function settled(f) {
+    try {
+      return Promise.resolve(f());
+    } catch (e) {
+      return Promise.reject(e);
+    }
   }
   function response(r, method) {
     var status = r.type === "opaqueredirect" || !r.status ? 302 : r.status;
@@ -14454,72 +14465,6 @@ function tabBridgeClient(d) {
     }
     return res;
   }
-  function bridgeFetch(url, init) {
-    init = init || {};
-    url = String(url);
-    var st = state();
-    if (!st) {
-      try {
-        return Promise.resolve(none(url, skipped));
-      } catch (e) {
-        return Promise.reject(e);
-      }
-    }
-    var method = String(init.method || "GET").toUpperCase(), read2 = method === "GET" || method === "HEAD";
-    var headers = {};
-    var src = init.headers || {};
-    var each = typeof src.forEach === "function" && !Array.isArray(src) ? function(f) {
-      src.forEach(function(v, k) {
-        f(k, v);
-      });
-    } : function(f) {
-      (Array.isArray(src) ? src : Object.keys(src).map(function(k) {
-        return [k, src[k]];
-      })).forEach(function(p) {
-        f(p[0], p[1]);
-      });
-    };
-    each(function(k, v) {
-      if (String(k).toLowerCase() !== "cookie" && v != null) headers[k] = String(v);
-    });
-    var job = { url, method, headers, redirect: init.redirect || "follow" };
-    if (env.IFRAMER_BRIDGE_TAB) job.tab = env.IFRAMER_BRIDGE_TAB;
-    if (d.auth && Object.keys(d.auth).length) job.auth = d.auth;
-    var b = init.body;
-    if (b != null && !read2) {
-      if (typeof b === "string") job.body = b;
-      else if (typeof URLSearchParams !== "undefined" && b instanceof URLSearchParams) {
-        job.body = b.toString();
-        if (!Object.keys(headers).some(function(k) {
-          return k.toLowerCase() === "content-type";
-        })) headers["content-type"] = "application/x-www-form-urlencoded;charset=UTF-8";
-      } else if (b instanceof ArrayBuffer) job.body64 = Buffer.from(b).toString("base64");
-      else if (ArrayBuffer.isView(b)) job.body64 = Buffer.from(b.buffer, b.byteOffset, b.byteLength).toString("base64");
-      else return Promise.reject(fail("this request body can't go through the tab (send a string or bytes, not a stream or FormData). Not sent"));
-    }
-    var late = read2 ? "" : ". A write may have reached the site: check it, never re-send it blindly";
-    return post(st, "/fetch", job, WAIT_MS).then(function(res) {
-      return res.json().then(function(j) {
-        return j;
-      }, function() {
-        return { error: "bridge HTTP " + res.status };
-      }).then(function(r) {
-        if (res.status === 503) return none(url, r.error || "no tab attached", r.detachedMs);
-        if (res.status === 401 || res.status === 403) return none(url, "the tab bridge restarted (" + (r.error || res.status) + ")");
-        if (r.dead) {
-          throw fail(r.error + ". No live tab for " + hostOf(url) + ": attach a fresh one (`" + attachCmd(url) + "`, then the line it prints), then " + (r.maybeSent ? "re-read before anything else. A write may have reached the site: check it, never re-send it blindly" : "run again"));
-        }
-        if (r.busy) throw fail(r.error + ". Other scripts are using this site's tab: let them finish, then run again once");
-        if (!res.ok || r.error) throw fail((r.error || "HTTP " + res.status) + ". Not retried");
-        used = true;
-        return response(r, method);
-      });
-    }, function(e) {
-      if (e && e.name === "TimeoutError") throw fail("no answer in " + WAIT_MS / 1e3 + " s for " + hostOf(url) + ". Restart it: `iframer bridge stop`, then attach again" + late);
-      down = true;
-      return none(url, "the tab bridge is not running");
-    });
-  }
   function attached(url) {
     var st = state();
     if (!st) return Promise.resolve(false);
@@ -14539,12 +14484,88 @@ function tabBridgeClient(d) {
       }
     );
   }
+  function bridgeFetch(url, init) {
+    init = init || {};
+    url = String(url);
+    var h = hostOf(url);
+    if (mode[h] === "direct") return Promise.resolve(null);
+    var st = state();
+    if (!st) return settled(function() {
+      return none(url, skipped);
+    });
+    var method = String(init.method || "GET").toUpperCase(), read2 = method === "GET" || method === "HEAD";
+    var headers = {};
+    var src = init.headers || {};
+    var each = typeof src.forEach === "function" && !Array.isArray(src) ? function(f) {
+      src.forEach(function(v, k) {
+        f(k, v);
+      });
+    } : function(f) {
+      (Array.isArray(src) ? src : Object.keys(src).map(function(k) {
+        return [k, src[k]];
+      })).forEach(function(p) {
+        f(p[0], p[1]);
+      });
+    };
+    each(function(k, v) {
+      if (String(k).toLowerCase() !== "cookie" && v != null) headers[k] = String(v);
+    });
+    var job = { url, method, headers };
+    if (init.redirect) job.redirect = init.redirect;
+    if (env.IFRAMER_BRIDGE_TAB) job.tab = env.IFRAMER_BRIDGE_TAB;
+    if (d.auth && Object.keys(d.auth).length) job.auth = d.auth;
+    var b = init.body;
+    if (b != null && !read2) {
+      if (typeof b === "string") job.body = b;
+      else if (typeof URLSearchParams !== "undefined" && b instanceof URLSearchParams) {
+        job.body = b.toString();
+        if (!Object.keys(headers).some(function(k) {
+          return k.toLowerCase() === "content-type";
+        })) headers["content-type"] = "application/x-www-form-urlencoded;charset=UTF-8";
+      } else if (b instanceof ArrayBuffer) job.body64 = Buffer.from(b).toString("base64");
+      else if (ArrayBuffer.isView(b)) job.body64 = Buffer.from(b.buffer, b.byteOffset, b.byteLength).toString("base64");
+      else {
+        return attached(url).then(function(on) {
+          if (!on) return none(url, skipped || "no tab attached");
+          throw fail("this request body can't go through the tab (send a string or bytes, not a stream or FormData). Not sent");
+        });
+      }
+    }
+    var dropped = "the connection to the tab bridge dropped while the request was out";
+    return post(st, "/fetch", job, WAIT_MS).then(function(res) {
+      return res.json().then(function(j) {
+        return j;
+      }, function() {
+        if (!read2 && res.status === 200) throw fail(dropped + ". " + MAYBE);
+        return { error: "bridge HTTP " + res.status };
+      }).then(function(r) {
+        if (res.status === 503) return none(url, r.error || "no tab attached", r.detachedMs);
+        if (res.status === 401 || res.status === 403) return none(url, "the tab bridge restarted (" + (r.error || res.status) + ")");
+        if (r.dead) {
+          throw fail(r.error + ". No live tab for " + h + ": attach a fresh one (`" + attachCmd(url) + "`, then the line it prints), then " + (r.maybeSent ? "re-read before anything else. " + MAYBE : "run again"));
+        }
+        if (r.busy) throw fail(r.error + ". Other scripts are using this site's tab: let them finish, then run again once");
+        if (!res.ok || r.error) throw fail((r.error || "HTTP " + res.status) + ". Not retried");
+        mode[h] = "tab";
+        return response(r, method);
+      });
+    }, function(e) {
+      if (e && e.name === "TimeoutError") throw fail("no answer in " + WAIT_MS / 1e3 + " s for " + h + ". Restart it: `iframer bridge stop`, then attach again" + (read2 ? "" : ". " + MAYBE));
+      down = true;
+      var code = String(e && (e.code || e.cause && e.cause.code) || "");
+      var never = /ECONNREFUSED|ConnectionRefused|ENOTFOUND|EADDRNOTAVAIL|UND_ERR_CONNECT_TIMEOUT/.test(code);
+      if (!read2 && !never) throw fail(dropped + ". " + MAYBE);
+      return none(url, "the tab bridge is not running");
+    });
+  }
   return {
     fetch: bridgeFetch,
     attached,
     /** True once a request of this run went through a tab. */
     used: function() {
-      return used;
+      return Object.keys(mode).some(function(k) {
+        return mode[k] === "tab";
+      });
     },
     /** Why the last request did not go through a tab. */
     skipped: function() {
@@ -14556,14 +14577,17 @@ function clientModuleSource() {
   return [
     `// iframer tab bridge client. Generated by \`iframer bridge client\`: don't edit, run it again after updating iframer.`,
     `// Sends a request through the logged-in browser tab attached with \`iframer bridge attach <host>\`: the tab does the`,
-    `// fetch with its own login, no cookie is read or saved.`,
+    `// fetch with its own login. No cookie leaves the browser, nothing is exported or saved.`,
     `//`,
     `//   import { bridgeFetch } from "./tab-bridge.mjs";`,
     `//   const res = (await bridgeFetch(url, init)) ?? (await fetch(url, initWithYourSavedSession));`,
     `//`,
     `// bridgeFetch resolves to a Response, or to null when no tab can take the request (bridge not running, no tab`,
-    `// attached for that site, IFRAMER_BRIDGE=off): use your other way then. Once a request went through a tab it throws`,
-    `// instead ("stopped: tab bridge: ..." with the next step). A write is never sent twice.`,
+    `// attached for that site, IFRAMER_BRIDGE=off): use your other way then. null always means the request did not leave`,
+    `// this process, so falling back is safe for writes too. Every other problem is thrown ("stopped: tab bridge: ..."`,
+    `// with the next step); when it says a write may have reached the site, check the site, never re-send blindly.`,
+    `// One session per host per run: the first request to a host decides (tab, or your own way) and it never changes.`,
+    `// A write never follows a redirect (status 302 comes back). A read that ends on another site is refused.`,
     `// Env: IFRAMER_BRIDGE=off, IFRAMER_BRIDGE_TAB=<name> (tabs attached with --name), IFRAMER_DATA_DIR.`,
     `import fs from "node:fs";`,
     `import os from "node:os";`,
@@ -14785,13 +14809,20 @@ function renderClient(host, map, auth, specs, dir) {
     } catch {
     }
   }
+  const taken = new Set(specs.map((r) => r.name));
+  const free = (base) => {
+    let n = base;
+    while (taken.has(n)) n += "_";
+    return n;
+  };
+  const TAB = free("__tab"), TAB_FETCH = free("__tabFetch"), HOME = free("__tabHome");
   const out = [];
   out.push(`#!/usr/bin/env node`);
   out.push(`// ${host} API client, generated by iframer from a capture of ${origin}. Node 18+, no browser.`);
   out.push(`// Regenerated by \`iframer ingest\` and \`iframer recipe\`: don't edit, add recipes instead.`);
   out.push(`//`);
   out.push(`// Auth: .env next to this file (see .env.example). Refresh it with: iframer auth ${host} --out ${JSON.stringify(dir)}`);
-  out.push(`// Or no cookie at all: \`iframer bridge attach ${host}\` attaches a logged-in tab, and these requests go through it.`);
+  out.push(`// Or no saved cookie at all: \`iframer bridge attach ${host}\` attaches a logged-in tab, and these requests go through it.`);
   out.push(`//`);
   out.push(`// CLI:     node client.mjs                         everything this client knows`);
   out.push(`//          node client.mjs <recipe> '{"arg":"x"}'  one saved task, one line`);
@@ -14800,7 +14831,7 @@ function renderClient(host, map, auth, specs, dir) {
   out.push(`// Library: import { get, page, action, recipes } from "./client.mjs"`);
   out.push(``);
   out.push(`import fs from "node:fs";`);
-  out.push(`import os from "node:os";`);
+  out.push(`import { homedir as ${HOME} } from "node:os";`);
   out.push(`import path from "node:path";`);
   out.push(`import { fileURLToPath } from "node:url";`);
   out.push(``);
@@ -14816,17 +14847,17 @@ function renderClient(host, map, auth, specs, dir) {
   out.push(`const env = { ...readEnv(path.join(DIR, ".env")), ...process.env };`);
   out.push(REFRESH);
   out.push(`// Tab bridge: when a logged-in tab is attached for this site (iframer bridge attach ${host}), every request goes`);
-  out.push(`// through that tab and no cookie is read. Nothing attached: it answers null and the request runs as it always did.`);
-  out.push(`// Once a request used the tab, the run never switches to the saved session half-way. Off: IFRAMER_BRIDGE=off.`);
-  out.push(`const __tab = (${tabBridgeClient.toString()})({ fs, path, home: os.homedir(), env, fetch: globalThis.fetch, auth: AUTH });`);
-  out.push(`const __tabFetch = (url, init) => __tab.fetch(url, init).then((r) => {`);
+  out.push(`// through that tab and the saved cookie is not used. Nothing attached: it answers null and the request runs as it`);
+  out.push(`// always did. The first request decides for the whole run: it never switches session half-way. Off: IFRAMER_BRIDGE=off.`);
+  out.push(`const ${TAB} = (${tabBridgeClient.toString()})({ fs, path, home: ${HOME}(), env, fetch: globalThis.fetch, auth: AUTH });`);
+  out.push(`const ${TAB_FETCH} = (url, init) => ${TAB}.fetch(url, init).then((r) => {`);
   out.push(`  if (!r) return globalThis.fetch(url, init);`);
   out.push(`  core.setTransport({ relogin: ${JSON.stringify(`log in to ${host} in the attached tab, then run again`)} });`);
   out.push(`  return r;`);
   out.push(`});`);
-  out.push(`export const core = ((fetch) => (${recipeCore.toString()})())(__tabFetch);`);
+  out.push(`export const core = ((fetch) => (${recipeCore.toString()})())(${TAB_FETCH});`);
   out.push(`core.setAuth(AUTH);`);
-  out.push(`core.setTransport({ base: ORIGIN, cookie: env.COOKIE || null, env, actions: ACTIONS, relogin: ${JSON.stringify(`log in to ${host} in a browser on this machine, then: iframer auth ${host} --out ${dir}`)}, onExpired: () => (__tab.used() ? false : refreshSession()) });`);
+  out.push(`core.setTransport({ base: ORIGIN, cookie: env.COOKIE || null, env, actions: ACTIONS, relogin: ${JSON.stringify(`log in to ${host} in a browser on this machine, then: iframer auth ${host} --out ${dir}`)}, onExpired: () => (${TAB}.used() ? false : refreshSession()) });`);
   out.push(``);
   out.push(`const FP = path.join(DIR, ".fingerprints.json");`);
   out.push(`const fps = {`);
@@ -14837,7 +14868,7 @@ function renderClient(host, map, auth, specs, dir) {
   out.push(``);
   out.push(`/** Any same-site request. Next.js page data: {rsc: true}. Returns parsed data. */`);
   out.push(`// No session yet: take it from a logged-in browser before the first call. Not needed when a tab is attached.`);
-  out.push(`const ready = __tab.attached(ORIGIN).then((on) => (on || env.COOKIE ? undefined : refreshSession()));`);
+  out.push(`const ready = ${TAB}.attached(ORIGIN).then((on) => (on || env.COOKIE ? undefined : refreshSession()));`);
   out.push(`export const get = (p, o) => ready.then(() => core.get(p, o));`);
   out.push(`/** A Next.js page's data: {components: {Name: props}, rows, ...}. */`);
   out.push(`export const page = (p, o) => get(p, { ...o, rsc: true });`);
@@ -14855,7 +14886,7 @@ function renderClient(host, map, auth, specs, dir) {
   out.push(`export const recipes = Object.fromEntries(Object.keys(SPECS).map((n) => [n, (a, max) => ready.then(() => run(SPECS[n], a, max))]));`);
   for (const r of specs) out.push(`export const ${r.name} = recipes[${JSON.stringify(r.name)}];`);
   out.push(``);
-  out.push(CLI_SOURCE.replace(/__HOST__/g, host));
+  out.push(CLI_SOURCE.replace(/__HOST__/g, host).replace(/__TAB__/g, TAB));
   return out.join("\n") + "\n";
 }
 function renderRecipes(specs, auth = {}) {
@@ -14901,7 +14932,7 @@ var init_recipes = __esm({
     init_client();
     RUNTIME = import_crypto13.default.createHash("sha1").update(recipeCore.toString()).update(recipeRunner.toString()).update(renderRecipes.toString()).digest("hex").slice(0, 8);
     recipesDir = (host) => import_path13.default.join(apisDir(host), "recipes");
-    RESERVED = /* @__PURE__ */ new Set(["get", "page", "action", "actions", "recipes", "schema", "core", "run", "default", "__tab", "__tabFetch"]);
+    RESERVED = /* @__PURE__ */ new Set(["get", "page", "action", "actions", "recipes", "schema", "core", "run", "default"]);
     envName = (h) => h.replace(/[^A-Za-z0-9]+/g, "_").toUpperCase();
     isCode = (s) => /=>|^\s*(async\s+)?function\b/.test(s);
     lit = (s) => s === void 0 ? "undefined" : isCode(s) ? `(${s})` : JSON.stringify(s);
@@ -14963,7 +14994,7 @@ async function main(argv) {
     const need = ["COOKIE", ...Object.keys(AUTH).map(core.envName)];
     console.log("__HOST__ (" + ORIGIN + ")");
     await ready;
-    if (await __tab.attached(ORIGIN)) console.log("tab: attached (requests go through the logged-in tab, no cookie needed)");
+    if (await __TAB__.attached(ORIGIN)) console.log("tab: attached (requests go through the logged-in tab, no cookie needed)");
     else console.log("auth: " + need.map((n) => n + (env[n] ? " set" : " missing")).join(", ") + (need.some((n) => !env[n]) ? "  -> log in to __HOST__ in a browser here, then iframer auth __HOST__" : ""));
     console.log("recipes: " + (Object.keys(SPECS).join(", ") || "none yet (iframer recipe __HOST__ <name> ...)"));
     console.log("actions: " + (Object.keys(ACTIONS).join(", ") || "none"));
@@ -15550,9 +15581,11 @@ var init_kit = __esm({
 // src/lib/tabbridge/relay.ts
 function tabRelay(c) {
   var MAX = 32 * 1024 * 1024;
+  if (location.origin !== c.o) return "WRONG_TAB: this expression is for " + c.o + " and this tab is on " + location.origin + ". Open the tab on " + c.o + ", or run `iframer bridge attach " + location.host + "` for this one.";
   var KEY = /* @__PURE__ */ Symbol.for("iframer.bridge");
+  var id = [c.port, c.site, c.name, c.ro ? 1 : 0].join("|");
   var old = window[KEY];
-  if (old && old.k === c.k && old.port === c.port && !old.stopped && (old.open || old.connecting)) return old.open ? "ALREADY_ATTACHED" : old.first;
+  if (old && old.id === id && !old.stopped && (old.open || old.connecting)) return old.open ? "ALREADY_ATTACHED" : old.first;
   if (old) {
     old.stopped = true;
     try {
@@ -15560,7 +15593,7 @@ function tabRelay(c) {
     } catch (e) {
     }
   }
-  var st = { k: c.k, port: c.port, open: false, ever: false, stopped: false, connecting: true, ws: null, first: null };
+  var st = { id, open: false, ever: false, stopped: false, connecting: true, ws: null, first: null };
   try {
     Object.defineProperty(window, KEY, { value: st, configurable: true, enumerable: false, writable: true });
   } catch (e) {
@@ -15611,7 +15644,32 @@ function tabRelay(c) {
     }
     return step();
   }
-  function handle(ws, q) {
+  function stored(s) {
+    var v = null;
+    try {
+      if (s.from === "localStorage" || s.from === "sessionStorage") {
+        v = window[s.from] && window[s.from].getItem(s.key);
+        if (v != null && (s.json || s.path)) {
+          v = JSON.parse(v);
+          (s.path || []).forEach(function(k) {
+            v = v == null ? v : v[k];
+          });
+        }
+      } else if (s.from === "cookie") {
+        document.cookie.split(/;\s*/).forEach(function(ck) {
+          if (ck.indexOf(s.key + "=") === 0) v = decodeURIComponent(ck.slice(s.key.length + 1));
+        });
+      } else if (s.from === "meta") {
+        var m = document.querySelector('meta[name="' + s.key + '"]');
+        v = m && m.getAttribute("content");
+      }
+    } catch (e) {
+      v = null;
+    }
+    return typeof v === "string" && v ? (s.prefix || "") + v : null;
+  }
+  var held = {}, running = {};
+  function request(ws, q) {
     function reply(o) {
       o.id = q.id;
       try {
@@ -15620,80 +15678,91 @@ function tabRelay(c) {
       }
     }
     if (q.notAfter && Date.now() > q.notAfter) return reply({ expired: 1 });
-    reply({ ack: 1 });
-    Promise.resolve().then(function() {
-      var method = String(q.method || "GET").toUpperCase(), read2 = method === "GET" || method === "HEAD";
-      var u = new URL(q.url, location.href);
-      if (!mine(u)) throw new Error("not this tab's site: " + u.hostname);
-      if (c.ro && !read2) throw new Error("this tab is attached read-only: " + method + " refused");
-      var headers = {}, referrer;
-      Object.keys(q.headers || {}).forEach(function(k) {
-        if (k.toLowerCase() === "referer") {
-          try {
-            if (new URL(q.headers[k], location.href).origin === location.origin) referrer = q.headers[k];
-          } catch (e) {
-          }
-        } else headers[k] = q.headers[k];
-      });
-      Object.keys(q.auth || {}).forEach(function(name) {
-        if (Object.keys(headers).some(function(k) {
-          return k.toLowerCase() === name.toLowerCase();
-        })) return;
-        var s = q.auth[name] || {}, v = null;
-        try {
-          if (s.from === "localStorage" || s.from === "sessionStorage") {
-            v = window[s.from] && window[s.from].getItem(s.key);
-            if (v != null && (s.json || s.path)) {
-              v = JSON.parse(v);
-              (s.path || []).forEach(function(k) {
-                v = v == null ? v : v[k];
-              });
+    var method = String(q.method || "GET").toUpperCase(), read2 = method === "GET" || method === "HEAD";
+    function run2() {
+      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null, timer;
+      Promise.resolve().then(function() {
+        var u = new URL(q.url, location.href);
+        if (!mine(u)) throw new Error("not this tab's site: " + u.hostname);
+        if (c.ro && !read2) throw new Error("this tab is attached read-only: " + method + " refused");
+        var headers = {}, referrer;
+        Object.keys(q.headers || {}).forEach(function(k) {
+          if (k.toLowerCase() === "referer") {
+            try {
+              if (new URL(q.headers[k], location.href).origin === location.origin) referrer = q.headers[k];
+            } catch (e) {
             }
-          } else if (s.from === "cookie") {
-            document.cookie.split(/;\s*/).forEach(function(ck) {
-              if (ck.indexOf(s.key + "=") === 0) v = decodeURIComponent(ck.slice(s.key.length + 1));
-            });
-          } else if (s.from === "meta") {
-            var m = document.querySelector('meta[name="' + s.key + '"]');
-            v = m && m.getAttribute("content");
-          }
-        } catch (e) {
-          v = null;
-        }
-        if (typeof v === "string" && v) headers[name] = (s.prefix || "") + v;
-      });
-      var init = { method, headers, credentials: "include", redirect: q.redirect || "follow", cache: "no-store" };
-      if (referrer) init.referrer = referrer;
-      if (!read2 && q.body64 != null) init.body = bytes(q.body64);
-      else if (!read2 && q.body != null) init.body = q.body;
-      if (read2 && typeof AbortSignal !== "undefined" && AbortSignal.timeout) init.signal = AbortSignal.timeout(2e4);
-      return fetch(u.href, init).then(function(res) {
-        var type = res.headers.get("content-type") || "";
-        if (/text\/event-stream/i.test(type)) {
-          try {
-            res.body && res.body.cancel();
-          } catch (e) {
-          }
-          throw new Error("streamed response (" + type + "): not supported through the tab bridge");
-        }
-        if (+res.headers.get("content-length") > MAX) {
-          try {
-            res.body && res.body.cancel();
-          } catch (e) {
-          }
-          throw new Error("response larger than 32 MB: too large for the tab bridge");
-        }
-        return readBody(res).then(function(body) {
-          var h = {};
-          res.headers.forEach(function(v, k) {
-            h[k] = v;
-          });
-          reply({ status: res.status, type: res.type, redirected: res.redirected, url: res.url, headers: h, body64: b64(body) });
+          } else headers[k] = q.headers[k];
         });
+        Object.keys(q.auth || {}).forEach(function(name) {
+          var v = stored(q.auth[name] || {});
+          if (v == null) return;
+          Object.keys(headers).forEach(function(k) {
+            if (k.toLowerCase() === name.toLowerCase()) delete headers[k];
+          });
+          headers[name] = v;
+        });
+        var redirect = read2 ? q.redirect || "follow" : q.redirect === "error" ? "error" : "manual";
+        var init = { method, headers, credentials: "include", redirect, cache: "no-store" };
+        if (referrer) init.referrer = referrer;
+        if (!read2 && q.body64 != null) init.body = bytes(q.body64);
+        else if (!read2 && q.body != null) init.body = q.body;
+        if (read2 && ctl) {
+          init.signal = ctl.signal;
+          running[q.id] = ctl;
+          timer = setTimeout(function() {
+            ctl.abort();
+          }, 2e4);
+        }
+        return fetch(u.href, init).then(function(res) {
+          function drop(why) {
+            try {
+              res.body && res.body.cancel();
+            } catch (e) {
+            }
+            throw new Error(why);
+          }
+          if (res.url) {
+            var end = new URL(res.url);
+            if (!mine(end)) drop("redirected to another site (" + end.hostname + "): refused");
+          }
+          var type = res.headers.get("content-type") || "";
+          if (/text\/event-stream/i.test(type)) drop("streamed response (" + type + "): not supported through the tab bridge");
+          if (+res.headers.get("content-length") > MAX) drop("response larger than 32 MB: too large for the tab bridge");
+          return readBody(res).then(function(body) {
+            var h = {};
+            res.headers.forEach(function(v, k) {
+              h[k] = v;
+            });
+            reply({ status: res.status, type: res.type, redirected: res.redirected, url: res.url, headers: h, body64: b64(body) });
+          });
+        });
+      }).catch(function(e) {
+        reply({ error: read2 && ctl && ctl.signal.aborted ? "aborted: the read was stopped or timed out" : String(e && e.message || e) });
+      }).then(function() {
+        clearTimeout(timer);
+        delete running[q.id];
       });
-    }).catch(function(e) {
-      reply({ error: String(e && e.message || e) });
-    });
+    }
+    reply({ ack: 1 });
+    if (read2) return run2();
+    held[q.id] = run2;
+    setTimeout(function() {
+      delete held[q.id];
+    }, 3e4);
+  }
+  function handle(ws, q) {
+    if (q.go) {
+      var run2 = held[q.id];
+      delete held[q.id];
+      if (run2) run2();
+      return;
+    }
+    if (q.abort) {
+      if (running[q.id]) running[q.id].abort();
+      return;
+    }
+    request(ws, q);
   }
   st.first = new Promise(function(done) {
     var blocked = false;
@@ -15730,6 +15799,7 @@ function tabRelay(c) {
       };
       ws.onclose = function() {
         st.open = false;
+        held = {};
         if (st.stopped) return;
         if (st.ever) {
           setTimeout(connect, 3e3);
@@ -15758,7 +15828,7 @@ function tabRelay(c) {
   return st.first;
 }
 function relaySource(cfg) {
-  const c = { port: cfg.port, site: cfg.site, name: cfg.name, k: cfg.key };
+  const c = { port: cfg.port, o: cfg.origin, site: cfg.site, name: cfg.name, k: cfg.key };
   if (cfg.readOnly) c.ro = 1;
   return `(${tabRelay.toString().replace(/\n\s+/g, "\n")})(${JSON.stringify(c)})`;
 }
@@ -15798,8 +15868,9 @@ function masterKey() {
   }
   return k;
 }
-function tabKey(master, site, name, readOnly) {
-  return import_crypto16.default.createHmac("sha256", master).update(`${site}
+function tabKey(master, origin, site, name, readOnly) {
+  return import_crypto16.default.createHmac("sha256", master).update(`${origin.toLowerCase()}
+${site}
 ${name}
 ${readOnly ? "ro" : "rw"}`).digest("hex").slice(0, 32);
 }
@@ -15810,6 +15881,7 @@ function validSite(site) {
   const [host, port, extra] = site.split(":");
   if (extra !== void 0 || port !== void 0 && !/^\d{1,5}$/.test(port)) return false;
   if (LOOPBACK.test(host)) return true;
+  if (SHARED_SUFFIXES.has(host)) return false;
   return port === void 0 && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host) && !IP.test(host);
 }
 function covers(site, url) {
@@ -15826,7 +15898,7 @@ function covers(site, url) {
   if (u.hostname === host) return true;
   return !loop && !IP.test(host) && u.hostname.endsWith("." + host);
 }
-var import_crypto16, import_fs16, import_path17, BRIDGE_VERSION, DEFAULT_PORT, bridgePort, stateFile, keyFile, LOOPBACK, IP, validName;
+var import_crypto16, import_fs16, import_path17, BRIDGE_VERSION, DEFAULT_PORT, bridgePort, stateFile, keyFile, LOOPBACK, IP, SHARED_SUFFIXES, validName;
 var init_state = __esm({
   "src/lib/tabbridge/state.ts"() {
     "use strict";
@@ -15841,6 +15913,65 @@ var init_state = __esm({
     keyFile = () => import_path17.default.join(getDataDir(), "bridge.key");
     LOOPBACK = /^(127\.0\.0\.1|localhost)$/;
     IP = /^\d{1,3}(\.\d{1,3}){3}$/;
+    SHARED_SUFFIXES = /* @__PURE__ */ new Set([
+      "co.uk",
+      "org.uk",
+      "ac.uk",
+      "gov.uk",
+      "me.uk",
+      "com.br",
+      "net.br",
+      "org.br",
+      "com.au",
+      "net.au",
+      "org.au",
+      "co.nz",
+      "co.jp",
+      "ne.jp",
+      "or.jp",
+      "co.in",
+      "co.kr",
+      "co.za",
+      "com.mx",
+      "com.ar",
+      "com.co",
+      "com.tr",
+      "com.cn",
+      "com.hk",
+      "com.sg",
+      "com.tw",
+      "co.il",
+      "co.id",
+      "com.my",
+      "com.ph",
+      "github.io",
+      "gitlab.io",
+      "vercel.app",
+      "netlify.app",
+      "herokuapp.com",
+      "pages.dev",
+      "workers.dev",
+      "web.app",
+      "firebaseapp.com",
+      "appspot.com",
+      "cloudfront.net",
+      "amazonaws.com",
+      "azurewebsites.net",
+      "onrender.com",
+      "fly.dev",
+      "glitch.me",
+      "repl.co",
+      "blogspot.com",
+      "wordpress.com",
+      "ngrok.io",
+      "ngrok-free.app",
+      "trycloudflare.com",
+      "s3.amazonaws.com",
+      "myshopify.com",
+      "webflow.io",
+      "framer.app",
+      "lovable.app"
+    ]);
     validName = (name) => /^[A-Za-z0-9_.-]{1,40}$/.test(name);
   }
 });
@@ -15941,12 +16072,12 @@ async function attach(o) {
   const host = o.host.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
   const site = o.site ? siteFor(o.site) : siteFor(host);
   const name = o.name || "default";
-  if (!validSite(site)) throw new Error(`not a site: ${site}. Give the host of the logged-in tab, e.g. iframer bridge attach www.example.com`);
+  if (!validSite(site)) throw new Error(`not a site: ${site} (one label, or a suffix anyone can register under). Give the host of the logged-in tab, e.g. iframer bridge attach www.example.com`);
   if (!validName(name)) throw new Error(`--name takes letters, digits, dot, dash and underscore: ${name}`);
   const origin = `${/^(127\.0\.0\.1|localhost)(:|$)/.test(host) ? "http" : "https"}://${host}`;
   if (!covers(site, origin)) throw new Error(`--site ${site} does not cover ${host}: it must be ${host} or a parent domain of it`);
   const st = await start();
-  const expression = relaySource({ port: st.port, site, name, readOnly: !!o.readOnly, key: tabKey(masterKey(), site, name, !!o.readOnly) });
+  const expression = relaySource({ port: st.port, origin, site, name, readOnly: !!o.readOnly, key: tabKey(masterKey(), origin, site, name, !!o.readOnly) });
   const target = o.target || "t3";
   const scope = `${site}${site === host ? "" : " and its subdomains"}${name === "default" ? "" : `, tab name "${name}"`}${o.readOnly ? ", read-only" : ""}`;
   const steps = target === "t3" ? [
@@ -15960,12 +16091,13 @@ async function attach(o) {
     `2. Evaluate the expression below in that page (any tool that runs JS in the page, or the DevTools console). It answers ATTACHED (or ALREADY_ATTACHED).`
   ];
   const text = [
-    `Tab bridge for ${scope}. Node scripts (client.mjs, recipes, any script) then send their requests through that tab: the tab does the fetch with its own login. No cookie is read or saved.`,
+    `Tab bridge for ${scope}. Node scripts (client.mjs, recipes, any script) then send their requests through that tab: the tab does the fetch with its own login. No cookie leaves the browser, nothing is exported or saved.`,
     ``,
     ...steps,
     `3. Check: iframer bridge status   ->   ${site} listed under "attached".`,
     ``,
     `Answers:`,
+    `- WRONG_TAB: the tab is on another host than ${host}. The expression only works on ${origin}: open that, or run attach with the tab's own host.`,
     `- CSP_BLOCKED: this site forbids the connection. The bridge can't be used here: use iframer auth ${host}, or iframer recipe ${host} --in-page.`,
     `- NO_BRIDGE or WAITING: run this command again and use the fresh expression. Chrome 147+ may ask to allow local network access for the site: allow it.`,
     `- The tab shows a login page: the user logs in there, then evaluate the expression again.`,
@@ -15974,6 +16106,8 @@ async function attach(o) {
     `- Leave the tab open. A page reload, navigation to another page load or a closed tab drops it: evaluate the same expression again (it stays valid).`,
     `- A daemon restart does not drop it: the tab reconnects by itself (a background tab can take a minute).`,
     `- Scripts print "stopped: tab bridge: ..." with the next step when the tab can't answer. A write is never sent twice: when an error says it may have reached the site, check the site before running it again.`,
+    `- A script decides once per run: one that started on its saved session stays on it. Attach first, then start the script.`,
+    `- A write never follows a redirect (it comes back as HTTP 302); a read that ends on another site is refused.`,
     `- Stop using the tab: iframer bridge stop (scripts go back to the saved session).`,
     ``,
     `Expression:`,
@@ -17935,7 +18069,7 @@ Screenshot: ${shot}`);
       --rm                          Delete a recipe; no name lists them
 
   Tab bridge: Node scripts (client.mjs, recipes, any script) send their requests through a tab that is
-  already logged in. The tab does the fetch with its own login; no cookie is read or saved:
+  already logged in. The tab does the fetch with its own login; no cookie leaves the browser, nothing is saved:
     bridge attach <host>            Start the bridge, print the one expression to evaluate in the logged-in tab
       --for <t3|playwright-mcp|any> Which browser tool's steps to print (default: t3)
       --site <domain>               Cover a parent domain too (default: the host, without www.)

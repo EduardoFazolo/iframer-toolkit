@@ -96,12 +96,13 @@ export async function attach(o: AttachOptions): Promise<{ site: string; name: st
   const host = o.host.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
   const site = o.site ? siteFor(o.site) : siteFor(host);
   const name = o.name || "default";
-  if (!validSite(site)) throw new Error(`not a site: ${site}. Give the host of the logged-in tab, e.g. iframer bridge attach www.example.com`);
+  if (!validSite(site)) throw new Error(`not a site: ${site} (one label, or a suffix anyone can register under). Give the host of the logged-in tab, e.g. iframer bridge attach www.example.com`);
   if (!validName(name)) throw new Error(`--name takes letters, digits, dot, dash and underscore: ${name}`);
   const origin = `${/^(127\.0\.0\.1|localhost)(:|$)/.test(host) ? "http" : "https"}://${host}`;
   if (!covers(site, origin)) throw new Error(`--site ${site} does not cover ${host}: it must be ${host} or a parent domain of it`);
   const st = await start();
-  const expression = relaySource({ port: st.port, site, name, readOnly: !!o.readOnly, key: tabKey(masterKey(), site, name, !!o.readOnly) });
+  // The key only works from this exact origin: the page can see it, so it must open nothing anywhere else.
+  const expression = relaySource({ port: st.port, origin, site, name, readOnly: !!o.readOnly, key: tabKey(masterKey(), origin, site, name, !!o.readOnly) });
   const target = o.target || "t3";
   const scope = `${site}${site === host ? "" : " and its subdomains"}${name === "default" ? "" : `, tab name "${name}"`}${o.readOnly ? ", read-only" : ""}`;
   const steps = target === "t3"
@@ -119,12 +120,13 @@ export async function attach(o: AttachOptions): Promise<{ site: string; name: st
         `2. Evaluate the expression below in that page (any tool that runs JS in the page, or the DevTools console). It answers ATTACHED (or ALREADY_ATTACHED).`,
       ];
   const text = [
-    `Tab bridge for ${scope}. Node scripts (client.mjs, recipes, any script) then send their requests through that tab: the tab does the fetch with its own login. No cookie is read or saved.`,
+    `Tab bridge for ${scope}. Node scripts (client.mjs, recipes, any script) then send their requests through that tab: the tab does the fetch with its own login. No cookie leaves the browser, nothing is exported or saved.`,
     ``,
     ...steps,
     `3. Check: iframer bridge status   ->   ${site} listed under "attached".`,
     ``,
     `Answers:`,
+    `- WRONG_TAB: the tab is on another host than ${host}. The expression only works on ${origin}: open that, or run attach with the tab's own host.`,
     `- CSP_BLOCKED: this site forbids the connection. The bridge can't be used here: use iframer auth ${host}, or iframer recipe ${host} --in-page.`,
     `- NO_BRIDGE or WAITING: run this command again and use the fresh expression. Chrome 147+ may ask to allow local network access for the site: allow it.`,
     `- The tab shows a login page: the user logs in there, then evaluate the expression again.`,
@@ -133,6 +135,8 @@ export async function attach(o: AttachOptions): Promise<{ site: string; name: st
     `- Leave the tab open. A page reload, navigation to another page load or a closed tab drops it: evaluate the same expression again (it stays valid).`,
     `- A daemon restart does not drop it: the tab reconnects by itself (a background tab can take a minute).`,
     `- Scripts print "stopped: tab bridge: ..." with the next step when the tab can't answer. A write is never sent twice: when an error says it may have reached the site, check the site before running it again.`,
+    `- A script decides once per run: one that started on its saved session stays on it. Attach first, then start the script.`,
+    `- A write never follows a redirect (it comes back as HTTP 302); a read that ends on another site is refused.`,
     `- Stop using the tab: iframer bridge stop (scripts go back to the saved session).`,
     ``,
     `Expression:`,

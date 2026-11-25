@@ -1,7 +1,7 @@
 /**
  * Tab bridge daemon: lets Node scripts make requests with the login of a tab
  * that is already logged in, in any browser where one line of JS can run. No
- * cookie is read, exported or saved.
+ * cookie leaves the browser: nothing is exported or saved.
  *
  *   Node script --POST /fetch (bearer token)--> this daemon (127.0.0.1 only)
  *     --WebSocket--> relay in the tab (relay.ts) --same-site fetch--> the site
@@ -13,9 +13,9 @@
  *
  * Safety: 127.0.0.1 only. Every HTTP route needs the per-run token and refuses
  * requests that carry an Origin (a web page). A relay is accepted only with the
- * key minted for its site by `iframer bridge attach`, from an Origin of that
- * site (the browser sets it; a page can't fake it), and a request is forwarded
- * only to a tab of its own site. Requests pass through memory, nothing is kept.
+ * key `iframer bridge attach` minted for its exact Origin (the browser sets it;
+ * a page can't fake it), and a request is forwarded only to a tab of its own
+ * site. Requests pass through memory, nothing is kept.
  */
 import crypto from "crypto";
 import http from "http";
@@ -96,8 +96,8 @@ export function startBridgeServer(o: ServerOptions): Promise<BridgeServer> {
     const site = u.searchParams.get("s") || "", name = u.searchParams.get("n") || "default", readOnly = u.searchParams.get("ro") === "1";
     const origin = String(req.headers.origin || "");
     const ok = u.pathname === "/relay" && validSite(site) && validName(name)
-      && safeEqual(u.searchParams.get("k") || "", tabKey(o.masterKey, site, name, readOnly))
-      && covers(site, origin);
+      && covers(site, origin)
+      && safeEqual(u.searchParams.get("k") || "", tabKey(o.masterKey, origin, site, name, readOnly));
     if (!ok) { sock.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"); return; }
     wss.handleUpgrade(req, sock, head, (ws) => {
       const tab: Tab = {

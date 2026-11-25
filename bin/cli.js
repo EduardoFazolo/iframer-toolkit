@@ -1500,7 +1500,7 @@ async function main() {
 
     case "bridge": {
       // Tab bridge: Node scripts send their requests through a tab that is already logged in (any browser where
-      // one line of JS can run). The tab does the fetch with its own login; no cookie is read, exported or saved.
+      // one line of JS can run). The tab does the fetch with its own login; no cookie leaves the browser, nothing is exported or saved.
       // Own small daemon (127.0.0.1, token); off unless a tab is attached. src/lib/tabbridge/.
       const bridge = await import("../src/lib/tabbridge/index.ts");
       const sub = args[0];
@@ -2064,7 +2064,7 @@ async function main() {
       --rm                          Delete a recipe; no name lists them
 
   Tab bridge: Node scripts (client.mjs, recipes, any script) send their requests through a tab that is
-  already logged in. The tab does the fetch with its own login; no cookie is read or saved:
+  already logged in. The tab does the fetch with its own login; no cookie leaves the browser, nothing is saved:
     bridge attach <host>            Start the bridge, print the one expression to evaluate in the logged-in tab
       --for <t3|playwright-mcp|any> Which browser tool's steps to print (default: t3)
       --site <domain>               Cover a parent domain too (default: the host, without www.)

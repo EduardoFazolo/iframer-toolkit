@@ -99,7 +99,8 @@ var Bridge = class {
       if (w.tab !== tab.id) continue;
       w.last = `the ${w.site} tab closed before answering`;
       if (w.read) this.dispatch(id, w);
-      else this.finish(id, w, { error: w.last, dead: true, maybeSent: true });
+      else if (w.released) this.finish(id, w, { error: w.last, dead: true, maybeSent: true });
+      else this.finish(id, w, { error: `${w.last}. The write was not sent`, dead: true });
     }
   }
   /** A message from the relay in a tab. Any message means the page's own code runs: the tab is alive. */
@@ -113,8 +114,17 @@ var Bridge = class {
     const w = this.waiting.get(id);
     if (!w || w.tab !== tab.id) return;
     if (m.ack) {
+      if (w.acked) return;
       w.acked = true;
       clearTimeout(w.timer);
+      if (!w.read) {
+        try {
+          tab.send({ id, go: 1 });
+        } catch {
+          return this.finish(id, w, { error: `the ${w.site} tab closed before the write was released. The write was not sent`, dead: true });
+        }
+        w.released = true;
+      }
       const ms = w.read ? this.t.tryMs : this.t.writeMs;
       w.timer = setTimeout(() => {
         tab.stalled = tab.probed = this.now();
@@ -134,7 +144,8 @@ var Bridge = class {
     if (err && NETWORK_ERR.test(err)) {
       w.last = `the ${w.site} tab could not reach ${w.site} (${err})`;
       if (w.read) this.dispatch(id, w);
-      else this.finish(id, w, { error: w.last, dead: true, maybeSent: true });
+      else if (w.released) this.finish(id, w, { error: w.last, dead: true, maybeSent: true });
+      else this.finish(id, w, { error: `${w.last}. The write was not sent`, dead: true });
       return;
     }
     const { id: _id, ack: _ack, expired: _expired, ...reply } = m;
@@ -166,16 +177,30 @@ var Bridge = class {
   /** Starts a request. `done` gets the reply, or null after cancel(). Returns the id for cancel(). */
   request(route, job, done) {
     const id = `${(++this.seq).toString(36)}${Math.random().toString(36).slice(2, 10)}`;
-    const w = { done, site: route.site, pool: route.pool, job, read: isRead(job.method), acked: false, tried: /* @__PURE__ */ new Set(), last: "", active: false };
+    const w = { done, site: route.site, pool: route.pool, job, read: isRead(job.method), acked: false, released: false, cancelled: false, tried: /* @__PURE__ */ new Set(), last: "", active: false };
     this.waiting.set(id, w);
     this.lastUse = this.now();
     this.run(id, w);
     return id;
   }
-  /** The script went away (killed, timed out): give its slot or its place in line back. */
+  /**
+   * The script went away (killed, timed out). A read waiting in line just leaves. A read already in a tab is aborted
+   * there and keeps its slot until the tab answers (or goes away, or its timer runs out): freeing it at once would put
+   * a fifth request on the site while the cancelled one still runs. A write is never cut off: it only stops waiting.
+   */
   cancel(id) {
     const w = this.waiting.get(id);
-    if (w) this.finish(id, w, null);
+    if (!w) return;
+    const tab = w.tab ? (this.pools.get(w.pool) ?? []).find((x) => x.id === w.tab) : void 0;
+    if (!w.read || !w.active || !tab) return this.finish(id, w, null);
+    w.cancelled = true;
+    w.done = () => {
+    };
+    try {
+      tab.send({ id, abort: 1 });
+    } catch {
+      this.finish(id, w, null);
+    }
   }
   finish(id, w, reply) {
     clearTimeout(w.timer);
@@ -214,6 +239,7 @@ var Bridge = class {
    */
   dispatch(id, w) {
     clearTimeout(w.timer);
+    if (w.cancelled) return this.finish(id, w, null);
     const now = this.now();
     const all = this.pools.get(w.pool) ?? [];
     const usable = all.filter((x) => w.read || !x.readOnly);
@@ -231,6 +257,7 @@ var Bridge = class {
     if (tab.stalled) tab.probed = now;
     w.tab = tab.id;
     w.acked = false;
+    w.released = false;
     w.tried.add(tab.id);
     const notAfter = Date.now() + Math.round(this.t.ackMs * 0.8);
     w.timer = setTimeout(() => {
@@ -317,8 +344,9 @@ function masterKey() {
   }
   return k;
 }
-function tabKey(master, site, name, readOnly) {
-  return import_crypto.default.createHmac("sha256", master).update(`${site}
+function tabKey(master, origin, site, name, readOnly) {
+  return import_crypto.default.createHmac("sha256", master).update(`${origin.toLowerCase()}
+${site}
 ${name}
 ${readOnly ? "ro" : "rw"}`).digest("hex").slice(0, 32);
 }
@@ -328,10 +356,70 @@ function safeEqual(a, b) {
 }
 var LOOPBACK = /^(127\.0\.0\.1|localhost)$/;
 var IP = /^\d{1,3}(\.\d{1,3}){3}$/;
+var SHARED_SUFFIXES = /* @__PURE__ */ new Set([
+  "co.uk",
+  "org.uk",
+  "ac.uk",
+  "gov.uk",
+  "me.uk",
+  "com.br",
+  "net.br",
+  "org.br",
+  "com.au",
+  "net.au",
+  "org.au",
+  "co.nz",
+  "co.jp",
+  "ne.jp",
+  "or.jp",
+  "co.in",
+  "co.kr",
+  "co.za",
+  "com.mx",
+  "com.ar",
+  "com.co",
+  "com.tr",
+  "com.cn",
+  "com.hk",
+  "com.sg",
+  "com.tw",
+  "co.il",
+  "co.id",
+  "com.my",
+  "com.ph",
+  "github.io",
+  "gitlab.io",
+  "vercel.app",
+  "netlify.app",
+  "herokuapp.com",
+  "pages.dev",
+  "workers.dev",
+  "web.app",
+  "firebaseapp.com",
+  "appspot.com",
+  "cloudfront.net",
+  "amazonaws.com",
+  "azurewebsites.net",
+  "onrender.com",
+  "fly.dev",
+  "glitch.me",
+  "repl.co",
+  "blogspot.com",
+  "wordpress.com",
+  "ngrok.io",
+  "ngrok-free.app",
+  "trycloudflare.com",
+  "s3.amazonaws.com",
+  "myshopify.com",
+  "webflow.io",
+  "framer.app",
+  "lovable.app"
+]);
 function validSite(site) {
   const [host, port, extra] = site.split(":");
   if (extra !== void 0 || port !== void 0 && !/^\d{1,5}$/.test(port)) return false;
   if (LOOPBACK.test(host)) return true;
+  if (SHARED_SUFFIXES.has(host)) return false;
   return port === void 0 && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host) && !IP.test(host);
 }
 var validName = (name) => /^[A-Za-z0-9_.-]{1,40}$/.test(name);
@@ -424,7 +512,7 @@ function startBridgeServer(o) {
     }
     const site = u.searchParams.get("s") || "", name = u.searchParams.get("n") || "default", readOnly = u.searchParams.get("ro") === "1";
     const origin = String(req.headers.origin || "");
-    const ok = u.pathname === "/relay" && validSite(site) && validName(name) && safeEqual(u.searchParams.get("k") || "", tabKey(o.masterKey, site, name, readOnly)) && covers(site, origin);
+    const ok = u.pathname === "/relay" && validSite(site) && validName(name) && covers(site, origin) && safeEqual(u.searchParams.get("k") || "", tabKey(o.masterKey, origin, site, name, readOnly));
     if (!ok) {
       sock.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
       return;

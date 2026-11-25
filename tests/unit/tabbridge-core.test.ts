@@ -16,35 +16,55 @@ interface Fake extends Tab {
   fetched: number;
   inFlight: number;
   peak: number;
-  held: Array<{ id: string; notAfter: number }>;
+  held: Array<{ id: string; notAfter: number; method: string }>;
   thaw(): void;
   /** Answer of the next requests: an error string, or nothing for a 200. */
   error?: string;
+  /** Confirms this long after the request arrived (a receipt that is late on the wire). */
+  lateAck: number;
+  /** Ignores {abort}, like a fetch that can't be stopped. */
+  ignoreAbort: boolean;
+  aborted: number;
+  /** Writes it was told to send ({go}). */
+  released: number;
 }
 
 let n = 0;
-function fake(b: Bridge, o: Partial<Pick<Fake, "frozen" | "silent" | "delay" | "site" | "name" | "readOnly" | "error">> = {}): Fake {
+function fake(b: Bridge, o: Partial<Pick<Fake, "frozen" | "silent" | "delay" | "site" | "name" | "readOnly" | "error" | "lateAck" | "ignoreAbort">> = {}): Fake {
+  const waitingForGo = new Map<string, () => void>();
+  const stop = new Map<string, () => void>();
   const t: Fake = {
     id: `t${++n}`, site: o.site ?? "dnnr.io", name: o.name ?? "default", readOnly: !!o.readOnly, url: "", since: Date.now(), stalled: 0, probed: 0,
     frozen: !!o.frozen, silent: !!o.silent, delay: o.delay ?? 0, got: 0, fetched: 0, inFlight: 0, peak: 0, held: [], error: o.error,
+    lateAck: o.lateAck ?? 0, ignoreAbort: !!o.ignoreAbort, aborted: 0, released: 0,
     send(m) {
-      const id = m.id as string, notAfter = m.notAfter as number;
+      const id = m.id as string;
+      if (m.go) { t.released++; const go = waitingForGo.get(id); waitingForGo.delete(id); go?.(); return; }
+      if (m.abort) { t.aborted++; if (!t.ignoreAbort) stop.get(id)?.(); return; }
+      const notAfter = m.notAfter as number, method = m.method as string;
       t.got++;
-      if (t.frozen) { t.held.push({ id, notAfter }); return; }
-      run(id, notAfter);
+      if (t.frozen) { t.held.push({ id, notAfter, method }); return; }
+      run(id, notAfter, method);
     },
-    thaw() { t.frozen = false; for (const h of t.held.splice(0)) run(h.id, h.notAfter); },
+    thaw() { t.frozen = false; for (const h of t.held.splice(0)) run(h.id, h.notAfter, h.method); },
   };
-  // What the relay does: drop a request that is past its deadline, else confirm it, fetch, answer.
-  const run = (id: string, notAfter: number) => queueMicrotask(async () => {
+  // What the relay does: drop a request past its deadline; else confirm it; a read is fetched at once, a write only
+  // after its go; then answer.
+  const run = (id: string, notAfter: number, method: string) => queueMicrotask(async () => {
     if (Date.now() > notAfter) { b.message(t, { id, expired: 1 }); return; }
+    const fetchIt = async () => {
+      if (t.silent) return;
+      t.fetched++;
+      t.peak = Math.max(t.peak, ++t.inFlight);
+      const stopped = await new Promise<boolean>((ok) => { const timer = setTimeout(() => ok(false), t.delay); stop.set(id, () => { clearTimeout(timer); ok(true); }); });
+      stop.delete(id);
+      t.inFlight--;
+      b.message(t, stopped ? { id, error: "aborted: the read was stopped or timed out" } : t.error ? { id, error: t.error } : { id, status: 200, type: "basic", headers: {}, body64: "" });
+    };
+    if (method !== "GET" && method !== "HEAD") waitingForGo.set(id, fetchIt);
+    if (t.lateAck) await sleep(t.lateAck);
     b.message(t, { id, ack: 1 });
-    if (t.silent) return;
-    t.fetched++;
-    t.peak = Math.max(t.peak, ++t.inFlight);
-    await sleep(t.delay);
-    t.inFlight--;
-    b.message(t, t.error ? { id, error: t.error } : { id, status: 200, type: "basic", headers: {}, body64: "" });
+    if (method === "GET" || method === "HEAD") await fetchIt();
   });
   b.attach(t);
   return t;
@@ -123,7 +143,29 @@ describe("writes are never sent twice", () => {
     expect(r.dead).toBe(true);
     expect(r.maybeSent).toBe(true);
     expect(r.ms).toBeGreaterThanOrEqual(1150);
+    expect(silent.released).toBe(1); // the tab was told to send it
     expect(older.got).toBe(0);
+  });
+
+  test("a write starts only on the go, and a normal one gets exactly one", async () => {
+    const b = make(), t = fake(b);
+    const r = (await ask(b, "POST")) as Reply;
+    expect(r.status).toBe(200);
+    expect(t.released).toBe(1);
+    expect(t.fetched).toBe(1);
+    await ask(b); // a read needs no go
+    expect(t.released).toBe(1);
+  });
+
+  test("a receipt that arrives after the wait: reported as not sent, and it really is not (no go)", async () => {
+    const b = make(), t = fake(b, { lateAck: 180 }); // receipt wait is 100 ms
+    const r = (await ask(b, "POST")) as Reply & { ms: number };
+    expect(r.dead).toBe(true);
+    expect(r.maybeSent).toBeUndefined();
+    expect(r.error).toContain("was not sent");
+    await sleep(150); // the late receipt has arrived by now
+    expect(t.released).toBe(0);
+    expect(t.fetched).toBe(0);
   });
 
   test("the tab closes mid-write: may have reached the site; a read moves to the next tab", async () => {
@@ -179,7 +221,7 @@ describe("tabs and sites", () => {
     expect(t.peak).toBe(4);
   });
 
-  test("a cancelled request gives its slot back", async () => {
+  test("a cancelled read is aborted in the tab, and its slot is free once the tab let go", async () => {
     const b = make(), t = fake(b, { delay: 300 });
     const r = b.route("https://dnnr.io/x") as { site: string; pool: string };
     const ids = Array.from({ length: 4 }, () => b.request(r, job(), () => {}));
@@ -188,8 +230,41 @@ describe("tabs and sites", () => {
     expect(t.got).toBe(4);
     b.cancel(ids[0]);
     await sleep(20);
+    expect(t.aborted).toBe(1);
     expect(t.got).toBe(5);
+    expect(t.peak).toBe(4); // never 5 running in the tab
     expect(((await fifth) as Reply).status).toBe(200);
+  });
+
+  test("a cancelled read the tab can't stop keeps its slot until it ends", async () => {
+    const b = make(), t = fake(b, { delay: 300, ignoreAbort: true });
+    const r = b.route("https://dnnr.io/x") as { site: string; pool: string };
+    const ids = Array.from({ length: 4 }, () => b.request(r, job(), () => {}));
+    const fifth = ask(b);
+    await sleep(20);
+    b.cancel(ids[0]);
+    await sleep(60);
+    expect(t.got).toBe(4); // the fifth has not been sent: the cancelled one still runs on the site
+    expect(((await fifth) as Reply).status).toBe(200);
+    expect(t.peak).toBe(4);
+  });
+
+  test("a cancelled read is never moved to another tab, and a cancelled write just stops waiting", async () => {
+    const b = make(), older = fake(b), frozen = fake(b, { frozen: true });
+    const r = b.route("https://dnnr.io/x") as { site: string; pool: string };
+    const id = b.request(r, job(), () => {});
+    b.cancel(id);
+    await sleep(160); // past the receipt wait: a live read would now go to the older tab
+    expect(older.got).toBe(0);
+    expect(b.pending()).toBe(0);
+    const b2 = make(), t2 = fake(b2, { silent: true });
+    const r2 = b2.route("https://dnnr.io/x") as { site: string; pool: string };
+    const w = b2.request(r2, job("POST"), () => {});
+    await sleep(20);
+    b2.cancel(w);
+    expect(b2.pending()).toBe(0);
+    expect(t2.aborted).toBe(0); // a write is never cut off
+    expect(frozen.got).toBe(1);
   });
 
   test("a request waiting in line too long fails as busy", async () => {
@@ -260,15 +335,19 @@ describe("sites and keys", () => {
     expect(validSite("127.0.0.1:8080")).toBe(true);
     expect(validSite("1.2.3.4")).toBe(false);
     expect(validSite("a b.io")).toBe(false);
+    expect(validSite("co.uk")).toBe(false); // anyone can register under it
+    expect(validSite("github.io")).toBe(false);
+    expect(validSite("shop.co.uk")).toBe(true);
   });
 
-  test("a tab key is bound to site, name and read-only", () => {
-    const m = "ab".repeat(32);
-    const k = tabKey(m, "dnnr.io", "default", false);
+  test("a tab key is bound to the exact origin, site, name and read-only", () => {
+    const m = "ab".repeat(32), o = "https://www.dnnr.io";
+    const k = tabKey(m, o, "dnnr.io", "default", false);
     expect(k).toMatch(/^[0-9a-f]{32}$/);
-    expect(tabKey(m, "slack.com", "default", false)).not.toBe(k);
-    expect(tabKey(m, "dnnr.io", "work", false)).not.toBe(k);
-    expect(tabKey(m, "dnnr.io", "default", true)).not.toBe(k);
-    expect(tabKey("cd".repeat(32), "dnnr.io", "default", false)).not.toBe(k);
+    expect(tabKey(m, "https://admin.dnnr.io", "dnnr.io", "default", false)).not.toBe(k); // a sibling subdomain
+    expect(tabKey(m, o, "slack.com", "default", false)).not.toBe(k);
+    expect(tabKey(m, o, "dnnr.io", "work", false)).not.toBe(k);
+    expect(tabKey(m, o, "dnnr.io", "default", true)).not.toBe(k);
+    expect(tabKey("cd".repeat(32), o, "dnnr.io", "default", false)).not.toBe(k);
   });
 });
