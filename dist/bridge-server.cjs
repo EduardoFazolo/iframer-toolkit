@@ -526,7 +526,7 @@ function startBridgeServer(o) {
     }
     const site = u.searchParams.get("s") || "", name = u.searchParams.get("n") || "default", readOnly = u.searchParams.get("ro") === "1";
     const origin = String(req.headers.origin || "");
-    const ok = u.pathname === "/relay" && validSite(site) && validName(name) && covers(site, origin) && safeEqual(u.searchParams.get("k") || "", tabKey(o.masterKey, origin, site, name, readOnly));
+    const ok = u.pathname === "/relay" && u.searchParams.get("v") === String(BRIDGE_VERSION) && validSite(site) && validName(name) && covers(site, origin) && safeEqual(u.searchParams.get("k") || "", tabKey(o.masterKey, origin, site, name, readOnly));
     if (!ok) {
       sock.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
       return;

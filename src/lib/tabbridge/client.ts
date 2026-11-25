@@ -13,7 +13,9 @@
  * the tab, or the caller's own way. It never changes after that, so a run can't
  * start on one account and continue on another. A host on the tab whose tab
  * goes away gets an error, not a quiet fallback; a host that started on its
- * saved session stays there even if a tab is attached later.
+ * saved session stays there even if a tab is attached later. A host counts as
+ * "on the tab" from the moment a request was handed to a tab, whatever came of
+ * it. Requests made while the first one is still deciding wait for it.
  *
  * A write is never sent twice. null for a write means it certainly did not
  * leave this process. Once it may have left, every failure is thrown with
@@ -21,19 +23,22 @@
  *
  * Serialized with Function.prototype.toString, so it must stay self-contained
  * plain JavaScript: no imports, no outer variables, no TypeScript syntax.
- * d: { fs, path, home, env, fetch, auth? } (auth: header name -> where the page keeps it; the tab fills those in)
+ * d: { fs, path, home, env, fetch, v?, auth? }
+ *   v: the bridge version this client was written for (a daemon of another version is not used)
+ *   auth: header name -> where the page keeps it; the tab fills those in
  */
 export function tabBridgeClient(d) {
   // Longer than the daemon's own limits (60 s in line + 3 tabs for a read, 65 s for a write), so the daemon's error wins.
   var WAIT_MS = 150000;
   var down = false, skipped = "", hinted = false;
   var mode = {}; // host -> "tab" | "direct"
-  var deciding = {}; // host -> the first request to it, while it is still finding out which way this run goes
+  var deciding = {}; // host -> a promise that settles when the first request to it has found out which way the run goes
   var env = d.env || {};
 
   function fail(msg) { return new Error("stopped: tab bridge: " + msg); }
   function hostOf(url) { try { return new URL(url).host; } catch (e) { return String(url); } }
   function attachCmd(url) { return "iframer bridge attach " + hostOf(url); }
+  function aborted(sig) { return sig.reason || new Error("This operation was aborted"); }
   var MAYBE = "A write may have reached the site: check it, never re-send it blindly";
 
   // The daemon's port and token. A missing file or a dead pid is remembered for the whole run: no retries, no waiting
@@ -45,6 +50,8 @@ export function tabBridgeClient(d) {
       var st = JSON.parse(d.fs.readFileSync(d.path.join(env.IFRAMER_DATA_DIR || d.path.join(d.home, ".iframer"), "bridge.json"), "utf8"));
       if (!st || !st.port || !st.token) throw new Error("empty");
       try { process.kill(st.pid, 0); } catch (e) { if (e.code !== "EPERM") throw e; }
+      // A daemon that speaks another version may judge "sent" and "not sent" differently: never guess.
+      if (d.v && st.v !== d.v) { down = true; skipped = "the tab bridge runs another version (" + st.v + ", this client is " + d.v + "): run `iframer bridge attach <host>` and `iframer refresh` with the same iframer"; return null; }
       return st;
     } catch (e) { down = true; skipped = "the tab bridge is not running"; return null; }
   }
@@ -71,22 +78,27 @@ export function tabBridgeClient(d) {
   }
   function settled(f) { try { return Promise.resolve(f()); } catch (e) { return Promise.reject(e); } }
 
-  function response(r, method) {
+  function response(r, read, method) {
     // A redirect that was not followed is opaque in the tab (status 0); report it as a 302 so callers see "redirected".
     var status = r.type === "opaqueredirect" || !r.status ? 302 : r.status;
     var empty = status === 204 || status === 205 || status === 304 || method === "HEAD";
-    var headers = new Headers();
-    Object.keys(r.headers || {}).forEach(function (k) {
-      // The tab already decoded the body.
-      if (/^content-(encoding|length)$/i.test(k)) return;
-      try { headers.set(k, r.headers[k]); } catch (e) {}
-    });
-    var res = new Response(empty ? null : Buffer.from(r.body64 || "", "base64"), { status: status, headers: headers });
     try {
-      Object.defineProperty(res, "url", { value: r.url || "" });
-      Object.defineProperty(res, "redirected", { value: !!r.redirected });
-    } catch (e) {}
-    return res;
+      var headers = new Headers();
+      Object.keys(r.headers || {}).forEach(function (k) {
+        // The tab already decoded the body.
+        if (/^content-(encoding|length)$/i.test(k)) return;
+        try { headers.set(k, r.headers[k]); } catch (e) {}
+      });
+      var res = new Response(empty ? null : Buffer.from(r.body64 || "", "base64"), { status: status, headers: headers });
+      try {
+        Object.defineProperty(res, "url", { value: r.url || "" });
+        Object.defineProperty(res, "redirected", { value: !!r.redirected });
+      } catch (e) {}
+      return res;
+    } catch (e) {
+      // The site did answer (a status a Response can't carry, for one). For a write that means it got there.
+      throw fail("the site answered HTTP " + r.status + ", which can't be passed on (" + ((e && e.message) || e) + "). " + (read ? "Not retried" : MAYBE));
+    }
   }
 
   /** True when a tab is attached for this URL's site (so no saved session is needed). */
@@ -100,28 +112,9 @@ export function tabBridgeClient(d) {
       function () { down = true; skipped = "the tab bridge is not running"; return false; });
   }
 
-  // The first request to a host decides the way for the run. Requests that start while it is still deciding wait for
-  // it, so two requests fired together can't end up one on the tab and one on the saved session.
-  function bridgeFetch(url, init) {
-    url = String(url);
-    var h = hostOf(url);
-    if (mode[h]) return send(url, init || {});
-    if (deciding[h]) { var again = function () { return bridgeFetch(url, init); }; return deciding[h].then(again, again); }
-    var first = send(url, init || {});
-    deciding[h] = first;
-    var done = function () { if (deciding[h] === first) delete deciding[h]; };
-    first.then(done, done);
-    return first;
-  }
-
-  function send(url, init) {
-    var h = hostOf(url);
-    if (mode[h] === "direct") return Promise.resolve(null);
-    // The script already gave up on this request: nothing is sent.
-    var sig = init.signal;
-    if (sig && sig.aborted) return Promise.reject(sig.reason || new Error("aborted"));
-    var st = state();
-    if (!st) return settled(function () { return none(url, skipped); });
+  // Everything the request needs, read from the caller's objects once, now. A request that has to wait for the first
+  // one's decision is sent later, and must not pick up changes the caller makes to `init` in the meantime.
+  function snapshot(url, init) {
     var method = String(init.method || "GET").toUpperCase(), read = method === "GET" || method === "HEAD";
     var headers = {};
     var src = init.headers || {};
@@ -131,10 +124,10 @@ export function tabBridgeClient(d) {
     // The tab sends its own cookies: the saved one never leaves this script.
     each(function (k, v) { if (String(k).toLowerCase() !== "cookie" && v != null) headers[k] = String(v); });
     var job = { url: url, method: method, headers: headers };
-    if (init.redirect) job.redirect = init.redirect;
+    if (init.redirect) job.redirect = String(init.redirect);
     if (env.IFRAMER_BRIDGE_TAB) job.tab = env.IFRAMER_BRIDGE_TAB;
     if (d.auth && Object.keys(d.auth).length) job.auth = d.auth;
-    var b = init.body;
+    var b = init.body, unsupported = false;
     if (b != null && !read) {
       if (typeof b === "string") job.body = b;
       else if (typeof URLSearchParams !== "undefined" && b instanceof URLSearchParams) {
@@ -143,13 +136,54 @@ export function tabBridgeClient(d) {
       }
       else if (b instanceof ArrayBuffer) job.body64 = Buffer.from(b).toString("base64");
       else if (ArrayBuffer.isView(b)) job.body64 = Buffer.from(b.buffer, b.byteOffset, b.byteLength).toString("base64");
-      else {
-        // A body the tab can't carry (a stream, FormData). Only a problem when a tab would take this request.
-        return attached(url).then(function (on) {
-          if (!on) return none(url, skipped || "no tab attached");
-          throw fail("this request body can't go through the tab (send a string or bytes, not a stream or FormData). Not sent");
-        });
-      }
+      else unsupported = true; // a stream, FormData: only a problem when a tab would take this request
+    }
+    return { url: url, host: hostOf(url), method: method, read: read, job: job, unsupported: unsupported, sig: init.signal || null };
+  }
+
+  function bridgeFetch(url, init) {
+    var req;
+    try { req = snapshot(String(url), init || {}); } catch (e) { return Promise.reject(e); }
+    return route(req);
+  }
+
+  // The first request to a host decides the way for the run. Requests that arrive while it is still deciding wait
+  // for it, so two requests fired together can't end up one on the tab and one on the saved session. Each waiter can
+  // still be aborted on its own.
+  function route(req) {
+    var h = req.host;
+    if (req.sig && req.sig.aborted) return Promise.reject(aborted(req.sig));
+    if (mode[h]) return send(req);
+    if (deciding[h]) {
+      var gate = deciding[h];
+      var wait = !req.sig ? gate : new Promise(function (ok, no) {
+        var on = function () { no(aborted(req.sig)); };
+        req.sig.addEventListener("abort", on);
+        gate.then(function () { req.sig.removeEventListener("abort", on); ok(); });
+      });
+      return wait.then(function () { return route(req); });
+    }
+    var open;
+    var mine = new Promise(function (ok) { open = ok; }); // in place before anything is sent
+    deciding[h] = mine;
+    var first = send(req);
+    var done = function () { if (deciding[h] === mine) delete deciding[h]; open(); };
+    first.then(done, done);
+    return first;
+  }
+
+  function send(req) {
+    var url = req.url, h = req.host, read = req.read, sig = req.sig;
+    if (mode[h] === "direct") return Promise.resolve(null);
+    // The script already gave up on this request: nothing is sent.
+    if (sig && sig.aborted) return Promise.reject(aborted(sig));
+    var st = state();
+    if (!st) return settled(function () { return none(url, skipped); });
+    if (req.unsupported) {
+      return attached(url).then(function (on) {
+        if (!on) return none(url, skipped || "no tab attached");
+        throw fail("this request body can't go through the tab (send a string or bytes, not a stream or FormData). Not sent");
+      });
     }
     var dropped = "the connection to the tab bridge dropped while the request was out";
     // One abort for the wait limit and for the script's own signal.
@@ -160,16 +194,20 @@ export function tabBridgeClient(d) {
     var clear = function () { clearTimeout(timer); if (sig) sig.removeEventListener("abort", onAbort); };
     var out = d.fetch("http://127.0.0.1:" + st.port + "/fetch", {
       method: "POST", headers: { Authorization: "Bearer " + st.token, "Content-Type": "application/json" },
-      body: JSON.stringify(job), signal: ac.signal,
+      body: JSON.stringify(req.job), signal: ac.signal,
     }).then(function (res) {
+      // 503, 401, 403: refused before anything was handed to a tab. Any other answer: a tab had this request, so
+      // this host is on the tab for the rest of the run, whatever came of it.
+      var refused = res.status === 503 || res.status === 401 || res.status === 403;
+      if (!refused) mode[h] = "tab";
       return res.json().then(function (j) { return j; }, function () {
-        // The daemon took the request and the answer was cut off: a write may be on the site already.
-        if (!read && res.status === 200) throw fail(dropped + ". " + MAYBE);
+        // The daemon took the request and its answer was cut off (or the script aborted while reading it).
+        if (!read && !refused) throw fail((gaveUp ? "the script aborted the request while the write was out" : dropped) + ". " + MAYBE);
+        if (gaveUp) throw aborted(sig);
         return { error: "bridge HTTP " + res.status };
       }).then(function (r) {
-        // 503, 401, 403: refused before anything was sent to a tab.
         if (res.status === 503) return none(url, r.error || "no tab attached", r.detachedMs);
-        if (res.status === 401 || res.status === 403) return none(url, "the tab bridge restarted (" + (r.error || res.status) + ")");
+        if (refused) return none(url, "the tab bridge restarted (" + (r.error || res.status) + ")");
         if (r.dead) {
           throw fail(r.error + ". No live tab for " + h + ": attach a fresh one (`" + attachCmd(url) + "`, then the line it prints), then "
             + (r.maybeSent ? "re-read before anything else. " + MAYBE : "run again"));
@@ -178,17 +216,18 @@ export function tabBridgeClient(d) {
         // The tab sent the write and then something failed (an answer too large, a refused redirect, ...).
         if (r.error && r.maybeSent) throw fail(r.error + ". " + MAYBE);
         if (!res.ok || r.error) throw fail((r.error || "HTTP " + res.status) + ". Not retried");
-        mode[h] = "tab";
-        return response(r, method);
+        return response(r, read, req.method);
       });
     }, function (e) {
-      if (timedOut) throw fail("no answer in " + WAIT_MS / 1000 + " s for " + h + ". Restart it: `iframer bridge stop`, then attach again" + (read ? "" : ". " + MAYBE));
-      // The script's own signal: a read just ends with its reason; a write may be on the site already.
-      if (gaveUp) { if (read) throw (sig.reason || e); throw fail("the script aborted the request while the write was out. " + MAYBE); }
-      down = true;
       // Refused at connect: nothing was sent. Anything else happened with the request already out.
       var code = String((e && (e.code || (e.cause && e.cause.code))) || "");
-      var never = /ECONNREFUSED|ConnectionRefused|ENOTFOUND|EADDRNOTAVAIL|UND_ERR_CONNECT_TIMEOUT/.test(code);
+      var never = !timedOut && !gaveUp && /ECONNREFUSED|ConnectionRefused|ENOTFOUND|EADDRNOTAVAIL|UND_ERR_CONNECT_TIMEOUT/.test(code);
+      // A write that may be on the site went there through the tab: the run stays on the tab.
+      if (!read && !never) mode[h] = "tab";
+      if (timedOut) throw fail("no answer in " + WAIT_MS / 1000 + " s for " + h + ". Restart it: `iframer bridge stop`, then attach again" + (read ? "" : ". " + MAYBE));
+      // The script's own signal: a read just ends with its reason; a write may be on the site already.
+      if (gaveUp) { if (read) throw aborted(sig); throw fail("the script aborted the request while the write was out. " + MAYBE); }
+      down = true;
       if (!read && !never) throw fail(dropped + ". " + MAYBE);
       return none(url, "the tab bridge is not running");
     });
@@ -207,7 +246,7 @@ export function tabBridgeClient(d) {
 }
 
 /** A standalone ES module for any Node script (written by `iframer bridge client`). */
-export function clientModuleSource(): string {
+export function clientModuleSource(version: number): string {
   return [
     `// iframer tab bridge client. Generated by \`iframer bridge client\`: don't edit, run it again after updating iframer.`,
     `// Sends a request through the logged-in browser tab attached with \`iframer bridge attach <host>\`: the tab does the`,
@@ -221,13 +260,13 @@ export function clientModuleSource(): string {
     `// this process, so falling back is safe for writes too. Every other problem is thrown ("stopped: tab bridge: ..."`,
     `// with the next step); when it says a write may have reached the site, check the site, never re-send blindly.`,
     `// One session per host per run: the first request to a host decides (tab, or your own way) and it never changes.`,
-    `// A write never follows a redirect (status 302 comes back). A read that ends on another site is refused.`,
+    `// Redirects: a write is never followed (status 302 comes back); a read is followed only inside the tab's own origin.`,
     `// Env: IFRAMER_BRIDGE=off, IFRAMER_BRIDGE_TAB=<name> (tabs attached with --name), IFRAMER_DATA_DIR.`,
     `import fs from "node:fs";`,
     `import os from "node:os";`,
     `import path from "node:path";`,
     ``,
-    `const bridge = (${tabBridgeClient.toString()})({ fs, path, home: os.homedir(), env: process.env, fetch: globalThis.fetch });`,
+    `const bridge = (${tabBridgeClient.toString()})({ fs, path, home: os.homedir(), env: process.env, fetch: globalThis.fetch, v: ${version} });`,
     `export const bridgeFetch = bridge.fetch;`,
     `/** True when a tab is attached for this URL's site. */`,
     `export const tabAttached = bridge.attached;`,

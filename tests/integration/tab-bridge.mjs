@@ -86,8 +86,8 @@ const master = fs.readFileSync(path.join(data, "bridge.key"), "utf8").trim();
 const key = (origin, site, name = "default", ro = false) => state.tabKey(master, origin, site, name, ro);
 const APP = "https://app.example.com";
 // A fake tab: a WebSocket client that says which page it is (Origin) and answers like the relay.
-function fakeTab({ site, origin, k, name = "default", ro = false, answer = (q) => ({ status: 200, type: "basic", headers: { "content-type": "text/plain" }, body64: Buffer.from(`${q.method} ${q.url}`).toString("base64") }) }) {
-  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/relay?s=${encodeURIComponent(site)}&n=${name}${ro ? "&ro=1" : ""}&k=${k}`, { headers: origin ? { Origin: origin } : {} });
+function fakeTab({ site, origin, k, name = "default", ro = false, v = state.BRIDGE_VERSION, answer = (q) => ({ status: 200, type: "basic", headers: { "content-type": "text/plain" }, body64: Buffer.from(`${q.method} ${q.url}`).toString("base64") }) }) {
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/relay?s=${encodeURIComponent(site)}&n=${name}${ro ? "&ro=1" : ""}${v ? `&v=${v}` : ""}&k=${k}`, { headers: origin ? { Origin: origin } : {} });
   const t = { ws, got: [], opened: new Promise((ok) => { ws.on("open", () => ok(true)); ws.on("error", () => ok(false)); ws.on("unexpected-response", () => ok(false)); }) };
   ws.on("message", (d) => {
     const q = JSON.parse(String(d));
@@ -106,6 +106,7 @@ check("a key is useless from a sibling subdomain of the same site", await refuse
 check("relay without an Origin is refused", await refused({ site: "app.example.com", origin: null, k: key(APP, "app.example.com") }));
 check("a page can't drop its own read-only limit", await refused({ site: "app.example.com", origin: APP, k: key(APP, "app.example.com", "default", true) }));
 check("a plain-http page is refused", await refused({ site: "app.example.com", origin: "http://app.example.com", k: key("http://app.example.com", "app.example.com") }));
+check("a relay from another version of the snippet is refused", await refused({ site: "app.example.com", origin: APP, k: key(APP, "app.example.com"), v: 1 }) && await refused({ site: "app.example.com", origin: APP, k: key(APP, "app.example.com"), v: 0 }));
 check("a shared suffix is refused as a site, even with a key for it", await refused({ site: "co.uk", origin: "https://shop.co.uk", k: key("https://shop.co.uk", "co.uk") }));
 check("the daemon is still up after the refusals", (await call("/status")).status === 200);
 
@@ -163,7 +164,7 @@ console.log("client, scripted daemon");
 {
   const fdata = fs.mkdtempSync(path.join(os.tmpdir(), "ifb-fake-"));
   let steps = [], probeAttached = false;
-  const seen = [];
+  const seen = [], bodies = [];
   const json = (res, code, body) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(body)); };
   const fakeDaemon = http.createServer((req, res) => {
     let raw = "";
@@ -172,11 +173,14 @@ console.log("client, scripted daemon");
       const q = JSON.parse(raw || "{}");
       if (req.url === "/probe") return json(res, 200, { attached: probeAttached });
       seen.push(`${q.method} ${q.url}`);
+      bodies.push(q.body ?? null);
       const step = steps.shift() || "ok";
       if (step === "drop") return req.socket.destroy(); // the daemon took the request, then the connection died
       if (step === "cut") { res.writeHead(200, { "content-type": "application/json" }); res.write('{"status":2'); return req.socket.destroy(); }
       if (step === "none") return json(res, 503, { error: "no tab attached for x" });
       if (step === "slow-none") return setTimeout(() => json(res, 503, { error: "no tab attached for x" }), 150);
+      if (step === "slow-ok") return setTimeout(() => json(res, 200, { status: 200, type: "basic", headers: {}, body64: Buffer.from("via-tab").toString("base64") }), 150);
+      if (step === "status-600") return json(res, 200, { status: 600, type: "basic", headers: {}, body64: "" });
       if (step === "sent-then-failed") return json(res, 200, { error: "response larger than 32 MB: too large for the tab bridge", maybeSent: true });
       json(res, 200, { status: 200, type: "basic", headers: {}, body64: Buffer.from("via-tab").toString("base64") });
     });
@@ -187,8 +191,8 @@ console.log("client, scripted daemon");
   if (CLI) cli(["bridge", "client", "--out", mod]); else bridge.writeClientModule(mod);
   const A = "https://a.example.com/x", B = "https://b.example.com/x";
   const run = (plan, body, o = {}) => new Promise((ok) => {
-    steps = [...plan]; seen.length = 0; probeAttached = !!o.attached;
-    fs.writeFileSync(path.join(fdata, "bridge.json"), JSON.stringify({ port: o.port || fport, token: "t", pid: process.pid, started: "", v: 1 }));
+    steps = [...plan]; seen.length = 0; bodies.length = 0; probeAttached = !!o.attached;
+    fs.writeFileSync(path.join(fdata, "bridge.json"), JSON.stringify({ port: o.port || fport, token: "t", pid: process.pid, started: "", v: o.v ?? state.BRIDGE_VERSION }));
     const file = path.join(fdata, "case.mjs");
     fs.writeFileSync(file, `import { bridgeFetch } from "./tab-bridge.mjs";
 const A = ${JSON.stringify(A)}, B = ${JSON.stringify(B)};
@@ -227,6 +231,17 @@ console.log(JSON.stringify(out));
   check("a write the tab sent and then failed on says it may have reached the site", /^ERR .*32 MB.*may have reached the site/.test(String(o[0])), o);
   o = await run(["ok"], `const c = new AbortController(); c.abort(); out.push(await one(A, { method: "POST", body: "{}", signal: c.signal }));`);
   check("a request the script already aborted is never sent", /^ERR /.test(String(o[0])) && seen.length === 0, { o, seen: [...seen] });
+
+  o = await run(["slow-ok", "ok"], `const first = one(A); const init = { method: "POST", body: "target-A" }; const second = one(A, init); init.body = "target-B"; init.method = "DELETE"; out.push(await first, await second);`);
+  check("a request that waits its turn is sent as it was when called, not as its options look later", o[1] === "via-tab" && seen[1] === `POST ${A}` && bodies[1] === "target-A", { o, seen: [...seen], bodies: [...bodies] });
+  o = await run(["drop", "none"], `out.push(await one(A, ${post})); out.push(await one(A, ${post}));`);
+  check("after a write that may have gone through the tab, the run never falls back to the saved session", /may have reached/.test(String(o[0])) && /^ERR .*was using the tab/.test(String(o[1])), o);
+  o = await run(["slow-none"], `const first = one(A); const c = new AbortController(); const second = one(A, { signal: c.signal }); c.abort(new Error("my-abort")); out.push(await second, await first);`);
+  check("a request waiting for the first one's decision can be aborted on its own", /my-abort/.test(String(o[0])) && o[1] === null && seen.length === 1, { o, seen: [...seen] });
+  o = await run(["status-600"], `out.push(await one(A, ${post}));`);
+  check("a site answer with a status that can't be passed on: the write says it may have reached the site", /^ERR stopped: tab bridge: .*600.*may have reached the site/.test(String(o[0])), o);
+  o = await run(["ok"], `out.push(await one(A));`, { v: 1 });
+  check("a daemon of another version is not used (null, nothing sent)", o[0] === null && seen.length === 0, { o, seen: [...seen] });
 
   o = await run([], `const f = new FormData(); f.set("a", "1"); out.push(await one(A, { method: "POST", body: f }));`, { attached: false });
   check("a FormData body with no tab attached falls back (null)", o[0] === null && seen.length === 0, o);
@@ -273,6 +288,9 @@ kit.writeOutputs(host);
 // With BRIDGE_CLI the client.mjs is written by the built CLI, so the bundled template is what runs below.
 if (CLI) cli(["recipe", host, "activeCampaigns", "--path", "/{community}/dashboard/campaigns", "--rsc", "--find", "campaigns", "--pick", "campaigns.{title}", "--where", "active=true", "--count", "--quiet"]);
 else kit.saveRecipe({ name: "activeCampaigns", host, path: "/{community}/dashboard/campaigns", rsc: true, find: "campaigns", pick: "campaigns.{title}", where: "active=true", count: true });
+// A code recipe that calls another recipe by its name (they are module bindings), as it could before.
+if (CLI) cli(["recipe", host, "composed", "--run", "async (core, args) => 'composed:' + (await activeCampaigns({ community: 'acme' }))", "--quiet"]);
+else kit.saveRecipe({ name: "composed", host, run: "async (core, args) => 'composed:' + (await activeCampaigns({ community: 'acme' }))" });
 // Recipes named like the client's own internals must not break the regenerated module.
 for (const name of ["os", "__tab", "__tabFetch", "__tabHome", "globalThis", "fetch", "process", "env", "path", "fs"]) {
   if (CLI) cli(["recipe", host, name, "--path", "/api/x", "--quiet"]); else kit.saveRecipe({ name, host, path: "/api/x" });
@@ -354,6 +372,8 @@ console.log(JSON.stringify({ first: first.sentCookie, second: second.sentCookie 
   check("an auth header the page keeps in localStorage is filled in by the tab", r.includes("Seeded Person"), r);
   r = await node(["activeCampaigns", "community=acme"]);
   check("a recipe runs through the tab", r === "1", r);
+  r = await node(["composed"]);
+  check("a code recipe still calls another recipe by name", r === "composed:1", r);
   r = await node(["action", "getRestaurants", JSON.stringify([{ communitySlug: "acme" }]), "--approved"]);
   check("a write (Server Action, id re-found from the page's JS) runs through the tab", r.includes("Bistro") && r.includes("acme"), r);
   r = await node(["get", "/api/rate-limited"]);
@@ -383,6 +403,9 @@ out.cross = await j("/api/x").then(() => bridgeFetch("https://evil.example/x")).
 out.writeRedirect = await j("/api/redirect-me", { method: "POST", body: "{}" });
 out.out = await j("/api/redirect-out").catch((e) => e.message);
 out.hugeWrite = await j("/api/huge", { method: "POST", body: "{}" }).catch((e) => e.message);
+out.asError = await j("/api/redirect-me", { redirect: "error" }).catch((e) => e.message);
+out.head = await j("/api/echo-head", { method: "HEAD" });
+out.afterError = await j("/api/x");
 console.log(JSON.stringify(out));
 `);
   let out = {};
@@ -401,6 +424,8 @@ console.log(JSON.stringify(out));
   check("another host with no tab is null, whatever this one uses", out.cross === null, out.cross);
   check("a write never follows a redirect: it comes back as 302 and the target is not requested", out.writeRedirect?.status === 302 && !log.some((l) => l.path === "/api/redirect-target" && l.method === "POST") && log.filter((l) => l.path === "/api/redirect-target").length === 1, { r: out.writeRedirect, hits: log.filter((l) => /redirect/.test(l.path)) });
   check("a read redirected to another site comes back as 302 and the other site is never requested", out.out?.status === 302 && !log.some((l) => l.path === "/api/cors-echo"), { out: out.out, hits: log.filter((l) => /cors-echo|redirect-out/.test(l.path)) });
+  check("redirect: error on a redirect is an error about the redirect, and the tab is not treated as dead", /redirect/.test(String(out.asError)) && !/No live tab/.test(String(out.asError)) && out.afterError?.status === 200, { e: out.asError, after: out.afterError });
+  check("a request that is not redirected is sent once", log.filter((l) => l.path === "/api/echo-head").length === 1 && out.head?.status === 200, { head: out.head, hits: log.filter((l) => l.path === "/api/echo-head") });
   check("a write that reached the site and then failed (answer too large) says it may have reached it", /32 MB.*may have reached the site/.test(String(out.hugeWrite)) && log.some((l) => l.path === "/api/huge" && l.method === "POST"), out.hugeWrite);
   text = cli(["bridge", "status"]);
   check("the tab is still answering after the refused stream and download", /attached/.test(text) && !/NOT ANSWERING/.test(text), text);

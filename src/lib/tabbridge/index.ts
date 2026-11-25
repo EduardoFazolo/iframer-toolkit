@@ -107,7 +107,7 @@ export async function attach(o: AttachOptions): Promise<{ site: string; name: st
   if (!covers(site, origin)) throw new Error(`--site ${site} does not cover ${host}: it must be ${host} or a parent domain of it`);
   const st = await start();
   // The key only works from this exact origin: the page can see it, so it must open nothing anywhere else.
-  const expression = relaySource({ port: st.port, origin, site, name, readOnly: !!o.readOnly, key: tabKey(masterKey(), origin, site, name, !!o.readOnly) });
+  const expression = relaySource({ version: BRIDGE_VERSION, port: st.port, origin, site, name, readOnly: !!o.readOnly, key: tabKey(masterKey(), origin, site, name, !!o.readOnly) });
   const target = o.target || "t3";
   const scope = `${site}${site === host ? "" : " and its subdomains"}${name === "default" ? "" : `, tab name "${name}"`}${o.readOnly ? ", read-only" : ""}`;
   const steps = target === "t3"
@@ -180,6 +180,6 @@ export async function statusText(): Promise<string> {
 /** Writes the standalone client module for scripts that are not a generated client.mjs. */
 export function writeClientModule(file = path.join(getDataDir(), "bridge", "tab-bridge.mjs")): string {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, clientModuleSource());
+  fs.writeFileSync(file, clientModuleSource(BRIDGE_VERSION));
   return file;
 }

@@ -14399,6 +14399,9 @@ function tabBridgeClient(d) {
   function attachCmd(url) {
     return "iframer bridge attach " + hostOf(url);
   }
+  function aborted(sig) {
+    return sig.reason || new Error("This operation was aborted");
+  }
   var MAYBE = "A write may have reached the site: check it, never re-send it blindly";
   function state() {
     if (env.IFRAMER_BRIDGE === "off") {
@@ -14414,6 +14417,11 @@ function tabBridgeClient(d) {
       } catch (e) {
         if (e.code !== "EPERM") throw e;
       }
+      if (d.v && st.v !== d.v) {
+        down = true;
+        skipped = "the tab bridge runs another version (" + st.v + ", this client is " + d.v + "): run `iframer bridge attach <host>` and `iframer refresh` with the same iframer";
+        return null;
+      }
       return st;
     } catch (e) {
       down = true;
@@ -14421,8 +14429,8 @@ function tabBridgeClient(d) {
       return null;
     }
   }
-  function post(st, route, body, ms) {
-    return d.fetch("http://127.0.0.1:" + st.port + route, {
+  function post(st, route2, body, ms) {
+    return d.fetch("http://127.0.0.1:" + st.port + route2, {
       method: "POST",
       headers: { Authorization: "Bearer " + st.token, "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -14447,24 +14455,28 @@ function tabBridgeClient(d) {
       return Promise.reject(e);
     }
   }
-  function response(r, method) {
+  function response(r, read2, method) {
     var status = r.type === "opaqueredirect" || !r.status ? 302 : r.status;
     var empty = status === 204 || status === 205 || status === 304 || method === "HEAD";
-    var headers = new Headers();
-    Object.keys(r.headers || {}).forEach(function(k) {
-      if (/^content-(encoding|length)$/i.test(k)) return;
+    try {
+      var headers = new Headers();
+      Object.keys(r.headers || {}).forEach(function(k) {
+        if (/^content-(encoding|length)$/i.test(k)) return;
+        try {
+          headers.set(k, r.headers[k]);
+        } catch (e) {
+        }
+      });
+      var res = new Response(empty ? null : Buffer.from(r.body64 || "", "base64"), { status, headers });
       try {
-        headers.set(k, r.headers[k]);
+        Object.defineProperty(res, "url", { value: r.url || "" });
+        Object.defineProperty(res, "redirected", { value: !!r.redirected });
       } catch (e) {
       }
-    });
-    var res = new Response(empty ? null : Buffer.from(r.body64 || "", "base64"), { status, headers });
-    try {
-      Object.defineProperty(res, "url", { value: r.url || "" });
-      Object.defineProperty(res, "redirected", { value: !!r.redirected });
+      return res;
     } catch (e) {
+      throw fail("the site answered HTTP " + r.status + ", which can't be passed on (" + (e && e.message || e) + "). " + (read2 ? "Not retried" : MAYBE));
     }
-    return res;
   }
   function attached(url) {
     var st = state();
@@ -14485,33 +14497,7 @@ function tabBridgeClient(d) {
       }
     );
   }
-  function bridgeFetch(url, init) {
-    url = String(url);
-    var h = hostOf(url);
-    if (mode[h]) return send(url, init || {});
-    if (deciding[h]) {
-      var again = function() {
-        return bridgeFetch(url, init);
-      };
-      return deciding[h].then(again, again);
-    }
-    var first = send(url, init || {});
-    deciding[h] = first;
-    var done = function() {
-      if (deciding[h] === first) delete deciding[h];
-    };
-    first.then(done, done);
-    return first;
-  }
-  function send(url, init) {
-    var h = hostOf(url);
-    if (mode[h] === "direct") return Promise.resolve(null);
-    var sig = init.signal;
-    if (sig && sig.aborted) return Promise.reject(sig.reason || new Error("aborted"));
-    var st = state();
-    if (!st) return settled(function() {
-      return none(url, skipped);
-    });
+  function snapshot2(url, init) {
     var method = String(init.method || "GET").toUpperCase(), read2 = method === "GET" || method === "HEAD";
     var headers = {};
     var src = init.headers || {};
@@ -14530,10 +14516,10 @@ function tabBridgeClient(d) {
       if (String(k).toLowerCase() !== "cookie" && v != null) headers[k] = String(v);
     });
     var job = { url, method, headers };
-    if (init.redirect) job.redirect = init.redirect;
+    if (init.redirect) job.redirect = String(init.redirect);
     if (env.IFRAMER_BRIDGE_TAB) job.tab = env.IFRAMER_BRIDGE_TAB;
     if (d.auth && Object.keys(d.auth).length) job.auth = d.auth;
-    var b = init.body;
+    var b = init.body, unsupported = false;
     if (b != null && !read2) {
       if (typeof b === "string") job.body = b;
       else if (typeof URLSearchParams !== "undefined" && b instanceof URLSearchParams) {
@@ -14543,12 +14529,65 @@ function tabBridgeClient(d) {
         })) headers["content-type"] = "application/x-www-form-urlencoded;charset=UTF-8";
       } else if (b instanceof ArrayBuffer) job.body64 = Buffer.from(b).toString("base64");
       else if (ArrayBuffer.isView(b)) job.body64 = Buffer.from(b.buffer, b.byteOffset, b.byteLength).toString("base64");
-      else {
-        return attached(url).then(function(on) {
-          if (!on) return none(url, skipped || "no tab attached");
-          throw fail("this request body can't go through the tab (send a string or bytes, not a stream or FormData). Not sent");
+      else unsupported = true;
+    }
+    return { url, host: hostOf(url), method, read: read2, job, unsupported, sig: init.signal || null };
+  }
+  function bridgeFetch(url, init) {
+    var req;
+    try {
+      req = snapshot2(String(url), init || {});
+    } catch (e) {
+      return Promise.reject(e);
+    }
+    return route(req);
+  }
+  function route(req) {
+    var h = req.host;
+    if (req.sig && req.sig.aborted) return Promise.reject(aborted(req.sig));
+    if (mode[h]) return send(req);
+    if (deciding[h]) {
+      var gate = deciding[h];
+      var wait2 = !req.sig ? gate : new Promise(function(ok, no) {
+        var on = function() {
+          no(aborted(req.sig));
+        };
+        req.sig.addEventListener("abort", on);
+        gate.then(function() {
+          req.sig.removeEventListener("abort", on);
+          ok();
         });
-      }
+      });
+      return wait2.then(function() {
+        return route(req);
+      });
+    }
+    var open;
+    var mine = new Promise(function(ok) {
+      open = ok;
+    });
+    deciding[h] = mine;
+    var first = send(req);
+    var done = function() {
+      if (deciding[h] === mine) delete deciding[h];
+      open();
+    };
+    first.then(done, done);
+    return first;
+  }
+  function send(req) {
+    var url = req.url, h = req.host, read2 = req.read, sig = req.sig;
+    if (mode[h] === "direct") return Promise.resolve(null);
+    if (sig && sig.aborted) return Promise.reject(aborted(sig));
+    var st = state();
+    if (!st) return settled(function() {
+      return none(url, skipped);
+    });
+    if (req.unsupported) {
+      return attached(url).then(function(on) {
+        if (!on) return none(url, skipped || "no tab attached");
+        throw fail("this request body can't go through the tab (send a string or bytes, not a stream or FormData). Not sent");
+      });
     }
     var dropped = "the connection to the tab bridge dropped while the request was out";
     var ac = new AbortController(), timedOut = false, gaveUp = false;
@@ -14568,35 +14607,38 @@ function tabBridgeClient(d) {
     var out = d.fetch("http://127.0.0.1:" + st.port + "/fetch", {
       method: "POST",
       headers: { Authorization: "Bearer " + st.token, "Content-Type": "application/json" },
-      body: JSON.stringify(job),
+      body: JSON.stringify(req.job),
       signal: ac.signal
     }).then(function(res) {
+      var refused = res.status === 503 || res.status === 401 || res.status === 403;
+      if (!refused) mode[h] = "tab";
       return res.json().then(function(j) {
         return j;
       }, function() {
-        if (!read2 && res.status === 200) throw fail(dropped + ". " + MAYBE);
+        if (!read2 && !refused) throw fail((gaveUp ? "the script aborted the request while the write was out" : dropped) + ". " + MAYBE);
+        if (gaveUp) throw aborted(sig);
         return { error: "bridge HTTP " + res.status };
       }).then(function(r) {
         if (res.status === 503) return none(url, r.error || "no tab attached", r.detachedMs);
-        if (res.status === 401 || res.status === 403) return none(url, "the tab bridge restarted (" + (r.error || res.status) + ")");
+        if (refused) return none(url, "the tab bridge restarted (" + (r.error || res.status) + ")");
         if (r.dead) {
           throw fail(r.error + ". No live tab for " + h + ": attach a fresh one (`" + attachCmd(url) + "`, then the line it prints), then " + (r.maybeSent ? "re-read before anything else. " + MAYBE : "run again"));
         }
         if (r.busy) throw fail(r.error + ". Other scripts are using this site's tab: let them finish, then run again once");
         if (r.error && r.maybeSent) throw fail(r.error + ". " + MAYBE);
         if (!res.ok || r.error) throw fail((r.error || "HTTP " + res.status) + ". Not retried");
-        mode[h] = "tab";
-        return response(r, method);
+        return response(r, read2, req.method);
       });
     }, function(e) {
+      var code = String(e && (e.code || e.cause && e.cause.code) || "");
+      var never = !timedOut && !gaveUp && /ECONNREFUSED|ConnectionRefused|ENOTFOUND|EADDRNOTAVAIL|UND_ERR_CONNECT_TIMEOUT/.test(code);
+      if (!read2 && !never) mode[h] = "tab";
       if (timedOut) throw fail("no answer in " + WAIT_MS / 1e3 + " s for " + h + ". Restart it: `iframer bridge stop`, then attach again" + (read2 ? "" : ". " + MAYBE));
       if (gaveUp) {
-        if (read2) throw sig.reason || e;
+        if (read2) throw aborted(sig);
         throw fail("the script aborted the request while the write was out. " + MAYBE);
       }
       down = true;
-      var code = String(e && (e.code || e.cause && e.cause.code) || "");
-      var never = /ECONNREFUSED|ConnectionRefused|ENOTFOUND|EADDRNOTAVAIL|UND_ERR_CONNECT_TIMEOUT/.test(code);
       if (!read2 && !never) throw fail(dropped + ". " + MAYBE);
       return none(url, "the tab bridge is not running");
     });
@@ -14618,7 +14660,7 @@ function tabBridgeClient(d) {
     }
   };
 }
-function clientModuleSource() {
+function clientModuleSource(version) {
   return [
     `// iframer tab bridge client. Generated by \`iframer bridge client\`: don't edit, run it again after updating iframer.`,
     `// Sends a request through the logged-in browser tab attached with \`iframer bridge attach <host>\`: the tab does the`,
@@ -14632,13 +14674,13 @@ function clientModuleSource() {
     `// this process, so falling back is safe for writes too. Every other problem is thrown ("stopped: tab bridge: ..."`,
     `// with the next step); when it says a write may have reached the site, check the site, never re-send blindly.`,
     `// One session per host per run: the first request to a host decides (tab, or your own way) and it never changes.`,
-    `// A write never follows a redirect (status 302 comes back). A read that ends on another site is refused.`,
+    `// Redirects: a write is never followed (status 302 comes back); a read is followed only inside the tab's own origin.`,
     `// Env: IFRAMER_BRIDGE=off, IFRAMER_BRIDGE_TAB=<name> (tabs attached with --name), IFRAMER_DATA_DIR.`,
     `import fs from "node:fs";`,
     `import os from "node:os";`,
     `import path from "node:path";`,
     ``,
-    `const bridge = (${tabBridgeClient.toString()})({ fs, path, home: os.homedir(), env: process.env, fetch: globalThis.fetch });`,
+    `const bridge = (${tabBridgeClient.toString()})({ fs, path, home: os.homedir(), env: process.env, fetch: globalThis.fetch, v: ${version} });`,
     `export const bridgeFetch = bridge.fetch;`,
     `/** True when a tab is attached for this URL's site. */`,
     `export const tabAttached = bridge.attached;`,
@@ -14653,34 +14695,173 @@ var init_client = __esm({
   }
 });
 
+// src/lib/tabbridge/state.ts
+function readState() {
+  try {
+    const st = JSON.parse(import_fs12.default.readFileSync(stateFile(), "utf8"));
+    return st && st.port && st.token && st.pid ? st : null;
+  } catch {
+    return null;
+  }
+}
+function clearState(pid) {
+  try {
+    if (readState()?.pid === pid) import_fs12.default.rmSync(stateFile());
+  } catch {
+  }
+}
+function masterKey() {
+  import_fs12.default.mkdirSync(getDataDir(), { recursive: true, mode: 448 });
+  try {
+    const k2 = import_fs12.default.readFileSync(keyFile(), "utf8").trim();
+    if (/^[0-9a-f]{64}$/.test(k2)) return k2;
+  } catch {
+  }
+  const k = import_crypto13.default.randomBytes(32).toString("hex");
+  import_fs12.default.writeFileSync(keyFile(), k, { mode: 384 });
+  try {
+    import_fs12.default.chmodSync(keyFile(), 384);
+  } catch {
+  }
+  return k;
+}
+function tabKey(master, origin, site, name, readOnly) {
+  return import_crypto13.default.createHmac("sha256", master).update(`${origin.toLowerCase()}
+${site}
+${name}
+${readOnly ? "ro" : "rw"}`).digest("hex").slice(0, 32);
+}
+function siteFor(host) {
+  return host.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^www\./, "");
+}
+function validSite(site) {
+  const [host, port, extra] = site.split(":");
+  if (extra !== void 0 || port !== void 0 && !/^\d{1,5}$/.test(port)) return false;
+  if (LOOPBACK.test(host)) return true;
+  if (SHARED_SUFFIXES.has(host)) return false;
+  if (/^(co|com|net|org|gov|edu|ac|or|ne|go|mil|nom|gob|sch)\.[a-z]{2}$/.test(host)) return false;
+  return port === void 0 && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host) && !IP.test(host);
+}
+function covers(site, url) {
+  let u;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  const [host, port] = site.split(":");
+  const loop = LOOPBACK.test(u.hostname);
+  if (u.protocol !== "https:" && !(u.protocol === "http:" && loop)) return false;
+  if (port !== void 0 && u.port !== port) return false;
+  if (u.hostname === host) return true;
+  return !loop && !IP.test(host) && u.hostname.endsWith("." + host);
+}
+var import_crypto13, import_fs12, import_path13, BRIDGE_VERSION, DEFAULT_PORT, bridgePort, stateFile, keyFile, LOOPBACK, IP, SHARED_SUFFIXES, validName;
+var init_state = __esm({
+  "src/lib/tabbridge/state.ts"() {
+    "use strict";
+    import_crypto13 = __toESM(require("crypto"));
+    import_fs12 = __toESM(require("fs"));
+    import_path13 = __toESM(require("path"));
+    init_paths();
+    BRIDGE_VERSION = 2;
+    DEFAULT_PORT = 47625;
+    bridgePort = () => Number(process.env.IFRAMER_BRIDGE_PORT) || DEFAULT_PORT;
+    stateFile = () => import_path13.default.join(getDataDir(), "bridge.json");
+    keyFile = () => import_path13.default.join(getDataDir(), "bridge.key");
+    LOOPBACK = /^(127\.0\.0\.1|localhost)$/;
+    IP = /^\d{1,3}(\.\d{1,3}){3}$/;
+    SHARED_SUFFIXES = /* @__PURE__ */ new Set([
+      "co.uk",
+      "org.uk",
+      "ac.uk",
+      "gov.uk",
+      "me.uk",
+      "com.br",
+      "net.br",
+      "org.br",
+      "com.au",
+      "net.au",
+      "org.au",
+      "co.nz",
+      "co.jp",
+      "ne.jp",
+      "or.jp",
+      "co.in",
+      "co.kr",
+      "co.za",
+      "com.mx",
+      "com.ar",
+      "com.co",
+      "com.tr",
+      "com.cn",
+      "com.hk",
+      "com.sg",
+      "com.tw",
+      "co.il",
+      "co.id",
+      "com.my",
+      "com.ph",
+      "github.io",
+      "gitlab.io",
+      "vercel.app",
+      "netlify.app",
+      "herokuapp.com",
+      "pages.dev",
+      "workers.dev",
+      "web.app",
+      "firebaseapp.com",
+      "appspot.com",
+      "cloudfront.net",
+      "amazonaws.com",
+      "azurewebsites.net",
+      "onrender.com",
+      "fly.dev",
+      "glitch.me",
+      "repl.co",
+      "blogspot.com",
+      "wordpress.com",
+      "ngrok.io",
+      "ngrok-free.app",
+      "trycloudflare.com",
+      "s3.amazonaws.com",
+      "myshopify.com",
+      "webflow.io",
+      "framer.app",
+      "lovable.app"
+    ]);
+    validName = (name) => /^[A-Za-z0-9_.-]{1,40}$/.test(name);
+  }
+});
+
 // src/lib/kit/recipes.ts
 function iframerCli() {
   try {
-    let d = import_path13.default.dirname((0, import_url.fileURLToPath)(importMetaUrl));
+    let d = import_path14.default.dirname((0, import_url.fileURLToPath)(importMetaUrl));
     for (let i = 0; i < 6; i++) {
-      const pkg = import_path13.default.join(d, "package.json");
-      if (import_fs12.default.existsSync(pkg) && JSON.parse(import_fs12.default.readFileSync(pkg, "utf8")).name === "iframer-toolkit") {
-        const dev = import_path13.default.join(d, "bin", "iframer-dev");
-        if (import_fs12.default.existsSync(dev)) return dev;
-        const cli = import_path13.default.join(d, "dist", "cli.js");
-        return import_fs12.default.existsSync(cli) ? cli : null;
+      const pkg = import_path14.default.join(d, "package.json");
+      if (import_fs13.default.existsSync(pkg) && JSON.parse(import_fs13.default.readFileSync(pkg, "utf8")).name === "iframer-toolkit") {
+        const dev = import_path14.default.join(d, "bin", "iframer-dev");
+        if (import_fs13.default.existsSync(dev)) return dev;
+        const cli = import_path14.default.join(d, "dist", "cli.js");
+        return import_fs13.default.existsSync(cli) ? cli : null;
       }
-      d = import_path13.default.dirname(d);
+      d = import_path14.default.dirname(d);
     }
   } catch {
   }
   return null;
 }
 function apisDir(host) {
-  return import_path13.default.join(getDataDir(), "apis", normalizeHost(host));
+  return import_path14.default.join(getDataDir(), "apis", normalizeHost(host));
 }
 function normalizeHost(host) {
   return host.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
 }
 function listRecipes(host) {
   const dir = recipesDir(host);
-  if (!import_fs12.default.existsSync(dir)) return [];
-  return import_fs12.default.readdirSync(dir).filter((f) => f.endsWith(".json")).sort().map((f) => JSON.parse(import_fs12.default.readFileSync(import_path13.default.join(dir, f), "utf8")));
+  if (!import_fs13.default.existsSync(dir)) return [];
+  return import_fs13.default.readdirSync(dir).filter((f) => f.endsWith(".json")).sort().map((f) => JSON.parse(import_fs13.default.readFileSync(import_path14.default.join(dir, f), "utf8")));
 }
 function saveRecipe(spec) {
   if (!/^[A-Za-z_$][\w$]*$/.test(spec.name)) throw new Error(`recipe name must be a JS identifier: ${spec.name}`);
@@ -14693,82 +14874,82 @@ function saveRecipe(spec) {
     checkCode(spec.run, "run");
   }
   const dir = recipesDir(spec.host);
-  import_fs12.default.mkdirSync(dir, { recursive: true });
-  import_fs12.default.writeFileSync(import_path13.default.join(dir, `${spec.name}.json`), JSON.stringify(spec, null, 2) + "\n");
+  import_fs13.default.mkdirSync(dir, { recursive: true });
+  import_fs13.default.writeFileSync(import_path14.default.join(dir, `${spec.name}.json`), JSON.stringify(spec, null, 2) + "\n");
   writeOutputs(spec.host);
   return clientPath(spec.host);
 }
 function removeRecipe(host, name) {
-  const f = import_path13.default.join(recipesDir(host), `${name}.json`);
-  if (!import_fs12.default.existsSync(f)) return false;
-  import_fs12.default.unlinkSync(f);
+  const f = import_path14.default.join(recipesDir(host), `${name}.json`);
+  if (!import_fs13.default.existsSync(f)) return false;
+  import_fs13.default.unlinkSync(f);
   writeOutputs(host);
   return true;
 }
 function outputsFile(host) {
-  return import_path13.default.join(apisDir(host), "outputs.json");
+  return import_path14.default.join(apisDir(host), "outputs.json");
 }
 function outputDirs(host) {
   const dirs = [apisDir(host)];
   try {
-    for (const d of JSON.parse(import_fs12.default.readFileSync(outputsFile(host), "utf8"))) if (!dirs.includes(d)) dirs.push(d);
+    for (const d of JSON.parse(import_fs13.default.readFileSync(outputsFile(host), "utf8"))) if (!dirs.includes(d)) dirs.push(d);
   } catch {
   }
   return dirs;
 }
 function addOutputDir(host, dir) {
-  const abs = import_path13.default.resolve(dir);
-  if (abs === import_path13.default.resolve(apisDir(host))) return;
-  const extra = outputDirs(host).slice(1).filter((d) => import_fs12.default.existsSync(d));
+  const abs = import_path14.default.resolve(dir);
+  if (abs === import_path14.default.resolve(apisDir(host))) return;
+  const extra = outputDirs(host).slice(1).filter((d) => import_fs13.default.existsSync(d));
   if (!extra.includes(abs)) extra.push(abs);
-  import_fs12.default.mkdirSync(apisDir(host), { recursive: true });
-  import_fs12.default.writeFileSync(outputsFile(host), JSON.stringify(extra, null, 2) + "\n");
+  import_fs13.default.mkdirSync(apisDir(host), { recursive: true });
+  import_fs13.default.writeFileSync(outputsFile(host), JSON.stringify(extra, null, 2) + "\n");
 }
 function clientPath(host, dir = apisDir(host)) {
-  return import_path13.default.join(dir, "client.mjs");
+  return import_path14.default.join(dir, "client.mjs");
 }
 function writeOutputs(host) {
   const written = [];
   for (const dir of outputDirs(host)) {
-    if (dir !== apisDir(host) && !import_fs12.default.existsSync(dir)) continue;
+    if (dir !== apisDir(host) && !import_fs13.default.existsSync(dir)) continue;
     written.push(...writeClient(host, dir));
   }
-  if (import_fs12.default.existsSync(import_path13.default.join(apisDir(host), "recipes.js"))) written.push(writeBundle(host));
+  if (import_fs13.default.existsSync(import_path14.default.join(apisDir(host), "recipes.js"))) written.push(writeBundle(host));
   return written;
 }
 function writeClient(host, dir = apisDir(host)) {
-  import_fs12.default.mkdirSync(dir, { recursive: true });
+  import_fs13.default.mkdirSync(dir, { recursive: true });
   const map = readMap(host, dir);
   const auth = readAuth(host, dir);
   const specs = listRecipes(host);
   const out = [];
   const put = (name, body, mode) => {
-    const p = import_path13.default.join(dir, name);
-    import_fs12.default.writeFileSync(p, body, mode ? { mode } : void 0);
+    const p = import_path14.default.join(dir, name);
+    import_fs13.default.writeFileSync(p, body, mode ? { mode } : void 0);
     out.push(p);
   };
   put("client.mjs", renderClient(host, map, auth, specs, dir), 493);
   put(".env.example", envExample(host, auth));
-  const gi = import_path13.default.join(dir, ".gitignore");
-  const cur = import_fs12.default.existsSync(gi) ? import_fs12.default.readFileSync(gi, "utf8") : "";
-  for (const line of [".env", ".fingerprints.json"]) if (!cur.split("\n").includes(line)) import_fs12.default.appendFileSync(gi, (cur && !cur.endsWith("\n") ? "\n" : "") + line + "\n");
+  const gi = import_path14.default.join(dir, ".gitignore");
+  const cur = import_fs13.default.existsSync(gi) ? import_fs13.default.readFileSync(gi, "utf8") : "";
+  for (const line of [".env", ".fingerprints.json"]) if (!cur.split("\n").includes(line)) import_fs13.default.appendFileSync(gi, (cur && !cur.endsWith("\n") ? "\n" : "") + line + "\n");
   return out;
 }
 function writeBundle(host) {
-  const file = import_path13.default.join(apisDir(host), "recipes.js");
-  import_fs12.default.mkdirSync(import_path13.default.dirname(file), { recursive: true });
-  import_fs12.default.writeFileSync(file, renderRecipes(listRecipes(host), readAuth(host)));
+  const file = import_path14.default.join(apisDir(host), "recipes.js");
+  import_fs13.default.mkdirSync(import_path14.default.dirname(file), { recursive: true });
+  import_fs13.default.writeFileSync(file, renderRecipes(listRecipes(host), readAuth(host)));
   return file;
 }
 function rebuildAllBundles() {
-  const root = import_path13.default.join(getDataDir(), "apis");
-  if (!import_fs12.default.existsSync(root)) return [];
-  return import_fs12.default.readdirSync(root).filter((h) => !h.includes(".bak-") && (import_fs12.default.existsSync(import_path13.default.join(root, h, "api.json")) || import_fs12.default.existsSync(import_path13.default.join(root, h, "recipes")))).flatMap((h) => writeOutputs(h));
+  const root = import_path14.default.join(getDataDir(), "apis");
+  if (!import_fs13.default.existsSync(root)) return [];
+  return import_fs13.default.readdirSync(root).filter((h) => !h.includes(".bak-") && (import_fs13.default.existsSync(import_path14.default.join(root, h, "api.json")) || import_fs13.default.existsSync(import_path14.default.join(root, h, "recipes")))).flatMap((h) => writeOutputs(h));
 }
 function readMap(host, dir) {
   for (const d of [dir, apisDir(host)]) {
     try {
-      return JSON.parse(import_fs12.default.readFileSync(import_path13.default.join(d, "api.json"), "utf8"));
+      return JSON.parse(import_fs13.default.readFileSync(import_path14.default.join(d, "api.json"), "utf8"));
     } catch {
     }
   }
@@ -14790,7 +14971,7 @@ function describeSource(s) {
 function readAuth(host, dir = apisDir(host)) {
   for (const d of [dir, apisDir(host)]) {
     try {
-      return JSON.parse(import_fs12.default.readFileSync(import_path13.default.join(d, "auth.json"), "utf8"));
+      return JSON.parse(import_fs13.default.readFileSync(import_path14.default.join(d, "auth.json"), "utf8"));
     } catch {
     }
   }
@@ -14855,6 +15036,97 @@ function renderClient(host, map, auth, specs, dir) {
     }
   }
   const TAB = "__tab", TAB_FETCH = "__tabFetch", HOME = "__tabHome";
+  const MODULE_NAMES = /* @__PURE__ */ new Set([
+    "fs",
+    "path",
+    "fileURLToPath",
+    "DIR",
+    "ORIGIN",
+    "AUTH",
+    "ACTIONS",
+    "PAGES",
+    "readEnv",
+    "HOST",
+    "IFRAMER",
+    "env",
+    "refreshed",
+    "refreshSession",
+    "core",
+    "FP",
+    "fps",
+    "run",
+    "ready",
+    "get",
+    "page",
+    "action",
+    "actions",
+    "SPECS",
+    "recipes",
+    "flags",
+    "args",
+    "show",
+    "main",
+    "isMain",
+    TAB,
+    TAB_FETCH,
+    HOME,
+    "fetch",
+    "globalThis",
+    "process",
+    "console",
+    "Buffer",
+    "undefined",
+    "arguments",
+    "eval",
+    "await",
+    "async",
+    "let",
+    "static",
+    "yield",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "debugger",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "enum",
+    "export",
+    "extends",
+    "false",
+    "finally",
+    "for",
+    "function",
+    "if",
+    "implements",
+    "import",
+    "in",
+    "instanceof",
+    "interface",
+    "new",
+    "null",
+    "package",
+    "private",
+    "protected",
+    "public",
+    "return",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "typeof",
+    "var",
+    "void",
+    "while",
+    "with"
+  ]);
+  const clashes = (n) => MODULE_NAMES.has(n) || n in globalThis || /^__recipe\d+$/.test(n);
   const out = [];
   out.push(`#!/usr/bin/env node`);
   out.push(`// ${host} API client, generated by iframer from a capture of ${origin}. Node 18+, no browser.`);
@@ -14888,7 +15160,7 @@ function renderClient(host, map, auth, specs, dir) {
   out.push(`// Tab bridge: when a logged-in tab is attached for this site (iframer bridge attach ${host}), every request goes`);
   out.push(`// through that tab and the saved cookie is not used. Nothing attached: it answers null and the request runs as it`);
   out.push(`// always did. The first request decides for the whole run: it never switches session half-way. Off: IFRAMER_BRIDGE=off.`);
-  out.push(`const ${TAB} = (${tabBridgeClient.toString()})({ fs, path, home: ${HOME}(), env, fetch: globalThis.fetch, auth: AUTH });`);
+  out.push(`const ${TAB} = (${tabBridgeClient.toString()})({ fs, path, home: ${HOME}(), env, fetch: globalThis.fetch, v: ${BRIDGE_VERSION}, auth: AUTH });`);
   out.push(`const ${TAB_FETCH} = (url, init) => ${TAB}.fetch(url, init).then((r) => {`);
   out.push(`  if (!r) return globalThis.fetch(url, init);`);
   out.push(`  core.setTransport({ relogin: ${JSON.stringify(`log in to ${host} in the attached tab, then run again`)} });`);
@@ -14923,8 +15195,7 @@ function renderClient(host, map, auth, specs, dir) {
   out.push(`};`);
   out.push(`/** Saved recipes: each takes its args object and resolves to one short line ("error: ..." on failure). */`);
   out.push(`export const recipes = Object.fromEntries(Object.keys(SPECS).map((n) => [n, (a, max) => ready.then(() => run(SPECS[n], a, max))]));`);
-  specs.forEach((r, i) => out.push(`const __recipe${i} = recipes[${JSON.stringify(r.name)}];`));
-  if (specs.length) out.push(`export { ${specs.map((r, i) => `__recipe${i} as ${r.name}`).join(", ")} };`);
+  specs.forEach((r, i) => out.push(clashes(r.name) ? `const __recipe${i} = recipes[${JSON.stringify(r.name)}]; export { __recipe${i} as ${r.name} };` : `export const ${r.name} = recipes[${JSON.stringify(r.name)}];`));
   out.push(``);
   out.push(CLI_SOURCE.replace(/__HOST__/g, host).replace(/__TAB__/g, TAB));
   return out.join("\n") + "\n";
@@ -14959,19 +15230,20 @@ function renderRecipes(specs, auth = {}) {
   out.push(`})();`);
   return out.join("\n") + "\n";
 }
-var import_fs12, import_path13, import_crypto13, import_url, RUNTIME, recipesDir, RESERVED, envName, isCode, lit, READ_ENV, REFRESH, CLI_SOURCE;
+var import_fs13, import_path14, import_crypto14, import_url, RUNTIME, recipesDir, RESERVED, envName, isCode, lit, READ_ENV, REFRESH, CLI_SOURCE;
 var init_recipes = __esm({
   "src/lib/kit/recipes.ts"() {
     "use strict";
-    import_fs12 = __toESM(require("fs"));
-    import_path13 = __toESM(require("path"));
+    import_fs13 = __toESM(require("fs"));
+    import_path14 = __toESM(require("path"));
     init_paths();
-    import_crypto13 = __toESM(require("crypto"));
+    import_crypto14 = __toESM(require("crypto"));
     import_url = require("url");
     init_recipe_core();
     init_client();
-    RUNTIME = import_crypto13.default.createHash("sha1").update(recipeCore.toString()).update(recipeRunner.toString()).update(renderRecipes.toString()).digest("hex").slice(0, 8);
-    recipesDir = (host) => import_path13.default.join(apisDir(host), "recipes");
+    init_state();
+    RUNTIME = import_crypto14.default.createHash("sha1").update(recipeCore.toString()).update(recipeRunner.toString()).update(renderRecipes.toString()).digest("hex").slice(0, 8);
+    recipesDir = (host) => import_path14.default.join(apisDir(host), "recipes");
     RESERVED = /* @__PURE__ */ new Set(["get", "page", "action", "actions", "recipes", "schema", "core", "run", "default"]);
     envName = (h) => h.replace(/[^A-Za-z0-9]+/g, "_").toUpperCase();
     isCode = (s) => /=>|^\s*(async\s+)?function\b/.test(s);
@@ -15081,27 +15353,27 @@ if (isMain) {
 // src/lib/kit/browser-cookies.ts
 function copyOpenFile(src, dst) {
   try {
-    import_fs13.default.copyFileSync(src, dst);
+    import_fs14.default.copyFileSync(src, dst);
     return;
   } catch (e) {
     const code = e.code;
     if (code !== "EBUSY" && code !== "EPERM" && code !== "EACCES") throw e;
   }
-  const fd = import_fs13.default.openSync(src, "r");
+  const fd = import_fs14.default.openSync(src, "r");
   try {
     const buf = Buffer.allocUnsafe(1 << 20);
     let pos = 0, n = 0;
-    const out = import_fs13.default.openSync(dst, "w");
+    const out = import_fs14.default.openSync(dst, "w");
     try {
-      while ((n = import_fs13.default.readSync(fd, buf, 0, buf.length, pos)) > 0) {
-        import_fs13.default.writeSync(out, buf, 0, n);
+      while ((n = import_fs14.default.readSync(fd, buf, 0, buf.length, pos)) > 0) {
+        import_fs14.default.writeSync(out, buf, 0, n);
         pos += n;
       }
     } finally {
-      import_fs13.default.closeSync(out);
+      import_fs14.default.closeSync(out);
     }
   } finally {
-    import_fs13.default.closeSync(fd);
+    import_fs14.default.closeSync(fd);
   }
 }
 function getSqlAll() {
@@ -15145,18 +15417,18 @@ function getSqlAll() {
   };
 }
 function readRows(file, sql) {
-  const tmp = import_fs13.default.mkdtempSync(import_path14.default.join(import_os5.default.tmpdir(), "ifk-ck-"));
+  const tmp = import_fs14.default.mkdtempSync(import_path15.default.join(import_os5.default.tmpdir(), "ifk-ck-"));
   try {
-    const db = import_path14.default.join(tmp, "c");
+    const db = import_path15.default.join(tmp, "c");
     copyOpenFile(file, db);
-    if (import_fs13.default.existsSync(file + "-journal")) copyOpenFile(file + "-journal", db + "-journal");
-    if (import_fs13.default.existsSync(file + "-wal")) copyOpenFile(file + "-wal", db + "-wal");
+    if (import_fs14.default.existsSync(file + "-journal")) copyOpenFile(file + "-journal", db + "-journal");
+    if (import_fs14.default.existsSync(file + "-wal")) copyOpenFile(file + "-wal", db + "-wal");
     return getSqlAll()(db, sql);
   } catch (e) {
     unreadable.set(file, e.message.split("\n")[0].slice(0, 80));
     return [];
   } finally {
-    import_fs13.default.rmSync(tmp, { recursive: true, force: true });
+    import_fs14.default.rmSync(tmp, { recursive: true, force: true });
   }
 }
 function matches(host, cookieHost) {
@@ -15167,28 +15439,28 @@ function matches(host, cookieHost) {
 }
 function appRoots() {
   const home = import_os5.default.homedir();
-  if (process.platform === "darwin") return [import_path14.default.join(home, "Library", "Application Support")];
+  if (process.platform === "darwin") return [import_path15.default.join(home, "Library", "Application Support")];
   if (process.platform === "win32") return [process.env.APPDATA, process.env.LOCALAPPDATA].filter(Boolean);
-  return [process.env.XDG_CONFIG_HOME || import_path14.default.join(home, ".config")];
+  return [process.env.XDG_CONFIG_HOME || import_path15.default.join(home, ".config")];
 }
 function profiles() {
   const win = process.platform === "win32";
   const out = [];
   const ls = (d) => {
     try {
-      return import_fs13.default.readdirSync(d);
+      return import_fs14.default.readdirSync(d);
     } catch {
       return [];
     }
   };
   const add = (source, dir, opts = {}) => {
-    for (const f of [import_path14.default.join(dir, "Cookies"), import_path14.default.join(dir, "Network", "Cookies")]) out.push({ source, file: f, keychain: opts.keychain, localState: opts.localState });
+    for (const f of [import_path15.default.join(dir, "Cookies"), import_path15.default.join(dir, "Network", "Cookies")]) out.push({ source, file: f, keychain: opts.keychain, localState: opts.localState });
   };
   for (const root of appRoots()) {
     for (const app of ls(root).filter((a) => /^t3[\s_-]?code/i.test(a))) {
-      const appDir = import_path14.default.join(root, app);
-      const localState = import_path14.default.join(appDir, "Local State");
-      for (const p of ls(import_path14.default.join(appDir, "Partitions"))) add(`T3 Code tab (${p})`, import_path14.default.join(appDir, "Partitions", p), { localState });
+      const appDir = import_path15.default.join(root, app);
+      const localState = import_path15.default.join(appDir, "Local State");
+      for (const p of ls(import_path15.default.join(appDir, "Partitions"))) add(`T3 Code tab (${p})`, import_path15.default.join(appDir, "Partitions", p), { localState });
       add(`T3 Code (${app})`, appDir, { localState });
     }
     const chromes = process.platform === "darwin" ? [
@@ -15199,12 +15471,12 @@ function profiles() {
       ["Chromium", "Chromium", "Chromium Safe Storage"]
     ] : win ? [["Chrome", "Google/Chrome/User Data", ""], ["Edge", "Microsoft/Edge/User Data", ""], ["Brave", "BraveSoftware/Brave-Browser/User Data", ""], ["Chromium", "Chromium/User Data", ""]] : [["Chrome", "google-chrome", ""], ["Chromium", "chromium", ""], ["Brave", "BraveSoftware/Brave-Browser", ""]];
     for (const [name, dir] of chromes) {
-      const r = import_path14.default.join(root, dir);
-      const localState = win ? import_path14.default.join(r, "Local State") : void 0;
-      for (const prof of ls(r)) if (prof !== "Local State") add(`${name} (${prof})`, import_path14.default.join(r, prof), { keychain: process.platform === "darwin" ? `${name} Safe Storage` : void 0, localState });
+      const r = import_path15.default.join(root, dir);
+      const localState = win ? import_path15.default.join(r, "Local State") : void 0;
+      for (const prof of ls(r)) if (prof !== "Local State") add(`${name} (${prof})`, import_path15.default.join(r, prof), { keychain: process.platform === "darwin" ? `${name} Safe Storage` : void 0, localState });
     }
   }
-  return out.filter((p) => import_fs13.default.existsSync(p.file));
+  return out.filter((p) => import_fs14.default.existsSync(p.file));
 }
 function cookieStores() {
   return profiles().map((p) => unreadable.has(p.file) ? `${p.source} [unreadable: ${unreadable.get(p.file)}]` : p.source);
@@ -15226,7 +15498,7 @@ function cookieKey(p) {
     if (keys.has(p.localState)) return keys.get(p.localState);
     let k2 = null;
     try {
-      const b = Buffer.from(JSON.parse(import_fs13.default.readFileSync(p.localState, "utf8")).os_crypt.encrypted_key, "base64");
+      const b = Buffer.from(JSON.parse(import_fs14.default.readFileSync(p.localState, "utf8")).os_crypt.encrypted_key, "base64");
       const blob = b.subarray(0, 5).toString() === "DPAPI" ? b.subarray(5) : b;
       const key = dpapiUnprotect(blob.toString("base64"));
       if (key && key.length === 32) k2 = { key, algo: "gcm" };
@@ -15235,13 +15507,13 @@ function cookieKey(p) {
     keys.set(p.localState, k2);
     return k2;
   }
-  if (process.platform === "linux") return { key: import_crypto14.default.pbkdf2Sync("peanuts", "saltysalt", 1, 16, "sha1"), algo: "cbc" };
+  if (process.platform === "linux") return { key: import_crypto15.default.pbkdf2Sync("peanuts", "saltysalt", 1, 16, "sha1"), algo: "cbc" };
   if (!p.keychain) return null;
   if (keys.has(p.keychain)) return keys.get(p.keychain);
   let k = null;
   try {
     const pw = (0, import_child_process5.execFileSync)("security", ["find-generic-password", "-w", "-s", p.keychain], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 6e4 }).trim();
-    if (pw) k = { key: import_crypto14.default.pbkdf2Sync(pw, "saltysalt", 1003, 16, "sha1"), algo: "cbc" };
+    if (pw) k = { key: import_crypto15.default.pbkdf2Sync(pw, "saltysalt", 1003, 16, "sha1"), algo: "cbc" };
   } catch {
   }
   keys.set(p.keychain, k);
@@ -15255,11 +15527,11 @@ function decrypt2(enc, ck, hostHashed) {
     if (ck.algo === "gcm") {
       const iv = enc.subarray(3, 15);
       const tag = enc.subarray(enc.length - 16);
-      const d = import_crypto14.default.createDecipheriv("aes-256-gcm", ck.key, iv);
+      const d = import_crypto15.default.createDecipheriv("aes-256-gcm", ck.key, iv);
       d.setAuthTag(tag);
       out = Buffer.concat([d.update(enc.subarray(15, enc.length - 16)), d.final()]);
     } else {
-      const d = import_crypto14.default.createDecipheriv("aes-128-cbc", ck.key, Buffer.alloc(16, " "));
+      const d = import_crypto15.default.createDecipheriv("aes-128-cbc", ck.key, Buffer.alloc(16, " "));
       out = Buffer.concat([d.update(enc.subarray(3)), d.final()]);
     }
     if (hostHashed && out.length >= 32) out = out.subarray(32);
@@ -15308,14 +15580,14 @@ function cookieHeader(jar) {
   }
   return [...seen].map(([n, v]) => `${n}=${v.value}`).join("; ");
 }
-var import_crypto14, import_fs13, import_os5, import_path14, import_child_process5, IS_BUN2, unreadable, sqlAll, chromeMs, keys;
+var import_crypto15, import_fs14, import_os5, import_path15, import_child_process5, IS_BUN2, unreadable, sqlAll, chromeMs, keys;
 var init_browser_cookies = __esm({
   "src/lib/kit/browser-cookies.ts"() {
     "use strict";
-    import_crypto14 = __toESM(require("crypto"));
-    import_fs13 = __toESM(require("fs"));
+    import_crypto15 = __toESM(require("crypto"));
+    import_fs14 = __toESM(require("fs"));
     import_os5 = __toESM(require("os"));
-    import_path14 = __toESM(require("path"));
+    import_path15 = __toESM(require("path"));
     import_child_process5 = require("child_process");
     IS_BUN2 = typeof globalThis.Bun !== "undefined";
     unreadable = /* @__PURE__ */ new Map();
@@ -15332,7 +15604,7 @@ function storeLocked(store) {
 function candidatePaths(host, dir) {
   for (const d of [dir, apisDir(host)]) {
     try {
-      const map = JSON.parse(import_fs14.default.readFileSync(import_path15.default.join(d, "api.json"), "utf8"));
+      const map = JSON.parse(import_fs15.default.readFileSync(import_path16.default.join(d, "api.json"), "utf8"));
       const out = [];
       const add = (p, rsc) => {
         if (!/\{/.test(p) && !out.some((x) => x.path === p)) out.push({ path: p, rsc });
@@ -15372,29 +15644,29 @@ async function findProbe(origin, paths) {
   return null;
 }
 function writeEnv(dir, vals) {
-  import_fs14.default.mkdirSync(dir, { recursive: true });
-  const envFile = import_path15.default.join(dir, ".env");
+  import_fs15.default.mkdirSync(dir, { recursive: true });
+  const envFile = import_path16.default.join(dir, ".env");
   const cur = {};
   try {
-    for (const l of import_fs14.default.readFileSync(envFile, "utf8").split(/\r?\n/)) {
+    for (const l of import_fs15.default.readFileSync(envFile, "utf8").split(/\r?\n/)) {
       const m = /^([A-Za-z_]\w*)=(.*)$/.exec(l);
       if (m) cur[m[1]] = m[2];
     }
   } catch {
   }
   Object.assign(cur, vals);
-  import_fs14.default.writeFileSync(envFile, Object.entries(cur).map(([k, v]) => `${k}=${v}`).join("\n") + "\n", { mode: 384 });
-  import_fs14.default.chmodSync(envFile, 384);
-  const gi = import_path15.default.join(dir, ".gitignore");
-  const giCur = import_fs14.default.existsSync(gi) ? import_fs14.default.readFileSync(gi, "utf8") : "";
-  if (!giCur.split("\n").includes(".env")) import_fs14.default.appendFileSync(gi, (giCur && !giCur.endsWith("\n") ? "\n" : "") + ".env\n");
+  import_fs15.default.writeFileSync(envFile, Object.entries(cur).map(([k, v]) => `${k}=${v}`).join("\n") + "\n", { mode: 384 });
+  import_fs15.default.chmodSync(envFile, 384);
+  const gi = import_path16.default.join(dir, ".gitignore");
+  const giCur = import_fs15.default.existsSync(gi) ? import_fs15.default.readFileSync(gi, "utf8") : "";
+  if (!giCur.split("\n").includes(".env")) import_fs15.default.appendFileSync(gi, (giCur && !giCur.endsWith("\n") ? "\n" : "") + ".env\n");
   return envFile;
 }
 async function refreshSession(host, dir, opts = {}) {
-  const envFile = import_path15.default.join(dir, ".env");
+  const envFile = import_path16.default.join(dir, ".env");
   let origin = `https://${host}`;
   try {
-    origin = JSON.parse(import_fs14.default.readFileSync(import_path15.default.join(apisDir(host), "api.json"), "utf8")).origin || origin;
+    origin = JSON.parse(import_fs15.default.readFileSync(import_path16.default.join(apisDir(host), "api.json"), "utf8")).origin || origin;
   } catch {
   }
   const probe = await findProbe(origin, candidatePaths(host, dir));
@@ -15434,12 +15706,12 @@ async function refreshSession(host, dir, opts = {}) {
     note: tried.length ? `no logged-in session found (${tried.join("; ")}). Log in to ${host} in the browser tab, then run this again` : `no cookies for ${host} on this machine (${looked}). Log in to ${host} in a T3 Code tab or Chrome, then run this again. If you are logged in and this still fails, report it as an iframer bug with this message; do not ask for the cookie`
   };
 }
-var import_fs14, import_path15, LOGIN;
+var import_fs15, import_path16, LOGIN;
 var init_session_env = __esm({
   "src/lib/kit/session-env.ts"() {
     "use strict";
-    import_fs14 = __toESM(require("fs"));
-    import_path15 = __toESM(require("path"));
+    import_fs15 = __toESM(require("fs"));
+    import_path16 = __toESM(require("path"));
     init_browser_cookies();
     init_recipes();
     LOGIN = /\/(login|log-in|signin|sign-in|auth|sso)(\/|\?|$)/i;
@@ -15501,16 +15773,16 @@ function kitSource(opts = {}) {
   if (opts.hardMax) clean.hardMax = opts.hardMax;
   const fn = pageKit.toString();
   const core = recipeCore.toString();
-  const build = import_crypto15.default.createHash("sha1").update(fn).update(core).digest("hex").slice(0, 10);
+  const build = import_crypto16.default.createHash("sha1").update(fn).update(core).digest("hex").slice(0, 10);
   return `(${fn})(${JSON.stringify({ ...clean, build })}, (${core})());
 `;
 }
 function kitDir() {
-  return import_path16.default.join(getDataDir(), "kit");
+  return import_path17.default.join(getDataDir(), "kit");
 }
-function writeKit(opts = {}, file = import_path16.default.join(kitDir(), "iframer-kit.js")) {
-  import_fs15.default.mkdirSync(import_path16.default.dirname(file), { recursive: true });
-  import_fs15.default.writeFileSync(file, kitSource(opts), "utf8");
+function writeKit(opts = {}, file = import_path17.default.join(kitDir(), "iframer-kit.js")) {
+  import_fs16.default.mkdirSync(import_path17.default.dirname(file), { recursive: true });
+  import_fs16.default.writeFileSync(file, kitSource(opts), "utf8");
   return file;
 }
 function kitInstructions(target, kitPath) {
@@ -15592,13 +15864,13 @@ function drainFallback() {
     `until next is null, write the joined chunks to a file, then \`iframer ingest <file>\`.`
   ].join("\n");
 }
-var import_crypto15, import_fs15, import_path16, KIT_TARGETS, MAKE_INPUT, SS, stash, STASH, INSTALL, STATUS, LS, recipeRun, recipeRunFallback;
+var import_crypto16, import_fs16, import_path17, KIT_TARGETS, MAKE_INPUT, SS, stash, STASH, INSTALL, STATUS, LS, recipeRun, recipeRunFallback;
 var init_kit = __esm({
   "src/lib/kit/index.ts"() {
     "use strict";
-    import_crypto15 = __toESM(require("crypto"));
-    import_fs15 = __toESM(require("fs"));
-    import_path16 = __toESM(require("path"));
+    import_crypto16 = __toESM(require("crypto"));
+    import_fs16 = __toESM(require("fs"));
+    import_path17 = __toESM(require("path"));
     init_paths();
     init_page_kit();
     init_recipe_core();
@@ -15623,7 +15895,7 @@ function tabRelay(c) {
   var MAX = 32 * 1024 * 1024;
   if (location.origin !== c.o) return "WRONG_TAB: this expression is for " + c.o + " and this tab is on " + location.origin + ". Open the tab on " + c.o + ", or run `iframer bridge attach " + location.host + "` for this one.";
   var KEY = /* @__PURE__ */ Symbol.for("iframer.bridge");
-  var id = [c.port, c.site, c.name, c.ro ? 1 : 0].join("|");
+  var id = [c.v, c.port, c.site, c.name, c.ro ? 1 : 0].join("|");
   var old = window[KEY];
   if (old && old.id === id && !old.stopped && (old.open || old.connecting)) return old.open ? "ALREADY_ATTACHED" : old.first;
   if (old) {
@@ -15743,9 +16015,8 @@ function tabRelay(c) {
           var v = stored(s);
           if (v != null) headers[name] = v;
         });
-        var own = u.origin === location.origin;
-        var redirect = q.redirect === "error" ? "error" : read2 && own ? q.redirect || "follow" : "manual";
-        var init = { method, headers, credentials: "include", redirect, cache: "no-store" };
+        var own = u.origin === location.origin, want = q.redirect || "follow";
+        var init = { method, headers, credentials: "include", redirect: "manual", cache: "no-store" };
         if (read2 && own) init.mode = "same-origin";
         if (referrer) init.referrer = referrer;
         if (!read2 && q.body64 != null) init.body = bytes(q.body64);
@@ -15758,18 +16029,18 @@ function tabRelay(c) {
           }, 2e4);
         }
         started = true;
-        return fetch(u.href, init).catch(function(e) {
-          if (!(read2 && own && redirect === "follow") || ctl && ctl.signal.aborted) throw e;
-          var look = {};
+        return fetch(u.href, init).then(function(res) {
+          if (res.type !== "opaqueredirect") return res;
+          if (want === "error") throw new Error("the site answered with a redirect, and the request asked for redirect: error");
+          if (!read2 || !own || want === "manual") return res;
+          var follow = {};
           Object.keys(init).forEach(function(k) {
-            look[k] = init[k];
+            follow[k] = init[k];
           });
-          look.redirect = "manual";
-          return fetch(u.href, look).then(function(r) {
-            if (r.type === "opaqueredirect") return r;
-            throw e;
-          }, function() {
-            throw e;
+          follow.redirect = "follow";
+          return fetch(u.href, follow).then(null, function(e) {
+            if (ctl && ctl.signal.aborted) throw e;
+            return res;
           });
         }).then(function(res) {
           function drop(why) {
@@ -15846,7 +16117,7 @@ function tabRelay(c) {
       if (st.stopped) return;
       var ws;
       try {
-        ws = new WebSocket("ws://127.0.0.1:" + c.port + "/relay?s=" + encodeURIComponent(c.site) + "&n=" + encodeURIComponent(c.name) + (c.ro ? "&ro=1" : "") + "&k=" + c.k);
+        ws = new WebSocket("ws://127.0.0.1:" + c.port + "/relay?s=" + encodeURIComponent(c.site) + "&n=" + encodeURIComponent(c.name) + (c.ro ? "&ro=1" : "") + "&v=" + c.v + "&k=" + c.k);
       } catch (e) {
         st.connecting = false;
         return done(blocked ? CSP : "NO_BRIDGE: the browser refused the connection to 127.0.0.1 (" + (e && e.message || e) + ").");
@@ -15856,7 +16127,7 @@ function tabRelay(c) {
         st.open = st.ever = true;
         st.connecting = false;
         try {
-          ws.send(JSON.stringify({ hello: location.href, v: 2 }));
+          ws.send(JSON.stringify({ hello: location.href, v: c.v }));
         } catch (e) {
         }
         done("ATTACHED");
@@ -15898,152 +16169,13 @@ function tabRelay(c) {
   return st.first;
 }
 function relaySource(cfg) {
-  const c = { port: cfg.port, o: cfg.origin, site: cfg.site, name: cfg.name, k: cfg.key };
+  const c = { v: cfg.version, port: cfg.port, o: cfg.origin, site: cfg.site, name: cfg.name, k: cfg.key };
   if (cfg.readOnly) c.ro = 1;
   return `(${tabRelay.toString().replace(/\n\s+/g, "\n")})(${JSON.stringify(c)})`;
 }
 var init_relay = __esm({
   "src/lib/tabbridge/relay.ts"() {
     "use strict";
-  }
-});
-
-// src/lib/tabbridge/state.ts
-function readState() {
-  try {
-    const st = JSON.parse(import_fs16.default.readFileSync(stateFile(), "utf8"));
-    return st && st.port && st.token && st.pid ? st : null;
-  } catch {
-    return null;
-  }
-}
-function clearState(pid) {
-  try {
-    if (readState()?.pid === pid) import_fs16.default.rmSync(stateFile());
-  } catch {
-  }
-}
-function masterKey() {
-  import_fs16.default.mkdirSync(getDataDir(), { recursive: true, mode: 448 });
-  try {
-    const k2 = import_fs16.default.readFileSync(keyFile(), "utf8").trim();
-    if (/^[0-9a-f]{64}$/.test(k2)) return k2;
-  } catch {
-  }
-  const k = import_crypto16.default.randomBytes(32).toString("hex");
-  import_fs16.default.writeFileSync(keyFile(), k, { mode: 384 });
-  try {
-    import_fs16.default.chmodSync(keyFile(), 384);
-  } catch {
-  }
-  return k;
-}
-function tabKey(master, origin, site, name, readOnly) {
-  return import_crypto16.default.createHmac("sha256", master).update(`${origin.toLowerCase()}
-${site}
-${name}
-${readOnly ? "ro" : "rw"}`).digest("hex").slice(0, 32);
-}
-function siteFor(host) {
-  return host.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^www\./, "");
-}
-function validSite(site) {
-  const [host, port, extra] = site.split(":");
-  if (extra !== void 0 || port !== void 0 && !/^\d{1,5}$/.test(port)) return false;
-  if (LOOPBACK.test(host)) return true;
-  if (SHARED_SUFFIXES.has(host)) return false;
-  if (/^(co|com|net|org|gov|edu|ac|or|ne|go|mil|nom|gob|sch)\.[a-z]{2}$/.test(host)) return false;
-  return port === void 0 && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host) && !IP.test(host);
-}
-function covers(site, url) {
-  let u;
-  try {
-    u = new URL(url);
-  } catch {
-    return false;
-  }
-  const [host, port] = site.split(":");
-  const loop = LOOPBACK.test(u.hostname);
-  if (u.protocol !== "https:" && !(u.protocol === "http:" && loop)) return false;
-  if (port !== void 0 && u.port !== port) return false;
-  if (u.hostname === host) return true;
-  return !loop && !IP.test(host) && u.hostname.endsWith("." + host);
-}
-var import_crypto16, import_fs16, import_path17, BRIDGE_VERSION, DEFAULT_PORT, bridgePort, stateFile, keyFile, LOOPBACK, IP, SHARED_SUFFIXES, validName;
-var init_state = __esm({
-  "src/lib/tabbridge/state.ts"() {
-    "use strict";
-    import_crypto16 = __toESM(require("crypto"));
-    import_fs16 = __toESM(require("fs"));
-    import_path17 = __toESM(require("path"));
-    init_paths();
-    BRIDGE_VERSION = 2;
-    DEFAULT_PORT = 47625;
-    bridgePort = () => Number(process.env.IFRAMER_BRIDGE_PORT) || DEFAULT_PORT;
-    stateFile = () => import_path17.default.join(getDataDir(), "bridge.json");
-    keyFile = () => import_path17.default.join(getDataDir(), "bridge.key");
-    LOOPBACK = /^(127\.0\.0\.1|localhost)$/;
-    IP = /^\d{1,3}(\.\d{1,3}){3}$/;
-    SHARED_SUFFIXES = /* @__PURE__ */ new Set([
-      "co.uk",
-      "org.uk",
-      "ac.uk",
-      "gov.uk",
-      "me.uk",
-      "com.br",
-      "net.br",
-      "org.br",
-      "com.au",
-      "net.au",
-      "org.au",
-      "co.nz",
-      "co.jp",
-      "ne.jp",
-      "or.jp",
-      "co.in",
-      "co.kr",
-      "co.za",
-      "com.mx",
-      "com.ar",
-      "com.co",
-      "com.tr",
-      "com.cn",
-      "com.hk",
-      "com.sg",
-      "com.tw",
-      "co.il",
-      "co.id",
-      "com.my",
-      "com.ph",
-      "github.io",
-      "gitlab.io",
-      "vercel.app",
-      "netlify.app",
-      "herokuapp.com",
-      "pages.dev",
-      "workers.dev",
-      "web.app",
-      "firebaseapp.com",
-      "appspot.com",
-      "cloudfront.net",
-      "amazonaws.com",
-      "azurewebsites.net",
-      "onrender.com",
-      "fly.dev",
-      "glitch.me",
-      "repl.co",
-      "blogspot.com",
-      "wordpress.com",
-      "ngrok.io",
-      "ngrok-free.app",
-      "trycloudflare.com",
-      "s3.amazonaws.com",
-      "myshopify.com",
-      "webflow.io",
-      "framer.app",
-      "lovable.app"
-    ]);
-    validName = (name) => /^[A-Za-z0-9_.-]{1,40}$/.test(name);
   }
 });
 
@@ -16155,7 +16287,7 @@ async function attach(o) {
   if (!validName(name)) throw new Error(`--name takes letters, digits, dot, dash and underscore: ${name}`);
   if (!covers(site, origin)) throw new Error(`--site ${site} does not cover ${host}: it must be ${host} or a parent domain of it`);
   const st = await start();
-  const expression = relaySource({ port: st.port, origin, site, name, readOnly: !!o.readOnly, key: tabKey(masterKey(), origin, site, name, !!o.readOnly) });
+  const expression = relaySource({ version: BRIDGE_VERSION, port: st.port, origin, site, name, readOnly: !!o.readOnly, key: tabKey(masterKey(), origin, site, name, !!o.readOnly) });
   const target = o.target || "t3";
   const scope = `${site}${site === host ? "" : " and its subdomains"}${name === "default" ? "" : `, tab name "${name}"`}${o.readOnly ? ", read-only" : ""}`;
   const steps = target === "t3" ? [
@@ -16221,7 +16353,7 @@ ${x.name}`))].map((key) => {
 }
 function writeClientModule(file = import_path18.default.join(getDataDir(), "bridge", "tab-bridge.mjs")) {
   import_fs17.default.mkdirSync(import_path18.default.dirname(file), { recursive: true });
-  import_fs17.default.writeFileSync(file, clientModuleSource());
+  import_fs17.default.writeFileSync(file, clientModuleSource(BRIDGE_VERSION));
   return file;
 }
 var import_child_process6, import_fs17, import_path18, import_url2, sleep6, BRIDGE_TARGETS;

@@ -62,7 +62,7 @@ check("a second attach reuses the same daemon and key", readState()?.pid === st.
 
 // ── the tab, played by a WebSocket client ──────────────────────────────────
 function fakeTab({ origin = cfg.o, k = cfg.k } = {}) {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/relay?s=${encodeURIComponent(cfg.site)}&n=${cfg.name}&k=${k}`, { headers: origin ? { Origin: origin } : {} });
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/relay?s=${encodeURIComponent(cfg.site)}&n=${cfg.name}&v=${cfg.v}&k=${k}`, { headers: origin ? { Origin: origin } : {} });
   const t = { ws, events: [], opened: new Promise((ok) => { ws.on("open", () => ok(true)); ws.on("error", () => ok(false)); ws.on("unexpected-response", () => ok(false)); }) };
   const held = new Map();
   const answer = (q) => ws.send(JSON.stringify({ id: q.id, status: 200, type: "basic", redirected: false, url: q.url, headers: { "content-type": "application/json" }, body64: Buffer.from(JSON.stringify({ ok: true, via: "tab", method: q.method, path: new URL(q.url).pathname, body: q.body ?? null, sawCookie: Object.keys(q.headers || {}).some((h) => h.toLowerCase() === "cookie") })).toString("base64") }));
@@ -78,6 +78,11 @@ function fakeTab({ origin = cfg.o, k = cfg.k } = {}) {
 }
 check("a tab with a wrong key is refused", !(await fakeTab({ k: "0".repeat(32) }).opened));
 check("a tab on another origin is refused, even with the key", !(await fakeTab({ origin: "https://evil.bridge-smoke.invalid" }).opened));
+{
+  const old = new WebSocket(`ws://127.0.0.1:${port}/relay?s=${encodeURIComponent(cfg.site)}&n=${cfg.name}&k=${cfg.k}`, { headers: { Origin: cfg.o } });
+  const opened = await new Promise((ok) => { old.on("open", () => ok(true)); old.on("error", () => ok(false)); old.on("unexpected-response", () => ok(false)); });
+  check("a tab snippet from another version is refused", !opened);
+}
 check("the daemon is still alive after the refusals", alive(st.pid) && /running/.test(cli("bridge", "status").out));
 const tab = fakeTab();
 check("the tab attaches with its key and origin", await tab.opened);

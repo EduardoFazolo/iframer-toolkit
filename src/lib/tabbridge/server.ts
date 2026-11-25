@@ -95,7 +95,9 @@ export function startBridgeServer(o: ServerOptions): Promise<BridgeServer> {
     try { u = new URL(req.url || "", "http://127.0.0.1"); } catch { sock.destroy(); return; }
     const site = u.searchParams.get("s") || "", name = u.searchParams.get("n") || "default", readOnly = u.searchParams.get("ro") === "1";
     const origin = String(req.headers.origin || "");
-    const ok = u.pathname === "/relay" && validSite(site) && validName(name)
+    // A relay from another version (an older snippet still running in a tab) is refused: it would not hold writes
+    // for a go, or keep to the redirect rules. The tab then needs the fresh expression.
+    const ok = u.pathname === "/relay" && u.searchParams.get("v") === String(BRIDGE_VERSION) && validSite(site) && validName(name)
       && covers(site, origin)
       && safeEqual(u.searchParams.get("k") || "", tabKey(o.masterKey, origin, site, name, readOnly));
     if (!ok) { sock.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"); return; }

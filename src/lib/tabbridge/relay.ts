@@ -25,7 +25,8 @@ export function tabRelay(c) {
   var MAX = 32 * 1024 * 1024;
   if (location.origin !== c.o) return "WRONG_TAB: this expression is for " + c.o + " and this tab is on " + location.origin + ". Open the tab on " + c.o + ", or run `iframer bridge attach " + location.host + "` for this one.";
   var KEY = Symbol.for("iframer.bridge");
-  var id = [c.port, c.site, c.name, c.ro ? 1 : 0].join("|");
+  // The version is part of what "already attached" means: a relay from an older iframer in this tab is replaced.
+  var id = [c.v, c.port, c.site, c.name, c.ro ? 1 : 0].join("|");
   var old = window[KEY];
   if (old && old.id === id && !old.stopped && (old.open || old.connecting)) return old.open ? "ALREADY_ATTACHED" : old.first;
   if (old) { old.stopped = true; try { old.ws && old.ws.close(); } catch (e) {} }
@@ -113,14 +114,14 @@ export function tabRelay(c) {
           var v = stored(s);
           if (v != null) headers[name] = v;
         });
-        // Redirects never take a request off this tab's ground:
-        // - a write never follows one (its body would go wherever the answer points): it comes back as a 302;
-        // - a read to this page's own origin follows them in "same-origin" mode, where the browser itself refuses a
-        //   hop to another origin before requesting it;
-        // - a read to another host of the site (an API subdomain) does not follow them: it comes back as a 302.
-        var own = u.origin === location.origin;
-        var redirect = q.redirect === "error" ? "error" : read && own ? (q.redirect || "follow") : "manual";
-        var init = { method: method, headers: headers, credentials: "include", redirect: redirect, cache: "no-store" };
+        // Redirects never take a request off this tab's ground. Every request is first sent without following:
+        // - no redirect (nearly always): that answer is the answer, one request;
+        // - a write is never followed (its body would go wherever the answer points): it comes back as a 302;
+        // - a read to this page's own origin is then followed in "same-origin" mode, where the browser itself refuses
+        //   a hop to another origin before requesting it; if it leaves the origin, the redirect comes back as a 302;
+        // - a read to another host of the site (an API subdomain) is not followed: it comes back as a 302.
+        var own = u.origin === location.origin, want = q.redirect || "follow";
+        var init = { method: method, headers: headers, credentials: "include", redirect: "manual", cache: "no-store" };
         if (read && own) init.mode = "same-origin";
         if (referrer) init.referrer = referrer;
         if (!read && q.body64 != null) init.body = bytes(q.body64);
@@ -132,14 +133,15 @@ export function tabRelay(c) {
           timer = setTimeout(function () { ctl.abort(); }, 20000);
         }
         started = true;
-        return fetch(u.href, init).catch(function (e) {
-          // A followed redirect that pointed off this origin fails like a dead network. Look once without following:
-          // if the site answers with a redirect, report that (a 302) instead of a tab that can't reach its site.
-          if (!(read && own && redirect === "follow") || (ctl && ctl.signal.aborted)) throw e;
-          var look = {};
-          Object.keys(init).forEach(function (k) { look[k] = init[k]; });
-          look.redirect = "manual";
-          return fetch(u.href, look).then(function (r) { if (r.type === "opaqueredirect") return r; throw e; }, function () { throw e; });
+        return fetch(u.href, init).then(function (res) {
+          if (res.type !== "opaqueredirect") return res;
+          if (want === "error") throw new Error("the site answered with a redirect, and the request asked for redirect: error");
+          if (!read || !own || want === "manual") return res;
+          var follow = {};
+          Object.keys(init).forEach(function (k) { follow[k] = init[k]; });
+          follow.redirect = "follow";
+          // A hop off this origin is refused by the browser: the redirect itself is then the answer.
+          return fetch(u.href, follow).then(null, function (e) { if (ctl && ctl.signal.aborted) throw e; return res; });
         }).then(function (res) {
           function drop(why) { try { res.body && res.body.cancel(); } catch (e) {} throw new Error(why); }
           // A followed redirect that ended on another site: this tab only answers for its own.
@@ -185,12 +187,12 @@ export function tabRelay(c) {
     function connect() {
       if (st.stopped) return;
       var ws;
-      try { ws = new WebSocket("ws://127.0.0.1:" + c.port + "/relay?s=" + encodeURIComponent(c.site) + "&n=" + encodeURIComponent(c.name) + (c.ro ? "&ro=1" : "") + "&k=" + c.k); }
+      try { ws = new WebSocket("ws://127.0.0.1:" + c.port + "/relay?s=" + encodeURIComponent(c.site) + "&n=" + encodeURIComponent(c.name) + (c.ro ? "&ro=1" : "") + "&v=" + c.v + "&k=" + c.k); }
       catch (e) { st.connecting = false; return done(blocked ? CSP : "NO_BRIDGE: the browser refused the connection to 127.0.0.1 (" + ((e && e.message) || e) + ")."); }
       st.ws = ws;
       ws.onopen = function () {
         st.open = st.ever = true; st.connecting = false;
-        try { ws.send(JSON.stringify({ hello: location.href, v: 2 })); } catch (e) {}
+        try { ws.send(JSON.stringify({ hello: location.href, v: c.v })); } catch (e) {}
         done("ATTACHED");
       };
       ws.onclose = function () {
@@ -222,8 +224,8 @@ export function tabRelay(c) {
 }
 
 /** The relay as one evaluable expression. Its value is a promise of the attach answer. */
-export function relaySource(cfg: { port: number; origin: string; site: string; name: string; readOnly: boolean; key: string }): string {
-  const c: Record<string, unknown> = { port: cfg.port, o: cfg.origin, site: cfg.site, name: cfg.name, k: cfg.key };
+export function relaySource(cfg: { version: number; port: number; origin: string; site: string; name: string; readOnly: boolean; key: string }): string {
+  const c: Record<string, unknown> = { v: cfg.version, port: cfg.port, o: cfg.origin, site: cfg.site, name: cfg.name, k: cfg.key };
   if (cfg.readOnly) c.ro = 1;
   // One evaluate call: drop the indentation, keep the lines (no minifier at run time).
   return `(${tabRelay.toString().replace(/\n\s+/g, "\n")})(${JSON.stringify(c)})`;
