@@ -29,16 +29,18 @@ interface Fake extends Tab {
   released: number;
   /** The error is one the relay raises before any fetch ({unsent}). */
   unsent: boolean;
+  /** The relay says the error means "this tab can't reach its site" ({net}). */
+  net: boolean;
 }
 
 let n = 0;
-function fake(b: Bridge, o: Partial<Pick<Fake, "frozen" | "silent" | "delay" | "site" | "name" | "readOnly" | "error" | "lateAck" | "ignoreAbort" | "unsent">> = {}): Fake {
+function fake(b: Bridge, o: Partial<Pick<Fake, "frozen" | "silent" | "delay" | "site" | "name" | "readOnly" | "error" | "lateAck" | "ignoreAbort" | "unsent" | "net">> = {}): Fake {
   const waitingForGo = new Map<string, () => void>();
   const stop = new Map<string, () => void>();
   const t: Fake = {
     id: `t${++n}`, site: o.site ?? "dnnr.io", name: o.name ?? "default", readOnly: !!o.readOnly, url: "", since: Date.now(), stalled: 0, probed: 0,
     frozen: !!o.frozen, silent: !!o.silent, delay: o.delay ?? 0, got: 0, fetched: 0, inFlight: 0, peak: 0, held: [], error: o.error,
-    lateAck: o.lateAck ?? 0, ignoreAbort: !!o.ignoreAbort, aborted: 0, released: 0, unsent: !!o.unsent,
+    lateAck: o.lateAck ?? 0, ignoreAbort: !!o.ignoreAbort, aborted: 0, released: 0, unsent: !!o.unsent, net: !!o.net,
     send(m) {
       const id = m.id as string;
       if (m.go) { t.released++; const go = waitingForGo.get(id); waitingForGo.delete(id); go?.(); return; }
@@ -61,7 +63,7 @@ function fake(b: Bridge, o: Partial<Pick<Fake, "frozen" | "silent" | "delay" | "
       const stopped = await new Promise<boolean>((ok) => { const timer = setTimeout(() => ok(false), t.delay); stop.set(id, () => { clearTimeout(timer); ok(true); }); });
       stop.delete(id);
       t.inFlight--;
-      b.message(t, stopped ? { id, error: "aborted: the read was stopped or timed out" } : t.error ? { id, error: t.error, ...(t.unsent ? { unsent: 1 } : {}) } : { id, status: 200, type: "basic", headers: {}, body64: "" });
+      b.message(t, stopped ? { id, error: "aborted: the read was stopped or timed out", net: 1 } : t.error ? { id, error: t.error, ...(t.unsent ? { unsent: 1 } : {}), ...(t.net ? { net: 1 } : {}) } : { id, status: 200, type: "basic", headers: {}, body64: "" });
     };
     if (method !== "GET" && method !== "HEAD") waitingForGo.set(id, fetchIt);
     if (t.lateAck) await sleep(t.lateAck);
@@ -196,7 +198,7 @@ describe("writes are never sent twice", () => {
   });
 
   test("the tab can't reach the site: a read moves on, a write stops", async () => {
-    const b = make(), older = fake(b), offline = fake(b, { error: "Failed to fetch" });
+    const b = make(), older = fake(b), offline = fake(b, { error: "Failed to fetch", net: true });
     expect(((await ask(b)) as Reply).status).toBe(200);
     const w = (await ask(b, "POST")) as Reply;
     expect(w.maybeSent).toBe(true);
@@ -220,6 +222,15 @@ describe("writes are never sent twice", () => {
     const w = (await ask(b, "POST")) as Reply;
     expect(w.error).toContain("not this tab's site");
     expect(w.maybeSent).toBeUndefined();
+  });
+
+  test("only the relay's own flag moves a read to another tab, never words in the error text", async () => {
+    const b = make(), older = fake(b);
+    fake(b, { error: "the request to aborted.failed-to-fetch.example could not be completed from this tab: timed out or network connection lost" });
+    const r = (await ask(b)) as Reply;
+    expect(r.error).toContain("aborted.failed-to-fetch.example");
+    expect(r.dead).toBeUndefined();
+    expect(older.got).toBe(0); // not sent again through the other tab
   });
 
   test("another error from the tab is the answer, not a dead tab", async () => {

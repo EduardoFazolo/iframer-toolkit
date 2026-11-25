@@ -14792,7 +14792,7 @@ var init_state = __esm({
     import_fs12 = __toESM(require("fs"));
     import_path13 = __toESM(require("path"));
     init_paths();
-    BRIDGE_VERSION = 3;
+    BRIDGE_VERSION = 4;
     DEFAULT_PORT = 47625;
     bridgePort = () => Number(process.env.IFRAMER_BRIDGE_PORT) || DEFAULT_PORT;
     stateFile = () => import_path13.default.join(getDataDir(), "bridge.json");
@@ -15163,6 +15163,7 @@ function renderClient(host, map, auth, specs, dir) {
     "Date",
     "Error",
     "Headers",
+    "Infinity",
     "JSON",
     "Math",
     "NaN",
@@ -15180,7 +15181,6 @@ function renderClient(host, map, auth, specs, dir) {
     "decodeURIComponent",
     "document",
     "encodeURIComponent",
-    "fetch",
     "globalThis",
     "location",
     "parseInt",
@@ -16058,7 +16058,7 @@ function tabRelay(c) {
     if (q.notAfter && Date.now() > q.notAfter) return reply({ expired: 1 });
     var method = String(q.method || "GET").toUpperCase(), read2 = method === "GET" || method === "HEAD";
     function run2() {
-      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null, timer, started = false, cross = "";
+      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null, timer, started = false, fetchFailed = false, cross = "";
       Promise.resolve().then(function() {
         var u = new URL(q.url, location.href);
         if (u.origin !== location.origin) cross = u.host;
@@ -16094,7 +16094,10 @@ function tabRelay(c) {
           }, 2e4);
         }
         started = true;
-        return fetch(u.href, init).then(function(res) {
+        return fetch(u.href, init).then(null, function(e) {
+          fetchFailed = true;
+          throw e;
+        }).then(function(res) {
           function drop(why) {
             try {
               res.body && res.body.cancel();
@@ -16115,8 +16118,10 @@ function tabRelay(c) {
           });
         });
       }).catch(function(e) {
-        var out = { error: read2 && ctl && ctl.signal.aborted ? "aborted: the read was stopped or timed out" : String(e && e.message || e) };
-        if (started && cross && !(ctl && ctl.signal.aborted) && e && e.name === "TypeError") out.error = "the request to " + cross + " could not be completed from this tab: that host does not accept requests from " + location.host + " (CORS), or it is unreachable. Attach a tab on " + cross + " itself";
+        var stopped = !!(read2 && ctl && ctl.signal.aborted);
+        var out = { error: stopped ? "aborted: the read was stopped or timed out" : String(e && e.message || e) };
+        if (stopped || fetchFailed && !cross) out.net = 1;
+        if (fetchFailed && cross && !stopped) out.error = "the request to " + cross + " could not be completed from this tab: that host does not accept requests from " + location.host + " (CORS), or it is unreachable. Attach a tab on " + cross + " itself";
         if (!started) out.unsent = 1;
         reply(out);
       }).then(function() {

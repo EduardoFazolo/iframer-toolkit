@@ -14,8 +14,9 @@ import { getDataDir } from "../paths";
  * running older daemon, so an old daemon never serves a new relay or the other way round.
  * 2: tab keys bound to the origin; writes held until {go}; {abort}.
  * 3: the relay states its version and another one is refused; replies say whether a tab had the request (handed).
+ * 4: the relay says itself when a failure means "this tab can't reach its site" ({net}); no reading of error texts.
  */
-export const BRIDGE_VERSION = 3;
+export const BRIDGE_VERSION = 4;
 
 /** Fixed, because the port is baked into the relay running in the tab. Outside the extension's 3022-3042 scan. */
 export const DEFAULT_PORT = 47625;

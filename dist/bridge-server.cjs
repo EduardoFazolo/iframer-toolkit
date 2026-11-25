@@ -46,7 +46,6 @@ function timings(scale2 = 1) {
 }
 var MAX_TABS = 3;
 var MAX_ACTIVE = 4;
-var NETWORK_ERR = /failed to fetch|networkerror|load failed|network connection|aborted|timed out/i;
 var isRead = (method) => method === "GET" || method === "HEAD";
 var poolKey = (site, name) => `${site}
 ${name}`;
@@ -144,14 +143,14 @@ var Bridge = class {
       return;
     }
     const err = typeof m.error === "string" ? m.error : "";
-    if (err && NETWORK_ERR.test(err)) {
+    if (err && m.net) {
       w.last = `the ${w.site} tab could not reach ${w.site} (${err})`;
       if (w.read) this.dispatch(id, w);
       else if (w.released) this.finish(id, w, { error: w.last, dead: true, maybeSent: true });
       else this.finish(id, w, { error: `${w.last}. The write was not sent`, dead: true });
       return;
     }
-    const { id: _id, ack: _ack, expired: _expired, unsent: _unsent, ...reply } = m;
+    const { id: _id, ack: _ack, expired: _expired, unsent: _unsent, net: _net, ...reply } = m;
     if (!w.read && err && w.released && !m.unsent) reply.maybeSent = true;
     this.finish(id, w, reply);
   }
@@ -316,7 +315,7 @@ var Bridge = class {
 var import_crypto = __toESM(require("crypto"));
 var import_fs = __toESM(require("fs"));
 var import_path2 = __toESM(require("path"));
-var BRIDGE_VERSION = 3;
+var BRIDGE_VERSION = 4;
 var DEFAULT_PORT = 47625;
 var bridgePort = () => Number(process.env.IFRAMER_BRIDGE_PORT) || DEFAULT_PORT;
 var stateFile = () => import_path2.default.join(getDataDir(), "bridge.json");

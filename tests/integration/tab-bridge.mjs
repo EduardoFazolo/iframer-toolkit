@@ -334,10 +334,10 @@ else kit.saveRecipe({ name: "activeCampaigns", host, path: "/{community}/dashboa
 if (CLI) cli(["recipe", host, "composed", "--run", "async (core, args) => 'composed:' + (await activeCampaigns({ community: 'acme' }))", "--quiet"]);
 else kit.saveRecipe({ name: "composed", host, run: "async (core, args) => 'composed:' + (await activeCampaigns({ community: 'acme' }))" });
 // ...also when the other recipe's name is an ordinary property name every object has, or one of the bridge's own names.
-if (CLI) cli(["recipe", host, "composed2", "--run", "async (core, args) => [String(await toString({})).length > 40, String(await __tabHome({})).length > 40, String(await Bun({})).length > 40, String(await Map({})).length > 40].join()", "--quiet"]);
-else kit.saveRecipe({ name: "composed2", host, run: "async (core, args) => [String(await toString({})).length > 40, String(await __tabHome({})).length > 40, String(await Bun({})).length > 40, String(await Map({})).length > 40].join()" });
+if (CLI) cli(["recipe", host, "composed2", "--run", "async (core, args) => [String(await toString({})).length > 40, String(await __tabHome({})).length > 40, String(await Bun({})).length > 40, String(await Map({})).length > 40, String(await fetch({})).length > 40].join()", "--quiet"]);
+else kit.saveRecipe({ name: "composed2", host, run: "async (core, args) => [String(await toString({})).length > 40, String(await __tabHome({})).length > 40, String(await Bun({})).length > 40, String(await Map({})).length > 40, String(await fetch({})).length > 40].join()" });
 // Recipes named like the client's own internals must not break the regenerated module.
-for (const name of ["os", "__tab", "__tabFetch", "__tabHome", "globalThis", "fetch", "process", "env", "path", "fs", "toString", "Bun", "async", "TextEncoder", "document", "Map"]) {
+for (const name of ["os", "__tab", "__tabFetch", "__tabHome", "globalThis", "fetch", "process", "env", "path", "fs", "toString", "Bun", "async", "TextEncoder", "document", "Map", "Infinity"]) {
   if (CLI) cli(["recipe", host, name, "--path", "/api/x", "--quiet"]); else kit.saveRecipe({ name, host, path: "/api/x" });
 }
 const client = path.join(dir, "client.mjs");
@@ -420,7 +420,7 @@ console.log(JSON.stringify({ first: first.sentCookie, second: second.sentCookie 
   r = await node(["composed"]);
   check("a code recipe still calls another recipe by name", r === "composed:1", r);
   r = await node(["composed2"]);
-  check("...also recipes named toString, __tabHome, Bun or Map (they stay module bindings)", r === "true,true,true,true", r);
+  check("...also recipes named toString, __tabHome, Bun, Map or fetch (they stay module bindings)", r === "true,true,true,true,true", r);
   r = await node(["action", "getRestaurants", JSON.stringify([{ communitySlug: "acme" }]), "--approved"]);
   check("a write (Server Action, id re-found from the page's JS) runs through the tab", r.includes("Bistro") && r.includes("acme"), r);
   r = await node(["get", "/api/redirect-me"]);

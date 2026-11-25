@@ -16,7 +16,8 @@
  *
  * Messages from the daemon: {id, url, method, ..., notAfter} a request,
  * {id, go} release a held write, {id, abort} stop a read nobody waits for.
- * Replies: {id, ack}, then the response, or {id, error} (+ unsent: failed before any fetch), or {id, expired}.
+ * Replies: {id, ack}, then the response, or {id, error} (+ unsent: failed before any fetch; + net: this tab could not
+ * reach its own site, or the read was stopped or timed out, so the daemon may try another tab), or {id, expired}.
  * A read is confirmed ({id, ack}) and fetched at once. A write is confirmed and
  * then HELD until its go: the daemon only sends the go while it still waits, so
  * a write the daemon gave up on never starts.
@@ -92,7 +93,7 @@ export function tabRelay(c) {
     if (q.notAfter && Date.now() > q.notAfter) return reply({ expired: 1 });
     var method = String(q.method || "GET").toUpperCase(), read = method === "GET" || method === "HEAD";
     function run() {
-      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null, timer, started = false, cross = "";
+      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null, timer, started = false, fetchFailed = false, cross = "";
       Promise.resolve().then(function () {
         var u = new URL(q.url, location.href);
         if (u.origin !== location.origin) cross = u.host;
@@ -129,7 +130,7 @@ export function tabRelay(c) {
           timer = setTimeout(function () { ctl.abort(); }, 20000);
         }
         started = true;
-        return fetch(u.href, init).then(function (res) {
+        return fetch(u.href, init).then(null, function (e) { fetchFailed = true; throw e; }).then(function (res) {
           function drop(why) { try { res.body && res.body.cancel(); } catch (e) {} throw new Error(why); }
           if (res.type === "opaqueredirect" && q.redirect === "error") drop("the site answered with a redirect, and the request asked for redirect: error");
           var type = res.headers.get("content-type") || "";
@@ -142,12 +143,16 @@ export function tabRelay(c) {
           });
         });
       }).catch(function (e) {
-        var out = { error: read && ctl && ctl.signal.aborted ? "aborted: the read was stopped or timed out" : String((e && e.message) || e) };
+        var stopped = !!(read && ctl && ctl.signal.aborted);
+        var out = { error: stopped ? "aborted: the read was stopped or timed out" : String((e && e.message) || e) };
+        // Tell the daemon, as a flag, when this means "this tab can't reach its site": the fetch to this page's own
+        // origin failed (redirects are never followed, so nothing else can make it fail), or the read was stopped.
+        if (stopped || (fetchFailed && !cross)) out.net = 1;
         // A fetch to another host of the site that fails: the browser does not say whether that host refused this
         // page (CORS; the request then DID reach it) or could not be reached. So it is final, never a reason to send
         // the same request again through another tab. Only a failed fetch to this page's own origin means "this tab
         // can't reach its site".
-        if (started && cross && !(ctl && ctl.signal.aborted) && e && e.name === "TypeError") out.error = "the request to " + cross + " could not be completed from this tab: that host does not accept requests from " + location.host + " (CORS), or it is unreachable. Attach a tab on " + cross + " itself";
+        if (fetchFailed && cross && !stopped) out.error = "the request to " + cross + " could not be completed from this tab: that host does not accept requests from " + location.host + " (CORS), or it is unreachable. Attach a tab on " + cross + " itself";
         // A fetch that failed after it started, in a mode that refuses redirects off this origin (or all redirects).
         // Refused before any fetch: certain not to be on the site (the daemon tells a write's caller so).
         if (!started) out.unsent = 1;

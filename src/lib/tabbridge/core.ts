@@ -98,9 +98,6 @@ export const MAX_TABS = 3;
 /** Reads in flight per site, across every script. */
 export const MAX_ACTIVE = 4;
 
-/** The tab's fetch itself failed (the tab can't reach the site), as opposed to an HTTP answer from the site. */
-const NETWORK_ERR = /failed to fetch|networkerror|load failed|network connection|aborted|timed out/i;
-
 export const isRead = (method: string): boolean => method === "GET" || method === "HEAD";
 
 type Done = (reply: Reply | null) => void;
@@ -207,14 +204,17 @@ export class Bridge {
       return;
     }
     const err = typeof m.error === "string" ? m.error : "";
-    if (err && NETWORK_ERR.test(err)) {
+    // {net}: the relay says this tab could not reach its own site (or the read was stopped or timed out there). Only
+    // that lets a read move to another tab. It is a flag, never a guess from the error text: a text can contain
+    // anything, a host name included.
+    if (err && m.net) {
       w.last = `the ${w.site} tab could not reach ${w.site} (${err})`;
       if (w.read) this.dispatch(id, w);
       else if (w.released) this.finish(id, w, { error: w.last, dead: true, maybeSent: true });
       else this.finish(id, w, { error: `${w.last}. The write was not sent`, dead: true });
       return;
     }
-    const { id: _id, ack: _ack, expired: _expired, unsent: _unsent, ...reply } = m;
+    const { id: _id, ack: _ack, expired: _expired, unsent: _unsent, net: _net, ...reply } = m;
     // A write the tab was told to send, that then failed for any reason (too large an answer, a refused redirect,
     // an error while reading the body): it may be on the site. Only a failure the tab marks as before its fetch
     // ({unsent}) is certain not to be.

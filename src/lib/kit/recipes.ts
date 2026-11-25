@@ -299,9 +299,10 @@ export function renderClient(host: string, map: MapLite, auth: Record<string, un
   // The globals the generated module's own code reads, and only those: found by scanning a generated client.mjs for
   // every global name. A name missing here can break the module when a recipe has it (as on master); a name here that
   // the module never reads would stop that recipe from being called by name, for nothing.
-  const GLOBALS_USED = ["AbortController", "AbortSignal", "Array", "ArrayBuffer", "Boolean", "Buffer", "Date", "Error", "Headers", "JSON", "Math", "NaN",
-    "Number", "Object", "Promise", "Response", "String", "TextDecoder", "TextEncoder", "URL", "URLSearchParams", "clearTimeout", "console",
-    "decodeURIComponent", "document", "encodeURIComponent", "fetch", "globalThis", "location", "parseInt", "performance", "process", "setTimeout", "window"];
+  // `fetch` is not among them: the request core gets its fetch as a parameter and everything else says globalThis.fetch.
+  const GLOBALS_USED = ["AbortController", "AbortSignal", "Array", "ArrayBuffer", "Boolean", "Buffer", "Date", "Error", "Headers", "Infinity", "JSON", "Math",
+    "NaN", "Number", "Object", "Promise", "Response", "String", "TextDecoder", "TextEncoder", "URL", "URLSearchParams", "clearTimeout", "console",
+    "decodeURIComponent", "document", "encodeURIComponent", "globalThis", "location", "parseInt", "performance", "process", "setTimeout", "window"];
   const NOT_BINDINGS = new Set([...RESERVED_WORDS, ...MODULE_DECLARED, ...GLOBALS_USED]);
   const clashes = (n: string) => NOT_BINDINGS.has(n);
   const out: string[] = [];
