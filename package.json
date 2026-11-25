@@ -49,7 +49,8 @@
     "prepublishOnly": "bun run build",
     "test:cdp-relay": "bun tests/integration/cdp-relay.mjs",
     "test:kit": "bun tests/integration/kit-bridge.mjs && bun tests/integration/kit-node-client.mjs",
-    "test:bridge": "bun tests/integration/tab-bridge.mjs && BRIDGE_CLI=dist/cli.js bun tests/integration/tab-bridge.mjs"
+    "test:bridge": "bun tests/integration/tab-bridge.mjs && BRIDGE_CLI=dist/cli.js bun tests/integration/tab-bridge.mjs",
+    "test:bridge:smoke": "node tests/integration/tab-bridge-smoke.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
